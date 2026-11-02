@@ -5,7 +5,7 @@
 import "server-only";
 import { db } from "@/lib/db";
 import { getSettings } from "@/lib/domain/settings";
-import { buildOptimizeRequest, loadOptimizeInput } from "@/lib/optimizer/build-request";
+import { buildOptimizeRequest, isStaleRun, loadOptimizeInput } from "@/lib/optimizer/build-request";
 import { optimize } from "@/lib/optimizer/client";
 import {
   FIELD_TRIP_STATUSES,
@@ -31,11 +31,8 @@ export type RunOptions = {
   move?: MoveTarget;
 };
 
-/** A RUNNING run older than its time limit plus this margin is considered interrupted (server restart, crash). */
-const STALE_RUN_MARGIN_SEC = 120;
-
 export const OPTIMIZATION_IN_PROGRESS_ERROR =
-  "Une optimisation de cette date est en cours : attendez la fin du calcul (quelques secondes) puis rechargez la page.";
+  "Une optimisation de cette date est en cours : attendez la fin du calcul puis rechargez la page.";
 
 function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
   return `${count} ${count > 1 ? pluralForm : singular}`;
@@ -45,8 +42,21 @@ function seconds(ms: number): string {
   return `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(ms / 1000)} s`;
 }
 
-function staleBefore(timeLimitSec: number): Date {
-  return new Date(Date.now() - (timeLimitSec + STALE_RUN_MARGIN_SEC) * 1000);
+/**
+ * RUNNING runs of serviceDate, split into live ones and ones interrupted by
+ * a crash or restart. Each run is judged on the solver budget of the trips
+ * it sent (see isStaleRun), not on the current settings alone.
+ */
+async function runningRuns(serviceDate: Date, solverTimeLimitSec: number): Promise<{ live: string[]; stale: string[] }> {
+  const runs = await db.optimizationRun.findMany({
+    where: { serviceDate, status: "RUNNING" },
+    select: { id: true, startedAt: true, tripsCount: true },
+  });
+  const now = new Date();
+  const live: string[] = [];
+  const stale: string[] = [];
+  for (const run of runs) (isStaleRun(run, solverTimeLimitSec, now) ? stale : live).push(run.id);
+  return { live, stale };
 }
 
 /**
@@ -69,10 +79,8 @@ export async function replanBlocker(isoDate: string): Promise<string | null> {
 /** True while an optimization of isoDate is running (runs interrupted by a crash do not count). */
 export async function optimizationInProgress(isoDate: string): Promise<boolean> {
   const { solverTimeLimitSec } = await getSettings(db);
-  const running = await db.optimizationRun.count({
-    where: { serviceDate: fromIsoDate(isoDate), status: "RUNNING", startedAt: { gte: staleBefore(solverTimeLimitSec) } },
-  });
-  return running > 0;
+  const { live } = await runningRuns(fromIsoDate(isoDate), solverTimeLimitSec);
+  return live.length > 0;
 }
 
 export async function runOptimization(isoDate: string, userId: string, options: RunOptions = {}): Promise<RunOutcome> {
@@ -104,13 +112,16 @@ export async function runOptimization(isoDate: string, userId: string, options: 
   }
 
   const serviceDate = fromIsoDate(isoDate);
+  // Budget scaled with the trips sent (effectiveTimeLimitSec), not the bare setting.
   const timeLimitSec = request.settings.timeLimitSec;
-  await db.optimizationRun.updateMany({
-    where: { serviceDate, status: "RUNNING", startedAt: { lt: staleBefore(timeLimitSec) } },
-    data: { status: "FAILED", finishedAt: new Date(), error: "Optimisation interrompue (serveur redémarré ou arrêté)." },
-  });
-  const running = await db.optimizationRun.count({ where: { serviceDate, status: "RUNNING" } });
-  if (running > 0) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
+  const { live, stale } = await runningRuns(serviceDate, input.settings.solverTimeLimitSec);
+  if (stale.length > 0) {
+    await db.optimizationRun.updateMany({
+      where: { id: { in: stale }, status: "RUNNING" },
+      data: { status: "FAILED", finishedAt: new Date(), error: "Optimisation interrompue (serveur redémarré ou arrêté)." },
+    });
+  }
+  if (live.length > 0) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
 
   const requester = await db.user.findUnique({ where: { id: userId }, select: { id: true } });
   const run = await db.optimizationRun.create({

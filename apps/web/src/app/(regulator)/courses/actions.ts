@@ -9,6 +9,15 @@ import { formatAddress } from "@/lib/domain/rules";
 import { getSettings } from "@/lib/domain/settings";
 import { generateTrips } from "@/lib/domain/trip-generation";
 import { geocodeAddress, geocoderEnabled } from "@/lib/geocode";
+import { evaluate } from "@/lib/optimizer/client";
+import { isConcurrentWriteError, NOTHING_DETACHED, removeTripStops, type DetachResult } from "@/lib/planning/detach";
+import {
+  refreshAdvice,
+  refreshCallsForReoptimization,
+  refreshNotice,
+  refreshRoutes,
+  type RefreshOutcome,
+} from "@/lib/planning/refresh-routes";
 import { formatMinute, addDays, todayIso } from "@/lib/time";
 import {
   buildNewTripData,
@@ -27,18 +36,18 @@ import {
   type TripDestination,
   type TripPrescription,
 } from "./trip-form";
-import { planDetach } from "./route-detach";
 import { checkScheduleFit, type ScheduleFit } from "./schedule-fit";
 import { sharingDecisionData } from "./sharing-decision";
 import { generationMessage } from "./trip-list";
 import { canCancel, canEditTime, canRestore, keyMinuteLabel, sharingDecisionsFor, SHARING_DECISION_LABELS } from "./trip-rules";
 
-/** Pages that show trips or route stops: refreshed after every change. */
+/** Pages that show trips, route stops or route totals: refreshed after every change. */
 function revalidateTripViews() {
   revalidatePath("/courses");
   revalidatePath("/arrivees-partagees");
   revalidatePath("/planning");
   revalidatePath("/chauffeur");
+  revalidatePath("/tableau-de-bord");
 }
 
 function failure(message: string): ActionResult {
@@ -179,36 +188,43 @@ const CLEARED_PLANNING = { ...DETACHED_PLANNING, lockedVehicleId: null } satisfi
 const CONCURRENT_CHANGE = "La course a changé entre-temps : rechargez la page.";
 
 /**
- * Takes the trip's stops out of the route(s) serving it, in the caller's
- * transaction. The remaining stops keep their order and times but get their
- * load recomputed; former co-passengers lose their shared-discounted revenue
- * and detour, and those left alone are no longer shared, so neither /courses
- * nor the reception list announce a shared transport that no longer exists.
- * Returns how many co-passengers now travel alone.
+ * Runs a transaction that takes a trip out of its route. Null when the trip
+ * changed meanwhile: the guarded update found nothing (the callback returns
+ * null), or another transaction won the race on the same rows.
  */
-async function removeTripStops(tx: Prisma.TransactionClient, tripId: string): Promise<number> {
-  const own = await tx.routeStop.findMany({ where: { tripId }, select: { routeId: true } });
-  if (own.length === 0) return 0;
-  const stops = await tx.routeStop.findMany({
-    where: { routeId: { in: [...new Set(own.map((stop) => stop.routeId))] } },
-    select: { id: true, routeId: true, tripId: true, kind: true, sequence: true, loadAfter: true },
-  });
-  const plan = planDetach(stops, tripId);
+async function detachInTransaction(
+  fn: (tx: Prisma.TransactionClient) => Promise<DetachResult | null>,
+): Promise<DetachResult | null> {
+  try {
+    return await db.$transaction(fn);
+  } catch (error) {
+    if (isConcurrentWriteError(error)) {
+      console.warn("[courses] trip changed by a concurrent transaction", error);
+      return null;
+    }
+    throw error;
+  }
+}
 
-  await tx.routeStop.deleteMany({ where: { tripId } });
-  for (const { id, loadAfter } of plan.loadUpdates) {
-    await tx.routeStop.update({ where: { id }, data: { loadAfter } });
-  }
-  if (plan.nowAlone.length > 0) {
-    await tx.trip.updateMany({
-      where: { id: { in: plan.nowAlone } },
-      data: { shared: false, detourKm: null, estimatedRevenue: null },
-    });
-  }
-  if (plan.stillShared.length > 0) {
-    await tx.trip.updateMany({ where: { id: { in: plan.stillShared } }, data: { detourKm: null, estimatedRevenue: null } });
-  }
-  return plan.nowAlone.length;
+/**
+ * Recomputes the times and totals of the routes a trip has just left, once
+ * its transaction has committed (see lib/planning/refresh-routes.ts).
+ */
+function refreshLeftRoutes(routeIds: readonly string[]): Promise<RefreshOutcome> {
+  return refreshRoutes({ prisma: db, evaluate }, routeIds);
+}
+
+/** " " + the refresh account, or "". */
+function noticeOf(refresh: RefreshOutcome): string {
+  const notice = refreshNotice(refresh);
+  return notice ? ` ${notice}` : "";
+}
+
+/** " " + what to do after the recomputation (re-optimize, or tell the driver on a day under way), or "". */
+function adviceOf(refresh: RefreshOutcome, routeStatus: RouteStatus | null | undefined): string {
+  const advice = refreshAdvice(refresh);
+  if (!advice) return "";
+  return ` ${advice}${refreshCallsForReoptimization(refresh) ? validatedHint(routeStatus) : ""}`;
 }
 
 /** " Son co-passager voyage désormais seul." */
@@ -238,22 +254,22 @@ export async function cancelTrip(_prev: ActionResult, formData: FormData): Promi
 
   // Guarded on the status read above so a concurrent change is not overwritten;
   // the stops are removed only when the trip really leaves its route.
-  const outcome = await db.$transaction(async (tx) => {
+  const detached = await detachInTransaction(async (tx) => {
     const updated = await tx.trip.updateMany({
       where: { id: trip.id, status: trip.status },
       data: { ...CLEARED_PLANNING, status: "CANCELLED" },
     });
     if (updated.count === 0) return null;
-    return { nowAlone: await removeTripStops(tx, trip.id) };
+    return removeTripStops(tx, trip.id);
   });
-  if (!outcome) return failure(CONCURRENT_CHANGE);
+  if (!detached) return failure(CONCURRENT_CHANGE);
 
+  const refresh = await refreshLeftRoutes(detached.routeIds);
   revalidateTripViews();
+  if (!trip.routeId && detached.routeIds.length === 0) return { ok: true, message: "Course annulée." };
   return {
     ok: true,
-    message: trip.routeId
-      ? `Course annulée et retirée de sa tournée.${aloneMessage(outcome.nowAlone)} Réoptimisez le planning.${validatedHint(trip.route?.status)}`
-      : "Course annulée.",
+    message: `Course annulée et retirée de sa tournée.${aloneMessage(detached.nowAlone)}${noticeOf(refresh)}${adviceOf(refresh, trip.route?.status)}`,
   };
 }
 
@@ -266,20 +282,20 @@ export async function restoreTrip(_prev: ActionResult, formData: FormData): Prom
   if (!trip) return failure("Course introuvable.");
   if (!canRestore(trip.status)) return failure("Seule une course annulée peut être rétablie.");
 
-  const restored = await db.$transaction(async (tx) => {
+  const detached = await detachInTransaction(async (tx) => {
     const updated = await tx.trip.updateMany({
       where: { id: trip.id, status: "CANCELLED" },
       data: { ...CLEARED_PLANNING, status: "PLANNED" },
     });
-    if (updated.count === 0) return false;
+    if (updated.count === 0) return null;
     // A trip cancelled elsewhere may still have stops: it starts afresh, outside any route.
-    await removeTripStops(tx, trip.id);
-    return true;
+    return removeTripStops(tx, trip.id);
   });
-  if (!restored) return failure(CONCURRENT_CHANGE);
+  if (!detached) return failure(CONCURRENT_CHANGE);
 
+  const refresh = await refreshLeftRoutes(detached.routeIds);
   revalidateTripViews();
-  return { ok: true, message: "Course rétablie : elle sera placée à la prochaine optimisation." };
+  return { ok: true, message: `Course rétablie : elle sera placée à la prochaine optimisation.${noticeOf(refresh)}` };
 }
 
 export async function rescheduleTrip(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
@@ -334,16 +350,17 @@ export async function rescheduleTrip(_prev: ActionResult, formData: FormData): P
     fit = checkScheduleFit(trip.id, minute, planned, settings);
   }
 
-  const outcome = await db.$transaction(async (tx) => {
+  const detached = await detachInTransaction(async (tx) => {
     const updated = await tx.trip.updateMany({
       where: { id: trip.id, status: trip.status, routeId: trip.routeId },
       data: fit.fits ? timeData : { ...timeData, ...DETACHED_PLANNING, status: "PLANNED" },
     });
     if (updated.count === 0) return null;
-    return { nowAlone: fit.fits ? 0 : await removeTripStops(tx, trip.id) };
+    return fit.fits ? NOTHING_DETACHED : removeTripStops(tx, trip.id);
   });
-  if (!outcome) return failure(CONCURRENT_CHANGE);
+  if (!detached) return failure(CONCURRENT_CHANGE);
 
+  const refresh = await refreshLeftRoutes(detached.routeIds);
   revalidateTripViews();
   const label = `${keyMinuteLabel(trip.direction)} à ${formatMinute(minute)}.`;
   if (!trip.routeId) return { ok: true, message: `${label} Pris en compte à la prochaine optimisation.` };
@@ -351,11 +368,15 @@ export async function rescheduleTrip(_prev: ActionResult, formData: FormData): P
   if (fit.fits) {
     return { ok: true, message: `${label} L'horaire prévu dans la tournée de ${vehicle} reste compatible.` };
   }
+  // On a day under way the date can no longer be re-optimized (replanBlockReason).
+  const replace = refresh.dayStarted
+    ? ` La journée a commencé : la course ne peut plus être replacée par l'optimisation, organisez ce transport à part.${adviceOf(refresh, trip.route?.status)}`
+    : ` Réoptimisez le planning pour la replacer.${validatedHint(trip.route?.status)}`;
   return {
     ok: true,
     message:
       `${label} La tournée de ${vehicle} ne tenait plus (${fit.reason}) : la course en a été retirée.` +
-      `${aloneMessage(outcome.nowAlone)} Réoptimisez le planning pour la replacer.${validatedHint(trip.route?.status)}`,
+      `${aloneMessage(detached.nowAlone)}${noticeOf(refresh)}${replace}`,
   };
 }
 

@@ -8,7 +8,7 @@
 import type { Prisma, PrismaClient, SharingStatus, StopKind, TripStatus, VehicleType } from "@prisma/client";
 import { formatLongDate, fromIsoDate } from "@/lib/time";
 import type { OptimizeRequest, PlanResponse } from "./contract";
-import { runKpisJson } from "./run-details";
+import { runDetailsJson } from "./run-details";
 
 /** Statuses set by the field (driver) or by cancellation: the planner never overwrites them. */
 const FROZEN_STATUSES: readonly TripStatus[] = ["PICKED_UP", "DROPPED_OFF", "CANCELLED", "NO_SHOW"];
@@ -361,9 +361,10 @@ export async function savePlan(
           status: "SUCCESS",
           finishedAt: new Date(),
           error: null,
+          // kpis: exactly the optimizer KPIs (PlanResponse.kpis).
           ...summary,
-          // KPIs plus the violation list, warnings and unassigned reasons (see run-details.ts).
-          kpis: runKpisJson(response),
+          // Solver status, violation list, warnings and unassigned reasons (see run-details.ts).
+          details: runDetailsJson(response),
         },
       });
 

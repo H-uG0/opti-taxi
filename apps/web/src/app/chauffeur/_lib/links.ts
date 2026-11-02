@@ -52,3 +52,12 @@ export function telHref(phone: string | null | undefined): string | null {
   if (digits.length < 3) return null;
   return `tel:${trimmed.startsWith("+") ? "+" : ""}${digits}`;
 }
+
+/** Regulation phone number as the roadmap shows it and dials it. */
+export type RegulatorContact = { number: string; href: string };
+
+/** Contact of the regulation (Paramètres), or null when no usable number is set. */
+export function regulatorContact(phone: string | null | undefined): RegulatorContact | null {
+  const href = telHref(phone);
+  return phone && href ? { number: phone.trim(), href } : null;
+}

@@ -179,14 +179,15 @@ export async function validateDay(date: string, confirmed: boolean): Promise<Pla
     db.optimizationRun.findFirst({
       where: { serviceDate, status: "SUCCESS" },
       orderBy: { startedAt: "desc" },
-      select: { id: true, valid: true, kpis: true },
+      // kpis: details of runs saved before the details column (see run-details.ts).
+      select: { id: true, valid: true, details: true, kpis: true },
     }),
   ]);
   if (routes === 0) return { ok: false, error: "Aucune tournée à valider : lancez d'abord l'optimisation." };
 
   const issues: string[] = [];
   if (unassigned > 0) issues.push(plural(unassigned, "course non affectée", "courses non affectées"));
-  const details = planRun ? readRunDetails(planRun.id, planRun.kpis) : null;
+  const details = planRun ? readRunDetails(planRun) : null;
   if (details && details.violations.length > 0) {
     issues.push(plural(details.violations.length, "violation de contrainte", "violations de contraintes"));
   } else if (!details && planRun?.valid === false) {

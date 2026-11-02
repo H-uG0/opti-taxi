@@ -1,22 +1,12 @@
 import "server-only";
-import { createHash } from "node:crypto";
 import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
+import { passwordVersion, type SessionClaims, type SessionUser } from "./session-check";
+
+export { passwordVersion, type Role, type SessionClaims, type SessionUser } from "./session-check";
 
 export const SESSION_COOKIE = "ot_session";
 const SESSION_HOURS = 12;
-
-export type Role = "REGULATOR" | "DRIVER";
-
-export type SessionUser = {
-  id: string;
-  name: string;
-  role: Role;
-  driverId: string | null;
-};
-
-/** What the signed cookie carries: the user plus the password version it was opened with. */
-export type SessionClaims = SessionUser & { passwordVersion: string | null };
 
 function secretKey(): Uint8Array {
   const secret = process.env.SESSION_SECRET;
@@ -24,14 +14,6 @@ function secretKey(): Uint8Array {
     throw new Error("SESSION_SECRET must be set to at least 32 characters");
   }
   return new TextEncoder().encode(secret);
-}
-
-/**
- * Short fingerprint of a password hash. Stored in the session so that a
- * password reset ends the sessions opened with the previous password.
- */
-export function passwordVersion(passwordHash: string): string {
-  return createHash("sha256").update(passwordHash).digest("hex").slice(0, 16);
 }
 
 export async function createSession(user: SessionUser, passwordHash: string): Promise<void> {
@@ -57,7 +39,7 @@ export async function createSession(user: SessionUser, passwordHash: string): Pr
   });
 }
 
-/** Claims of a valid signed cookie. Not checked against the database: use requireUser (lib/auth). */
+/** Claims of a valid signed cookie. Not checked against the database: use requireUser / getCurrentUser (lib/auth). */
 export async function readSession(): Promise<SessionClaims | null> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;

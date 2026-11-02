@@ -2,9 +2,10 @@ import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { passwordVersion, readSession, type Role, type SessionUser } from "./session";
+import { readSession } from "./session";
+import { sessionIsCurrent, type Role, type SessionUser } from "./session-check";
 
-export type { Role, SessionUser } from "./session";
+export type { Role, SessionUser } from "./session-check";
 
 /** Home page of each role. */
 export const ROLE_HOME: Record<Role, string> = {
@@ -13,17 +14,18 @@ export const ROLE_HOME: Record<Role, string> = {
 };
 
 /**
- * The signed-in user, re-checked against the database on every request:
- * session tokens are stateless (12 h), so an account disabled, a driver
- * deactivated, a role or driver link changed, or a password reset since the
- * sign-in must end the session here. Cached per request (layout and page
- * share one lookup).
+ * The signed-in user, re-checked against the database on every request
+ * (rules in sessionIsCurrent): session tokens are stateless (12 h), so an
+ * account disabled, a driver deactivated or unlinked, a role or driver link
+ * changed, or a password hash changed since the sign-in ends the session here.
+ * Cached per request in renders (layout and page share one lookup); in a
+ * server action every call reads the database again.
  */
 const currentUser = cache(async (): Promise<SessionUser | null> => {
-  const session = await readSession();
-  if (!session) return null;
+  const claims = await readSession();
+  if (!claims) return null;
   const account = await db.user.findUnique({
-    where: { id: session.id },
+    where: { id: claims.id },
     select: {
       name: true,
       role: true,
@@ -33,11 +35,7 @@ const currentUser = cache(async (): Promise<SessionUser | null> => {
       driver: { select: { active: true } },
     },
   });
-  if (!account?.active) return null;
-  if (account.role !== session.role || account.driverId !== session.driverId) return null;
-  if (session.passwordVersion !== passwordVersion(account.passwordHash)) return null;
-  if (account.driver && !account.driver.active) return null;
-  return { id: session.id, name: account.name, role: account.role, driverId: account.driverId };
+  return sessionIsCurrent(claims, account);
 });
 
 /**
@@ -52,7 +50,12 @@ export async function requireUser(role?: Role): Promise<SessionUser> {
   return user;
 }
 
-/** A driver session must be linked to a Driver record to see a roadmap. */
+/**
+ * A driver session must be linked to an active Driver record to see a
+ * roadmap. sessionIsCurrent already refuses a driver session without one, so
+ * the check below only narrows the type; it redirects to /login, where the
+ * same rule shows the form (no redirect loop).
+ */
 export async function requireDriver(): Promise<SessionUser & { driverId: string }> {
   const user = await requireUser("DRIVER");
   if (!user.driverId) redirect("/login?error=no-driver");

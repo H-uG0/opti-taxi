@@ -2,7 +2,7 @@
 
 import { useActionState, useState, type ChangeEvent, type ReactNode } from "react";
 import { cn } from "@/components/ui/cn";
-import { Field, Fieldset, FormMessage } from "@/components/ui/form";
+import { Field, Fieldset, FormMessage, Input } from "@/components/ui/form";
 import { formatMinute } from "@/lib/time";
 import { IDLE_STATE, parseDecimal, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
 import { FormFooter, UnitInput } from "../vehicules/_lib/ui";
@@ -230,6 +230,29 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             hint={`Entre 1 et ${MAX_SOLVER_TIME_LIMIT_SEC} s. Plus long : meilleures tournées possibles, mais attente plus longue après « Optimiser demain ».`}
           >
             <NumberInput name="solverTimeLimitSec" unit="s" integer values={values} errors={errors} />
+          </Field>
+        </div>
+      </Fieldset>
+
+      <Fieldset legend="Régulation">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Téléphone de la régulation"
+            htmlFor="regulatorPhone"
+            error={errors.regulatorPhone}
+            hint="Proposé en appel direct sur la feuille de route des chauffeurs (ex. 04 65 71 00 00). Laissez vide pour n'afficher aucun numéro."
+          >
+            <Input
+              id="regulatorPhone"
+              name="regulatorPhone"
+              type="tel"
+              inputMode="tel"
+              maxLength={25}
+              autoComplete="off"
+              className="tabular sm:max-w-56"
+              defaultValue={valueOf(values, "regulatorPhone")}
+              aria-invalid={Boolean(errors.regulatorPhone)}
+            />
           </Field>
         </div>
       </Fieldset>

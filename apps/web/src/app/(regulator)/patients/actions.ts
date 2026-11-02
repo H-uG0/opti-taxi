@@ -7,6 +7,14 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatAddress } from "@/lib/domain/rules";
 import { planTripsFromRecurrences } from "@/lib/domain/trip-generation";
+import { evaluate } from "@/lib/optimizer/client";
+import {
+  NOTHING_REFRESHED,
+  refreshNotice,
+  refreshRoutes,
+  withRefreshNotice,
+  type RefreshOutcome,
+} from "@/lib/planning/refresh-routes";
 import { addDays, formatShortDate, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import { idSchema } from "./_lib/form-parse";
 import { formString, messageState, type ActionResult, type FormState } from "./_lib/form-state";
@@ -38,9 +46,25 @@ function revalidateTrips(summary: SyncSummary) {
   if (!isEmptySync(summary)) revalidatePath("/", "layout");
 }
 
-function withSync(message: string, summary: SyncSummary): string {
-  const sync = describeSync(summary);
-  return sync ? `${message} ${sync}` : message;
+/**
+ * Recomputes the times and totals of the routes that trips have just left,
+ * once the sync transaction has committed (see lib/planning/refresh-routes.ts).
+ */
+function refreshLeftRoutes(routeIds: ReadonlySet<string>): Promise<RefreshOutcome> {
+  return refreshRoutes({ prisma: db, evaluate }, routeIds);
+}
+
+function withSync(message: string, summary: SyncSummary, refresh: RefreshOutcome = NOTHING_REFRESHED): string {
+  return [message, describeSync(summary), refreshNotice(refresh)].filter(Boolean).join(" ");
+}
+
+/**
+ * Redirect target after a form save: the sync summary (?courses=…) and the
+ * recomputation of the routes trips left (?tournees=…, see withRefreshNotice),
+ * so the page can tell both.
+ */
+function afterSave(path: string, summary: SyncSummary, refresh: RefreshOutcome): string {
+  return withRefreshNotice(withSyncNotice(path, summary), refresh);
 }
 
 const activeFlag = z.enum(["true", "false"]).transform((v) => v === "true");
@@ -83,15 +107,23 @@ export async function updatePatient(patientId: string, _prev: FormState, formDat
   const deactivated = existing.active && !data.active;
   const moved = home.address !== formatAddress(existing) || data.lat !== existing.lat || data.lng !== existing.lng;
 
+  const leftRoutes = new Set<string>();
   const summary = await db.$transaction(async (tx) => {
     await tx.patient.update({ where: { id: existing.id }, data });
     if (!deactivated && !moved) return EMPTY_SYNC;
-    return syncOpenTrips(tx, { patientId: existing.id }, () => (deactivated ? CANCEL : { kind: "update", home }), today);
+    return syncOpenTrips(
+      tx,
+      { patientId: existing.id },
+      () => (deactivated ? CANCEL : { kind: "update", home }),
+      today,
+      leftRoutes,
+    );
   }, SYNC_TX_OPTIONS);
+  const refresh = await refreshLeftRoutes(leftRoutes);
 
   revalidatePatients();
   revalidateTrips(summary);
-  redirect(withSyncNotice(`/patients/${existing.id}`, summary));
+  redirect(afterSave(`/patients/${existing.id}`, summary, refresh));
 }
 
 /** Deactivation keeps the history (no hard delete) and cancels the patient's open trips to come. */
@@ -104,17 +136,22 @@ export async function setPatientActive(_prev: ActionResult, formData: FormData):
   const { patientId, active } = input.data;
   const today = todayIso();
 
+  const leftRoutes = new Set<string>();
   const summary = await db.$transaction(async (tx) => {
     const { count } = await tx.patient.updateMany({ where: { id: patientId }, data: { active } });
     if (count === 0) return null;
-    return active ? EMPTY_SYNC : syncOpenTrips(tx, { patientId }, () => CANCEL, today);
+    return active ? EMPTY_SYNC : syncOpenTrips(tx, { patientId }, () => CANCEL, today, leftRoutes);
   }, SYNC_TX_OPTIONS);
   if (!summary) return { ok: false, message: NOT_FOUND };
+  const refresh = await refreshLeftRoutes(leftRoutes);
 
   revalidatePatients();
   revalidatePath("/(regulator)/etablissements", "layout");
   revalidateTrips(summary);
-  return { ok: true, message: active ? `Patient réactivé. ${REACTIVATED_HINT}` : withSync("Patient désactivé.", summary) };
+  return {
+    ok: true,
+    message: active ? `Patient réactivé. ${REACTIVATED_HINT}` : withSync("Patient désactivé.", summary, refresh),
+  };
 }
 
 // ---------------------------------------------------------------- prescriptions
@@ -171,18 +208,20 @@ export async function updatePrescription(
     validTo !== toIsoDate(existing.validTo);
   const rules = { id: existing.id, mode: rest.mode, sharing: rest.sharing, validFrom, validTo };
 
+  const leftRoutes = new Set<string>();
   const summary = await db.$transaction(async (tx) => {
     await tx.prescription.update({
       where: { id: existing.id },
       data: { ...rest, validFrom: fromIsoDate(validFrom), validTo: fromIsoDate(validTo) },
     });
     if (!rulesChanged) return EMPTY_SYNC;
-    return syncOpenTrips(tx, { prescriptionId: existing.id }, (trip) => prescriptionTarget(trip, rules), today);
+    return syncOpenTrips(tx, { prescriptionId: existing.id }, (trip) => prescriptionTarget(trip, rules), today, leftRoutes);
   }, SYNC_TX_OPTIONS);
+  const refresh = await refreshLeftRoutes(leftRoutes);
 
   revalidatePatients();
   revalidateTrips(summary);
-  redirect(withSyncNotice(`/patients/${existing.patientId}#prescriptions`, summary));
+  redirect(afterSave(`/patients/${existing.patientId}#prescriptions`, summary, refresh));
 }
 
 /**
@@ -275,6 +314,7 @@ export async function attachRecurrencesToRenewal(_prev: ActionResult, formData: 
     validTo: toIsoDate(to.validTo),
   };
 
+  const leftRoutes = new Set<string>();
   const result = await db.$transaction(async (tx) => {
     const recurrences = await tx.recurrence.findMany({
       where: { patientId, prescriptionId: from.id },
@@ -285,10 +325,17 @@ export async function attachRecurrencesToRenewal(_prev: ActionResult, formData: 
     const planned = firstOldDay <= fromEnd ? planTripsFromRecurrences(recurrences, firstOldDay, fromEnd) : [];
     const created = planned.length > 0 ? (await tx.trip.createMany({ data: planned, skipDuplicates: true })).count : 0;
     await tx.recurrence.updateMany({ where: { id: { in: ids } }, data: { prescriptionId: to.id } });
-    const summary = await syncOpenTrips(tx, { recurrenceId: { in: ids } }, (trip) => renewalTarget(trip, renewal), today);
+    const summary = await syncOpenTrips(
+      tx,
+      { recurrenceId: { in: ids } },
+      (trip) => renewalTarget(trip, renewal),
+      today,
+      leftRoutes,
+    );
     return { count: recurrences.length, created, summary };
   }, SYNC_TX_OPTIONS);
   if (!result) return { ok: false, message: "Aucune récurrence n'est rattachée à cette prescription." };
+  const refresh = await refreshLeftRoutes(leftRoutes);
 
   revalidatePatients();
   revalidatePath("/(regulator)/etablissements", "layout");
@@ -304,6 +351,7 @@ export async function attachRecurrencesToRenewal(_prev: ActionResult, formData: 
     message: withSync(
       `${moved} à la prescription du ${formatShortDate(renewal.validFrom)} au ${formatShortDate(renewal.validTo)}.${generated}`,
       result.summary,
+      refresh,
     ),
   };
 }
@@ -440,6 +488,7 @@ export async function updateRecurrence(
   };
   const today = todayIso();
 
+  const leftRoutes = new Set<string>();
   const summary = await db.$transaction(async (tx) => {
     await tx.recurrence.update({
       where: { id: existing.id },
@@ -466,13 +515,20 @@ export async function updateRecurrence(
       },
       facility: { address: formatAddress(facility), lat: facility.lat, lng: facility.lng },
     };
-    return syncOpenTrips(tx, { recurrenceId: existing.id }, (trip) => recurrenceTarget(trip, before, target), today);
+    return syncOpenTrips(
+      tx,
+      { recurrenceId: existing.id },
+      (trip) => recurrenceTarget(trip, before, target),
+      today,
+      leftRoutes,
+    );
   }, SYNC_TX_OPTIONS);
+  const refresh = await refreshLeftRoutes(leftRoutes);
 
   revalidatePatients();
   revalidatePath("/(regulator)/etablissements", "layout");
   revalidateTrips(summary);
-  redirect(withSyncNotice(`/patients/${existing.patientId}#recurrences`, summary));
+  redirect(afterSave(`/patients/${existing.patientId}#recurrences`, summary, refresh));
 }
 
 /** Deactivating a recurrence cancels its open trips to come; reactivating it does not bring them back. */
@@ -501,10 +557,12 @@ export async function setRecurrenceActive(_prev: ActionResult, formData: FormDat
   }
 
   const today = todayIso();
+  const leftRoutes = new Set<string>();
   const summary = await db.$transaction(async (tx) => {
     await tx.recurrence.update({ where: { id: recurrence.id }, data: { active } });
-    return active ? EMPTY_SYNC : syncOpenTrips(tx, { recurrenceId: recurrence.id }, () => CANCEL, today);
+    return active ? EMPTY_SYNC : syncOpenTrips(tx, { recurrenceId: recurrence.id }, () => CANCEL, today, leftRoutes);
   }, SYNC_TX_OPTIONS);
+  const refresh = await refreshLeftRoutes(leftRoutes);
 
   revalidatePatients();
   revalidatePath("/(regulator)/etablissements", "layout");
@@ -513,6 +571,6 @@ export async function setRecurrenceActive(_prev: ActionResult, formData: FormDat
     ok: true,
     message: active
       ? "Récurrence réactivée : relancez « Générer la semaine » dans Courses ; les courses annulées à la désactivation se rétablissent dans Courses."
-      : withSync("Récurrence désactivée.", summary),
+      : withSync("Récurrence désactivée.", summary, refresh),
   };
 }

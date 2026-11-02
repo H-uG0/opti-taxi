@@ -22,8 +22,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_BUDGET_SEC = 10
 """Default `solverTimeLimitSec` of the web app."""
 LONG_BUDGET_SEC = 30
-REFERENCE_SERVED_LONG_RUN = 134
-"""Trips of busy_day() served by a 30 s run (development machine)."""
+REFERENCE_SERVED_LONG_RUN = 139
+"""Best known number of trips of busy_day() served: a 30 s run of the current search
+(development machine; 134 for a 30 s run of the search before the reinsertion step). The current
+search serves 129 from 1 s to 20 s, 129 to 139 at 30 s depending on the machine load."""
 MIN_SERVED_RATIO = 0.8
 """Trips served at the default budget, relative to the long run."""
 

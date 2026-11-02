@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Info, Plus, TriangleAlert } from "lucide-react";
+import { Info, Plus, TriangleAlert, UserX } from "lucide-react";
 import { LinkButton } from "@/components/ui/button";
 import { FormMessage } from "@/components/ui/form";
 import { Card, CardBody, EmptyState, PageHeader, Stat } from "@/components/ui/layout";
 import { Table, TBody, THead, Th } from "@/components/ui/table";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { OUTBOUND_NO_SHOW_ADVICE, returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
 import { formatPercent, PRESCRIBED_MODE_LABELS, SHARING_SCOPE_LABELS } from "@/lib/labels";
 import { addDays, formatLongDate, formatShortDate, fromIsoDate, isIsoDate, startOfIsoWeek, tomorrowIso } from "@/lib/time";
 import { DayNav } from "./day-nav";
@@ -51,6 +52,8 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       where: { serviceDate },
       select: {
         id: true,
+        patientId: true,
+        facilityId: true,
         direction: true,
         status: true,
         payer: true,
@@ -88,10 +91,13 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
     }),
   ]);
 
-  const summary = summarizeTrips(trips);
+  // Same-day return trips to check: their outbound leg was closed as patient absent.
+  const returnsToCheck = returnsToCheckAfterNoShow(trips);
+  const dayTrips = trips.map((trip) => ({ ...trip, outboundNoShow: returnsToCheck.has(trip.id) }));
+  const summary = summarizeTrips(dayTrips);
   const coPassengers = coPassengersFromStops(stops);
   const shortNames = new Map(trips.map((trip) => [trip.id, shortPatientName(trip.patient)]));
-  const visible = sortTrips(filterTrips(trips, filters));
+  const visible = sortTrips(filterTrips(dayTrips, filters));
 
   const rows: TripRowData[] = visible.map((trip) => ({
     id: trip.id,
@@ -128,6 +134,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
     sharingRespondedAt: formatInstant(trip.sharingRespondedAt),
     sharingNote: trip.sharingNote,
     notes: trip.notes,
+    outboundNoShow: trip.outboundNoShow,
   }));
 
   const weekStart = startOfIsoWeek(date);
@@ -188,6 +195,29 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
         />
         <Stat label="Annulées" value={summary.cancelled} />
       </div>
+
+      {summary.returnsToCheck > 0 ? (
+        <div
+          role="note"
+          className="mb-4 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900"
+        >
+          <UserX aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <span>
+            <span className="font-semibold">
+              {summary.returnsToCheck > 1
+                ? `${summary.returnsToCheck} retours à vérifier : l'aller a été déclaré « patient absent ».`
+                : "Un retour à vérifier : l'aller a été déclaré « patient absent »."}
+            </span>{" "}
+            {OUTBOUND_NO_SHOW_ADVICE}{" "}
+            <Link
+              href={coursesHref(date, { ...EMPTY_FILTERS, status: "RETURN_TO_CHECK" })}
+              className="font-medium underline underline-offset-2"
+            >
+              {summary.returnsToCheck > 1 ? "Voir ces retours" : "Voir ce retour"}
+            </Link>
+          </span>
+        </div>
+      ) : null}
 
       {summary.sharingConflicts > 0 ? (
         <div

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StopKind, TripStatus } from "@prisma/client";
+import * as domain from "@/lib/domain/no-show";
 import {
   buildTimeline,
   coPassengers,
@@ -240,26 +241,10 @@ describe("readable roadmap dates", () => {
 });
 
 describe("outbound no-show on the return leg", () => {
-  const leg = (patientId: string, recurrenceId: string | null, facilityId: string | null) => ({ patientId, recurrenceId, facilityId });
-
-  it("pairs legs of the same recurrence, or of the same facility without one", () => {
-    expect(isSameEpisode(leg("p1", "r1", "f1"), leg("p1", "r1", "f1"))).toBe(true);
-    expect(isSameEpisode(leg("p1", "r1", "f1"), leg("p1", "r2", "f1"))).toBe(false);
-    expect(isSameEpisode(leg("p1", null, "f1"), leg("p1", "r1", "f1"))).toBe(true);
-    expect(isSameEpisode(leg("p1", null, "f1"), leg("p1", null, "f2"))).toBe(false);
-    expect(isSameEpisode(leg("p1", null, null), leg("p1", null, null))).toBe(false);
-    expect(isSameEpisode(leg("p1", "r1", "f1"), leg("p2", "r1", "f1"))).toBe(false);
-  });
-
-  it("flags the return trips whose outbound leg was a no-show", () => {
-    const returns = [
-      { id: "ret_a", ...leg("p1", "r1", "f1") },
-      { id: "ret_b", ...leg("p2", "r2", "f1") },
-      { id: "ret_c", ...leg("p3", null, "f2") },
-    ];
-    const noShows = [leg("p1", "r1", "f1"), leg("p3", null, "f2"), leg("p2", "r9", "f1")];
-    expect(returnTripsAfterOutboundNoShow(returns, noShows)).toEqual(new Set(["ret_a", "ret_c"]));
-    expect(returnTripsAfterOutboundNoShow(returns, [])).toEqual(new Set());
+  // The rules are tested in @/lib/domain/no-show; the driver screens keep importing them from here.
+  it("re-exports the shared pairing helpers", () => {
+    expect(isSameEpisode).toBe(domain.isSameEpisode);
+    expect(returnTripsAfterOutboundNoShow).toBe(domain.returnTripsAfterOutboundNoShow);
   });
 });
 

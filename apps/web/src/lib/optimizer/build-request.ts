@@ -35,6 +35,13 @@ const VEHICLE_TYPE_ORDER: Record<VehicleType, number> = { TAXI: 0, VSL: 1, AMBUL
 /** Trip statuses that never reach the optimizer. */
 export const EXCLUDED_TRIP_STATUSES: readonly TripStatus[] = ["CANCELLED", "NO_SHOW"];
 
+/** Upper bound of settings.timeLimitSec in the contract (contract.ts, schemas.py). */
+export const CONTRACT_MAX_TIME_LIMIT_SEC = 600;
+/** Trips the solver needs about one second for to return a complete plan (measured on the seeded days). */
+export const TRIPS_PER_SOLVER_SECOND = 8;
+/** A RUNNING run older than its solver budget plus this margin was interrupted (server restart, crash). */
+export const STALE_RUN_MARGIN_SEC = 120;
+
 // ---------------------------------------------------------------------------
 // Input shapes (subsets of the Prisma models, so tests can build them by hand)
 // ---------------------------------------------------------------------------
@@ -70,6 +77,8 @@ export type VehicleInput = {
 export type TripInput = {
   id: string;
   patientId: string;
+  /** Not sent to the optimizer: pairs the outbound and return legs of a day (patient absent on the outbound leg). */
+  recurrenceId: string | null;
   facilityId: string | null;
   direction: TripDirection;
   status: TripStatus;
@@ -147,7 +156,27 @@ export type BuildResult = {
 // Pure rules
 // ---------------------------------------------------------------------------
 
-export function toContractSettings(settings: SettingsInput): OptimizerSettings {
+/**
+ * Solver budget actually sent for a day of `tripCount` trips: the configured
+ * time limit, raised to one second per TRIPS_PER_SOLVER_SECOND trips so a
+ * busy day is not cut short, capped at the contract maximum.
+ */
+export function effectiveTimeLimitSec(configuredSec: number, tripCount: number): number {
+  return Math.min(CONTRACT_MAX_TIME_LIMIT_SEC, Math.max(configuredSec, Math.ceil(tripCount / TRIPS_PER_SOLVER_SECOND)));
+}
+
+/**
+ * Whether a run still RUNNING at `now` should have finished long ago: its
+ * budget is recomputed from the trips it sent, so a large day is not
+ * declared interrupted while the solver is still working on it.
+ */
+export function isStaleRun(run: { startedAt: Date; tripsCount: number }, configuredSec: number, now: Date): boolean {
+  const budgetSec = effectiveTimeLimitSec(configuredSec, run.tripsCount) + STALE_RUN_MARGIN_SEC;
+  return run.startedAt.getTime() < now.getTime() - budgetSec * 1000;
+}
+
+/** Contract settings of a request that sends `tripCount` trips. */
+export function toContractSettings(settings: SettingsInput, tripCount: number): OptimizerSettings {
   return {
     waitBeforeAppointmentMin: settings.waitBeforeAppointmentMin,
     waitAfterSessionMin: settings.waitAfterSessionMin,
@@ -157,7 +186,7 @@ export function toContractSettings(settings: SettingsInput): OptimizerSettings {
     pickupServiceMin: settings.pickupServiceMin,
     dropoffServiceMin: settings.dropoffServiceMin,
     unassignedPenalty: settings.unassignedPenalty,
-    timeLimitSec: settings.solverTimeLimitSec,
+    timeLimitSec: effectiveTimeLimitSec(settings.solverTimeLimitSec, tripCount),
   };
 }
 
@@ -393,7 +422,7 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
   return {
     request: {
       date: input.date,
-      settings: toContractSettings(input.settings),
+      settings: toContractSettings(input.settings, trips.length),
       vehicles: available,
       trips,
       tariffs: toContractTariffs(input.tariffs, input.date),
@@ -440,6 +469,7 @@ export const vehicleInputSelect = {
 export const tripInputSelect = {
   id: true,
   patientId: true,
+  recurrenceId: true,
   facilityId: true,
   direction: true,
   status: true,

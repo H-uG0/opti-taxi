@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getCurrentUser, ROLE_HOME } from "@/lib/auth";
 import { LoginForm } from "./login-form";
+import { NO_ACTIVE_DRIVER } from "./messages";
 
 export const metadata: Metadata = { title: "Connexion" };
 
@@ -19,7 +20,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <p className="mt-1 text-sm text-slate-600">Planification des tournées</p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <LoginForm notice={error === "no-driver" ? "Ce compte chauffeur n'est relié à aucune fiche chauffeur." : null} />
+          <LoginForm notice={error === "no-driver" ? NO_ACTIVE_DRIVER : null} />
         </div>
       </div>
     </main>

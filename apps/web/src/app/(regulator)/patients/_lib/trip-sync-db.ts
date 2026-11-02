@@ -1,6 +1,6 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
-import { planDetach } from "@/app/(regulator)/courses/route-detach";
+import { removeTripStops } from "@/lib/planning/detach";
 import { fromIsoDate, toIsoDate } from "@/lib/time";
 import { EMPTY_SYNC, OPEN_TRIP_STATUSES, planTripChange, type SyncSummary, type SyncTrip, type TripTarget } from "./trip-sync";
 
@@ -66,41 +66,17 @@ export async function loadOpenTrips(
 }
 
 /**
- * Takes the trip's stops out of the route(s) serving it. The remaining stops
- * keep their order and times but get their load recomputed; former
- * co-passengers left alone are no longer shared and lose their shared revenue
- * and detour. Same rules as cancelling a trip in « Courses ».
+ * Applies `targetFor` to each trip and returns what was done. A trip leaving
+ * its route has its stops removed the same way as cancelling it in « Courses »
+ * (lib/planning/detach.ts); the routes it left are added to `leftRoutes`, to be
+ * recomputed once the transaction has committed (lib/planning/refresh-routes.ts).
  */
-async function removeTripStops(tx: Prisma.TransactionClient, tripId: string): Promise<void> {
-  const own = await tx.routeStop.findMany({ where: { tripId }, select: { routeId: true } });
-  if (own.length === 0) return;
-  const stops = await tx.routeStop.findMany({
-    where: { routeId: { in: [...new Set(own.map((stop) => stop.routeId))] } },
-    select: { id: true, routeId: true, tripId: true, kind: true, sequence: true, loadAfter: true },
-  });
-  const plan = planDetach(stops, tripId);
-
-  await tx.routeStop.deleteMany({ where: { tripId } });
-  for (const { id, loadAfter } of plan.loadUpdates) {
-    await tx.routeStop.update({ where: { id }, data: { loadAfter } });
-  }
-  if (plan.nowAlone.length > 0) {
-    await tx.trip.updateMany({
-      where: { id: { in: plan.nowAlone } },
-      data: { shared: false, detourKm: null, estimatedRevenue: null },
-    });
-  }
-  if (plan.stillShared.length > 0) {
-    await tx.trip.updateMany({ where: { id: { in: plan.stillShared } }, data: { detourKm: null, estimatedRevenue: null } });
-  }
-}
-
-/** Applies `targetFor` to each trip and returns what was done. */
 export async function syncTrips(
   tx: Prisma.TransactionClient,
   trips: SyncTrip[],
   targetFor: (trip: SyncTrip) => TripTarget,
   todayIso: string,
+  leftRoutes?: Set<string>,
 ): Promise<SyncSummary> {
   const summary: SyncSummary = { ...EMPTY_SYNC };
   for (const trip of trips) {
@@ -116,7 +92,8 @@ export async function syncTrips(
     });
     if (count === 0) continue;
     if (change.detach) {
-      await removeTripStops(tx, change.tripId);
+      const { routeIds } = await removeTripStops(tx, change.tripId);
+      for (const routeId of routeIds) leftRoutes?.add(routeId);
       summary.detached += 1;
     }
     if (change.cancel) summary.cancelled += 1;
@@ -125,12 +102,13 @@ export async function syncTrips(
   return summary;
 }
 
-/** Shorthand: loads the open trips matching `where` and syncs them. */
+/** Shorthand: loads the open trips matching `where` and syncs them (see syncTrips for `leftRoutes`). */
 export async function syncOpenTrips(
   tx: Prisma.TransactionClient,
   where: Prisma.TripWhereInput,
   targetFor: (trip: SyncTrip) => TripTarget,
   todayIso: string,
+  leftRoutes?: Set<string>,
 ): Promise<SyncSummary> {
-  return syncTrips(tx, await loadOpenTrips(tx, where, todayIso), targetFor, todayIso);
+  return syncTrips(tx, await loadOpenTrips(tx, where, todayIso), targetFor, todayIso, leftRoutes);
 }

@@ -15,6 +15,7 @@
     "db:up": "docker compose up -d postgres",
     "db:migrate": "pnpm --filter web db:migrate",
     "db:seed": "pnpm --filter web db:seed",
+    "db:history": "pnpm --filter web db:history",
     "db:reset": "pnpm --filter web db:reset",
     "optimizer:up": "docker compose up -d --build optimizer",
     "optimizer:test": "cd services/optimizer && python -m pytest -q",

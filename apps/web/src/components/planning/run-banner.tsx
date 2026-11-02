@@ -11,15 +11,29 @@ const MATRIX_LABELS: Record<string, string> = {
 export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planRun: RunView | null }) {
   if (!lastRun && !planRun) return null;
   const failed = lastRun && lastRun.status === "FAILED" ? lastRun : null;
-  const running = lastRun && lastRun.status === "RUNNING" ? lastRun : null;
+  // A RUNNING run past its budget was interrupted (server restart): do not promise a result.
+  const running = lastRun && lastRun.status === "RUNNING" && !lastRun.interrupted ? lastRun : null;
+  const interrupted = lastRun && lastRun.status === "RUNNING" && lastRun.interrupted ? lastRun : null;
 
   return (
     <div className="space-y-2">
+      {interrupted ? (
+        <p role="alert" className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+          <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <span>
+            <span className="font-semibold">L&apos;optimisation du {formatInstant(interrupted.startedAt)} ne s&apos;est pas terminée</span>
+            {interrupted.requestedBy ? ` (lancée par ${interrupted.requestedBy})` : ""} : le serveur a sans doute redémarré
+            pendant le calcul. Relancez l&apos;optimisation{planRun ? " ; les tournées affichées sont celles du calcul précédent" : ""}.
+          </span>
+        </p>
+      ) : null}
+
       {running ? (
         <p role="status" className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm text-sky-900">
           <LoaderCircle aria-hidden className="size-4 shrink-0 motion-safe:animate-spin" />
           Une optimisation de cette date a démarré le {formatInstant(running.startedAt)}
-          {running.requestedBy ? ` (${running.requestedBy})` : ""} : rechargez la page dans quelques secondes.
+          {running.requestedBy ? ` (${running.requestedBy})` : ""} pour {pluralize(running.tripsCount, "course")} : calcul
+          d&apos;environ {running.timeLimitSec} s, rechargez la page ensuite.
         </p>
       ) : null}
 

@@ -4,11 +4,13 @@ import { CalendarX } from "lucide-react";
 import { requireDriver } from "@/lib/auth";
 import { cn } from "@/components/ui/cn";
 import { formatLongDate, formatMinute, minuteOfDay, todayIso, tomorrowIso } from "@/lib/time";
-import { loadDriverRoutes, loadReturnTripsAfterOutboundNoShow } from "./_lib/load";
+import type { RegulatorContact } from "./_lib/links";
+import { loadDriverRoutes, loadRegulatorContact, loadReturnTripsAfterOutboundNoShow } from "./_lib/load";
 import { isReadableRoadmapDate } from "./_lib/roadmap";
 import { buildRouteView } from "./_lib/view";
 import { DaySwitch } from "./_components/day-switch";
 import { RefreshControl } from "./_components/refresh-control";
+import { CallRegulator } from "./_components/regulator-call";
 import { RouteSection } from "./_components/route-section";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -16,15 +18,18 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 const bigLink =
   "inline-flex min-h-12 touch-manipulation items-center justify-center rounded-xl px-6 text-base font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600";
 
-function NoRoute({ date, tomorrow }: { date: string; tomorrow: string }) {
+function NoRoute({ date, tomorrow, regulator }: { date: string; tomorrow: string; regulator: RegulatorContact | null }) {
+  const call = <CallRegulator regulator={regulator}>appelez la régulation</CallRegulator>;
   return (
     <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-10 text-center">
       <CalendarX aria-hidden className="mx-auto size-10 text-slate-400" />
       <p className="mt-3 text-lg font-semibold text-slate-900">Aucune tournée {date === tomorrow ? "demain" : "aujourd'hui"}</p>
       <p className="mt-1 text-sm text-slate-600">
-        {date === tomorrow
-          ? "La tournée de demain n'est pas encore planifiée. Revenez plus tard ou appelez la régulation."
-          : "Aucune course ne vous est affectée ce jour-là. En cas de doute, appelez la régulation."}
+        {date === tomorrow ? (
+          <>La tournée de demain n&apos;est pas encore planifiée. Revenez plus tard ou {call}.</>
+        ) : (
+          <>Aucune course ne vous est affectée ce jour-là. En cas de doute, {call}.</>
+        )}
       </p>
       <div className="mt-5 flex justify-center">
         {date === tomorrow ? (
@@ -64,7 +69,7 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
   // Statuses are recorded on the service day only (the server actions check it too).
   const editable = date === today;
 
-  const routes = await loadDriverRoutes(user.driverId, date, today);
+  const [routes, regulator] = await Promise.all([loadDriverRoutes(user.driverId, date, today), loadRegulatorContact()]);
   const afterOutboundNoShow = await loadReturnTripsAfterOutboundNoShow(routes, date);
   const views = routes.map((route) => buildRouteView(route, user.driverId, editable, afterOutboundNoShow));
 
@@ -79,11 +84,11 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
       </div>
 
       {views.length === 0 ? (
-        <NoRoute date={date} tomorrow={tomorrow} />
+        <NoRoute date={date} tomorrow={tomorrow} regulator={regulator} />
       ) : (
         <div className="space-y-8">
           {views.map((view) => (
-            <RouteSection key={view.id} route={view} />
+            <RouteSection key={view.id} route={view} regulator={regulator} />
           ))}
         </div>
       )}

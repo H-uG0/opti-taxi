@@ -3,11 +3,12 @@
 import { useId, useState } from "react";
 import { useFormStatus } from "react-dom";
 import type { Payer, SharingStatus, TripDirection, TripStatus, VehicleType } from "@prisma/client";
-import { Check, ChevronDown, Lock, TriangleAlert, Undo2, Users, X } from "lucide-react";
+import { Check, ChevronDown, Lock, TriangleAlert, Undo2, UserX, Users, X } from "lucide-react";
 import { Badge, VEHICLE_TYPE_COLORS, VehicleTypeBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Input, Textarea } from "@/components/ui/form";
+import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_LABEL } from "@/lib/domain/no-show";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Td } from "@/components/ui/table";
 import { DIRECTION_LABELS, PAYER_LABELS, SHARING_STATUS_LABELS, TRIP_STATUS_LABELS, formatEuros, formatKm } from "@/lib/labels";
@@ -61,6 +62,8 @@ export type TripRowData = {
   sharingRespondedAt: string | null;
   sharingNote: string | null;
   notes: string | null;
+  /** Return trip still to do whose outbound leg of the day was closed as patient absent. */
+  outboundNoShow: boolean;
 };
 
 export const TRIP_TABLE_COLUMNS = 8;
@@ -87,6 +90,14 @@ export function TripRow({ trip }: { trip: TripRowData }) {
             <Badge tone={trip.direction === "OUTBOUND" ? "brand" : "neutral"}>{DIRECTION_LABELS[trip.direction]}</Badge>
             {trip.origin ? null : <span className="text-xs text-slate-500">Ponctuelle</span>}
           </span>
+          {trip.outboundNoShow ? (
+            <span className="mt-1 flex" title={OUTBOUND_NO_SHOW_ADVICE}>
+              <Badge tone="danger">
+                <UserX aria-hidden className="size-3.5 shrink-0" />
+                {OUTBOUND_NO_SHOW_LABEL}
+              </Badge>
+            </span>
+          ) : null}
         </Td>
         <Td className={cn("max-w-72", muted)}>
           <span className="block truncate font-medium text-slate-800" title={trip.facilityName ?? undefined}>
@@ -166,6 +177,25 @@ export function TripRow({ trip }: { trip: TripRowData }) {
 function TripDetails({ trip }: { trip: TripRowData }) {
   return (
     <div className="grid gap-3 lg:grid-cols-3">
+      {trip.outboundNoShow ? (
+        <p
+          role="note"
+          className="flex items-start gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-sm text-red-900 lg:col-span-3"
+        >
+          <UserX aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <span>
+            <span className="font-semibold">{OUTBOUND_NO_SHOW_LABEL}.</span> {OUTBOUND_NO_SHOW_ADVICE}
+            {trip.patientPhone ? (
+              <>
+                {" "}
+                <a href={`tel:${trip.patientPhone.replace(/\s+/g, "")}`} className="tabular font-medium underline underline-offset-2">
+                  Appeler le {trip.patientPhone}
+                </a>
+              </>
+            ) : null}
+          </span>
+        </p>
+      ) : null}
       <Panel title="Course">
         <dl className="space-y-1.5 text-sm">
           <Detail label="Prise en charge">{trip.pickupAddress}</Detail>

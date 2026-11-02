@@ -22,33 +22,9 @@ export function isReadableRoadmapDate(date: string | null | undefined, today: st
   return date >= first && date <= last;
 }
 
-/** The fields that pair the outbound and return legs of a patient's care on one day. */
-export type LegKey = { patientId: string; recurrenceId: string | null; facilityId: string | null };
-
-/**
- * Whether two legs of the same day belong to the same care episode: same
- * patient, and same recurrence when both come from one (a recurrence makes
- * both legs), otherwise same facility.
- */
-export function isSameEpisode(a: LegKey, b: LegKey): boolean {
-  if (a.patientId !== b.patientId) return false;
-  if (a.recurrenceId !== null && b.recurrenceId !== null) return a.recurrenceId === b.recurrenceId;
-  return a.facilityId !== null && a.facilityId === b.facilityId;
-}
-
-/**
- * Return trips whose outbound leg of the same day was closed as "patient
- * absent" (on any vehicle): the patient probably never reached the facility,
- * so the crew calls the regulator before going there to collect them.
- */
-export function returnTripsAfterOutboundNoShow(
-  returnTrips: readonly (LegKey & { id: string })[],
-  outboundNoShows: readonly LegKey[],
-): Set<string> {
-  return new Set(
-    returnTrips.filter((trip) => outboundNoShows.some((outbound) => isSameEpisode(outbound, trip))).map((trip) => trip.id),
-  );
-}
+// Pairing of the outbound and return legs (patient absent on the outbound
+// leg): shared with the regulator screens, see @/lib/domain/no-show.
+export { isSameEpisode, returnTripsAfterOutboundNoShow, type LegKey } from "@/lib/domain/no-show";
 
 /** What the driver sees on a stop. */
 export type StopState =

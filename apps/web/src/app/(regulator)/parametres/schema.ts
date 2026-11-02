@@ -1,6 +1,7 @@
 /**
- * Optimizer settings (AppSettings singleton). The decree caps are upper
- * bounds: the regulator may be stricter, never looser. Pure module, unit-tested.
+ * Settings (AppSettings singleton): optimizer rules and the regulation phone
+ * number shown to the drivers. The decree caps are upper bounds: the
+ * regulator may be stricter, never looser. Pure module, unit-tested.
  */
 import { z } from "zod";
 import type { AppSettings } from "@prisma/client";
@@ -14,6 +15,31 @@ export const DECREE_LIMITS = {
 } as const;
 
 export const MAX_SOLVER_TIME_LIMIT_SEC = 120;
+
+export const PHONE_ERROR =
+  "Numéro invalide : saisissez un numéro français à 10 chiffres (ex. 04 65 71 00 00), éventuellement au format +33 4 65 71 00 00.";
+
+/**
+ * Confirmation after a save. The regulation number is mentioned only when it
+ * changed; open roadmaps pick it up at their next refresh.
+ */
+export function settingsSavedMessage(previousPhone: string | null, savedPhone: string | null): string {
+  const rules = "Paramètres enregistrés : les règles s'appliqueront au prochain calcul des tournées.";
+  if (previousPhone === savedPhone) return rules;
+  if (!savedPhone) return `${rules} La feuille de route des chauffeurs n'affichera plus de numéro de la régulation.`;
+  return `${rules} Les chauffeurs verront le numéro ${savedPhone} dès la prochaine actualisation de leur feuille de route.`;
+}
+
+/**
+ * French phone number typed in any usual form ("0465710000", "04.65.71.00.00",
+ * "04-65-71-00-00", "+33 4 65 71 00 00", "+33 (0)4 65 71 00 00", "0033 4…"),
+ * written "04 65 71 00 00". Null when it is not a 10-digit French number.
+ */
+export function normalizeFrenchPhone(input: string): string | null {
+  const compact = input.replace(/[\s.-]/g, "").replace(/^(\+33|0033)\(0\)/, "$1");
+  const national = /^(?:\+33|0033)([1-9]\d{8})$/.exec(compact)?.[1] ?? /^0([1-9]\d{8})$/.exec(compact)?.[1];
+  return national ? `0${national}`.replace(/(\d{2})(?=\d)/g, "$1 ") : null;
+}
 
 export const settingsSchema = z
   .object({
@@ -44,6 +70,13 @@ export const settingsSchema = z
     dropoffServiceMin: numberField({ integer: true, min: 0, max: 60, unit: "min" }),
     unassignedPenalty: numberField({ min: 0, max: 1_000_000, unit: "€" }),
     solverTimeLimitSec: numberField({ integer: true, min: 1, max: MAX_SOLVER_TIME_LIMIT_SEC, unit: "s" }),
+    // Blank: no number, the drivers' roadmap shows no call link.
+    regulatorPhone: z
+      .string()
+      .trim()
+      .optional()
+      .refine((value) => !value || normalizeFrenchPhone(value) !== null, PHONE_ERROR)
+      .transform((value) => (value ? normalizeFrenchPhone(value) : null)),
   })
   .superRefine((v, ctx) => {
     const wait = v.waitBeforeAppointmentMin + v.waitAfterSessionMin;
@@ -65,6 +98,7 @@ export const settingsSchema = z
 
 export type SettingsInput = z.output<typeof settingsSchema>;
 
+/** Numeric settings, shown in the form with formatDecimalInput. */
 export const SETTINGS_FIELDS = [
   "waitBeforeAppointmentMin",
   "waitAfterSessionMin",
@@ -77,6 +111,11 @@ export const SETTINGS_FIELDS = [
   "solverTimeLimitSec",
 ] as const satisfies readonly (keyof SettingsInput & keyof AppSettings)[];
 
-export function settingsFormValues(settings: Pick<AppSettings, (typeof SETTINGS_FIELDS)[number]>): FormValues {
-  return Object.fromEntries(SETTINGS_FIELDS.map((field) => [field, formatDecimalInput(settings[field])]));
+export function settingsFormValues(
+  settings: Pick<AppSettings, (typeof SETTINGS_FIELDS)[number] | "regulatorPhone">,
+): FormValues {
+  return {
+    ...Object.fromEntries(SETTINGS_FIELDS.map((field) => [field, formatDecimalInput(settings[field])])),
+    regulatorPhone: settings.regulatorPhone ?? "",
+  };
 }

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildOptimizeRequest,
+  CONTRACT_MAX_TIME_LIMIT_SEC,
+  effectiveTimeLimitSec,
+  isStaleRun,
   resolveVehicleAvailability,
+  STALE_RUN_MARGIN_SEC,
   toContractSettings,
   type DriverInput,
   type OptimizeInput,
@@ -65,6 +69,7 @@ function trip(id: string, overrides: Partial<TripInput> = {}): TripInput {
   return {
     id,
     patientId: `pat_${id}`,
+    recurrenceId: null,
     facilityId: "fac_1",
     direction: "OUTBOUND",
     status: "PLANNED",
@@ -103,7 +108,7 @@ function input(overrides: Partial<OptimizeInput> = {}): OptimizeInput {
 
 describe("settings mapping", () => {
   it("maps AppSettings to the contract, solverTimeLimitSec -> timeLimitSec", () => {
-    expect(toContractSettings(settings)).toEqual({
+    expect(toContractSettings(settings, 20)).toEqual({
       waitBeforeAppointmentMin: 30,
       waitAfterSessionMin: 15,
       maxTotalWaitMin: 45,
@@ -114,6 +119,47 @@ describe("settings mapping", () => {
       unassignedPenalty: 10000,
       timeLimitSec: 12,
     });
+  });
+});
+
+describe("solver budget", () => {
+  it("keeps the configured limit for a small day and gives 1 s per 8 trips to a large one", () => {
+    expect(effectiveTimeLimitSec(10, 0)).toBe(10);
+    expect(effectiveTimeLimitSec(10, 80)).toBe(10);
+    expect(effectiveTimeLimitSec(10, 81)).toBe(11);
+    expect(effectiveTimeLimitSec(10, 200)).toBe(25);
+    expect(effectiveTimeLimitSec(60, 200)).toBe(60);
+  });
+
+  it("never exceeds the contract maximum", () => {
+    expect(effectiveTimeLimitSec(10, 10_000)).toBe(CONTRACT_MAX_TIME_LIMIT_SEC);
+    expect(effectiveTimeLimitSec(CONTRACT_MAX_TIME_LIMIT_SEC, 0)).toBe(CONTRACT_MAX_TIME_LIMIT_SEC);
+  });
+
+  it("sends the scaled budget in the request, within the zod contract", () => {
+    const trips = Array.from({ length: 120 }, (_, i) => trip(`t${i}`));
+    const { request } = buildOptimizeRequest(input({ trips }));
+    expect(request.settings.timeLimitSec).toBe(15);
+    expect(optimizeRequestSchema.parse(request).settings.timeLimitSec).toBe(15);
+  });
+
+  it("counts only the trips actually sent", () => {
+    const trips = [
+      ...Array.from({ length: 100 }, (_, i) => trip(`t${i}`)),
+      ...Array.from({ length: 40 }, (_, i) => trip(`x${i}`, { status: "CANCELLED" })),
+    ];
+    expect(buildOptimizeRequest(input({ trips })).request.settings.timeLimitSec).toBe(13);
+  });
+
+  it("declares a RUNNING run interrupted only after its own scaled budget plus the margin", () => {
+    const now = new Date("2026-11-02T18:00:00Z");
+    const startedSecAgo = (sec: number) => new Date(now.getTime() - sec * 1000);
+    // Small run: 12 s budget.
+    expect(isStaleRun({ startedAt: startedSecAgo(12 + STALE_RUN_MARGIN_SEC - 1), tripsCount: 10 }, 12, now)).toBe(false);
+    expect(isStaleRun({ startedAt: startedSecAgo(12 + STALE_RUN_MARGIN_SEC + 1), tripsCount: 10 }, 12, now)).toBe(true);
+    // 800 trips: 100 s budget, still alive where a 12 s budget would call it stale.
+    expect(isStaleRun({ startedAt: startedSecAgo(12 + STALE_RUN_MARGIN_SEC + 60), tripsCount: 800 }, 12, now)).toBe(false);
+    expect(isStaleRun({ startedAt: startedSecAgo(100 + STALE_RUN_MARGIN_SEC + 1), tripsCount: 800 }, 12, now)).toBe(true);
   });
 });
 

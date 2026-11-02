@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { DriverInput, SettingsInput } from "@/lib/optimizer/build-request";
 import type { RunDetails } from "@/lib/optimizer/run-details";
-import { buildPlanningView, computeDayKpis, dayStatusOf, waitAtFacility, type PlanningRawInput, type RawRoute, type RawRun, type RawTrip, type RawVehicle } from "./view";
+import { computeDayKpis as computeDashboardDayKpis, type KpiData } from "@/lib/kpis";
+import {
+  buildPlanningView,
+  computeDayKpis,
+  dayStatusOf,
+  toKpiRows,
+  waitAtFacility,
+  type PlanningRawInput,
+  type RawRoute,
+  type RawRun,
+  type RawTrip,
+  type RawVehicle,
+} from "./view";
 
 const DATE = "2026-11-03"; // Tuesday
 
@@ -50,6 +62,7 @@ const vehicle = (id: string, label: string, workDays?: number[]): RawVehicle => 
 const trip = (id: string, overrides: Partial<RawTrip> = {}): RawTrip => ({
   id,
   patientId: `p_${id}`,
+  recurrenceId: null,
   facilityId: "f1",
   direction: "OUTBOUND",
   status: "PLANNED",
@@ -79,7 +92,15 @@ const trip = (id: string, overrides: Partial<RawTrip> = {}): RawTrip => ({
   ...overrides,
 });
 
-const stop = (id: string, sequence: number, tripId: string, kind: "PICKUP" | "DROPOFF", minute: number, loadAfter: number) => ({
+const stop = (
+  id: string,
+  sequence: number,
+  tripId: string,
+  kind: "PICKUP" | "DROPOFF",
+  minute: number,
+  loadAfter: number,
+  completedAt: Date | null = null,
+) => ({
   id,
   sequence,
   tripId,
@@ -91,7 +112,7 @@ const stop = (id: string, sequence: number, tripId: string, kind: "PICKUP" | "DR
   startMinute: minute,
   departureMinute: minute + 5,
   loadAfter,
-  completedAt: null,
+  completedAt,
 });
 
 const route = (overrides: Partial<RawRoute> = {}): RawRoute => ({
@@ -223,18 +244,60 @@ describe("buildPlanningView", () => {
     const started = buildPlanningView(input({ trips: [trip("a", { routeId: "r1", status: "PICKED_UP" })] }));
     expect(started.dayStarted).toBe(true);
   });
+
+  it("gives the solver budget an optimization launched now would get, scaled with the trips sent", () => {
+    expect(buildPlanningView(input()).timeLimitSec).toBe(10);
+    // A run in progress shows its own budget, from the trips it sent.
+    const running = buildPlanningView(input({ lastRun: run({ status: "RUNNING", finishedAt: null, tripsCount: 240 }) }));
+    expect(running.lastRun?.timeLimitSec).toBe(30);
+    // 160 trips that can be sent (+ cancelled ones, not sent): 20 s instead of the configured 10 s.
+    const many = [
+      ...Array.from({ length: 160 }, (_, i) => trip(`t${i}`)),
+      ...Array.from({ length: 40 }, (_, i) => trip(`x${i}`, { status: "CANCELLED" })),
+    ];
+    expect(buildPlanningView(input({ trips: many, routes: [] })).timeLimitSec).toBe(20);
+  });
+
+  it("tells a run still computing from one interrupted by a server restart", () => {
+    // 240 trips: 30 s budget + 120 s margin after 17:00:00.
+    const running = run({ status: "RUNNING", finishedAt: null, tripsCount: 240 });
+    const at = (iso: string) => buildPlanningView(input({ lastRun: running, now: new Date(iso) })).lastRun?.interrupted;
+    expect(at("2026-11-02T17:00:20Z")).toBe(false);
+    expect(at("2026-11-02T17:02:30Z")).toBe(false);
+    expect(at("2026-11-02T17:02:31Z")).toBe(true);
+    expect(at("2026-11-03T08:00:00Z")).toBe(true);
+    // Finished runs are never "interrupted", however old.
+    const old = buildPlanningView(input({ now: new Date("2026-11-10T08:00:00Z") }));
+    expect(old.lastRun?.interrupted).toBe(false);
+    expect(old.planRun?.interrupted).toBe(false);
+  });
+
+  it("flags the open return trip whose outbound leg was closed as patient absent", () => {
+    const view = buildPlanningView(
+      input({
+        trips: [
+          trip("a", { routeId: "r1", status: "NO_SHOW", recurrenceId: "rec1", patientId: "p1" }),
+          trip("b", { routeId: "r1", status: "ASSIGNED", shared: true }),
+          trip("ra", { direction: "RETURN", appointmentMinute: null, readyMinute: 690, recurrenceId: "rec1", patientId: "p1" }),
+          trip("rb", { direction: "RETURN", appointmentMinute: null, readyMinute: 690, patientId: "p_b" }),
+        ],
+      }),
+    );
+    expect(view.trips.filter((t) => t.outboundNoShow).map((t) => t.id)).toEqual(["ra"]);
+  });
 });
 
-describe("helpers", () => {
+describe("day KPIs", () => {
   it("computes the KPIs from routes and trips", () => {
     const kpis = computeDayKpis(
+      DATE,
       [
-        { status: "ASSIGNED", vehicleId: "v1", shared: true },
-        { status: "ASSIGNED", vehicleId: "v1", shared: false },
-        { status: "PLANNED", vehicleId: null, shared: false },
-        { status: "CANCELLED", vehicleId: null, shared: false },
+        trip("a", { status: "ASSIGNED", routeId: "r1", shared: true }),
+        trip("b", { status: "ASSIGNED", routeId: "r1" }),
+        trip("c", { status: "PLANNED" }),
+        trip("x", { status: "CANCELLED" }),
       ],
-      [{ distanceKm: 100, emptyKm: 25, revenue: 150, margin: 60, stops: [1, 2] }],
+      [route({ stops: [stop("s1", 0, "a", "PICKUP", 420, 1), stop("s2", 1, "a", "DROPOFF", 460, 0)] })],
       0,
     );
     expect(kpis).toEqual({
@@ -253,6 +316,113 @@ describe("helpers", () => {
     });
   });
 
+  // One day as both pages read it from the database: /planning (buildPlanningView)
+  // and /tableau-de-bord (load-kpis.ts rows, then @/lib/kpis).
+  const done = new Date("2026-11-03T07:58:00Z");
+  const dayRoutes: RawRoute[] = [
+    route({
+      stops: [
+        stop("s1", 0, "a", "PICKUP", 420, 1, new Date("2026-11-03T07:00:00Z")),
+        stop("s2", 1, "b", "PICKUP", 430, 2),
+        stop("s3", 2, "a", "DROPOFF", 460, 1, done),
+        stop("s4", 3, "b", "DROPOFF", 470, 0),
+        stop("s5", 4, "n", "PICKUP", 600, 1),
+        stop("s6", 5, "n", "DROPOFF", 640, 0),
+      ],
+    }),
+    // Route emptied by cancellations: its stale km and money must not count.
+    route({ id: "r2", vehicleId: "v2", distanceKm: 80, emptyKm: 80, revenue: 0, cost: 40, margin: -40, stops: [] }),
+  ];
+  const dayTrips: RawTrip[] = [
+    trip("a", { routeId: "r1", status: "DROPPED_OFF", shared: true, plannedPickupMinute: 420, plannedDropoffMinute: 460 }),
+    trip("b", { routeId: "r1", status: "ASSIGNED", shared: true, plannedPickupMinute: 430, plannedDropoffMinute: 470 }),
+    trip("n", { routeId: "r1", status: "NO_SHOW", plannedPickupMinute: 600, plannedDropoffMinute: 640 }),
+    trip("c"),
+    trip("x", { status: "CANCELLED" }),
+  ];
+
+  /** What tableau-de-bord/load-kpis.ts returns for the same rows. */
+  function dashboardRows(): KpiData {
+    const served = new Set(["ASSIGNED", "PICKED_UP", "DROPPED_OFF"]);
+    return {
+      routes: dayRoutes.map((r) => ({
+        serviceDate: DATE,
+        vehicleId: r.vehicleId,
+        distanceKm: r.distanceKm,
+        emptyKm: r.emptyKm,
+        revenue: r.revenue,
+        cost: r.cost,
+        margin: r.margin,
+        validatedAt: r.validatedAt,
+        stopCount: r.stops.length,
+        hasRecordedStatus: r.stops.some((s) => s.completedAt !== null),
+      })),
+      trips: dayTrips
+        .filter((t) => t.routeId !== null && served.has(t.status))
+        .map((t) => ({
+          serviceDate: DATE,
+          status: t.status,
+          routeId: t.routeId,
+          direction: t.direction,
+          shared: t.shared,
+          appointmentMinute: t.appointmentMinute,
+          plannedDropoffMinute: t.plannedDropoffMinute,
+          dropoffCompletedAt: t.id === "a" ? done : null,
+        })),
+      runs: [],
+    };
+  }
+
+  it("gives /planning the same numbers as /tableau-de-bord for the same day", () => {
+    const planning = buildPlanningView(input({ trips: dayTrips, routes: dayRoutes })).kpis;
+    const dashboard = computeDashboardDayKpis(DATE, dashboardRows(), "2026-11-02");
+    expect({
+      tripsServed: planning.tripsServed,
+      vehiclesUsed: planning.vehiclesUsed,
+      tripsPerVehicle: planning.tripsPerVehicle,
+      totalKm: planning.totalKm,
+      emptyKm: planning.emptyKm,
+      emptyKmRatio: planning.emptyKmRatio,
+      sharedTrips: planning.sharedTrips,
+      sharedTripRatio: planning.sharedTripRatio,
+      revenue: planning.revenue,
+      margin: planning.margin,
+    }).toEqual({
+      tripsServed: dashboard.servedTrips,
+      vehiclesUsed: dashboard.vehicles,
+      tripsPerVehicle: dashboard.tripsPerVehiclePlanned,
+      totalKm: dashboard.distanceKm,
+      emptyKm: dashboard.emptyKm,
+      emptyKmRatio: dashboard.emptyKmShare,
+      sharedTrips: dashboard.sharedTrips,
+      sharedTripRatio: dashboard.sharedRate,
+      revenue: dashboard.revenue,
+      margin: dashboard.margin,
+    });
+    // And the figures themselves: the absent patient and the emptied route do not count.
+    expect(planning).toMatchObject({
+      tripsTotal: 3,
+      tripsServed: 2,
+      vehiclesUsed: 1,
+      tripsPerVehicle: 2,
+      totalKm: 100,
+      emptyKmRatio: 0.25,
+      sharedTripRatio: 1,
+      revenue: 150,
+      margin: 60,
+    });
+  });
+
+  it("builds the dashboard rows as load-kpis.ts does (@/lib/kpis keeps only the served trips)", () => {
+    const rows = toKpiRows(DATE, dayTrips, dayRoutes);
+    const expected = dashboardRows();
+    expect(rows.routes).toEqual(expected.routes);
+    expect(rows.trips.filter((t) => t.routeId !== null && t.status !== "NO_SHOW")).toEqual(expected.trips);
+  });
+
+});
+
+describe("helpers", () => {
   it("derives the day status", () => {
     expect(dayStatusOf(3, [])).toBe("UNPLANNED");
     expect(dayStatusOf(3, [{ status: "VALIDATED" }, { status: "VALIDATED" }])).toBe("VALIDATED");

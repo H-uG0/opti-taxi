@@ -1,12 +1,13 @@
 /**
- * Details of a finished optimization run that have no column of their own
- * (violation list, optimizer warnings, reason of each unassigned trip).
+ * Details of a finished optimization run (solver status, violation list,
+ * optimizer warnings, reason of each unassigned trip), stored in the
+ * OptimizationRun.details JSON column: they survive a server restart and are
+ * the same on every server instance. OptimizationRun.kpis holds exactly the
+ * optimizer KPIs (PlanResponse.kpis).
  *
- * They are stored in the OptimizationRun.kpis JSON, next to the optimizer
- * KPIs, under the `details` key: they survive a server restart and are the
- * same on every server instance. Only this module knows that layout, so a
- * dedicated `details Json?` column can replace it without touching callers.
- * Runs saved before the details were stored decode to null.
+ * Runs saved before the details column existed kept the details inside the
+ * kpis JSON, under a `details` key: they are still read from there. Runs
+ * saved without details decode to null.
  */
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -20,30 +21,42 @@ export type RunDetails = {
   unassigned: Array<{ tripId: string; reason: string }>;
 };
 
-const storedRunSchema = z.object({
-  details: z.object({
-    solverStatus: z.string(),
-    violations: z.array(violationSchema),
-    warnings: z.array(z.string()),
-    unassigned: z.array(unassignedSchema),
-  }),
+/** The OptimizationRun columns the details are read from. */
+export type StoredRun = {
+  id: string;
+  details: Prisma.JsonValue | null;
+  kpis: Prisma.JsonValue | null;
+};
+
+const detailsSchema = z.object({
+  solverStatus: z.string(),
+  violations: z.array(violationSchema),
+  warnings: z.array(z.string()),
+  unassigned: z.array(unassignedSchema),
 });
 
-/** JSON written to OptimizationRun.kpis: the optimizer KPIs plus the run details. */
-export function runKpisJson(
-  response: Pick<PlanResponse, "kpis" | "validation" | "meta" | "unassigned">,
+/** Legacy layout: the optimizer KPIs plus the details under the `details` key. */
+const legacyKpisSchema = z.object({ details: detailsSchema });
+
+/** JSON written to OptimizationRun.details. */
+export function runDetailsJson(
+  response: Pick<PlanResponse, "validation" | "meta" | "unassigned">,
 ): Prisma.InputJsonObject {
-  const details = {
+  return {
     solverStatus: response.meta.solverStatus,
     violations: response.validation.violations,
     warnings: response.meta.warnings,
     unassigned: response.unassigned,
   };
-  return { ...response.kpis, details } as Prisma.InputJsonObject;
 }
 
-/** Details of run `runId` from its stored kpis JSON, or null when absent or unreadable. */
-export function readRunDetails(runId: string, kpis: Prisma.JsonValue | null | undefined): RunDetails | null {
-  const parsed = storedRunSchema.safeParse(kpis);
-  return parsed.success ? { runId, ...parsed.data.details } : null;
+/**
+ * Details of a stored run: its details column, else (runs saved before that
+ * column) the `details` key of its kpis JSON. Null when absent or unreadable.
+ */
+export function readRunDetails(run: StoredRun): RunDetails | null {
+  const stored = detailsSchema.safeParse(run.details);
+  if (stored.success) return { runId: run.id, ...stored.data };
+  const legacy = legacyKpisSchema.safeParse(run.kpis);
+  return legacy.success ? { runId: run.id, ...legacy.data.details } : null;
 }

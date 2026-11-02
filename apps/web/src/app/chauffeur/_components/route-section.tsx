@@ -4,6 +4,7 @@ import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { cn } from "@/components/ui/cn";
 import { formatKm, STOP_KIND_LABELS } from "@/lib/labels";
 import { formatDuration, formatMinute } from "@/lib/time";
+import type { RegulatorContact } from "../_lib/links";
 import type { RouteView, StopView } from "../_lib/view";
 import { NavLinks } from "./nav-links";
 import { StopCard } from "./stop-card";
@@ -140,7 +141,7 @@ function ReturnMarker({ route, finished }: { route: RouteView; finished: boolean
   );
 }
 
-export function RouteSection({ route }: { route: RouteView }) {
+export function RouteSection({ route, regulator }: { route: RouteView; regulator: RegulatorContact | null }) {
   const titleId = `route-${route.id}`;
   const finished = route.stops.length > 0 && route.nextStop === null;
 
@@ -165,7 +166,7 @@ export function RouteSection({ route }: { route: RouteView }) {
                 </Marker>
               );
             case "stop":
-              return <StopCard key={item.stop.id} stop={item.stop} total={route.stops.length} />;
+              return <StopCard key={item.stop.id} stop={item.stop} total={route.stops.length} regulator={regulator} />;
             case "return":
               return <ReturnMarker key="return" route={route} finished={finished} />;
           }

@@ -214,10 +214,15 @@ export function assignmentConflicts(
 
 /**
  * requireUser (lib/auth) re-checks the account on every request: disabling it,
- * deactivating the driver or resetting the password ends a session already
- * open. Said wherever the regulator could think the phone stays signed in.
+ * deactivating the driver or resetting the password rejects a session already
+ * open at its next server round-trip (an action, or a refresh of the page; a
+ * roadmap already on screen stays visible until then). For the rejection to
+ * survive a later reactivation, deactivating must also store
+ * lockedPasswordHash() (lib/auth/password). Said wherever the regulator could
+ * think the phone stays signed in.
  */
-export const OPEN_SESSION_NOTE = "Une session déjà ouverte sur son téléphone est fermée immédiatement.";
+export const OPEN_SESSION_NOTE =
+  "Une session déjà ouverte sur son téléphone est coupée dès sa prochaine action ou actualisation.";
 
 export const MIN_PASSWORD_LENGTH = 10;
 export const MAX_PASSWORD_LENGTH = 64;

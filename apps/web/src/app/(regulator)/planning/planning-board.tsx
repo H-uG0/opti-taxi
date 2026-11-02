@@ -53,6 +53,7 @@ export function PlanningBoard({
     () => new Set(violations.map((v) => v.tripId).filter((id): id is string => id !== null)),
     [violations],
   );
+  const returnsToCheck = useMemo(() => trips.filter((t) => t.outboundNoShow).map((t) => t.id), [trips]);
 
   const [selection, setSelection] = useState<{ tripId: string | null; vehicleId: string | null }>(() => ({
     tripId: initialTripId,
@@ -123,7 +124,7 @@ export function PlanningBoard({
       <Card>
         <CardHeader title="Frise par véhicule" />
         <div className="border-b border-slate-100 px-4 py-2">
-          <TimelineLegend />
+          <TimelineLegend showReturnToCheck={returnsToCheck.length > 0} />
         </div>
         <Timeline
           rows={vehicles}
@@ -178,6 +179,7 @@ export function PlanningBoard({
             violationsKnown={violationsKnown}
             staleTrips={staleTrips}
             droppedLocks={droppedLocks}
+            returnsToCheck={returnsToCheck}
             trips={tripsById}
             vehicleLabels={vehicleLabels}
             planned={planned}

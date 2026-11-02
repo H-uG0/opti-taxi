@@ -13,13 +13,17 @@ import type {
 import {
   buildOptimizeRequest,
   compareVehicles,
+  effectiveTimeLimitSec,
   EXCLUDED_TRIP_STATUSES,
+  isStaleRun,
   personName,
   type SettingsInput,
   type TripInput,
   type VehicleInput,
 } from "@/lib/optimizer/build-request";
 import type { RunDetails } from "@/lib/optimizer/run-details";
+import { returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
+import { computeDayKpis as computeDashboardDayKpis, type KpiRoute, type KpiTrip } from "@/lib/kpis";
 import { VIOLATION_LABELS } from "@/lib/labels";
 import { vehicleShade } from "./colors";
 import { coPassengers, computeTimeRange } from "./timeline";
@@ -114,6 +118,8 @@ export type PlanningRawInput = {
   planRun: RawRun | null;
   details: ReadonlyMap<string, RunDetails>;
   baseColors: Record<VehicleType, string>;
+  /** Time of the page load, to tell a live RUNNING run from an interrupted one; defaults to the current time. */
+  now?: Date;
 };
 
 const FIELD_STATUSES: readonly TripStatus[] = ["PICKED_UP", "DROPPED_OFF"];
@@ -141,7 +147,12 @@ export function waitAtFacility(trip: {
   return trip.readyMinute !== null && trip.plannedPickupMinute !== null ? trip.plannedPickupMinute - trip.readyMinute : null;
 }
 
-function runView(run: RawRun | null, details: ReadonlyMap<string, RunDetails>): RunView | null {
+function runView(
+  run: RawRun | null,
+  details: ReadonlyMap<string, RunDetails>,
+  configuredSec: number,
+  now: Date,
+): RunView | null {
   if (!run) return null;
   return {
     id: run.id,
@@ -158,33 +169,88 @@ function runView(run: RawRun | null, details: ReadonlyMap<string, RunDetails>): 
     unassignedCount: run.unassignedCount,
     requestedBy: run.requestedBy?.name ?? null,
     warnings: details.get(run.id)?.warnings ?? null,
+    timeLimitSec: effectiveTimeLimitSec(configuredSec, run.tripsCount),
+    // Same rule as the stale-run cleanup of runOptimization (run-optimization.ts).
+    interrupted: run.status === "RUNNING" && isStaleRun(run, configuredSec, now),
   };
 }
 
-/** KPIs of the day computed from the saved routes and trips (always current). */
+export type KpiTripSource = Pick<
+  RawTrip,
+  "id" | "status" | "routeId" | "direction" | "shared" | "appointmentMinute" | "plannedDropoffMinute"
+>;
+export type KpiRouteSource = Pick<
+  RawRoute,
+  "vehicleId" | "distanceKm" | "emptyKm" | "revenue" | "cost" | "margin" | "validatedAt"
+> & { stops: ReadonlyArray<Pick<RawStop, "tripId" | "kind" | "completedAt">> };
+
+/**
+ * The planning rows of `date` as the dashboard reads them from the database
+ * (tableau-de-bord/load-kpis.ts): stop count and recorded status per route,
+ * real drop-off instant per trip.
+ */
+export function toKpiRows(
+  date: string,
+  trips: readonly KpiTripSource[],
+  routes: readonly KpiRouteSource[],
+): { routes: KpiRoute[]; trips: KpiTrip[] } {
+  const dropoffAt = new Map<string, Date>();
+  for (const stop of routes.flatMap((r) => r.stops)) {
+    if (stop.kind !== "DROPOFF" || !stop.completedAt) continue;
+    const latest = dropoffAt.get(stop.tripId);
+    if (!latest || stop.completedAt > latest) dropoffAt.set(stop.tripId, stop.completedAt);
+  }
+  return {
+    routes: routes.map((r) => ({
+      serviceDate: date,
+      vehicleId: r.vehicleId,
+      distanceKm: r.distanceKm,
+      emptyKm: r.emptyKm,
+      revenue: r.revenue,
+      cost: r.cost,
+      margin: r.margin,
+      validatedAt: r.validatedAt,
+      stopCount: r.stops.length,
+      hasRecordedStatus: r.stops.some((s) => s.completedAt !== null),
+    })),
+    trips: trips.map((t) => ({
+      serviceDate: date,
+      status: t.status,
+      routeId: t.routeId,
+      direction: t.direction,
+      shared: t.shared,
+      appointmentMinute: t.appointmentMinute,
+      plannedDropoffMinute: t.plannedDropoffMinute,
+      dropoffCompletedAt: dropoffAt.get(t.id) ?? null,
+    })),
+  };
+}
+
+/**
+ * KPIs of the day from the saved routes and trips (always current), with the
+ * dashboard formulas of @/lib/kpis: served trips, used vehicles, km, shared
+ * rate and money are computed there, so both pages show the same numbers.
+ */
 export function computeDayKpis(
-  trips: Array<{ status: TripStatus; vehicleId: string | null; shared: boolean }>,
-  routes: Array<{ distanceKm: number; emptyKm: number; revenue: number; margin: number; stops: unknown[] }>,
+  date: string,
+  trips: readonly KpiTripSource[],
+  routes: readonly KpiRouteSource[],
   violations: number | null,
 ): DayKpis {
-  const active = trips.filter((t) => isActiveTrip(t.status));
-  const served = active.filter((t) => t.vehicleId !== null);
-  const sharedTrips = served.filter((t) => t.shared).length;
-  const used = routes.filter((r) => r.stops.length > 0);
-  const totalKm = used.reduce((sum, r) => sum + r.distanceKm, 0);
-  const emptyKm = used.reduce((sum, r) => sum + r.emptyKm, 0);
+  // Only planned figures are read: `today` (here the date itself) does not change them.
+  const day = computeDashboardDayKpis(date, { ...toKpiRows(date, trips, routes), runs: [] }, date);
   return {
-    tripsTotal: active.length,
-    tripsServed: served.length,
-    vehiclesUsed: used.length,
-    tripsPerVehicle: used.length > 0 ? served.length / used.length : null,
-    totalKm,
-    emptyKm,
-    emptyKmRatio: totalKm > 0 ? emptyKm / totalKm : null,
-    sharedTrips,
-    sharedTripRatio: served.length > 0 ? sharedTrips / served.length : null,
-    revenue: used.reduce((sum, r) => sum + r.revenue, 0),
-    margin: used.reduce((sum, r) => sum + r.margin, 0),
+    tripsTotal: trips.filter((t) => isActiveTrip(t.status)).length,
+    tripsServed: day.servedTrips,
+    vehiclesUsed: day.vehicles,
+    tripsPerVehicle: day.tripsPerVehiclePlanned,
+    totalKm: day.distanceKm,
+    emptyKm: day.emptyKm,
+    emptyKmRatio: day.emptyKmShare,
+    sharedTrips: day.sharedTrips,
+    sharedTripRatio: day.sharedRate,
+    revenue: day.revenue,
+    margin: day.margin,
     violations,
   };
 }
@@ -197,6 +263,7 @@ export function dayStatusOf(activeTrips: number, routes: Array<{ status: RouteSt
 }
 
 export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
+  const now = input.now ?? new Date();
   const build = buildOptimizeRequest({
     date: input.date,
     settings: input.settings,
@@ -277,6 +344,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
   }
 
   const vehicleOfTrip = (trip: RawTrip): string | null => (trip.routeId ? (routeById.get(trip.routeId)?.vehicleId ?? null) : null);
+  const returnsToCheck = returnsToCheckAfterNoShow(input.trips);
 
   const trips: TripView[] = input.trips
     .filter((t) => isActiveTrip(t.status) || vehicleOfTrip(t) !== null)
@@ -308,6 +376,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
         detourKm: vehicleId ? t.detourKm : null,
         estimatedRevenue: vehicleId ? t.estimatedRevenue : null,
         waitAtFacilityMin: vehicleId ? waitAtFacility(t) : null,
+        outboundNoShow: returnsToCheck.has(t.id),
       };
     })
     .sort((a, b) => tripTime(a) - tripTime(b));
@@ -351,7 +420,6 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
   const violationsKnown = !input.planRun || input.planRun.valid !== false || planDetails !== null;
 
   const activeTrips = input.trips.filter((t) => isActiveTrip(t.status)).length;
-  const routeViews = rows.map((r) => r.route).filter((r): r is RouteView => r !== null);
 
   return {
     date: input.date,
@@ -361,17 +429,18 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     unassigned,
     violations,
     violationsKnown,
-    kpis: computeDayKpis(trips, routeViews, violationsKnown ? violations.length : null),
+    kpis: computeDayKpis(input.date, input.trips, input.routes, violationsKnown ? violations.length : null),
     skippedVehicles: build.skippedVehicles,
     droppedLocks: build.droppedLocks,
     excludedTrips: build.excludedTrips,
     notes: build.notes,
     staleTrips,
-    lastRun: runView(input.lastRun, input.details),
-    planRun: runView(input.planRun, input.details),
+    lastRun: runView(input.lastRun, input.details, input.settings.solverTimeLimitSec, now),
+    planRun: runView(input.planRun, input.details, input.settings.solverTimeLimitSec, now),
     timeRange: computeTimeRange(rows),
     dayStarted:
       input.trips.some((t) => FIELD_STATUSES.includes(t.status)) ||
       input.routes.some((r) => r.stops.some((s) => s.completedAt !== null)),
+    timeLimitSec: build.request.settings.timeLimitSec,
   };
 }

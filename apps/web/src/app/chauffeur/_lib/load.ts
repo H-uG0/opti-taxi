@@ -1,6 +1,10 @@
 import "server-only";
+import { cache } from "react";
+import { requireDriver } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { getRegulatorPhone } from "@/lib/domain/settings";
 import { fromIsoDate, todayIso } from "@/lib/time";
+import { regulatorContact, type RegulatorContact } from "./links";
 import { isReadableRoadmapDate, returnTripsAfterOutboundNoShow } from "./roadmap";
 
 /**
@@ -112,3 +116,12 @@ export async function loadReturnTripsAfterOutboundNoShow(routes: readonly Driver
   });
   return returnTripsAfterOutboundNoShow([...returnTrips.values()], outboundNoShows);
 }
+
+/**
+ * Regulation phone number set in Paramètres, or null. Cached per request:
+ * the layout header and the page share one lookup.
+ */
+export const loadRegulatorContact = cache(async (): Promise<RegulatorContact | null> => {
+  await requireDriver();
+  return regulatorContact(await getRegulatorPhone(db));
+});

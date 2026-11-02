@@ -79,6 +79,24 @@ describe("tariffsInForce", () => {
     expect(tariffsInForce([b, a], "2026-11-03")).toEqual([b]);
   });
 
+  it("needs createdAt and id for a same-day tie: without them the first grid in input order is kept", () => {
+    // What a caller selecting columns without createdAt / id would pass.
+    const strip = (g: TariffGrid) => ({
+      vehicleType: g.vehicleType,
+      department: g.department,
+      validFrom: g.validFrom,
+      validTo: g.validTo,
+      pricePerKm: g.pricePerKm,
+    });
+    const first = strip(grid({ from: "2026-11-02", pricePerKm: 1.2, createdAt: new Date("2026-11-02T08:00:00Z") }));
+    const fixed = strip(grid({ from: "2026-11-02", pricePerKm: 1.12, createdAt: new Date("2026-11-02T08:05:00Z") }));
+    expect(tariffsInForce([first, fixed], "2026-11-03")).toEqual([first]);
+    expect(tariffsInForce([fixed, first], "2026-11-03")).toEqual([fixed]);
+    // A later start still wins without them.
+    const later = strip(grid({ from: "2026-11-03", pricePerKm: 1.3 }));
+    expect(tariffsInForce([later, first], "2026-11-03")).toEqual([later]);
+  });
+
   it("keeps one grid per vehicle type and department", () => {
     const taxi13 = grid({ from: "2025-01-01" });
     const taxi04 = grid({ from: "2025-01-01", department: "04", pricePerKm: 1.17 });

@@ -94,6 +94,11 @@ export type TripView = {
   estimatedRevenue: number | null;
   /** OUTBOUND: RDV - planned drop-off; RETURN: planned pick-up - end of session. */
   waitAtFacilityMin: number | null;
+  /**
+   * RETURN trip still to do whose outbound leg of the day was closed as
+   * "patient absent": call the patient or cancel the return (@/lib/domain/no-show).
+   */
+  outboundNoShow: boolean;
 };
 
 export type UnassignedView = { tripId: string; reason: string };
@@ -106,7 +111,13 @@ export type ViolationView = {
   vehicleId: string | null;
 };
 
+/**
+ * Indicators of the planned day. Every figure but tripsTotal and violations
+ * comes from @/lib/kpis (the dashboard formulas), so /planning and
+ * /tableau-de-bord always show the same numbers for a day.
+ */
 export type DayKpis = {
+  /** Trips to plan: every trip of the day except cancelled and absent ones. */
   tripsTotal: number;
   tripsServed: number;
   vehiclesUsed: number;
@@ -140,6 +151,13 @@ export type RunView = {
   requestedBy: string | null;
   /** Optimizer warnings, null when no longer known. */
   warnings: string[] | null;
+  /** Solver budget of this run, scaled with the trips it sent (effectiveTimeLimitSec, current setting). */
+  timeLimitSec: number;
+  /**
+   * Still RUNNING long after its budget (isStaleRun): the server stopped
+   * during the computation. The next optimization marks it FAILED.
+   */
+  interrupted: boolean;
 };
 
 /** EMPTY: no trip; UNPLANNED: trips but no route; PROPOSED / VALIDATED: every route in that status; MIXED otherwise. */
@@ -169,4 +187,6 @@ export type PlanningDayView = {
   timeRange: { start: number; end: number };
   /** True once a trip was picked up: re-planning is then disabled. */
   dayStarted: boolean;
+  /** Solver budget of an optimization launched now, scaled with the trips it would send (effectiveTimeLimitSec). */
+  timeLimitSec: number;
 };

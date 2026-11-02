@@ -5,7 +5,8 @@ Nodes
 - two nodes per trip: pickup and delivery (AddPickupAndDelivery, same vehicle, pickup first,
   both performed or both dropped);
 - driver break sites of a vehicle whose break may fall inside its working time
-  (BreakMode.NODE): its depot and the facilities of the trips it may serve. Exactly one is visited
+  (BreakMode.NODE): its depot, the facilities of the trips it may serve and the homes where its
+  lunchtime returns end when no other site is reachable in time. Exactly one is visited
   inside the break window, with a service time equal to the break and the seats cumul forced to 0
   (the vehicle is empty during the whole break; the driving to reach the site is counted).
   Known gap: a route that ends before the window (or starts after it) still visits its site
@@ -47,9 +48,30 @@ Search (budget = settings.timeLimitSec, counted from the start of the search)
    the trips, so a busy vehicle may get none.
 2. Break repair: a vehicle left without a break gets one at the cheapest feasible empty position,
    removing the trips that ride through the break window if needed. Exact time and detour checks
-   in Python (milliseconds), then the routing model confirms the whole plan once.
-3. GUIDED_LOCAL_SEARCH on the remaining budget, from a plan where every break is performed:
+   in Python (milliseconds).
+3. Reinsertion: every trip left out (by the repair or by the first solution) goes back at its
+   cheapest feasible position, trips with the fewest options first (regret insertion), with the
+   same exact checks plus seats, exclusive rides and an empty vehicle at the break; the break
+   moves when the trip only fits without it. The local search alone needed 5 to more than 120 s
+   to win back the trips the repair drops; this takes milliseconds. The routing model then
+   confirms the whole plan once.
+4. Second start, built in Python: the breaks alone, then every trip by the same regret insertion.
+   It respects the breaks from the start: on the seed days it serves more trips than steps 1-3
+   (56 of 56 against 55 on 2026-11-05), on the 160-trip busy day fewer (118 against 129). The
+   start with the lower objective is kept.
+5. GUIDED_LOCAL_SEARCH on the remaining budget, from a plan where every break is performed:
    dropping a break would cost more than all the trips, so the best plan keeps them.
+If the first solution fails (ROUTING_FAIL_TIMEOUT: the time limit ran out before the heuristic
+produced anything, as on an overloaded machine), the plan of step 4 is built, then the local search
+starts from it (from the breaks alone, always feasible, if the routing model rejects it); the two
+share the rest of the budget, at least FALLBACK_SEARCH_SEC, half each. A plan, possibly with trips
+left out, is returned whenever the model is feasible; its trips left out get the time-limit reason
+(a re-run may place them), with WARNING_FIRST_SOLUTION_FAILED.
+
+Determinism: nodes, candidates and every Python step iterate lists and insertion-ordered dicts
+(never sets), so the model and, under a solution limit, the plan do not depend on PYTHONHASHSEED.
+Only the wall-clock time limit (and the 100 ms LNS sub-search limit of OR-Tools) can make two runs
+differ.
 """
 
 from __future__ import annotations
@@ -85,12 +107,26 @@ MIN_LOCAL_SEARCH_SEC = 0.2
 FIRST_SOLUTION_GRACE_SEC = 5
 """Extra time the first solution may take beyond the budget: interrupted, the insertion heuristic
 leaves most trips unplaced (none of 160 with a 1 s budget). The web client waits the budget + 30 s."""
+FALLBACK_SEARCH_SEC = 5
+"""Least time of the fallback when the first solution failed, in all: half for the insertion from
+the breaks (_built_from_breaks), half for the local search from that plan (see
+_search_without_first_solution). The response then comes at most FIRST_SOLUTION_GRACE_SEC +
+FALLBACK_SEARCH_SEC after the budget."""
+MAX_BREAK_MOVES = 30
+"""Positions tried, cheapest first, when a trip only fits once the vehicle's break moves."""
+RESTORE_MARGIN_SEC = 1
+"""Time kept, before the routing limit of the first solution runs out, to restore the repaired
+plan (ReadAssignmentFromRoutes runs under that limit and fails once it is over)."""
 
 REASON_DROPPED = "Pas de place dans les tournées : conflit d'horaires, de capacité ou de pause avec les autres courses"
 REASON_DROPPED_TIME_LIMIT = (
     "Non placée dans le temps de calcul imparti : augmenter le temps de calcul (Paramètres) ou placer la course à la main"
 )
 REASON_NO_SOLUTION = "Aucune solution trouvée dans le temps de calcul imparti"
+WARNING_FIRST_SOLUTION_FAILED = (
+    "Construction initiale des tournées interrompue par la limite de temps (serveur chargé ?) : "
+    "planning construit par une méthode de secours, relancer l'optimisation peut placer davantage de courses"
+)
 
 SEARCH_COMPLETE_STATUSES = frozenset({"ROUTING_SUCCESS", "ROUTING_OPTIMAL"})
 MIN_RECOMMENDED_SEC = 10
@@ -238,6 +274,11 @@ class _DayModel:
         """Objective cost (cents) of leaving each trip unassigned."""
         self.search_status = "ROUTING_NOT_SOLVED"
         """Status of the last solver run (the routing status changes when an assignment is read)."""
+        self.first_solution_failed = False
+        """True when the first solution failed: the plan then comes from the fallback (insertion
+        from the breaks, then local search; see _search_without_first_solution)."""
+        self._lost_cents: list[dict[tuple[str, str], int]] = []
+        """Per pickup node: revenue lost (cents) with each candidate tariff (see _lost_revenue_cents)."""
         self._meter_rows: list[list[int]] = []
         self._limit_functions: list[Callable[[int, int], int]] = []
         """Pickup-to-delivery limit callbacks, kept alive while the C++ model uses them."""
@@ -273,7 +314,8 @@ class _DayModel:
                 self.nodes.append(Node(Role.BREAK, point, rule.duration_min, member.breaks.window, vehicle=v))
 
     def _break_sites(self, v: int, member: FleetVehicle, window: Window, duration: int) -> list[int]:
-        """Depot first, then the facilities of the trips this vehicle may serve, nearest first."""
+        """Depot first, then the facilities of the trips this vehicle may serve, nearest first, then
+        the homes needed by its lunchtime returns (_home_break_sites)."""
         matrix = self.ctx.matrix
         depot = self._point(member.vehicle.depot)
         facilities: dict[int, None] = {}
@@ -287,7 +329,34 @@ class _DayModel:
             begin = max(member.shift.open + matrix.minutes_by_index(depot, point), window.open)
             if begin <= window.close and begin + duration + matrix.minutes_by_index(point, depot) <= member.shift.close:
                 sites.append(point)
-        return sites
+        return [*sites, *self._home_break_sites(v, member, window, duration, sites)]
+
+    def _home_break_sites(self, v: int, member: FleetVehicle, window: Window, duration: int, sites: Sequence[int]) -> list[int]:
+        """Homes where a RETURN trip of this vehicle can end inside the break window and from which,
+        the dropoff ending at its latest, no other site is reachable before the latest break start.
+
+        Without them, a lunchtime return far from the depot and from every facility (Gap -> Sisteron
+        at noon) left no room for the break, although the driver can rest right there (the plan
+        recomputed by schedule.py does). Only the homes that are needed: each one adds a node.
+        """
+        matrix = self.ctx.matrix
+        settings = self.ctx.request.settings
+        needed: list[tuple[int, int]] = []
+        for trip, candidates in self.routable:
+            home = self._point(trip.dropoff)
+            if v not in candidates or trip.direction != "RETURN" or home in sites or any(home == h for _, h in needed):
+                continue
+            pickup = self.ctx.windows[trip.id].pickup
+            ride = settings.pickup_service_min + matrix.minutes(trip.pickup, trip.dropoff) + settings.dropoff_service_min
+            earliest_end, latest_end = pickup.open + ride, pickup.close + ride
+            if earliest_end > window.close or latest_end < window.open:
+                continue
+            overshoot = latest_end + min(matrix.minutes_by_index(home, site) for site in sites) - window.close
+            back = max(earliest_end, window.open) + duration + matrix.minutes_by_index(home, sites[0])
+            if overshoot > 0 and back <= member.shift.close:
+                needed.append((overshoot, home))
+        needed.sort(key=lambda item: -item[0])  # stable: most needed first, then request order
+        return [home for _, home in needed[:MAX_BREAK_SITES]]
 
     def node_at(self, index: int) -> Node:
         return self.nodes[self.manager.IndexToNode(index)]
@@ -341,7 +410,7 @@ class _DayModel:
         settings = ctx.request.settings
 
         # Arc costs per vehicle (vehicles with the same cost profile share one matrix).
-        lost = self._lost_revenue_cents()
+        lost = self._lost_cents = self._lost_revenue_cents()
         km_cost_rows: dict[float, dict[int, list[int]]] = {}
         cost_callbacks: dict[tuple[float, str, str], int] = {}
         for v, member in enumerate(fleet):
@@ -440,9 +509,10 @@ class _DayModel:
         return params
 
     def search(self, time_limit_sec: float) -> pywrapcp.Assignment | None:
-        """First solution, break repair, guided local search (see module docstring), all within
-        `time_limit_sec` (the first solution may use FIRST_SOLUTION_GRACE_SEC more); None when no
-        plan was found."""
+        """First solution, break repair, reinsertion, second start, guided local search (see module
+        docstring), all within `time_limit_sec` (the first solution and the repair may use
+        FIRST_SOLUTION_GRACE_SEC more, the fallback after a failed first solution
+        FALLBACK_SEARCH_SEC); None when no plan was found."""
         started = time.monotonic()
         deadline = started + time_limit_sec
         # The routing limit set here also bounds the restore of the repaired plan below: the grace
@@ -452,31 +522,91 @@ class _DayModel:
         self.search_status = _status_name(self.routing)
         built = time.monotonic()
         if first is None:
-            logger.info("solver: no first solution after %.1f s (%s)", built - started, self.search_status)
-            return None
+            logger.warning("solver: no first solution after %.1f s (%s)", built - started, self.search_status)
+            self.first_solution_failed = True
+            return self._search_without_first_solution(deadline)
         if built > deadline:
             logger.warning("solver: first solution took %.1f s, over the %s s budget", built - started, time_limit_sec)
-        with_breaks = self._with_all_breaks(first)
-        start = first if with_breaks is None else with_breaks
+        # Both restores below run under the routing limit of the first solution.
+        restore_deadline = started + first_limit - RESTORE_MARGIN_SEC
+        start, kept = self._repaired(first, restore_deadline)
         repaired = time.monotonic()
         logger.info(
-            "solver: first solution %.2f s (%d trips placed), break repair %.2f s (%d trips kept)",
+            "solver: first solution %.2f s (%d trips placed), break repair %d trips kept, reinsertion %d trips placed (%.2f s)",
             built - started,
             self._placed(first),
-            repaired - built,
+            kept,
             self._placed(start),
+            repaired - built,
         )
-        remaining = deadline - repaired
+        if repaired < deadline:
+            routes = self._built_from_breaks(min(deadline, restore_deadline))
+            constructed = self.routing.ReadAssignmentFromRoutes(routes, True)
+            if constructed is None:
+                logger.warning("solver: plan built from the breaks rejected by the routing model")
+            else:
+                chosen = constructed.ObjectiveValue() < start.ObjectiveValue()
+                logger.info(
+                    "solver: insertion from the breaks %.2f s (%d trips placed), %s",
+                    time.monotonic() - repaired,
+                    self._placed_in(routes),
+                    "kept as the start" if chosen else "first solution kept",
+                )
+                start = constructed if chosen else start
+        remaining = deadline - time.monotonic()
         if remaining < MIN_LOCAL_SEARCH_SEC:
             return start
-        best = self.routing.SolveFromAssignmentWithParameters(start, self._params(remaining))
+        return self._local_search(start, remaining)
+
+    def _local_search(self, start: pywrapcp.Assignment, seconds: float) -> pywrapcp.Assignment | None:
+        """Guided local search from `start`; `start` itself when the search returns nothing."""
+        began = time.monotonic()
+        best = self.routing.SolveFromAssignmentWithParameters(start, self._params(seconds))
         if best is None:
             return start
         self.search_status = _status_name(self.routing)
-        logger.info(
-            "solver: local search %.2f s (%d trips placed) -> %s", time.monotonic() - repaired, self._placed(best), self.search_status
-        )
+        logger.info("solver: local search %.2f s (%d trips placed) -> %s", time.monotonic() - began, self._placed(best), self.search_status)
         return best
+
+    def _search_without_first_solution(self, deadline: float) -> pywrapcp.Assignment | None:
+        """Search when the first solution failed: the rest of the budget, at least
+        FALLBACK_SEARCH_SEC, half for the insertion from the breaks, half for the local search from
+        it; from the breaks-only routes (always feasible) if the routing model rejects it.
+
+        The failed solve closed the model and used up its routing limit, under which
+        ReadAssignmentFromRoutes would fail: the start only sets the routes (RoutesToAssignment)
+        and the search, with a fresh limit, restores it.
+        """
+        now = time.monotonic()
+        end = max(deadline, now + FALLBACK_SEARCH_SEC)
+        constructed = self._built_from_breaks(now + (end - now) / 2)
+        for routes in (constructed, self._breaks_only_routes()):
+            start = self.routing.solver().Assignment()
+            if not self.routing.RoutesToAssignment(routes, True, True, start):
+                continue
+            best = self.routing.SolveFromAssignmentWithParameters(start, self._params(max(end - time.monotonic(), MIN_LOCAL_SEARCH_SEC)))
+            self.search_status = _status_name(self.routing)
+            if best is not None:
+                logger.info(
+                    "solver: local search from %d trips inserted after the breaks: %d trips placed -> %s",
+                    self._placed_in(routes),
+                    self._placed(best),
+                    self.search_status,
+                )
+                return best
+        logger.warning("solver: no start accepted by the routing model (%s)", self.search_status)
+        return None
+
+    def _breaks_only_routes(self) -> list[list[int]]:
+        """Each vehicle's break at its cheapest feasible site (the depot) and nothing else."""
+        return [self._with_break([], v) or [] if v in self.break_nodes else [] for v in range(len(self.fleet))]
+
+    def _built_from_breaks(self, deadline: float) -> list[list[int]]:
+        """Routes built in Python: the breaks alone, then every trip by regret insertion (breaks
+        moved when needed, see _cheapest_insertion), until the deadline."""
+        routes = self._breaks_only_routes()
+        self._insert_left_out(routes, deadline)
+        return routes
 
     def _routes(self, solution: pywrapcp.Assignment) -> list[list[int]]:
         """Visited indices (depots excluded) of every vehicle."""
@@ -493,24 +623,35 @@ class _DayModel:
 
     def _placed(self, solution: pywrapcp.Assignment) -> int:
         """Number of trips served by the solution."""
-        return sum(1 for route in self._routes(solution) for index in route if self.node_at(index).role is Role.PICKUP)
+        return self._placed_in(self._routes(solution))
+
+    def _placed_in(self, routes: Sequence[Sequence[int]]) -> int:
+        return sum(1 for route in routes for index in route if self.node_at(index).role is Role.PICKUP)
 
     # -- break repair
-    def _with_all_breaks(self, solution: pywrapcp.Assignment) -> pywrapcp.Assignment | None:
-        """The solution with a break for every vehicle that needs one; None if the routing model
-        rejects the repaired plan (the local search then inserts the missing breaks itself)."""
+    def _repaired(self, solution: pywrapcp.Assignment, insertion_deadline: float) -> tuple[pywrapcp.Assignment, int]:
+        """The solution with a break for every vehicle that needs one and the trips left out
+        reinserted, and the number of trips kept by the break repair alone. The solution as it is
+        if the routing model rejects the result (the local search then inserts the missing breaks
+        itself)."""
         routes = self._routes(solution)
         missing = [v for v in self.break_nodes if not any(self.node_at(index).role is Role.BREAK for index in routes[v])]
-        if not missing:
-            return solution
-        time_dim = self.routing.GetDimensionOrDie("Time")
-        cumuls = {index: solution.Value(time_dim.CumulVar(index)) for route in routes for index in route}
-        for v in missing:
-            routes[v] = self._fit_break(routes[v], v, cumuls)
+        if missing:
+            time_dim = self.routing.GetDimensionOrDie("Time")
+            cumuls = {index: solution.Value(time_dim.CumulVar(index)) for route in routes for index in route}
+            for v in missing:
+                routes[v] = self._fit_break(routes[v], v, cumuls)
+        kept = self._placed_in(routes)
+        inserted = self._insert_left_out(routes, insertion_deadline)
+        if not missing and not inserted:
+            return solution, kept
         repaired = self.routing.ReadAssignmentFromRoutes(routes, True)
         if repaired is None:
-            logger.warning("solver: break repair of %d vehicle(s) rejected by the routing model", len(missing))
-        return repaired
+            logger.warning(
+                "solver: repaired plan (%d break(s), %d trip(s) reinserted) rejected by the routing model", len(missing), inserted
+            )
+            return solution, kept
+        return repaired, kept
 
     def _fit_break(self, route: Sequence[int], v: int, cumuls: dict[int, int]) -> list[int]:
         """Route of vehicle v with a break site inserted, dropping trips only when needed.
@@ -629,6 +770,200 @@ class _DayModel:
 
         return max(reversed(trips), key=overlap)
 
+    # -- reinsertion of the trips left out
+    def _insert_left_out(self, routes: list[list[int]], deadline: float) -> int:
+        """Put the trips missing from `routes` (changed in place) back at their cheapest feasible
+        position, until none fits or the deadline passes; returns the number inserted.
+
+        Regret insertion: the trip with the largest gap between its best and second-best vehicle
+        goes first (a trip with a single option first of all), so that the trips with few options
+        are not crowded out by those that fit anywhere. An insertion makes a route tighter (only a
+        moved break can free a slot): a trip without any option is not retried, and after an
+        insertion only the options in the changed route are recomputed.
+        """
+        placed = {self.node_at(index).trip.id for route in routes for index in route if self.node_at(index).trip is not None}
+        options: dict[str, dict[int, tuple[float, list[int]]]] = {}
+        for trip, candidates in self.routable:
+            if time.monotonic() >= deadline:
+                return 0
+            if trip.id in placed:
+                continue
+            by_vehicle = {v: best for v in candidates if (best := self._cheapest_insertion(routes[v], v, trip)) is not None}
+            if by_vehicle:
+                options[trip.id] = by_vehicle
+        inserted = 0
+        while options and time.monotonic() < deadline:
+            trip_id, v = self._next_insertion(options)
+            routes[v] = options.pop(trip_id)[v][1]
+            inserted += 1
+            for other_id, by_vehicle in list(options.items()):
+                if v not in by_vehicle:
+                    continue
+                best = self._cheapest_insertion(routes[v], v, self.ctx.trips[other_id])
+                if best is not None:
+                    by_vehicle[v] = best
+                    continue
+                del by_vehicle[v]
+                if not by_vehicle:
+                    del options[other_id]
+        return inserted
+
+    @staticmethod
+    def _next_insertion(options: dict[str, dict[int, tuple[float, list[int]]]]) -> tuple[str, int]:
+        """(trip, vehicle) of the next insertion: largest regret, then cheapest, then first listed."""
+        chosen: tuple[float, float, str, int] | None = None
+        for trip_id, by_vehicle in options.items():
+            costs = sorted((cost, v) for v, (cost, _) in by_vehicle.items())
+            regret = costs[1][0] - costs[0][0] if len(costs) > 1 else math.inf
+            if chosen is None or (regret, -costs[0][0]) > (chosen[0], chosen[1]):
+                chosen = (regret, -costs[0][0], trip_id, costs[0][1])
+        assert chosen is not None
+        return chosen[2], chosen[3]
+
+    def _cheapest_insertion(self, route: Sequence[int], v: int, trip: Trip) -> tuple[float, list[int]] | None:
+        """Cheapest feasible route of vehicle v with the trip's pickup and delivery inserted, and
+        its extra cost (cents: km and driving minutes added, revenue lost against the best tariff),
+        None when the trip fits nowhere.
+
+        When the trip fits nowhere around the vehicle's break, the break may move: the trip goes
+        into the route without the break, which then takes its cheapest feasible empty position
+        again (_with_break). The first solution and the repair place breaks with no regard for the
+        trips still to come; lunchtime returns often need exactly the slot the break holds.
+        """
+        sequence = self._first_feasible(v, route, self._insertion_positions(route, v, trip), trip)
+        if sequence is not None:
+            return sequence
+        held = [k for k, index in enumerate(route) if self.node_at(index).role is Role.BREAK]
+        if not held:
+            return None
+        k = held[0]
+        bare = [*route[:k], *route[k + 1 :]]
+        current = self._stop_cost(v, route, k)
+        for cost, i, j in self._insertion_positions(bare, v, trip)[:MAX_BREAK_MOVES]:
+            moved = self._with_break(self._inserted(bare, trip, i, j), v)
+            if moved is not None and not self._detour_breaches(moved):
+                where = next(n for n, index in enumerate(moved) if self.node_at(index).role is Role.BREAK)
+                return cost + self._stop_cost(v, moved, where) - current, moved
+        return None
+
+    def _first_feasible(
+        self, v: int, route: Sequence[int], positions: Sequence[tuple[float, int, int]], trip: Trip
+    ) -> tuple[float, list[int]] | None:
+        """First screened position (cheapest first) that passes the full time and detour checks."""
+        for cost, i, j in positions:
+            sequence = self._inserted(route, trip, i, j)
+            if self._time_feasible(v, sequence) and not self._detour_breaches(sequence):
+                return cost, sequence
+        return None
+
+    def _inserted(self, route: Sequence[int], trip: Trip, i: int, j: int) -> list[int]:
+        """The route with the trip's pickup before stop i and its delivery before stop j (j >= i)."""
+        p_node, d_node = self.trip_nodes[trip.id]
+        return [*route[:i], self.manager.NodeToIndex(p_node), *route[i:j], self.manager.NodeToIndex(d_node), *route[j:]]
+
+    def _stop_cost(self, v: int, route: Sequence[int], k: int) -> float:
+        """Cost (cents) of the detour through stop k of the route of vehicle v."""
+        depot = self.nodes[v]
+        before = self.node_at(route[k - 1]) if k else depot
+        after = self.node_at(route[k + 1]) if k + 1 < len(route) else depot
+        return self._detour_cost(v, before, self.node_at(route[k]), after)
+
+    def _detour_cost(self, v: int, a: Node, b: Node, c: Node) -> float:
+        """Cost (cents) for vehicle v of driving a -> b -> c instead of a -> c: km and minutes."""
+        matrix = self.ctx.matrix
+        vehicle = self.fleet[v].vehicle
+        km = matrix.km_by_index(a.point, b.point) + matrix.km_by_index(b.point, c.point) - matrix.km_by_index(a.point, c.point)
+        minutes = (
+            matrix.minutes_by_index(a.point, b.point) + matrix.minutes_by_index(b.point, c.point) - matrix.minutes_by_index(a.point, c.point)
+        )
+        return km * vehicle.cost_per_km * CENTS_PER_EURO + minutes * vehicle.cost_per_hour * CENTS_PER_EURO / 60
+
+    def _insertion_positions(self, route: Sequence[int], v: int, trip: Trip) -> list[tuple[float, int, int]]:
+        """(extra cost, pickup position i, delivery position j) of every position of the trip in
+        the route of vehicle v that passes the screening, cheapest first.
+
+        The screening is exact for times (earliest starts forward, latest starts that keep the
+        rest of the route on time backward), seats, exclusive rides, the empty vehicle at the break
+        and the trip's own detour; only the rides of the other patients on board are left to the
+        full check (_first_feasible).
+        """
+        matrix = self.ctx.matrix
+        member = self.fleet[v]
+        depot = self.nodes[v]
+        p_node, d_node = self.trip_nodes[trip.id]
+        pickup, delivery = self.nodes[p_node], self.nodes[d_node]
+        stops = [self.node_at(index) for index in route]
+        count = len(stops)
+        capacity = member.vehicle.capacity
+
+        earliest: list[int] = []
+        seats: list[int] = []
+        exclusive: list[int] = []
+        clock, previous, load, alone = member.shift.open, depot, 0, 0
+        for node in stops:
+            clock = max(clock + previous.service_min + matrix.minutes_by_index(previous.point, node.point), node.window.open)
+            load, alone = load + node.seats, alone + node.exclusive
+            earliest.append(clock)
+            seats.append(load)
+            exclusive.append(alone)
+            previous = node
+        # Latest service start at each stop (arrival at the end depot last) keeping the rest on time.
+        latest = [member.shift.close] * (count + 1)
+        following = depot
+        for k in reversed(range(count)):
+            node = stops[k]
+            latest[k] = min(node.window.close, latest[k + 1] - matrix.minutes_by_index(node.point, following.point) - node.service_min)
+            following = node
+
+        limit_m = self.detour_limits_m.get(trip.id)
+        weight = pickup.exclusive
+        base = self._lost_cents[p_node].get(self._tariff_key(member.vehicle), 0)
+
+        def extra(a: Node, b: Node, c: Node) -> float:
+            return self._detour_cost(v, a, b, c)
+
+        positions: list[tuple[float, int, int]] = []
+        for i in range(count + 1):
+            before = stops[i - 1] if i else depot
+            departure = earliest[i - 1] + before.service_min if i else member.shift.open
+            if departure > pickup.window.close:
+                break  # departures only get later along the route
+            start_p = max(departure + matrix.minutes_by_index(before.point, pickup.point), pickup.window.open)
+            if start_p > pickup.window.close:
+                continue
+            if (seats[i - 1] if i else 0) + pickup.seats > capacity or (exclusive[i - 1] if i else 0) + weight > EXCLUSIVE_WEIGHT:
+                continue
+            after_p = stops[i] if i < count else depot
+            pickup_cost = extra(before, pickup, after_p)
+            # Delivery right after `last` (the pickup, then each stop ridden through), before stop j.
+            last, clock, ride = pickup, start_p, 0
+            for j in range(i, count + 1):
+                after = stops[j] if j < count else depot
+                start_d = max(clock + last.service_min + matrix.minutes_by_index(last.point, delivery.point), delivery.window.open)
+                on_time = start_d <= delivery.window.close and (
+                    start_d + delivery.service_min + matrix.minutes_by_index(delivery.point, after.point) <= latest[j]
+                )
+                if on_time and (limit_m is None or ride + self._meters(last, delivery) <= limit_m):
+                    cost = extra(pickup, delivery, after_p) if j == i else extra(last, delivery, after)
+                    positions.append((base + pickup_cost + cost, i, j))
+                if j == count:
+                    break
+                # Ride through stop j with the patient on board.
+                node = stops[j]
+                if node.role is Role.BREAK or seats[j] + pickup.seats > capacity or exclusive[j] + weight > EXCLUSIVE_WEIGHT:
+                    break
+                clock = max(clock + last.service_min + matrix.minutes_by_index(last.point, node.point), node.window.open)
+                ride += self._meters(last, node)
+                if clock > node.window.close or (limit_m is not None and ride > limit_m):
+                    break
+                last = node
+        positions.sort()
+        return positions
+
+    def _meters(self, a: Node, b: Node) -> int:
+        """Distance-dimension transit (meters, rounded like the model) between two nodes' places."""
+        return round(self.ctx.matrix.km_by_index(a.point, b.point) * METERS_PER_KM)
+
     # -- result
     def sequences(self, solution: pywrapcp.Assignment) -> dict[str, list[StopRef]]:
         result: dict[str, list[StopRef]] = {}
@@ -676,11 +1011,15 @@ def solve(ctx: PlanContext) -> SolveOutcome:
         for trip, _ in routable:
             unassigned[trip.id] = REASON_NO_SOLUTION
         return SolveOutcome({}, unassigned, "NO_SOLUTION", status_name, None, warnings)
+    if model.first_solution_failed:
+        warnings.append(WARNING_FIRST_SOLUTION_FAILED)
 
     sequences = model.sequences(solution)
     served = {ref.trip_id for refs in sequences.values() for ref in refs}
     dropped = [trip for trip, _ in routable if trip.id not in served]
-    cut_short = search_cut_short(status_name)
+    # After a failed first solution the plan comes from a shortened fallback search, and the
+    # warning above says a re-run may place more: never tell the regulator there is no room.
+    cut_short = model.first_solution_failed or search_cut_short(status_name)
     for trip in dropped:
         unassigned[trip.id] = REASON_DROPPED_TIME_LIMIT if cut_short else REASON_DROPPED
     if dropped and cut_short:

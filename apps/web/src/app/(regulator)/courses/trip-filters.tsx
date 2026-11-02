@@ -30,6 +30,7 @@ export function TripFiltersForm({ date, filters }: { date: string; filters: Trip
         <Select id="filter-status" name="statut" defaultValue={filters.status ?? ""}>
           <option value="">Tous</option>
           <option value="ACTIVE">Hors annulées</option>
+          <option value="RETURN_TO_CHECK">Retours à vérifier (aller absent)</option>
           {STATUS_OPTIONS.map(([value, label]) => (
             <option key={value} value={value}>
               {label}

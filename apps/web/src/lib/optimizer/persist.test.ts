@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import { optimizeRequestSchema, planResponseSchema, type PlanResponse, type PlanRoute, type TripResult } from "./contract";
 import {
@@ -9,10 +10,12 @@ import {
   planRoutes,
   planTripUpdates,
   replanBlockReason,
+  savePlan,
   summarizeRun,
   type CurrentTrip,
   type VehicleCrew,
 } from "./persist";
+import { readRunDetails, runDetailsJson } from "./run-details";
 
 const NOW = new Date("2026-11-02T17:30:00Z");
 
@@ -349,6 +352,55 @@ describe("contract fixtures", () => {
       matrixSource: response.meta.matrixSource,
       valid: response.validation.valid,
       kpis: response.kpis,
+    });
+  });
+
+  it("saves the run with exactly the optimizer KPIs and the details in their own column", async () => {
+    type RunWrite = { where: unknown; data: Record<string, unknown> };
+    const runWrites: RunWrite[] = [];
+    let createdRoutes = 0;
+    // Just enough of a transaction client for savePlan: nothing locked, nothing started.
+    const tx = {
+      $queryRaw: async () => [],
+      trip: {
+        count: async () => 0,
+        findMany: async () => request.trips.map((t) => current(t.id)),
+        update: async () => ({}),
+        updateMany: async () => ({ count: 0 }),
+      },
+      vehicle: {
+        findMany: async () =>
+          request.vehicles.map((v) => ({ id: v.id, type: v.type, defaultDriverId: `drv_${v.id}`, defaultCrewMateId: null })),
+      },
+      route: {
+        deleteMany: async () => ({ count: 0 }),
+        create: async () => ({ id: `route_${++createdRoutes}` }),
+      },
+      optimizationRun: {
+        update: async (args: RunWrite) => {
+          runWrites.push(args);
+          return {};
+        },
+      },
+    };
+    const prisma = { $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx) } as unknown as PrismaClient;
+
+    await savePlan(prisma, { runId: "run_1", isoDate: request.date, request, response, now: NOW });
+
+    expect(runWrites).toHaveLength(1);
+    const write = runWrites[0];
+    expect(write?.where).toEqual({ id: "run_1" });
+    expect(write?.data).toMatchObject({ status: "SUCCESS", error: null, ...summarizeRun(request, response) });
+    expect(write?.data.kpis).toStrictEqual(response.kpis);
+    expect(write?.data.details).toStrictEqual(runDetailsJson(response));
+
+    const stored = JSON.parse(JSON.stringify({ id: "run_1", kpis: write?.data.kpis, details: write?.data.details }));
+    expect(readRunDetails(stored)).toEqual({
+      runId: "run_1",
+      solverStatus: response.meta.solverStatus,
+      violations: response.validation.violations,
+      warnings: response.meta.warnings,
+      unassigned: response.unassigned,
     });
   });
 });

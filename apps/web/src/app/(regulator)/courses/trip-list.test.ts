@@ -41,6 +41,7 @@ describe("parseTripFilters", () => {
       sharing: "SHARED",
       q: "dupont",
     });
+    expect(parseTripFilters({ statut: "RETURN_TO_CHECK" }).status).toBe("RETURN_TO_CHECK");
     expect(parseTripFilters({ statut: "DROP TABLE", sens: ["OUTBOUND", "RETURN"], partage: "nope" })).toEqual({
       status: null,
       direction: "OUTBOUND",
@@ -63,6 +64,12 @@ describe("filterTrips", () => {
   it("filters by status, with ACTIVE hiding cancelled trips", () => {
     expect(ids(filterTrips(trips, { ...EMPTY_FILTERS, status: "CANCELLED" }))).toEqual(["b"]);
     expect(ids(filterTrips(trips, { ...EMPTY_FILTERS, status: "ACTIVE" }))).toEqual(["a", "c"]);
+  });
+
+  it("keeps only the return trips to check after an outbound absence", () => {
+    const withFlag = [...trips, trip({ id: "r", direction: "RETURN", outboundNoShow: true })];
+    expect(ids(filterTrips(withFlag, { ...EMPTY_FILTERS, status: "RETURN_TO_CHECK" }))).toEqual(["r"]);
+    expect(ids(filterTrips(trips, { ...EMPTY_FILTERS, status: "RETURN_TO_CHECK" }))).toEqual([]);
   });
 
   it("filters by direction and sharing", () => {
@@ -120,8 +127,18 @@ describe("summarizeTrips", () => {
       sharingRefused: 1,
       sharingPending: 1,
       sharingConflicts: 0,
+      returnsToCheck: 0,
       cancelled: 1,
     });
+  });
+
+  it("counts the return trips to check after an outbound absence", () => {
+    const summary = summarizeTrips([
+      trip({ id: "out", status: "NO_SHOW" }),
+      trip({ id: "ret", direction: "RETURN", outboundNoShow: true }),
+      trip({ id: "other", direction: "RETURN" }),
+    ]);
+    expect(summary.returnsToCheck).toBe(1);
   });
 
   it("counts refused trips still shared in the plan", () => {

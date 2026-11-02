@@ -19,8 +19,10 @@ import {
 import { cn } from "@/components/ui/cn";
 import { formatMinute } from "@/lib/time";
 import { MOBILITY_LABELS, STOP_KIND_LABELS } from "@/lib/labels";
+import type { RegulatorContact } from "../_lib/links";
 import type { StopView } from "../_lib/view";
 import { NavLinks } from "./nav-links";
+import { CallRegulator } from "./regulator-call";
 import { StopActions, UndoStatus } from "./stop-actions";
 
 const KIND_STYLES = {
@@ -148,19 +150,20 @@ function StopDetails({ stop }: { stop: StopView }) {
 }
 
 /** Return pickup of a patient absent on the outbound leg: check before driving to the facility. */
-function OutboundNoShowWarning() {
+function OutboundNoShowWarning({ regulator }: { regulator: RegulatorContact | null }) {
   return (
     <div role="note" className="flex items-start gap-2 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-red-950">
       <TriangleAlert aria-hidden className="mt-0.5 size-5 shrink-0 text-red-700" />
       <p className="text-base">
-        <span className="font-bold">Aller : patient absent.</span> Appelez la régulation avant d&apos;aller le chercher.
+        <span className="font-bold">Aller : patient absent.</span>{" "}
+        <CallRegulator regulator={regulator}>Appelez la régulation</CallRegulator> avant d&apos;aller le chercher.
       </p>
     </div>
   );
 }
 
 /** A stop still to do: everything the crew needs, then the status buttons. */
-function OpenStopCard({ stop, total }: { stop: StopView; total: number }) {
+function OpenStopCard({ stop, total, regulator }: { stop: StopView; total: number; regulator: RegulatorContact | null }) {
   const { controls } = stop;
   const hasActions = controls.primary !== null || controls.noShow;
   return (
@@ -195,7 +198,7 @@ function OpenStopCard({ stop, total }: { stop: StopView; total: number }) {
           ) : null}
         </div>
 
-        {stop.outboundNoShow ? <OutboundNoShowWarning /> : null}
+        {stop.outboundNoShow ? <OutboundNoShowWarning regulator={regulator} /> : null}
 
         <StopDetails stop={stop} />
 
@@ -288,6 +291,10 @@ function ClosedStopCard({ stop }: { stop: StopView }) {
   );
 }
 
-export function StopCard({ stop, total }: { stop: StopView; total: number }) {
-  return stop.state === "pending" ? <OpenStopCard stop={stop} total={total} /> : <ClosedStopCard stop={stop} />;
+export function StopCard({ stop, total, regulator }: { stop: StopView; total: number; regulator: RegulatorContact | null }) {
+  return stop.state === "pending" ? (
+    <OpenStopCard stop={stop} total={total} regulator={regulator} />
+  ) : (
+    <ClosedStopCard stop={stop} />
+  );
 }

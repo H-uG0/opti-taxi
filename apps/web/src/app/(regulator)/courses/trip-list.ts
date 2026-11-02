@@ -11,8 +11,11 @@ const TRIP_STATUSES = ["PLANNED", "ASSIGNED", "PICKED_UP", "DROPPED_OFF", "CANCE
 const SHARING_STATUSES = ["NOT_ELIGIBLE", "NOT_PROPOSED", "PROPOSED", "ACCEPTED", "REFUSED"] as const satisfies readonly SharingStatus[];
 const DIRECTIONS = ["OUTBOUND", "RETURN"] as const satisfies readonly TripDirection[];
 
-/** "ACTIVE" = every status but CANCELLED. */
-export type StatusFilter = TripStatus | "ACTIVE";
+/**
+ * "ACTIVE" = every status but CANCELLED; "RETURN_TO_CHECK" = return trips
+ * whose outbound leg was closed as patient absent (@/lib/domain/no-show).
+ */
+export type StatusFilter = TripStatus | "ACTIVE" | "RETURN_TO_CHECK";
 /** "SHARED" = shared in the current planning (Trip.shared), the other values are the traceability status. */
 export type SharingFilter = SharingStatus | "SHARED";
 
@@ -39,7 +42,7 @@ function pick<T extends string>(value: SearchParamValue, allowed: readonly T[]):
 /** Reads ?statut=&sens=&partage=&q= ; unknown values are ignored. */
 export function parseTripFilters(params: Record<string, SearchParamValue>): TripFilters {
   return {
-    status: pick<StatusFilter>(params.statut, [...TRIP_STATUSES, "ACTIVE"]),
+    status: pick<StatusFilter>(params.statut, [...TRIP_STATUSES, "ACTIVE", "RETURN_TO_CHECK"]),
     direction: pick<TripDirection>(params.sens, DIRECTIONS),
     sharing: pick<SharingFilter>(params.partage, [...SHARING_STATUSES, "SHARED"]),
     q: (firstValue(params.q) ?? "").trim().slice(0, 80),
@@ -66,11 +69,15 @@ export type FilterableTrip = {
   sharingStatus: SharingStatus;
   shared: boolean;
   patient: { firstName: string; lastName: string };
+  /** Return trip to check: its outbound leg was closed as patient absent (returnsToCheckAfterNoShow). */
+  outboundNoShow?: boolean;
 };
 
 export function matchesFilters(trip: FilterableTrip, filters: TripFilters): boolean {
   if (filters.status === "ACTIVE") {
     if (trip.status === "CANCELLED") return false;
+  } else if (filters.status === "RETURN_TO_CHECK") {
+    if (!trip.outboundNoShow) return false;
   } else if (filters.status !== null && trip.status !== filters.status) {
     return false;
   }
@@ -137,6 +144,8 @@ export type DaySummary = {
   sharingPending: number;
   /** Still shared in the plan although the patient refused: the day must be re-optimized. */
   sharingConflicts: number;
+  /** Return trips still to do whose outbound leg was closed as patient absent: call the patient or cancel. */
+  returnsToCheck: number;
   cancelled: number;
 };
 
@@ -148,6 +157,7 @@ export function summarizeTrips(
     shared: boolean;
     sharingStatus: SharingStatus;
     sharingAllowed: boolean;
+    outboundNoShow?: boolean;
   }[],
 ): DaySummary {
   const summary: DaySummary = {
@@ -161,6 +171,7 @@ export function summarizeTrips(
     sharingRefused: 0,
     sharingPending: 0,
     sharingConflicts: 0,
+    returnsToCheck: 0,
     cancelled: 0,
   };
   for (const trip of trips) {
@@ -180,6 +191,7 @@ export function summarizeTrips(
       summary.sharingPending += 1;
     }
     if (sharingConflict(trip)) summary.sharingConflicts += 1;
+    if (trip.outboundNoShow) summary.returnsToCheck += 1;
   }
   return summary;
 }

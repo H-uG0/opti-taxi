@@ -1,9 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { OctagonAlert, CircleSlash, LockKeyholeOpen, RotateCcw } from "lucide-react";
+import { OctagonAlert, CircleSlash, LockKeyholeOpen, RotateCcw, UserX } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
+import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_SHORT_LABEL } from "@/lib/domain/no-show";
 import type { DroppedLock } from "@/lib/optimizer/build-request";
 import type { TripView, UnassignedView, ViolationView } from "@/lib/planning/types";
 import { DIRECTION_LABELS } from "@/lib/labels";
@@ -15,6 +16,8 @@ export type IssuesPanelProps = {
   violationsKnown: boolean;
   staleTrips: UnassignedView[];
   droppedLocks: DroppedLock[];
+  /** Return trips to check: their outbound leg was closed as "patient absent". */
+  returnsToCheck: string[];
   trips: Record<string, TripView>;
   vehicleLabels: Record<string, string>;
   planned: boolean;
@@ -63,7 +66,20 @@ function TripButton({
   );
 }
 
-function Section({ icon, title, tone, children }: { icon: ReactNode; title: string; tone: "red" | "amber" | "slate"; children: ReactNode }) {
+function Section({
+  icon,
+  title,
+  tone,
+  intro,
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  tone: "red" | "amber" | "slate";
+  /** What to do, said once for every entry of the section. */
+  intro?: ReactNode;
+  children: ReactNode;
+}) {
   const tones = { red: "text-red-700", amber: "text-amber-700", slate: "text-slate-700" };
   return (
     <section className="px-2 py-2">
@@ -71,18 +87,20 @@ function Section({ icon, title, tone, children }: { icon: ReactNode; title: stri
         {icon}
         {title}
       </h3>
+      {intro ? <p className="px-2 pb-1.5 text-xs text-slate-600">{intro}</p> : null}
       <ul className="max-h-72 space-y-0.5 overflow-y-auto">{children}</ul>
     </section>
   );
 }
 
-/** Everything the regulator should look at: unassigned trips, violations, stale or ignored locks. */
+/** Everything the regulator should look at: returns after an absence, unassigned trips, violations, stale or ignored locks. */
 export function IssuesPanel({
   unassigned,
   violations,
   violationsKnown,
   staleTrips,
   droppedLocks,
+  returnsToCheck,
   trips,
   vehicleLabels,
   planned,
@@ -90,7 +108,13 @@ export function IssuesPanel({
   onSelectTrip,
   onSelectVehicle,
 }: IssuesPanelProps) {
-  const count = (planned ? unassigned.length : 0) + violations.length + staleTrips.length + droppedLocks.length + (violationsKnown ? 0 : 1);
+  const count =
+    returnsToCheck.length +
+    (planned ? unassigned.length : 0) +
+    violations.length +
+    staleTrips.length +
+    droppedLocks.length +
+    (violationsKnown ? 0 : 1);
 
   return (
     <Card>
@@ -104,6 +128,23 @@ export function IssuesPanel({
               Le dernier calcul signalait des violations, mais leur détail n&apos;a pas été enregistré (calcul antérieur à
               cette version) : relancez l&apos;optimisation pour les revoir.
             </p>
+          ) : null}
+
+          {returnsToCheck.length > 0 ? (
+            <Section
+              icon={<UserX aria-hidden className="size-3.5" />}
+              title={`Retours à vérifier (${returnsToCheck.length})`}
+              tone="red"
+              intro={OUTBOUND_NO_SHOW_ADVICE}
+            >
+              {returnsToCheck.map((tripId) => (
+                <li key={tripId}>
+                  <TripButton tripId={tripId} trips={trips} selected={tripId === selectedTripId} onSelect={onSelectTrip}>
+                    <span className="font-medium text-red-800">{OUTBOUND_NO_SHOW_SHORT_LABEL}</span>
+                  </TripButton>
+                </li>
+              ))}
+            </Section>
           ) : null}
 
           {violations.length > 0 ? (

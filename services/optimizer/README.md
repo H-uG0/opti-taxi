@@ -30,7 +30,8 @@ Variables d'environnement :
 | `OSRM_URL` | ex. `http://localhost:5050` : temps et distances routiers via OSRM. Vide : estimation à vol d'oiseau. |
 | `LOG_LEVEL` | `info` par défaut (temps de calcul de chaque requête dans les journaux). |
 
-Tests (~1 min, dont le démarrage de l'interpréteur) :
+Tests (~2 min sur la machine de développement ; `tests/test_search.py` lance trois interpréteurs,
+un par valeur de `PYTHONHASHSEED`) :
 
 ```bash
 .venv/Scripts/python.exe -m pytest -q
@@ -86,10 +87,12 @@ solution respecte alors l'attente cumulée.
   moins un co-passager : la borne est donc toujours valide (exactement la règle des 10 km pour un
   véhicule à 2 places, prudente au-delà).
 - Pause chauffeur : un nœud « pause » par lieu candidat (dépôt du véhicule et établissements des
-  courses qu'il peut faire, au plus 12), réservé au véhicule, dans la fenêtre de pause, avec un
-  temps d'arrêt égal à la durée de la pause et **aucun patient à bord** (cumul de places forcé à 0) ;
-  un seul est visité. Le trajet jusqu'au lieu de pause est compté. Si l'horaire du véhicule laisse
-  toujours la pause avant le départ ou après le retour, aucun nœud n'est créé.
+  courses qu'il peut faire, au plus 12 ; plus les domiciles où finit un retour de midi quand aucun
+  autre lieu n'est atteignable à temps, voir « Limites connues »), réservé au véhicule, dans la
+  fenêtre de pause, avec un temps d'arrêt égal à la durée de la pause et **aucun patient à bord**
+  (cumul de places forcé à 0) ; un seul est visité. Le trajet jusqu'au lieu de pause est compté.
+  Si l'horaire du véhicule laisse toujours la pause avant le départ ou après le retour, aucun nœud
+  n'est créé.
 - Toutes ces règles passent par des primitives du routage (dimensions, limite prise en charge →
   dépose, domaine des véhicules, disjonctions) que les filtres d'OR-Tools vérifient à chaque
   insertion et à chaque mouvement. Une contrainte posée sur les cumuls par `solver.Add()` n'est
@@ -106,16 +109,42 @@ solution respecte alors l'attente cumulée.
      160 courses de la journée chargée avec un budget de 1 s) ;
   2. réparation des pauses : un véhicule resté sans pause la reçoit à la position vide la moins
      coûteuse ; si aucune n'est possible, on retire la course la moins chère dont le retrait
-     suffit, sinon celle qui traverse le plus la fenêtre de pause, et on recommence. Vérifications
-     exactes en Python (horaires, détours ; quelques millisecondes), puis une confirmation par le
-     modèle OR-Tools ;
-  3. `GUIDED_LOCAL_SEARCH` sur le reste du budget, à partir de ce planning où toutes les pauses
+     suffit, sinon celle qui traverse le plus la fenêtre de pause, et on recommence ;
+  3. réinsertion : chaque course laissée de côté (par la réparation ou par la première solution)
+     revient à sa position faisable la moins coûteuse, par insertion avec regret (d'abord la
+     course qui n'a qu'une possibilité, puis celle dont le meilleur et le deuxième meilleur
+     véhicule diffèrent le plus). Si une course ne tient qu'en déplaçant la pause du véhicule, la
+     pause est retirée puis replacée (autre lieu, autre position vide) ;
+  4. second départ construit en Python : les pauses seules (au dépôt), puis toutes les courses
+     par la même insertion avec regret. Il respecte les pauses dès le début, contrairement à la
+     première solution ; le moins coûteux des deux départs (objectif OR-Tools) est gardé. Sur les
+     journées du jeu de démonstration, il sert plus de courses (56 sur 56 le 05/11 contre 55) ;
+     sur la journée chargée de 160 courses, moins (118 contre 129) ;
+  5. `GUIDED_LOCAL_SEARCH` sur le reste du budget, à partir de ce planning où toutes les pauses
      sont prises.
+
+  Étapes 2 à 4 : vérifications exactes en Python (horaires au plus tôt et au plus tard, places,
+  patient non partageable seul à bord, véhicule vide pendant la pause, détours ; de 0,1 à 1 s
+  pour 60 à 160 courses), puis une confirmation de chaque planning par le modèle OR-Tools. Sans
+  elles, la recherche locale mettait de 5 à plus de 120 s à replacer les courses retirées par la
+  réparation des pauses (mesures dans « Limites connues »).
+- **Première solution introuvable** (`ROUTING_FAIL_TIMEOUT` : la limite de temps tombe avant que
+  l'heuristique produise quoi que ce soit, sur une machine surchargée) : au lieu de répondre
+  `NO_SOLUTION`, on construit le planning depuis les pauses (étape 4), puis la recherche locale
+  part de ce planning (ou des pauses seules, toujours faisable, si OR-Tools le refuse). Les deux
+  se partagent à parts égales le reste du budget, au moins 5 s en tout. Un avertissement
+  (« Construction initiale des tournées interrompue… planning construit par une méthode de
+  secours… ») le signale dans `meta.warnings`.
 - Motif des courses non placées par le solveur : si la recherche locale a atteint un optimum
   local, « Pas de place dans les tournées… » ; si elle a été interrompue par la limite de temps
-  (statut `ROUTING_PARTIAL_SUCCESS_LOCAL_OPTIMUM_NOT_REACHED`), « Non placée dans le temps de
-  calcul imparti… » et un avertissement dans `meta.warnings` donne le nombre de courses concernées
-  et le temps conseillé.
+  (statut `ROUTING_PARTIAL_SUCCESS_LOCAL_OPTIMUM_NOT_REACHED`) ou si le planning vient de la
+  méthode de secours ci-dessus, « Non placée dans le temps de calcul imparti… » et un
+  avertissement dans `meta.warnings` donne le nombre de courses concernées et le temps conseillé.
+- **Déterminisme.** Nœuds, candidats et étapes Python parcourent des listes et des dictionnaires
+  (ordre d'insertion), jamais des ensembles : le modèle et, à nombre de solutions fixé, le
+  planning ne dépendent pas de `PYTHONHASHSEED` (`test_model_and_plan_do_not_depend_on_the_hash_seed`,
+  trois interpréteurs). Seules la limite de temps et la limite de 100 ms des sous-recherches LNS
+  d'OR-Tools peuvent faire différer deux calculs.
 
 **Après le solveur, tout est recalculé** à partir de l'ordre des arrêts (`schedule.py`) :
 horaires au plus tôt, puis report des arrêts suivis d'un trajet avec patient à bord pour éviter
@@ -138,27 +167,42 @@ partir de la requête, de la matrice et des tournées produites (avec leurs hora
 
 ## Limites connues
 
-- **Temps de calcul.** Journée chargée de référence (`busy_day()` des tests : 160 courses,
-  16 véhicules dont 14 avec pause, distances à vol d'oiseau, machine de développement) :
+- **Temps de calcul.** Journées du jeu de démonstration (requêtes construites par le web depuis la
+  base de développement, 10 véhicules, tous avec pause, distances à vol d'oiseau, machine de
+  développement chargée) : courses servies, avant → après la réinsertion, le second départ et les
+  pauses au domicile (le calcul de 120 s d'avant ne faisait pas mieux que celui de 60 s) :
 
-  | Budget | Courses servies |
-  | --- | --- |
-  | 1 s | 116 (réponse en 2,5 s : la première solution finit hors budget) |
-  | 5 s | 116 |
-  | 10 s (défaut du web) | 116 (74 avant la correction de la recherche) |
-  | 30 s | 134 |
-  | 10 s sans aucune pause | 125 |
+  | Journée | 5 s | 10 s (défaut du web) | 30 s | 60 s |
+  | --- | --- | --- | --- | --- |
+  | 03/11 (64 courses) | 57 → 63 | 61 → 63 ou 64 (selon la charge) | 61 → 64 | 61 → 64 |
+  | 04/11 (60 courses) | 54 → 60 | 58 → 60 | 59 → 60 | 59 → 60 |
+  | 05/11 (56 courses) | 50 → 56 | 54 → 56 | 55 → 56 | 55 → 56 |
 
-  La première solution prend environ 1,5 s ; la réparation des pauses retire ~9 courses, que la
-  recherche locale ne replace qu'avec du temps. **Temps conseillé : max(10 s, 1 s par 8 courses)**
-  (20 s pour 160 courses) ; l'avertissement « Recherche interrompue… » l'indique. Le web passe
-  `solverTimeLimitSec` tel quel (10 s par défaut) : le faire croître avec le nombre de courses est
-  une évolution demandée côté web. `tests/test_solver_quality.py` vérifie qu'à 10 s on sert au
-  moins 80 % de ce qu'atteint un calcul de 30 s (comparaison directe :
-  `OPTIMIZER_SLOW_TESTS=1`).
+  Journée chargée de référence (`busy_day()` des tests : 160 courses, 16 véhicules dont 14 avec
+  pause) :
+
+  | Budget | Avant | Actuel |
+  | --- | --- | --- |
+  | 1 s | 116 | 129 (réponse en 2,6 s : la première solution finit hors budget) |
+  | 5 s | 116 | 129 |
+  | 10 s (défaut du web) | 116 | 129 |
+  | 20 s (conseillé) | 116 | 129 |
+  | 30 s | 134 | 129 à 139 (selon la charge de la machine) |
+  | 10 s sans aucune pause | 125 | 132 |
+
+  À 30 s, six calculs ont donné 129 (trois fois), 134, 137 et 139 courses (139 contre 134 pour
+  l'ancien code lancé en parallèle, à charge égale). Au-delà de 20 s sur cette journée très chargée (21 à
+  31 courses restent non servies), la recherche locale partie des 129 courses de la
+  réinsertion progresse encore, mais pas toujours sur une machine chargée, où elle peut rester à
+  129 (même résultat avec une insertion « la moins chère d'abord », une réinsertion limitée aux
+  courses retirées par la réparation ou d'autres coefficients de la recherche guidée).
+  **Temps conseillé : max(10 s, 1 s par 8 courses)** (20 s pour 160 courses) ;
+  l'avertissement « Recherche interrompue… » l'indique. Le web passe `solverTimeLimitSec` tel quel (10 s par défaut).
+  `tests/test_solver_quality.py` vérifie qu'à 10 s on sert au moins 80 % du meilleur résultat
+  connu (139) et le compare à un calcul de 30 s avec `OPTIMIZER_SLOW_TESTS=1`.
 - La réparation des pauses est gloutonne (une pause par véhicule, au moindre détour) : elle peut
-  retirer une course qu'une réorganisation des tournées aurait gardée ; la recherche locale peut
-  ensuite la replacer.
+  retirer une course qu'une réorganisation des tournées aurait gardée ; la réinsertion la replace
+  quand une position faisable existe, sinon la recherche locale.
 - **Écart objectif / coût affiché autour de la pause.** Dans le modèle, la pause d'une tournée qui
   finit avant la fenêtre de pause (ou commence après) reste dans la fenêtre (lieu de pause visité
   à partir de 11:30 par exemple) : l'objectif paie l'attente jusqu'à la fin de cette pause
@@ -175,12 +219,16 @@ partir de la requête, de la matrice et des tournées produites (avec leurs hora
   peu plus le partage que la marge réelle ; le CA renvoyé, lui, applique l'abattement.
 - Pour un véhicule de 3 places ou plus, le détour autorisé par le solveur reste celui d'un seul
   co-passager (prudent).
-- Lieux de pause candidats limités au dépôt et aux 11 établissements les plus proches du dépôt.
+- Lieux de pause candidats limités au dépôt, aux 11 établissements les plus proches du dépôt et
+  aux domiciles où un retour peut finir dans la fenêtre de pause sans qu'aucun autre lieu soit
+  atteignable avant le dernier début de pause possible (retour Gap → Sisteron à midi : sans ce
+  domicile, la course ou la pause ne trouvait pas de place). Le planning recalculé, lui, peut
+  placer la pause sur n'importe quel trajet à vide.
 - Pas de trafic : OSRM donne des temps sans congestion ; l'estimation à vol d'oiseau est grossière
   en montagne.
 - La recherche locale tourne tout le temps imparti (`timeLimitSec`) : la réponse arrive après ce
-  délai, plus le calcul de la matrice et la construction du modèle (~0,5 s pour 160 courses), et
-  au plus 5 s de plus si la première solution n'a pas fini dans le budget (le web attend
-  `timeLimitSec` + 30 s).
+  délai, plus le calcul de la matrice et la construction du modèle (~0,5 s pour 160 courses), au
+  plus 5 s de plus si la première solution et la réinsertion n'ont pas fini dans le budget, et
+  encore au plus 5 s si la première solution a échoué (le web attend `timeLimitSec` + 30 s).
 - Matrices et modèle construits en Python en O(n²) : adapté à quelques centaines de courses par
   jour (taille de la flotte de V) ; au-delà, prévoir des voisinages restreints.

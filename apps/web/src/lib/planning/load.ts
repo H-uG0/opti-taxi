@@ -21,7 +21,8 @@ const runSelect = {
   tripsCount: true,
   lockedCount: true,
   unassignedCount: true,
-  /** Optimizer KPIs and run details (violations, warnings, unassigned reasons). */
+  /** Run details (violations, warnings, unassigned reasons); kpis for runs saved before the details column. */
+  details: true,
   kpis: true,
   requestedBy: { select: { name: true } },
 } as const;
@@ -102,7 +103,7 @@ export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView 
 
   const details = new Map<string, RunDetails>();
   for (const run of [lastRun, planRun]) {
-    const found = run ? readRunDetails(run.id, run.kpis) : null;
+    const found = run ? readRunDetails(run) : null;
     if (found) details.set(found.runId, found);
   }
 
@@ -117,5 +118,6 @@ export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView 
     details,
     baseColors: VEHICLE_TYPE_HEX,
   });
-  return { ...view, timeLimitSec: settings.solverTimeLimitSec };
+  // view.timeLimitSec: the solver budget scaled with the day's trips, not the bare setting.
+  return view;
 }

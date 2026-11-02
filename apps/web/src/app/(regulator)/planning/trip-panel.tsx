@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useId, useState, type ReactNode } from "react";
-import { ExternalLink, Lock, LockOpen, MoveRight, X } from "lucide-react";
+import { ExternalLink, Lock, LockOpen, MoveRight, UserX, X } from "lucide-react";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
 import { Card } from "@/components/ui/layout";
+import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_LABEL } from "@/lib/domain/no-show";
 import type { TripView, VehicleRowView, ViolationView } from "@/lib/planning/types";
 import {
   DIRECTION_LABELS,
@@ -95,6 +96,23 @@ export function TripPanel({ trip, trips, vehicles, violations, date, replanBlock
           <X aria-hidden className="size-4" />
         </button>
       </div>
+
+      {trip.outboundNoShow ? (
+        <div role="note" className="flex items-start gap-2 border-b border-red-200 bg-red-50 px-4 py-2.5 text-red-900">
+          <UserX aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <div className="min-w-0 space-y-1">
+            <p className="text-sm font-semibold">{OUTBOUND_NO_SHOW_LABEL}</p>
+            <p className="text-xs text-red-800">{OUTBOUND_NO_SHOW_ADVICE}</p>
+            <Link
+              href={`/courses?${new URLSearchParams({ date, sens: "RETURN", q: trip.patientName }).toString()}`}
+              className="inline-flex items-center gap-1 text-xs font-medium underline underline-offset-2"
+            >
+              Téléphone du patient et annulation dans Courses
+              <ExternalLink aria-hidden className="size-3" />
+            </Link>
+          </div>
+        </div>
+      ) : null}
 
       <dl className="divide-y divide-slate-100 px-4 py-2 text-sm">
         <div className="pb-1">

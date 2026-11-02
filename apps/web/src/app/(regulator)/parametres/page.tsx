@@ -19,8 +19,8 @@ export default async function SettingsPage() {
   return (
     <div className="max-w-5xl">
       <PageHeader
-        title="Paramètres de l'optimiseur"
-        description={`Règles appliquées à chaque calcul des tournées. Dernière modification : ${updatedAtFormat.format(settings.updatedAt)}.`}
+        title="Paramètres"
+        description={`Règles appliquées à chaque calcul des tournées et numéro de la régulation affiché aux chauffeurs. Dernière modification : ${updatedAtFormat.format(settings.updatedAt)}.`}
       />
       <SettingsForm action={saveSettings} initial={settingsFormValues(settings)} />
     </div>

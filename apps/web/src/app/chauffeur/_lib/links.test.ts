@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isValidPoint, navigationLinks, telHref } from "./links";
+import { isValidPoint, navigationLinks, regulatorContact, telHref } from "./links";
 
 describe("navigationLinks", () => {
   it("builds Google Maps, Waze and geo: links to the coordinates", () => {
@@ -36,5 +36,18 @@ describe("telHref", () => {
     expect(telHref(undefined)).toBeNull();
     expect(telHref("")).toBeNull();
     expect(telHref("n/a")).toBeNull();
+  });
+});
+
+describe("regulatorContact", () => {
+  it("shows the stored number and dials its digits", () => {
+    expect(regulatorContact("04 65 71 00 00")).toEqual({ number: "04 65 71 00 00", href: "tel:0465710000" });
+  });
+
+  it("gives no contact when no number is set", () => {
+    expect(regulatorContact(null)).toBeNull();
+    expect(regulatorContact(undefined)).toBeNull();
+    expect(regulatorContact("")).toBeNull();
+    expect(regulatorContact("  ")).toBeNull();
   });
 });

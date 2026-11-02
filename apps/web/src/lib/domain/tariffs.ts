@@ -2,14 +2,22 @@
 import type { TariffGrid } from "@prisma/client";
 import { toIsoDate } from "@/lib/time";
 
-/** What grid selection reads: full rows, or the subset the optimizer request is built from. */
+/**
+ * What grid selection reads: full rows, or the subset the optimizer request is
+ * built from. createdAt and id only break same-day ties (see supersedes): a
+ * caller that selects a subset of columns must keep them, or two grids
+ * starting the same day fall back to input order.
+ */
 type DatedGrid = Pick<TariffGrid, "vehicleType" | "department" | "validFrom" | "validTo"> &
   Partial<Pick<TariffGrid, "createdAt" | "id">>;
 
 /**
  * Does `grid` supersede `current`? The later start wins; on the same start day
  * (e.g. a grid duplicated the same day to fix a typo) the one created last
- * wins, then the greater id, so the result never depends on the input order.
+ * wins, then the greater id, so with createdAt and id supplied the result never
+ * depends on the input order. A grid without them counts as created at the
+ * epoch with an empty id: between two such grids the first one in input order
+ * is kept.
  */
 function supersedes(grid: DatedGrid, current: DatedGrid): boolean {
   const byStart = grid.validFrom.getTime() - current.validFrom.getTime();

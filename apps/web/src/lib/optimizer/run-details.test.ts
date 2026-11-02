@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { planResponseSchema, type PlanResponse } from "./contract";
-import { readRunDetails, runKpisJson } from "./run-details";
+import { readRunDetails, runDetailsJson, type StoredRun } from "./run-details";
 
 const fixtures = path.resolve(__dirname, "../../../../../contract/fixtures");
 const fixture: PlanResponse = planResponseSchema.parse(
@@ -22,33 +22,48 @@ const response: PlanResponse = {
   meta: { ...fixture.meta, solverStatus: "ROUTING_SUCCESS", warnings: ["Aucune grille tarifaire pour AMBULANCE 05"] },
 };
 
+const expected = {
+  runId: "run_1",
+  solverStatus: "ROUTING_SUCCESS",
+  violations: response.validation.violations,
+  warnings: ["Aucune grille tarifaire pour AMBULANCE 05"],
+  unassigned: [{ tripId: "t9", reason: "Horaires inatteignables pour le véhicule figé" }],
+};
+
 /** What Prisma hands back for a Json column: plain JSON. */
-function throughDatabase(value: unknown): unknown {
-  return JSON.parse(JSON.stringify(value));
+function throughDatabase(value: unknown): StoredRun["details"] {
+  return value === null ? null : (JSON.parse(JSON.stringify(value)) as StoredRun["details"]);
 }
 
-describe("run details stored with the KPIs", () => {
-  it("keeps the optimizer KPIs at the top level of the JSON", () => {
-    const json = runKpisJson(response);
-    expect(json).toMatchObject(response.kpis);
+function storedRun(details: unknown, kpis: unknown): StoredRun {
+  return { id: "run_1", details: throughDatabase(details), kpis: throughDatabase(kpis) };
+}
+
+describe("run details column", () => {
+  it("holds the solver status, violations, warnings and unassigned reasons, and no KPI", () => {
+    const json = runDetailsJson(response);
+    expect(Object.keys(json).sort()).toEqual(["solverStatus", "unassigned", "violations", "warnings"]);
   });
 
-  it("reads back the violations, warnings and unassigned reasons after a round trip", () => {
-    const stored = throughDatabase(runKpisJson(response));
-    expect(readRunDetails("run_1", stored as never)).toEqual({
-      runId: "run_1",
-      solverStatus: "ROUTING_SUCCESS",
-      violations: response.validation.violations,
-      warnings: ["Aucune grille tarifaire pour AMBULANCE 05"],
-      unassigned: [{ tripId: "t9", reason: "Horaires inatteignables pour le véhicule figé" }],
-    });
+  it("reads back the details after a round trip, next to KPIs stored as they are", () => {
+    expect(readRunDetails(storedRun(runDetailsJson(response), response.kpis))).toEqual(expected);
+  });
+
+  it("reads the details of runs saved before the column, from the kpis JSON", () => {
+    const legacyKpis = { ...response.kpis, details: runDetailsJson(response) };
+    expect(readRunDetails(storedRun(null, legacyKpis))).toEqual(expected);
+  });
+
+  it("prefers the details column to a legacy copy in the kpis JSON", () => {
+    const legacyKpis = { ...response.kpis, details: { ...runDetailsJson(response), warnings: ["ancien"] } };
+    expect(readRunDetails(storedRun(runDetailsJson(response), legacyKpis))?.warnings).toEqual(expected.warnings);
   });
 
   it("returns null for runs saved without details, or unreadable JSON", () => {
-    expect(readRunDetails("run_1", null)).toBeNull();
-    expect(readRunDetails("run_1", undefined)).toBeNull();
-    expect(readRunDetails("run_1", throughDatabase(response.kpis) as never)).toBeNull();
-    expect(readRunDetails("run_1", { details: { violations: "?" } })).toBeNull();
-    expect(readRunDetails("run_1", [1, 2])).toBeNull();
+    expect(readRunDetails(storedRun(null, null))).toBeNull();
+    expect(readRunDetails(storedRun(null, response.kpis))).toBeNull();
+    expect(readRunDetails(storedRun({ violations: "?" }, null))).toBeNull();
+    expect(readRunDetails(storedRun(null, { details: { violations: "?" } }))).toBeNull();
+    expect(readRunDetails(storedRun([1, 2], [1, 2]))).toBeNull();
   });
 });

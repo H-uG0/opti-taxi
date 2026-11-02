@@ -19,8 +19,16 @@ const DEFAULT_OPTIMIZER_URL = "http://localhost:8100";
 /** Margin added to the solver time limit for the distance matrix, validation and network. */
 const RESPONSE_MARGIN_SEC = 30;
 const HEALTH_TIMEOUT_MS = 2_500;
+/** /evaluate runs no solver (distance matrix, timing, validation): it never needs the solver budget. */
+export const EVALUATE_TIMEOUT_MS = 30_000;
 
-export type OptimizerResult<T> = { ok: true; data: T } | { ok: false; error: string };
+/**
+ * Why a call failed: the service could not be reached, did not answer in time,
+ * or answered with an error (HTTP error, invalid request or response).
+ */
+export type OptimizerFailureReason = "unreachable" | "timeout" | "error";
+
+export type OptimizerResult<T> = { ok: true; data: T } | { ok: false; error: string; reason?: OptimizerFailureReason };
 export type OptimizerHealth = z.infer<typeof healthSchema>;
 
 export function optimizerUrl(): string {
@@ -77,9 +85,10 @@ async function call<S extends z.ZodType>(
       return {
         ok: false,
         error: `Le service d'optimisation n'a pas répondu en ${Math.round(init.timeoutMs / 1000)} s (${base}). Réessayez ou réduisez le temps de calcul dans les paramètres.`,
+        reason: "timeout",
       };
     }
-    return { ok: false, error: unreachableMessage(base) };
+    return { ok: false, error: unreachableMessage(base), reason: "unreachable" };
   }
 
   if (!response.ok) {
@@ -87,6 +96,7 @@ async function call<S extends z.ZodType>(
     return {
       ok: false,
       error: `Le service d'optimisation a renvoyé une erreur (HTTP ${response.status}) : ${detail}`,
+      reason: "error",
     };
   }
 
@@ -94,13 +104,14 @@ async function call<S extends z.ZodType>(
   try {
     json = await response.json();
   } catch {
-    return { ok: false, error: "Réponse illisible du service d'optimisation (JSON invalide)." };
+    return { ok: false, error: "Réponse illisible du service d'optimisation (JSON invalide).", reason: "error" };
   }
   const parsed = schema.safeParse(json);
   if (!parsed.success) {
     return {
       ok: false,
       error: `Réponse inattendue du service d'optimisation (contrat non respecté) : ${formatIssues(parsed.error)}`,
+      reason: "error",
     };
   }
   return { ok: true, data: parsed.data };
@@ -123,16 +134,16 @@ export async function optimize(request: OptimizeRequest): Promise<OptimizerResul
   });
 }
 
-/** POST /evaluate: times, km, revenue and violations of a given plan. */
+/** POST /evaluate: times, km, revenue and violations of a given plan (no solver: short timeout). */
 export async function evaluate(request: EvaluateRequest): Promise<OptimizerResult<PlanResponse>> {
   const body = evaluateRequestSchema.safeParse(request);
   if (!body.success) {
-    return { ok: false, error: `Requête d'évaluation invalide : ${formatIssues(body.error)}` };
+    return { ok: false, error: `Requête d'évaluation invalide : ${formatIssues(body.error)}`, reason: "error" };
   }
   return call("/evaluate", planResponseSchema, {
     method: "POST",
     body: body.data,
-    timeoutMs: timeoutFor(body.data.settings.timeLimitSec),
+    timeoutMs: EVALUATE_TIMEOUT_MS,
   });
 }
 
