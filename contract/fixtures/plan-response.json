@@ -1,0 +1,131 @@
+{
+  "status": "OK",
+  "routes": [
+    {
+      "vehicleId": "veh_amb_1",
+      "startMin": 420,
+      "endMin": 760,
+      "distanceKm": 196.4,
+      "emptyKm": 98.2,
+      "loadedKm": 98.2,
+      "durationMin": 340,
+      "revenue": 352.1,
+      "cost": 343.2,
+      "margin": 8.9,
+      "break": { "startMin": 720, "endMin": 750 },
+      "stops": [
+        {
+          "tripId": "trip_5",
+          "kind": "PICKUP",
+          "location": { "lat": 44.2, "lng": 5.93 },
+          "arrivalMin": 463,
+          "startMin": 463,
+          "departureMin": 468,
+          "loadAfter": 1
+        },
+        {
+          "tripId": "trip_5",
+          "kind": "DROPOFF",
+          "location": { "lat": 44.56, "lng": 6.08 },
+          "arrivalMin": 510,
+          "startMin": 510,
+          "departureMin": 515,
+          "loadAfter": 0
+        },
+        {
+          "tripId": "trip_6",
+          "kind": "PICKUP",
+          "location": { "lat": 44.56, "lng": 6.08 },
+          "arrivalMin": 515,
+          "startMin": 660,
+          "departureMin": 665,
+          "loadAfter": 1
+        },
+        {
+          "tripId": "trip_6",
+          "kind": "DROPOFF",
+          "location": { "lat": 44.2, "lng": 5.93 },
+          "arrivalMin": 708,
+          "startMin": 708,
+          "departureMin": 713,
+          "loadAfter": 0
+        }
+      ]
+    }
+  ],
+  "trips": [
+    {
+      "tripId": "trip_5",
+      "vehicleId": "veh_amb_1",
+      "pickupMin": 463,
+      "dropoffMin": 510,
+      "shared": false,
+      "coPassengerTripIds": [],
+      "directKm": 49.1,
+      "rideKm": 49.1,
+      "detourKm": 0,
+      "revenue": 175.14,
+      "waitAtFacilityMin": 30
+    },
+    {
+      "tripId": "trip_6",
+      "vehicleId": "veh_amb_1",
+      "pickupMin": 660,
+      "dropoffMin": 708,
+      "shared": false,
+      "coPassengerTripIds": [],
+      "directKm": 49.1,
+      "rideKm": 49.1,
+      "detourKm": 0,
+      "revenue": 175.14,
+      "waitAtFacilityMin": 0
+    },
+    {
+      "tripId": "trip_7",
+      "vehicleId": null,
+      "pickupMin": null,
+      "dropoffMin": null,
+      "shared": false,
+      "coPassengerTripIds": [],
+      "directKm": 52.3,
+      "rideKm": 0,
+      "detourKm": 0,
+      "revenue": 0,
+      "waitAtFacilityMin": null
+    }
+  ],
+  "unassigned": [{ "tripId": "trip_7", "reason": "Aucun véhicule compatible disponible dans la fenêtre horaire" }],
+  "kpis": {
+    "tripsTotal": 3,
+    "tripsServed": 2,
+    "tripsUnassigned": 1,
+    "vehiclesUsed": 1,
+    "tripsPerVehicle": 2,
+    "totalKm": 196.4,
+    "emptyKm": 98.2,
+    "emptyKmRatio": 0.5,
+    "sharedTrips": 0,
+    "sharedTripRatio": 0,
+    "revenue": 350.28,
+    "cost": 343.2,
+    "margin": 7.08
+  },
+  "validation": {
+    "valid": false,
+    "violations": [
+      {
+        "code": "TIME_WINDOW",
+        "message": "Exemple de violation : arrivée après le rendez-vous",
+        "tripId": "trip_5",
+        "vehicleId": "veh_amb_1"
+      }
+    ]
+  },
+  "meta": {
+    "matrixSource": "haversine",
+    "solverStatus": "ROUTING_SUCCESS",
+    "objective": 123456,
+    "wallTimeMs": 2140,
+    "warnings": []
+  }
+}

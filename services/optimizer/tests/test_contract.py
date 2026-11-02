@@ -1,0 +1,45 @@
+"""The pydantic models must accept every contract fixture (mirror of contract.test.ts)."""
+
+import json
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from app.schemas import EvaluateRequest, OptimizeRequest, PlanResponse
+
+FIXTURES = Path(__file__).resolve().parents[3] / "contract" / "fixtures"
+
+
+def load(name: str) -> dict:
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def test_optimize_request_fixture() -> None:
+    request = OptimizeRequest.model_validate(load("optimize-request.json"))
+    assert request.trips
+
+
+def test_evaluate_request_fixture() -> None:
+    request = EvaluateRequest.model_validate(load("evaluate-request.json"))
+    assert request.routes
+
+
+def test_plan_response_fixture_round_trips() -> None:
+    raw = load("plan-response.json")
+    response = PlanResponse.model_validate(raw)
+    assert response.model_dump(mode="json", by_alias=True) == raw
+
+
+def test_outbound_requires_appointment() -> None:
+    raw = load("optimize-request.json")
+    raw["trips"][0]["appointmentMin"] = None
+    with pytest.raises(ValidationError):
+        OptimizeRequest.model_validate(raw)
+
+
+def test_unknown_fields_rejected() -> None:
+    raw = load("optimize-request.json")
+    raw["extra"] = 1
+    with pytest.raises(ValidationError):
+        OptimizeRequest.model_validate(raw)

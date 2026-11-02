@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "Segoe UI Mono", Menlo, monospace;
+
+  /* Brand: deep teal, reads as "medical transport" without being clinical. */
+  --color-brand-50: #effaf9;
+  --color-brand-100: #d6f1ee;
+  --color-brand-200: #afe2dd;
+  --color-brand-300: #7ccbc4;
+  --color-brand-400: #4aaea7;
+  --color-brand-500: #2f928c;
+  --color-brand-600: #227571;
+  --color-brand-700: #1f5e5b;
+  --color-brand-800: #1d4c4a;
+  --color-brand-900: #1b3f3e;
+
+  /* Vehicle types, used consistently in badges, timeline and map. */
+  --color-taxi: #c27c0e;
+  --color-vsl: #2563eb;
+  --color-ambulance: #dc2626;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-slate-50);
+  color: var(--color-slate-900);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular figures for times, km and amounts. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

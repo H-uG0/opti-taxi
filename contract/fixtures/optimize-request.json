@@ -1,0 +1,186 @@
+{
+  "date": "2026-11-03",
+  "settings": {
+    "waitBeforeAppointmentMin": 30,
+    "waitAfterSessionMin": 15,
+    "maxTotalWaitMin": 45,
+    "maxDetourKmPerExtraPatient": 10,
+    "maxDetourKmTotal": 30,
+    "pickupServiceMin": 5,
+    "dropoffServiceMin": 5,
+    "unassignedPenalty": 10000,
+    "timeLimitSec": 5
+  },
+  "vehicles": [
+    {
+      "id": "veh_taxi_1",
+      "label": "Taxi 1 (Marseille)",
+      "type": "TAXI",
+      "capacity": 2,
+      "depot": { "lat": 43.2965, "lng": 5.3698 },
+      "department": "13",
+      "costPerKm": 0.32,
+      "costPerHour": 24,
+      "shiftStartMin": 360,
+      "shiftEndMin": 1140,
+      "break": { "windowStartMin": 690, "windowEndMin": 840, "durationMin": 45 }
+    },
+    {
+      "id": "veh_vsl_1",
+      "label": "VSL 1 (Sisteron)",
+      "type": "VSL",
+      "capacity": 2,
+      "depot": { "lat": 44.1955, "lng": 5.9436 },
+      "department": "04",
+      "costPerKm": 0.3,
+      "costPerHour": 23,
+      "shiftStartMin": 390,
+      "shiftEndMin": 1110,
+      "break": null
+    },
+    {
+      "id": "veh_amb_1",
+      "label": "Ambulance 1 (Gap)",
+      "type": "AMBULANCE",
+      "capacity": 1,
+      "depot": { "lat": 44.5594, "lng": 6.0786 },
+      "department": "05",
+      "costPerKm": 0.42,
+      "costPerHour": 46,
+      "shiftStartMin": 420,
+      "shiftEndMin": 1140,
+      "break": { "windowStartMin": 720, "windowEndMin": 870, "durationMin": 30 }
+    }
+  ],
+  "trips": [
+    {
+      "id": "trip_1",
+      "patientId": "pat_1",
+      "facilityId": "fac_dialyse_aix",
+      "direction": "OUTBOUND",
+      "pickup": { "lat": 43.31, "lng": 5.39 },
+      "dropoff": { "lat": 43.526, "lng": 5.438 },
+      "appointmentMin": 450,
+      "readyMin": null,
+      "allowedVehicleTypes": ["TAXI", "VSL"],
+      "shareable": true,
+      "lockedVehicleId": null
+    },
+    {
+      "id": "trip_2",
+      "patientId": "pat_1",
+      "facilityId": "fac_dialyse_aix",
+      "direction": "RETURN",
+      "pickup": { "lat": 43.526, "lng": 5.438 },
+      "dropoff": { "lat": 43.31, "lng": 5.39 },
+      "appointmentMin": null,
+      "readyMin": 690,
+      "allowedVehicleTypes": ["TAXI", "VSL"],
+      "shareable": true,
+      "lockedVehicleId": null
+    },
+    {
+      "id": "trip_3",
+      "patientId": "pat_2",
+      "facilityId": "fac_dialyse_aix",
+      "direction": "OUTBOUND",
+      "pickup": { "lat": 43.33, "lng": 5.41 },
+      "dropoff": { "lat": 43.526, "lng": 5.438 },
+      "appointmentMin": 450,
+      "readyMin": null,
+      "allowedVehicleTypes": ["TAXI", "VSL"],
+      "shareable": true,
+      "lockedVehicleId": null
+    },
+    {
+      "id": "trip_4",
+      "patientId": "pat_2",
+      "facilityId": "fac_dialyse_aix",
+      "direction": "RETURN",
+      "pickup": { "lat": 43.526, "lng": 5.438 },
+      "dropoff": { "lat": 43.33, "lng": 5.41 },
+      "appointmentMin": null,
+      "readyMin": 690,
+      "allowedVehicleTypes": ["TAXI", "VSL"],
+      "shareable": true,
+      "lockedVehicleId": null
+    },
+    {
+      "id": "trip_5",
+      "patientId": "pat_3",
+      "facilityId": "fac_ch_gap",
+      "direction": "OUTBOUND",
+      "pickup": { "lat": 44.2, "lng": 5.93 },
+      "dropoff": { "lat": 44.56, "lng": 6.08 },
+      "appointmentMin": 540,
+      "readyMin": null,
+      "allowedVehicleTypes": ["AMBULANCE"],
+      "shareable": false,
+      "lockedVehicleId": null
+    },
+    {
+      "id": "trip_6",
+      "patientId": "pat_3",
+      "facilityId": "fac_ch_gap",
+      "direction": "RETURN",
+      "pickup": { "lat": 44.56, "lng": 6.08 },
+      "dropoff": { "lat": 44.2, "lng": 5.93 },
+      "appointmentMin": null,
+      "readyMin": 660,
+      "allowedVehicleTypes": ["AMBULANCE"],
+      "shareable": false,
+      "lockedVehicleId": null
+    },
+    {
+      "id": "trip_7",
+      "patientId": "pat_4",
+      "facilityId": "fac_radio_aix",
+      "direction": "OUTBOUND",
+      "pickup": { "lat": 43.83, "lng": 5.79 },
+      "dropoff": { "lat": 43.535, "lng": 5.43 },
+      "appointmentMin": 600,
+      "readyMin": null,
+      "allowedVehicleTypes": ["TAXI", "VSL"],
+      "shareable": false,
+      "lockedVehicleId": "veh_vsl_1"
+    }
+  ],
+  "tariffs": [
+    {
+      "vehicleType": "TAXI",
+      "department": "13",
+      "baseFare": 13,
+      "pricePerKm": 1.12,
+      "includedKm": 0,
+      "sharedDiscount2": 0.23,
+      "sharedDiscount3": 0.35
+    },
+    {
+      "vehicleType": "TAXI",
+      "department": "04",
+      "baseFare": 13,
+      "pricePerKm": 1.08,
+      "includedKm": 0,
+      "sharedDiscount2": 0.23,
+      "sharedDiscount3": 0.35
+    },
+    {
+      "vehicleType": "VSL",
+      "department": "*",
+      "baseFare": 13.6,
+      "pricePerKm": 1.0,
+      "includedKm": 0,
+      "sharedDiscount2": 0.23,
+      "sharedDiscount3": 0.35
+    },
+    {
+      "vehicleType": "AMBULANCE",
+      "department": "*",
+      "baseFare": 64.5,
+      "pricePerKm": 2.4,
+      "includedKm": 3,
+      "sharedDiscount2": 0,
+      "sharedDiscount3": 0
+    }
+  ]
+}

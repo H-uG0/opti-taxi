@@ -1,0 +1,23 @@
+{
+  "name": "opti-taxi",
+  "private": true,
+  "description": "Optimiseur de tournées J+1 pour Taxi & Ambulance V (taxi conventionné, VSL, ambulance)",
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "lint": "pnpm --filter web lint",
+    "typecheck": "pnpm --filter web typecheck",
+    "test": "pnpm --filter web test",
+    "db:up": "docker compose up -d postgres",
+    "db:migrate": "pnpm --filter web db:migrate",
+    "db:seed": "pnpm --filter web db:seed",
+    "db:reset": "pnpm --filter web db:reset",
+    "optimizer:up": "docker compose up -d --build optimizer",
+    "optimizer:test": "cd services/optimizer && python -m pytest -q",
+    "contract:check": "pnpm --filter web test -- contract && cd services/optimizer && python -m pytest -q tests/test_contract.py"
+  }
+}

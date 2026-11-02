@@ -1,0 +1,47 @@
+# Local development stack.
+#   docker compose up -d postgres optimizer
+#   docker compose --profile osrm up -d osrm   (after ./infra/osrm/prepare.sh)
+name: opti-taxi
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: optitaxi
+      POSTGRES_PASSWORD: optitaxi
+      POSTGRES_DB: optitaxi
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U optitaxi -d optitaxi"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  optimizer:
+    build: ./services/optimizer
+    environment:
+      # Empty = straight-line estimate. With the osrm profile running: http://osrm:5000
+      OSRM_URL: ${OSRM_URL:-}
+      LOG_LEVEL: info
+    ports:
+      - "8100:8100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  osrm:
+    profiles: ["osrm"]
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    command: osrm-routed --algorithm mld --max-table-size 1000 /data/region.osrm
+    ports:
+      - "5050:5000"
+    volumes:
+      - ./infra/osrm/data:/data
+
+volumes:
+  pgdata:
