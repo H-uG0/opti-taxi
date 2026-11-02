@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Opti-Taxi</title>
+  <rect width="512" height="512" rx="112" fill="#1f5e5b"/>
+  <g transform="translate(-12 -18)">
+    <path d="M148 388 C 268 388 232 318 352 318" fill="none" stroke="#7ccbc4" stroke-width="40" stroke-linecap="round"/>
+    <circle cx="148" cy="388" r="44" fill="#ffffff"/>
+    <circle cx="148" cy="388" r="16" fill="#1f5e5b"/>
+    <path fill="#ffffff" fill-rule="evenodd" d="M352 340 C 352 340 276 268 276 196 A 76 76 0 0 1 428 196 C 428 268 352 340 352 340 Z M352 168 A 28 28 0 1 0 352 224 A 28 28 0 1 0 352 168 Z"/>
+  </g>
+</svg>

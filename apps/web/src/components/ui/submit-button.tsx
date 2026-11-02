@@ -8,11 +8,13 @@ import { Button } from "./button";
 export function SubmitButton({
   children,
   pendingLabel,
+  disabled,
   ...props
 }: ComponentProps<typeof Button> & { pendingLabel?: string }) {
   const { pending } = useFormStatus();
+  // The pending state wins over the caller's `disabled`, so a form cannot be submitted twice.
   return (
-    <Button type="submit" disabled={pending || props.disabled} aria-busy={pending} {...props}>
+    <Button type="submit" {...props} disabled={pending || disabled} aria-busy={pending}>
       {pending ? (pendingLabel ?? "Enregistrement…") : children}
     </Button>
   );

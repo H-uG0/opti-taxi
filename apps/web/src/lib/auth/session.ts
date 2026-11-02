@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 
@@ -14,6 +15,9 @@ export type SessionUser = {
   driverId: string | null;
 };
 
+/** What the signed cookie carries: the user plus the password version it was opened with. */
+export type SessionClaims = SessionUser & { passwordVersion: string | null };
+
 function secretKey(): Uint8Array {
   const secret = process.env.SESSION_SECRET;
   if (!secret || secret.length < 32) {
@@ -22,8 +26,21 @@ function secretKey(): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
-export async function createSession(user: SessionUser): Promise<void> {
-  const token = await new SignJWT({ name: user.name, role: user.role, driverId: user.driverId })
+/**
+ * Short fingerprint of a password hash. Stored in the session so that a
+ * password reset ends the sessions opened with the previous password.
+ */
+export function passwordVersion(passwordHash: string): string {
+  return createHash("sha256").update(passwordHash).digest("hex").slice(0, 16);
+}
+
+export async function createSession(user: SessionUser, passwordHash: string): Promise<void> {
+  const token = await new SignJWT({
+    name: user.name,
+    role: user.role,
+    driverId: user.driverId,
+    pwv: passwordVersion(passwordHash),
+  })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.id)
     .setIssuedAt()
@@ -40,7 +57,8 @@ export async function createSession(user: SessionUser): Promise<void> {
   });
 }
 
-export async function readSession(): Promise<SessionUser | null> {
+/** Claims of a valid signed cookie. Not checked against the database: use requireUser (lib/auth). */
+export async function readSession(): Promise<SessionClaims | null> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -52,6 +70,7 @@ export async function readSession(): Promise<SessionUser | null> {
       name: typeof payload.name === "string" ? payload.name : "",
       role: payload.role,
       driverId: typeof payload.driverId === "string" ? payload.driverId : null,
+      passwordVersion: typeof payload.pwv === "string" ? payload.pwv : null,
     };
   } catch {
     return null;

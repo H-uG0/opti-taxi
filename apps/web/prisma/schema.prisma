@@ -397,6 +397,8 @@ model AppSettings {
   dropoffServiceMin          Int      @default(5)
   unassignedPenalty          Float    @default(10000)
   solverTimeLimitSec         Int      @default(10)
+  /// Numéro de la régulation, proposé en appel direct sur la feuille de route des chauffeurs.
+  regulatorPhone             String?
   updatedAt                  DateTime @updatedAt
 }
 
@@ -416,6 +418,8 @@ model OptimizationRun {
   valid           Boolean?
   /// Indicateurs renvoyés par l'optimiseur (PlanResponse.kpis).
   kpis            Json?
+  /// Détails du calcul : statut du solveur, violations, avertissements, motif de chaque course non affectée.
+  details         Json?
   error           String?
 
   requestedBy User?   @relation(fields: [requestedById], references: [id], onDelete: SetNull)

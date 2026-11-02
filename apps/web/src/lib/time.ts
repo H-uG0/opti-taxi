@@ -6,14 +6,19 @@
 
 export const TIME_ZONE = "Europe/Paris";
 
-/** 450 -> "07:30". Minutes past 24 h wrap into the next day ("25:10" -> "01:10 (+1)"). */
+/**
+ * 450 -> "07:30". Minutes past 24 h wrap into the next day ("25:10" -> "01:10 (+1)"),
+ * negative minutes into the previous one (-30 -> "23:30 (-1)"). Fractions are rounded.
+ */
 export function formatMinute(minute: number | null | undefined): string {
-  if (minute === null || minute === undefined) return "—";
-  const day = Math.floor(minute / 1440);
-  const m = ((minute % 1440) + 1440) % 1440;
+  if (minute === null || minute === undefined || !Number.isFinite(minute)) return "—";
+  const total = Math.round(minute);
+  const day = Math.floor(total / 1440);
+  const m = ((total % 1440) + 1440) % 1440;
   const hh = String(Math.floor(m / 60)).padStart(2, "0");
   const mm = String(m % 60).padStart(2, "0");
-  return day > 0 ? `${hh}:${mm} (+${day})` : `${hh}:${mm}`;
+  if (day === 0) return `${hh}:${mm}`;
+  return `${hh}:${mm} (${day > 0 ? "+" : ""}${day})`;
 }
 
 /** "07:30" -> 450. Returns null for anything that is not HH:MM. */
@@ -38,7 +43,9 @@ const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
 
 export function isIsoDate(value: string | null | undefined): value is string {
   if (!value || !isoDatePattern.test(value)) return false;
-  return toIsoDate(fromIsoDate(value)) === value;
+  const date = fromIsoDate(value);
+  // Month 00/13+ or day 32+ give an Invalid Date (toISOString would throw); 02-30 rolls over and fails the round trip.
+  return !Number.isNaN(date.getTime()) && toIsoDate(date) === value;
 }
 
 /** "2026-11-03" -> Date at UTC midnight, the representation Prisma uses for @db.Date. */
@@ -53,13 +60,15 @@ export function toIsoDate(date: Date): string {
 
 /** Today's calendar date in Europe/Paris as "YYYY-MM-DD". */
 export function todayIso(now: Date = new Date()): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
+  // Assembled from parts rather than relying on a locale's pattern (en-CA's has changed across ICU versions).
+  const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(now);
-  return parts; // en-CA formats as YYYY-MM-DD
+  }).formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("year").padStart(4, "0")}-${part("month")}-${part("day")}`;
 }
 
 export function addDays(isoDate: string, days: number): string {

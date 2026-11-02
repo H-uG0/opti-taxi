@@ -33,7 +33,7 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   const ok = await verifyPassword(parsed.data.password, user?.passwordHash ?? (await dummyHash()));
   if (!user || !user.active || !ok) return { error: "Adresse e-mail ou mot de passe incorrect.", email };
 
-  await createSession({ id: user.id, name: user.name, role: user.role, driverId: user.driverId });
+  await createSession({ id: user.id, name: user.name, role: user.role, driverId: user.driverId }, user.passwordHash);
   redirect(ROLE_HOME[user.role]);
 }
 

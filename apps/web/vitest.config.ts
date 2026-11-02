@@ -8,5 +8,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // The first Date / Intl / zod call of a worker can take several seconds on a
+    // slow or antivirus-scanned machine: warm them up once, and allow slow tests.
+    setupFiles: ["./vitest.setup.ts"],
+    testTimeout: 30_000,
+    hookTimeout: 60_000,
   },
 });

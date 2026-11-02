@@ -7,7 +7,7 @@ export default async function RegulatorLayout({ children }: { children: React.Re
 
   return (
     <div className="flex min-h-dvh">
-      <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
+      <aside className="sticky top-0 hidden h-dvh print:hidden w-60 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
         <div className="border-b border-slate-200 px-5 py-4">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand-700">Taxi & Ambulance V</p>
           <p className="text-lg font-semibold tracking-tight text-slate-900">Opti-Taxi</p>
@@ -23,7 +23,7 @@ export default async function RegulatorLayout({ children }: { children: React.Re
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
+        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 lg:hidden print:hidden">
           <p className="font-semibold text-slate-900">Opti-Taxi</p>
           <form action={logout}>
             <button type="submit" className="text-sm text-slate-600">
@@ -31,10 +31,10 @@ export default async function RegulatorLayout({ children }: { children: React.Re
             </button>
           </form>
         </header>
-        <div className="border-b border-slate-200 bg-white lg:hidden">
+        <div className="border-b border-slate-200 bg-white lg:hidden print:hidden">
           <RegulatorNav horizontal />
         </div>
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 print:p-0">{children}</main>
       </div>
     </div>
   );
