@@ -1,0 +1,14 @@
+# Build context of the web image (apps/web/Dockerfile, context = repository root).
+**/node_modules
+**/.next
+**/*.tsbuildinfo
+.git
+.local
+**/.env
+**/.env.*
+!.env.example
+services
+infra/osrm/data
+**/coverage
+**/test-results
+**/playwright-report

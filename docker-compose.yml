@@ -1,5 +1,7 @@
-# Local development stack.
-#   docker compose up -d postgres optimizer
+# Local stack.
+#   docker compose up --build                  demo: database, optimizer and web app with
+#                                              fictitious data -> http://localhost:3100
+#   docker compose up -d postgres optimizer    development (then pnpm dev, see README)
 #   docker compose --profile osrm up -d osrm   (after ./infra/osrm/prepare.sh)
 name: opti-taxi
 
@@ -33,6 +35,27 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
+
+  # Web app in production mode. On a fresh database it loads the fictitious data
+  # set (seed), then simulates 20 past days in the background (apps/web/docker/start.sh).
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      optimizer:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://optitaxi:optitaxi@postgres:5432/optitaxi
+      OPTIMIZER_URL: http://optimizer:8100
+      GEOCODER_URL: https://data.geopf.fr/geocodage/search
+      # 1: seed + history on an empty database. 0: start with an empty database.
+      DEMO_DATA: "1"
+    ports:
+      - "3100:3100"
+    init: true
 
   osrm:
     profiles: ["osrm"]

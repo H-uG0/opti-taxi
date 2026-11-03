@@ -36,7 +36,24 @@ Le web appelle l'optimizer en HTTP (`POST /optimize`, `POST /evaluate`). Les tem
 viennent d'OSRM s'il est configuré (`OSRM_URL`), sinon d'une estimation à vol d'oiseau
 (× 1,3, vitesses moyennes) signalée dans l'interface.
 
-## Démarrage
+## Essayer en une commande (Docker)
+
+Prérequis : [Docker Desktop](https://www.docker.com/products/docker-desktop/) démarré, et les ports
+3100, 5433 et 8100 libres.
+
+```bash
+git clone https://github.com/H-uG0/opti-taxi.git
+cd opti-taxi
+docker compose up --build
+```
+
+Le premier lancement construit les images (10 à 20 minutes selon la machine), crée la base et charge
+le jeu de données fictif. Ouvrir ensuite http://localhost:3100 (Chrome ou Edge) et se connecter avec
+un des comptes ci-dessous. L'historique des 20 derniers jours ouvrés, utilisé par le tableau de bord,
+se calcule en arrière-plan pendant quelques minutes après le démarrage. Arrêt : `Ctrl+C`, puis
+`docker compose down` (ajouter `-v` pour repartir d'une base vide au prochain lancement).
+
+## Démarrage (développement)
 
 Prérequis : Node 22+, pnpm 10, Python 3.12+, PostgreSQL 17 (Docker ou installation locale).
 
