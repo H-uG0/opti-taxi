@@ -3,8 +3,11 @@
  * Shared by the optimizeDay and moveTrip server actions (callers check auth).
  */
 import "server-only";
+import { audit } from "@/lib/audit";
+import type { SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getSettings } from "@/lib/domain/settings";
+import { logError } from "@/lib/log";
 import { buildOptimizeRequest, isStaleRun, loadOptimizeInput } from "@/lib/optimizer/build-request";
 import { optimize } from "@/lib/optimizer/client";
 import {
@@ -15,6 +18,7 @@ import {
   type SavePlanResult,
 } from "@/lib/optimizer/persist";
 import { formatLongDate, fromIsoDate, todayIso } from "@/lib/time";
+import { withBeforeCommit } from "./before-commit";
 import { movePlacementIssue, moveRequestIssue, type MoveTarget } from "./move";
 
 export type RunOutcome =
@@ -30,6 +34,12 @@ export type RunOptions = {
   /** « Déplacer vers… » : save the plan only if it serves this trip with this vehicle. */
   move?: MoveTarget;
 };
+
+/**
+ * Budget of the planning transactions (a change and its audit event): the
+ * same as savePlan, whose row locks they may have to wait for.
+ */
+export const PLANNING_TX_OPTIONS = { maxWait: 15_000, timeout: 60_000 } as const;
 
 export const OPTIMIZATION_IN_PROGRESS_ERROR =
   "Une optimisation de cette date est en cours : attendez la fin du calcul puis rechargez la page.";
@@ -83,7 +93,19 @@ export async function optimizationInProgress(isoDate: string): Promise<boolean> 
   return live.length > 0;
 }
 
-export async function runOptimization(isoDate: string, userId: string, options: RunOptions = {}): Promise<RunOutcome> {
+/**
+ * Runs the optimization of isoDate for `user` (the signed-in regulator).
+ * Every request leaves its OptimizationRun row (requestedById, status, error).
+ * The "plan.optimize" audit event is written in savePlan's transaction, with
+ * the routes it replaces: it exists exactly when the plan of the day changed.
+ * A failed run, or a move the optimizer could not carry out, changes nothing
+ * and leaves its FAILED run only.
+ */
+export async function runOptimization(
+  isoDate: string,
+  user: Pick<SessionUser, "id" | "role">,
+  options: RunOptions = {},
+): Promise<RunOutcome> {
   const blocker = await replanBlocker(isoDate);
   if (blocker) return { ok: false, error: blocker };
 
@@ -123,12 +145,12 @@ export async function runOptimization(isoDate: string, userId: string, options: 
   }
   if (live.length > 0) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
 
-  const requester = await db.user.findUnique({ where: { id: userId }, select: { id: true } });
+  // The account was just re-read by requireUser: it exists, as requestedById and AuditEvent.userId require.
   const run = await db.optimizationRun.create({
     data: {
       serviceDate,
       status: "RUNNING",
-      requestedById: requester?.id ?? null,
+      requestedById: user.id,
       tripsCount: request.trips.length,
       lockedCount: request.trips.filter((t) => t.lockedVehicleId).length,
     },
@@ -161,10 +183,14 @@ export async function runOptimization(isoDate: string, userId: string, options: 
 
   let saved: SavePlanResult;
   try {
-    saved = await savePlan(db, { runId: run.id, isoDate, request, response: plan });
+    // The event commits with the saved plan, or rolls back with it (blocked day, database error).
+    const traced = withBeforeCommit(db, (tx) =>
+      audit(tx, user, { action: "plan.optimize", entity: "OptimizationRun", entityId: run.id, serviceDate: isoDate }),
+    );
+    saved = await savePlan(traced, { runId: run.id, isoDate, request, response: plan });
   } catch (error) {
     if (error instanceof PlanBlockedError) return fail(error.message, meta);
-    console.error("[planning] saving the plan failed", error);
+    logError("[planning] saving the plan failed", error, { runId: run.id, serviceDate: isoDate });
     return fail("Le planning calculé n'a pas pu être enregistré (erreur de base de données). Relancez l'optimisation.", meta);
   }
 

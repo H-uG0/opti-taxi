@@ -1,8 +1,8 @@
 /**
- * Ids of the rows the history script creates. Trips and optimization runs get
- * a deterministic id with the HISTORY_ID_PREFIX (routes are found through
- * their run): a re-run deletes exactly these rows and nothing else. Ids stay
- * under the 64 characters the forms accept.
+ * Ids of the rows the history script creates. Trips, optimization runs and
+ * audit events get an id with the HISTORY_ID_PREFIX (routes are found through
+ * their run, stops go with their route): a re-run deletes exactly these rows
+ * and nothing else. Ids stay under the 64 characters the forms accept.
  */
 import type { TripDirection } from "@prisma/client";
 
@@ -21,6 +21,11 @@ export function historyTripId(isoDate: string, recurrenceId: string, direction: 
 /** "hist-20261012-run2": second optimization of the 12 October planning. */
 export function historyRunId(isoDate: string, round: number): string {
   return `${HISTORY_ID_PREFIX}${compactDate(isoDate)}-run${round}`;
+}
+
+/** "hist-20261012-ev0042": 42nd audit event written by the simulation of 12 October (numbered as written). */
+export function historyAuditEventId(isoDate: string, sequence: number): string {
+  return `${HISTORY_ID_PREFIX}${compactDate(isoDate)}-ev${String(sequence).padStart(4, "0")}`;
 }
 
 export function isHistoryId(id: string | null | undefined): boolean {

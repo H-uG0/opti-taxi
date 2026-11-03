@@ -17,13 +17,23 @@ function driverAccount(overrides: Partial<AccountState> = {}): AccountState {
     active: true,
     driverId: "drv_1",
     passwordHash: HASH,
+    sessionVersion: 3,
     driver: { active: true },
     ...overrides,
   };
 }
 
 function regulatorAccount(overrides: Partial<AccountState> = {}): AccountState {
-  return { name: "Régulation", role: "REGULATOR", active: true, driverId: null, passwordHash: HASH, driver: null, ...overrides };
+  return {
+    name: "Régulation",
+    role: "REGULATOR",
+    active: true,
+    driverId: null,
+    passwordHash: HASH,
+    sessionVersion: 0,
+    driver: null,
+    ...overrides,
+  };
 }
 
 /** Claims of a session opened on `account` (what createSession signs). */
@@ -34,6 +44,7 @@ function claimsFor(account: AccountState, id = "usr_1"): SessionClaims {
     role: account.role,
     driverId: account.driverId,
     passwordVersion: passwordVersion(account.passwordHash),
+    sessionVersion: account.sessionVersion,
   };
 }
 
@@ -121,24 +132,55 @@ describe("sessionIsCurrent", () => {
     expect(sessionIsCurrent(claimsFor(orphan), orphan)).toBeNull();
   });
 
-  it("a deactivation that stores a new hash is not undone by a reactivation (lost phone)", () => {
+  it("a deactivation that bumps the session version is not undone by a reactivation (lost phone)", () => {
     const account = driverAccount();
     const lostPhone = claimsFor(account);
-    // Deactivation stores lockedPasswordHash(), then the regulator reactivates
-    // the access and sets a new password for the spare phone.
-    const deactivated = { ...account, active: false, passwordHash: OTHER_HASH };
+    // Deactivation bumps the version (REVOKE_SESSIONS), then the regulator
+    // reactivates the access, password unchanged.
+    const deactivated = { ...account, active: false, sessionVersion: account.sessionVersion + 1 };
     expect(sessionIsCurrent(lostPhone, deactivated)).toBeNull();
-    const reactivated = { ...deactivated, active: true, passwordHash: "$2b$10$newPasswordHashForTheSparePhone0000000000000000000000" };
+    const reactivated = { ...deactivated, active: true };
     expect(sessionIsCurrent(lostPhone, reactivated)).toBeNull();
+    // A new sign-in on the spare phone carries the new version.
     expect(sessionIsCurrent(claimsFor(reactivated), reactivated)).not.toBeNull();
   });
 
-  it("only suspends the session when the deactivation keeps the password hash", () => {
-    // Why deactivating must store lockedPasswordHash(): flipping `active` alone
+  it("only suspends the session when the deactivation keeps the session version", () => {
+    // Why deactivating must spread REVOKE_SESSIONS: flipping `active` alone
     // lets the same cookie back in once the account is active again.
     const account = driverAccount();
     const claims = claimsFor(account);
     expect(sessionIsCurrent(claims, { ...account, active: false })).toBeNull();
     expect(sessionIsCurrent(claims, account)).not.toBeNull();
+  });
+});
+
+describe("sessionIsCurrent: session version", () => {
+  it("keeps a session opened with the account's current version", () => {
+    const account = driverAccount({ sessionVersion: 7 });
+    expect(sessionIsCurrent({ ...claimsFor(account), sessionVersion: 7 }, account)).not.toBeNull();
+    const fresh = regulatorAccount({ sessionVersion: 0 });
+    expect(sessionIsCurrent(claimsFor(fresh), fresh)).not.toBeNull();
+  });
+
+  it("ends a session opened before a logout, deactivation or new password (older version)", () => {
+    const account = driverAccount({ sessionVersion: 7 });
+    expect(sessionIsCurrent({ ...claimsFor(account), sessionVersion: 6 }, account)).toBeNull();
+    expect(sessionIsCurrent({ ...claimsFor(account), sessionVersion: 0 }, account)).toBeNull();
+  });
+
+  it("refuses a version the account never had (newer than the account's)", () => {
+    const account = regulatorAccount({ sessionVersion: 2 });
+    expect(sessionIsCurrent({ ...claimsFor(account), sessionVersion: 3 }, account)).toBeNull();
+  });
+
+  it("refuses a token issued before the session version existed (no sv claim), even on a version-0 account", () => {
+    const account = regulatorAccount({ sessionVersion: 0 });
+    expect(sessionIsCurrent({ ...claimsFor(account), sessionVersion: null }, account)).toBeNull();
+  });
+
+  it("still checks the password fingerprint when the version matches", () => {
+    const account = driverAccount();
+    expect(sessionIsCurrent(claimsFor(account), { ...account, passwordHash: OTHER_HASH })).toBeNull();
   });
 });

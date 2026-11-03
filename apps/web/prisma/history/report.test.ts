@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { computeKpisByDay, summarizePeriod } from "@/lib/kpis";
 import { periodSummaryLines } from "./kpis";
-import { dayTableHeader, emptyDayReport, formatDayLine, interruptedMessage, totalReport, type DayReport } from "./report";
+import {
+  dayTableHeader,
+  emptyDayReport,
+  foreignRowsReason,
+  formatDayLine,
+  interruptedMessage,
+  totalReport,
+  type DayReport,
+} from "./report";
 
 const day: DayReport = {
   ...emptyDayReport("2026-10-12", null),
@@ -41,6 +49,16 @@ describe("day report", () => {
 
   it("says why a day was skipped", () => {
     expect(formatDayLine(emptyDayReport("2026-10-13", "données existantes"))).toBe("Mar 13/10/2026 ignoré : données existantes");
+  });
+
+  it("lists only the kinds of foreign rows a date left alone holds", () => {
+    expect(foreignRowsReason({ trips: 12, routes: 1, runs: 0, events: 0 })).toBe(
+      "données existantes non créées par la simulation (12 courses, 1 tournée)",
+    );
+    expect(foreignRowsReason({ trips: 0, routes: 0, runs: 0, events: 2 })).toBe(
+      "données existantes non créées par la simulation (2 modifications enregistrées dans l'application)",
+    );
+    expect(foreignRowsReason({ trips: 0, routes: 0, runs: 1, events: 1 })).toContain("1 optimisation, 1 modification enregistrée dans");
   });
 
   it("sums simulated days only", () => {

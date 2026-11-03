@@ -79,22 +79,36 @@ describe("tariffsInForce", () => {
     expect(tariffsInForce([b, a], "2026-11-03")).toEqual([b]);
   });
 
-  it("needs createdAt and id for a same-day tie: without them the first grid in input order is kept", () => {
-    // What a caller selecting columns without createdAt / id would pass.
-    const strip = (g: TariffGrid) => ({
+  it("works on a column subset that keeps createdAt and id", () => {
+    // What a caller selecting columns (the optimizer request builder) passes.
+    const subset = (g: TariffGrid) => ({
+      id: g.id,
+      createdAt: g.createdAt,
       vehicleType: g.vehicleType,
       department: g.department,
       validFrom: g.validFrom,
       validTo: g.validTo,
       pricePerKm: g.pricePerKm,
     });
-    const first = strip(grid({ from: "2026-11-02", pricePerKm: 1.2, createdAt: new Date("2026-11-02T08:00:00Z") }));
-    const fixed = strip(grid({ from: "2026-11-02", pricePerKm: 1.12, createdAt: new Date("2026-11-02T08:05:00Z") }));
-    expect(tariffsInForce([first, fixed], "2026-11-03")).toEqual([first]);
+    const first = subset(grid({ from: "2026-11-02", pricePerKm: 1.2, createdAt: new Date("2026-11-02T08:00:00Z") }));
+    const fixed = subset(grid({ from: "2026-11-02", pricePerKm: 1.12, createdAt: new Date("2026-11-02T08:05:00Z") }));
+    expect(tariffsInForce([first, fixed], "2026-11-03")).toEqual([fixed]);
     expect(tariffsInForce([fixed, first], "2026-11-03")).toEqual([fixed]);
-    // A later start still wins without them.
-    const later = strip(grid({ from: "2026-11-03", pricePerKm: 1.3 }));
-    expect(tariffsInForce([later, first], "2026-11-03")).toEqual([later]);
+  });
+
+  it("requires createdAt and id: a column subset missing either one does not type-check", () => {
+    // One directive per field: each line proves its own field is required, so making
+    // only one of them optional again also breaks tsc (TS2578, unused directive).
+    const dated = { vehicleType: "TAXI", department: "13", validFrom: fromIsoDate("2026-11-02"), validTo: null } as const;
+    const withoutCreatedAt = { ...dated, id: "grid_x" };
+    const withoutId = { ...dated, createdAt: new Date("2026-11-02T08:00:00Z") };
+    // Control: with both fields the same subset type-checks, so the errors below come
+    // from the missing field alone.
+    expect(tariffsInForce([{ ...withoutId, id: "grid_x" }], "2026-11-03")).toHaveLength(1);
+    // @ts-expect-error createdAt is required, so a same-day tie never depends on the input order.
+    expect(tariffsInForce([withoutCreatedAt], "2026-11-03")).toHaveLength(1);
+    // @ts-expect-error id is required, so a full tie never depends on the input order.
+    expect(tariffsInForce([withoutId], "2026-11-03")).toHaveLength(1);
   });
 
   it("keeps one grid per vehicle type and department", () => {

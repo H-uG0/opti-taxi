@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
 import { Card } from "@/components/ui/layout";
 import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_LABEL } from "@/lib/domain/no-show";
+import { fieldRecordLabel, fieldRecordText, sharingAnswerText } from "@/lib/planning/format";
 import type { TripView, VehicleRowView, ViolationView } from "@/lib/planning/types";
 import {
   DIRECTION_LABELS,
@@ -70,6 +71,7 @@ export function TripPanel({ trip, trips, vehicles, violations, date, replanBlock
       ? "Course déjà commencée."
       : replanBlocked;
   const outbound = trip.direction === "OUTBOUND";
+  const sharingAnswerLine = trip.sharingAnswer ? sharingAnswerText(trip.sharingAnswer, trip.sharingStatus) : null;
 
   return (
     <Card aria-labelledby="trip-panel-title">
@@ -130,6 +132,11 @@ export function TripPanel({ trip, trips, vehicles, violations, date, replanBlock
           <Row label="Dépose prévue">
             <span className="tabular">{formatMinute(trip.plannedDropoffMinute)}</span>
           </Row>
+          {trip.fieldRecords.map((record) => (
+            <Row key={record.stopId} label={fieldRecordLabel(record.kind, trip.status)}>
+              <span className="tabular">{fieldRecordText(record, date)}</span>
+            </Row>
+          ))}
           <Row label="Attente sur place">
             <span className="tabular">
               {trip.waitAtFacilityMin === null ? "—" : formatDuration(trip.waitAtFacilityMin)}
@@ -169,6 +176,7 @@ export function TripPanel({ trip, trips, vehicles, violations, date, replanBlock
                 <ExternalLink aria-hidden className="size-3" />
               </Link>
             </span>
+            {sharingAnswerLine ? <span className="mt-0.5 block text-xs text-slate-500">{sharingAnswerLine}</span> : null}
           </Row>
           {trip.shared ? (
             <Row label="Détour">

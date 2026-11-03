@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CalendarX } from "lucide-react";
+import { auditRead } from "@/lib/audit";
 import { requireDriver } from "@/lib/auth";
 import { cn } from "@/components/ui/cn";
 import { formatLongDate, formatMinute, minuteOfDay, todayIso, tomorrowIso } from "@/lib/time";
@@ -69,7 +70,13 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
   // Statuses are recorded on the service day only (the server actions check it too).
   const editable = date === today;
 
-  const [routes, regulator] = await Promise.all([loadDriverRoutes(user.driverId, date, today), loadRegulatorContact()]);
+  const [routes, regulator] = await Promise.all([
+    loadDriverRoutes(user.driverId, date, today),
+    loadRegulatorContact(),
+    // Trace of the read (patient names, phones and addresses on screen) for the day shown,
+    // tomorrow on the ?date= preview; never breaks the page.
+    auditRead(user, { action: "roadmap.view", entity: "Driver", entityId: user.driverId, serviceDate: date }),
+  ]);
   const afterOutboundNoShow = await loadReturnTripsAfterOutboundNoShow(routes, date);
   const views = routes.map((route) => buildRouteView(route, user.driverId, editable, afterOutboundNoShow));
 

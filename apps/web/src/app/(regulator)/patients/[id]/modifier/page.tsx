@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { geocoderEnabled } from "@/lib/geocode";
@@ -15,11 +16,15 @@ import { openTripsLabel } from "../../_lib/trip-sync";
 export const metadata: Metadata = { title: "Modifier le patient" };
 
 export default async function EditPatientPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const { id } = await params;
   const patient = await db.patient.findUnique({ where: { id } });
   if (!patient) notFound();
-  const openTrips = await countOpenTrips({ patientId: patient.id }, todayIso());
+  // The whole record is shown in the form: the read is traced like the patient page.
+  const [openTrips] = await Promise.all([
+    countOpenTrips({ patientId: patient.id }, todayIso()),
+    auditRead(user, { action: "patient.view", entity: "Patient", entityId: patient.id }),
+  ]);
 
   return (
     <div>

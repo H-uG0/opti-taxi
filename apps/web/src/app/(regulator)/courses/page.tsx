@@ -5,6 +5,7 @@ import { LinkButton } from "@/components/ui/button";
 import { FormMessage } from "@/components/ui/form";
 import { Card, CardBody, EmptyState, PageHeader, Stat } from "@/components/ui/layout";
 import { Table, TBody, THead, Th } from "@/components/ui/table";
+import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { OUTBOUND_NO_SHOW_ADVICE, returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
@@ -12,6 +13,7 @@ import { formatPercent, PRESCRIBED_MODE_LABELS, SHARING_SCOPE_LABELS } from "@/l
 import { addDays, formatLongDate, formatShortDate, fromIsoDate, isIsoDate, startOfIsoWeek, tomorrowIso } from "@/lib/time";
 import { DayNav } from "./day-nav";
 import { GenerateTripsForm } from "./generate-trips-form";
+import { outboundNoShowTrace, sharingAnswerTrace, stopStatusTraces } from "./record-trace";
 import { TripFiltersForm } from "./trip-filters";
 import {
   coPassengersFromStops,
@@ -40,13 +42,15 @@ function capitalize(text: string): string {
 }
 
 export default async function CoursesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const params = await searchParams;
   const rawDate = Array.isArray(params.date) ? params.date[0] : params.date;
   const date = isIsoDate(rawDate) ? rawDate : tomorrowIso();
   const filters = parseTripFilters(params);
   const serviceDate = fromIsoDate(date);
 
+  // The day's patients, phones, addresses and notes are on screen (auditRead never throws).
+  const traced = auditRead(user, { action: "trip_list.view", entity: "Trip", entityId: null, serviceDate: date });
   const [trips, stops] = await Promise.all([
     db.trip.findMany({
       where: { serviceDate },
@@ -82,6 +86,12 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
         recurrence: { select: { label: true } },
         route: { select: { vehicle: { select: { label: true, type: true } } } },
         lockedVehicle: { select: { label: true } },
+        // Who recorded the answer and the crew's statuses: account names only.
+        sharingRespondedBy: { select: { name: true } },
+        stops: {
+          where: { completedAt: { not: null } },
+          select: { kind: true, completedAt: true, completedBy: { select: { name: true } } },
+        },
       },
     }),
     // A cancelled or absent patient is not on board: not a co-passenger.
@@ -90,6 +100,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       select: { routeId: true, tripId: true, kind: true, sequence: true },
     }),
   ]);
+  await traced;
 
   // Same-day return trips to check: their outbound leg was closed as patient absent.
   const returnsToCheck = returnsToCheckAfterNoShow(trips);
@@ -99,43 +110,53 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
   const shortNames = new Map(trips.map((trip) => [trip.id, shortPatientName(trip.patient)]));
   const visible = sortTrips(filterTrips(dayTrips, filters));
 
-  const rows: TripRowData[] = visible.map((trip) => ({
-    id: trip.id,
-    direction: trip.direction,
-    status: trip.status,
-    payer: trip.payer,
-    patientName: patientDisplayName(trip.patient),
-    patientPhone: trip.patient.phone,
-    keyMinute: keyMinute(trip),
-    facilityName: trip.facility?.name ?? null,
-    pickupAddress: trip.pickupAddress,
-    dropoffAddress: trip.dropoffAddress,
-    allowedVehicleTypes: trip.allowedVehicleTypes,
-    prescriptionLabel:
-      trip.payer === "PRIVATE"
-        ? "Client privé : sans prescription"
-        : trip.prescription
-          ? `${PRESCRIBED_MODE_LABELS[trip.prescription.mode]} · partage : ${SHARING_SCOPE_LABELS[trip.prescription.sharing].toLowerCase()}`
-          : "Aucune prescription liée",
-    origin: trip.recurrenceId ? (trip.recurrence?.label ?? "sans libellé") : null,
-    vehicleLabel: trip.route?.vehicle.label ?? null,
-    vehicleType: trip.route?.vehicle.type ?? null,
-    lockedVehicleLabel: trip.lockedVehicle?.label ?? null,
-    plannedPickupMinute: trip.plannedPickupMinute,
-    plannedDropoffMinute: trip.plannedDropoffMinute,
-    shared: trip.shared,
-    coPassengers: (coPassengers.get(trip.id) ?? []).map((id) => shortNames.get(id) ?? "un autre patient"),
-    directKm: trip.directKm,
-    detourKm: trip.detourKm,
-    estimatedRevenue: trip.estimatedRevenue,
-    sharingAllowed: trip.sharingAllowed,
-    sharingStatus: trip.sharingStatus,
-    sharingProposedAt: formatInstant(trip.sharingProposedAt),
-    sharingRespondedAt: formatInstant(trip.sharingRespondedAt),
-    sharingNote: trip.sharingNote,
-    notes: trip.notes,
-    outboundNoShow: trip.outboundNoShow,
-  }));
+  const rows: TripRowData[] = visible.map((trip) => {
+    const answer = sharingAnswerTrace(trip);
+    const statusTraces = stopStatusTraces(trip.status, trip.stops);
+    return {
+      id: trip.id,
+      direction: trip.direction,
+      status: trip.status,
+      statusTraces: statusTraces.map((trace) => trace.full),
+      statusTraceShort: statusTraces.at(-1)?.short ?? null,
+      payer: trip.payer,
+      patientName: patientDisplayName(trip.patient),
+      patientPhone: trip.patient.phone,
+      keyMinute: keyMinute(trip),
+      facilityName: trip.facility?.name ?? null,
+      pickupAddress: trip.pickupAddress,
+      dropoffAddress: trip.dropoffAddress,
+      allowedVehicleTypes: trip.allowedVehicleTypes,
+      prescriptionLabel:
+        trip.payer === "PRIVATE"
+          ? "Client privé : sans prescription"
+          : trip.prescription
+            ? `${PRESCRIBED_MODE_LABELS[trip.prescription.mode]} · partage : ${SHARING_SCOPE_LABELS[trip.prescription.sharing].toLowerCase()}`
+            : "Aucune prescription liée",
+      origin: trip.recurrenceId ? (trip.recurrence?.label ?? "sans libellé") : null,
+      vehicleLabel: trip.route?.vehicle.label ?? null,
+      vehicleType: trip.route?.vehicle.type ?? null,
+      lockedVehicleLabel: trip.lockedVehicle?.label ?? null,
+      plannedPickupMinute: trip.plannedPickupMinute,
+      plannedDropoffMinute: trip.plannedDropoffMinute,
+      shared: trip.shared,
+      coPassengers: (coPassengers.get(trip.id) ?? []).map((id) => shortNames.get(id) ?? "un autre patient"),
+      directKm: trip.directKm,
+      detourKm: trip.detourKm,
+      estimatedRevenue: trip.estimatedRevenue,
+      sharingAllowed: trip.sharingAllowed,
+      sharingStatus: trip.sharingStatus,
+      sharingProposedAt: formatInstant(trip.sharingProposedAt),
+      // Only for a current answer (accepted, refused): the badge shows it.
+      sharingAnswer: answer?.full ?? null,
+      sharingAnswerShort: answer?.short ?? null,
+      sharingNote: trip.sharingNote,
+      notes: trip.notes,
+      outboundNoShow: trip.outboundNoShow,
+      // Read from the whole day: the outbound trip may be filtered out of the list.
+      outboundNoShowTrace: trip.outboundNoShow ? outboundNoShowTrace(trip, trips) : null,
+    };
+  });
 
   const weekStart = startOfIsoWeek(date);
   const filtered = hasActiveFilters(filters);

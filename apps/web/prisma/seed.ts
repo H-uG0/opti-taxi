@@ -5,6 +5,8 @@
  *
  * Run with `pnpm db:seed` (prisma db seed -> tsx prisma/seed.ts). It must not
  * import "@/lib/db" or anything marked "server-only": it owns its client.
+ * Development only: it refuses a database that is not on this machine or that
+ * holds accounts it did not create (prisma/safety.ts, SEED_ALLOW_WIPE=1 to force).
  */
 import { PrismaClient, type PrescribedMode, type SharingScope, type TripDirection } from "@prisma/client";
 import { hashPassword } from "@/lib/auth/password";
@@ -17,6 +19,7 @@ import {
   sharingAllowedFor,
 } from "@/lib/domain/rules";
 import { generateTrips } from "@/lib/domain/trip-generation";
+import { logError } from "@/lib/log";
 import {
   addDays,
   formatShortDate,
@@ -48,6 +51,7 @@ import {
   type DriverKey,
   type FacilityKey,
 } from "./seed/data";
+import { assertSeedOnlyDatabase, UnsafeDatabaseError } from "./safety";
 import { distanceKm, jitter } from "./seed/geo";
 import {
   devEmail,
@@ -55,6 +59,7 @@ import {
   fictitiousMobile,
   NameFactory,
   randomAccessNote,
+  SEED_EMAIL_DOMAIN,
   streetAddress,
 } from "./seed/identity";
 import { Rng } from "./seed/random";
@@ -62,7 +67,7 @@ import { Rng } from "./seed/random";
 /** Fixed seed: every run produces the same people, places and schedules (dates stay relative to today). */
 const RANDOM_SEED = 20_261_102;
 
-const REGULATOR_ACCOUNT = { email: "regulateur@opti-taxi.test", password: "regulateur", name: "Régulation" };
+const REGULATOR_ACCOUNT = { email: `regulateur${SEED_EMAIL_DOMAIN}`, password: "regulateur", name: "Régulation" };
 const DRIVER_PASSWORD = "chauffeur";
 
 const prisma = new PrismaClient();
@@ -92,47 +97,16 @@ function lookup<K, V>(map: Map<K, V>, key: K, what: string): V {
 }
 
 // ---------------------------------------------------------------------------
-// Safety: the seed erases everything, so it only runs against a local database.
-
-/** Hosts considered local: this machine, or the PostgreSQL service of docker-compose. */
-const LOCAL_DATABASE_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "postgres"]);
-
-/**
- * Refuses to run unless NODE_ENV is not "production" and DATABASE_URL points to
- * a local database (or SEED_ALLOW_WIPE=1 is set on purpose). Returns the target
- * ("database on host:port") for display; never the credentials.
- */
-function assertDevelopmentDatabase(): string {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("Refus : le seed efface toute la base, il ne s'exécute jamais avec NODE_ENV=production.");
-  }
-  const raw = process.env.DATABASE_URL;
-  if (!raw) throw new Error("Refus : DATABASE_URL n'est pas défini, impossible de vérifier la base cible.");
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error("Refus : DATABASE_URL n'est pas une URL valide, impossible de vérifier la base cible.");
-  }
-  // A `host` query parameter (Unix socket) takes precedence over the URL host.
-  const host = (url.searchParams.get("host") ?? url.hostname).toLowerCase();
-  const database = decodeURIComponent(url.pathname.replace(/^\//, "")) || "(base par défaut)";
-  const target = `${database} sur ${host || "(hôte vide)"}${url.port ? `:${url.port}` : ""}`;
-  if (!LOCAL_DATABASE_HOSTS.has(host) && process.env.SEED_ALLOW_WIPE !== "1") {
-    throw new Error(
-      `Refus : la base cible (${target}) n'est pas locale. Le seed efface toutes les données (patients, courses, comptes). ` +
-        "Pour une base de développement distante, relancer avec SEED_ALLOW_WIPE=1.",
-    );
-  }
-  return target;
-}
-
-// ---------------------------------------------------------------------------
 // Reference data.
 
-/** Deletes every row, children before parents (development database only). */
+/**
+ * Deletes every row, children before parents (development database only:
+ * main() runs the guard of prisma/safety.ts first). The audit trail goes too:
+ * it only ever holds ids of rows deleted here.
+ */
 async function wipe(): Promise<void> {
   await prisma.$transaction([
+    prisma.auditEvent.deleteMany(),
     prisma.routeStop.deleteMany(),
     prisma.trip.deleteMany(),
     prisma.route.deleteMany(),
@@ -252,17 +226,19 @@ async function seedVehicles(drivers: Map<DriverKey, CreatedDriver>): Promise<Map
   return vehicleOfDriver;
 }
 
+/** The regulator account (its id records the seeded sharing answers) and one account per driver. */
 async function seedUsers(
   drivers: Map<DriverKey, CreatedDriver>,
   vehicleOfDriver: Map<DriverKey, string>,
-): Promise<DriverAccount[]> {
-  await prisma.user.create({
+): Promise<{ regulatorId: string; accounts: DriverAccount[] }> {
+  const regulator = await prisma.user.create({
     data: {
       email: REGULATOR_ACCOUNT.email,
       name: REGULATOR_ACCOUNT.name,
       passwordHash: await hashPassword(REGULATOR_ACCOUNT.password),
       role: "REGULATOR",
     },
+    select: { id: true },
   });
   const accounts: DriverAccount[] = [];
   for (const driver of drivers.values()) {
@@ -273,7 +249,7 @@ async function seedUsers(
     });
     accounts.push({ email, name, vehicle: vehicleOfDriver.get(driver.key) ?? null });
   }
-  return accounts;
+  return { regulatorId: regulator.id, accounts };
 }
 
 // ---------------------------------------------------------------------------
@@ -462,8 +438,10 @@ const NEIGHBOUR_KM = 3.5;
  * Marks two of tomorrow's trips as REFUSED, chosen where the refusal matters:
  * the earliest outbound and the earliest return that had a natural sharing
  * partner (same facility, same time, sharing allowed, neighbouring home).
+ * Recorded by the regulator account, with the audit event the « Courses »
+ * action writes (trip.sharing_refuse), in the same transaction.
  */
-async function seedSharingRefusals(dates: Dates): Promise<string[]> {
+async function seedSharingRefusals(dates: Dates, regulatorId: string): Promise<string[]> {
   const candidates = await prisma.trip.findMany({
     where: { serviceDate: fromIsoDate(dates.tomorrow), sharingAllowed: true, recurrenceId: { not: null } },
     include: { patient: { select: { firstName: true, lastName: true } }, facility: { select: { name: true } } },
@@ -499,17 +477,31 @@ async function seedSharingRefusals(dates: Dates): Promise<string[]> {
 
   const proposedAt = new Date(Date.now() - 26 * 3_600_000);
   const respondedAt = new Date(Date.now() - 25 * 3_600_000);
-  for (const trip of chosen) {
-    await prisma.trip.update({
-      where: { id: trip.id },
-      data: {
-        sharingStatus: "REFUSED",
-        sharingProposedAt: proposedAt,
-        sharingRespondedAt: respondedAt,
-        sharingNote: REFUSAL_NOTES[trip.direction],
-      },
-    });
-  }
+  await prisma.$transaction([
+    ...chosen.map((trip) =>
+      prisma.trip.update({
+        where: { id: trip.id },
+        data: {
+          sharingStatus: "REFUSED",
+          sharingProposedAt: proposedAt,
+          sharingRespondedAt: respondedAt,
+          sharingRespondedById: regulatorId,
+          sharingNote: REFUSAL_NOTES[trip.direction],
+        },
+      }),
+    ),
+    prisma.auditEvent.createMany({
+      data: chosen.map((trip) => ({
+        at: respondedAt,
+        userId: regulatorId,
+        role: "REGULATOR" as const,
+        action: "trip.sharing_refuse",
+        entity: "Trip",
+        entityId: trip.id,
+        serviceDate: trip.serviceDate,
+      })),
+    }),
+  ]);
   return chosen.map(
     (trip) =>
       `${trip.patient.firstName} ${trip.patient.lastName} — ${trip.direction === "OUTBOUND" ? "aller" : "retour"}, ${trip.facility?.name ?? "sans établissement"}`,
@@ -531,6 +523,7 @@ async function printSummary(dates: Dates, refusals: string[], accounts: DriverAc
     ["Prescriptions", await prisma.prescription.count()],
     ["Récurrences", await prisma.recurrence.count()],
     ["Courses", await prisma.trip.count()],
+    ["Événements d'audit", await prisma.auditEvent.count()],
   ];
   console.log("\nEnregistrements créés :");
   for (const [label, count] of counts) console.log(`  ${label.padEnd(26)} ${String(count).padStart(5)}`);
@@ -573,7 +566,8 @@ async function printSummary(dates: Dates, refusals: string[], accounts: DriverAc
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const target = assertDevelopmentDatabase();
+  // Before anything is written: a local database holding only the seed's accounts (prisma/safety.ts).
+  const target = await assertSeedOnlyDatabase("seed", (where) => prisma.user.count({ where }));
   const started = Date.now();
   const rng = new Rng(RANDOM_SEED);
   const today = todayIso();
@@ -597,7 +591,7 @@ async function main(): Promise<void> {
   console.log("• Chauffeurs, véhicules et comptes");
   const drivers = await seedDrivers(rng);
   const vehicleOfDriver = await seedVehicles(drivers);
-  const accounts = await seedUsers(drivers, vehicleOfDriver);
+  const { regulatorId, accounts } = await seedUsers(drivers, vehicleOfDriver);
   console.log("• Patients, prescriptions et récurrences");
   const names = new NameFactory(rng, Object.values(DRIVERS));
   await seedPatients(rng, names, facilities, dates);
@@ -607,7 +601,7 @@ async function main(): Promise<void> {
   console.log("• Courses ponctuelles de demain et refus de partage");
   const oneOff = await seedOneOffTrips(rng, names, facilities, dates);
   console.log(`  ${oneOff} courses ponctuelles`);
-  const refusals = await seedSharingRefusals(dates);
+  const refusals = await seedSharingRefusals(dates, regulatorId);
 
   await printSummary(dates, refusals, accounts);
   console.log(`\nSeed terminé en ${((Date.now() - started) / 1000).toFixed(1)} s.`);
@@ -616,7 +610,10 @@ async function main(): Promise<void> {
 main()
   .then(() => prisma.$disconnect())
   .catch(async (error: unknown) => {
-    console.error(error);
+    // A refusal of the guard is expected: its message alone, without a stack trace.
+    // Anything else is logged without the Prisma query arguments (addresses, notes).
+    if (error instanceof UnsafeDatabaseError) console.error(`\n${error.message}`);
+    else logError("[seed] le seed a échoué", error);
     await prisma.$disconnect();
     process.exit(1);
   });

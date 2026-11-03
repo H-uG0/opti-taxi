@@ -34,24 +34,40 @@ export function parisInstant(isoDate: string, minute: number, second = 0): Date 
 // ---------------------------------------------------------------------------
 // Simulated days
 
+export type SimulationDates = {
+  /** The dates to simulate, oldest first. */
+  dates: string[];
+  /** Working days passed over because they hold rows the simulation did not create, oldest first. */
+  leftAlone: string[];
+};
+
 /**
  * The `count` working days before `today` (Monday to Saturday, with at least
- * one trip), oldest first. `today` and later dates are never included; the
+ * one trip), oldest first. A date of `foreignDates` (rows the simulation did
+ * not create: the seed's days, a day planned in the app) is passed over and
+ * the search goes one working day further back, so the period still has
+ * `count` simulated days. `today` and later dates are never included; the
  * search stops `maxLookbackDays` back.
  */
 export function pickSimulationDates(
   today: string,
   count: number,
-  hasTrips: (isoDate: string) => boolean,
-  maxLookbackDays = 120,
-): string[] {
+  options: { hasTrips: (isoDate: string) => boolean; foreignDates?: ReadonlySet<string>; maxLookbackDays?: number },
+): SimulationDates {
+  const { hasTrips, foreignDates = new Set<string>(), maxLookbackDays = 120 } = options;
   const dates: string[] = [];
+  const leftAlone: string[] = [];
   for (let back = 1; back <= maxLookbackDays && dates.length < count; back++) {
     const date = addDays(today, -back);
-    if (isoWeekday(date) === 7 || !hasTrips(date)) continue;
+    if (isoWeekday(date) === 7) continue;
+    if (foreignDates.has(date)) {
+      leftAlone.push(date);
+      continue;
+    }
+    if (!hasTrips(date)) continue;
     dates.push(date);
   }
-  return dates.reverse();
+  return { dates: dates.reverse(), leftAlone: leftAlone.reverse() };
 }
 
 // ---------------------------------------------------------------------------

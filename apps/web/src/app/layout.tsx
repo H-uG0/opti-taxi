@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { connection } from "next/server";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -14,7 +15,11 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // The Content-Security-Policy nonce (src/proxy.ts) reaches only pages rendered
+  // per request. Every page reads the session cookie anyway; this also renders
+  // the 404 page per request instead of prerendering it with nonce-less scripts.
+  await connection();
   return (
     <html lang="fr">
       <body className="min-h-dvh">{children}</body>

@@ -3,7 +3,7 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { readSession } from "./session";
-import { sessionIsCurrent, type Role, type SessionUser } from "./session-check";
+import { ACCOUNT_STATE_SELECT, sessionIsCurrent, type Role, type SessionUser } from "./session-check";
 
 export type { Role, SessionUser } from "./session-check";
 
@@ -17,24 +17,16 @@ export const ROLE_HOME: Record<Role, string> = {
  * The signed-in user, re-checked against the database on every request
  * (rules in sessionIsCurrent): session tokens are stateless (12 h), so an
  * account disabled, a driver deactivated or unlinked, a role or driver link
- * changed, or a password hash changed since the sign-in ends the session here.
+ * changed, a session version bumped (logout, deactivation, new password or
+ * e-mail: REVOKE_SESSIONS) or a password hash changed since the sign-in ends
+ * the session here.
  * Cached per request in renders (layout and page share one lookup); in a
  * server action every call reads the database again.
  */
 const currentUser = cache(async (): Promise<SessionUser | null> => {
   const claims = await readSession();
   if (!claims) return null;
-  const account = await db.user.findUnique({
-    where: { id: claims.id },
-    select: {
-      name: true,
-      role: true,
-      active: true,
-      driverId: true,
-      passwordHash: true,
-      driver: { select: { active: true } },
-    },
-  });
+  const account = await db.user.findUnique({ where: { id: claims.id }, select: ACCOUNT_STATE_SELECT });
   return sessionIsCurrent(claims, account);
 });
 

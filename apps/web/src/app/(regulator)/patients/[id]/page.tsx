@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import type { TripStatus } from "@prisma/client";
 import { Pencil, Plus } from "lucide-react";
+import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
@@ -38,7 +39,7 @@ import {
   type ValidityState,
 } from "../_lib/status";
 import { countOpenTripsByRecurrence } from "../_lib/trip-counts";
-import { openTripsLabel, SYNC_PARAM } from "../_lib/trip-sync";
+import { openTripsLabel } from "../_lib/trip-sync";
 
 export const metadata: Metadata = { title: "Fiche patient" };
 
@@ -77,7 +78,7 @@ export default async function PatientPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const { id } = await params;
   const query = await searchParams;
   const today = todayIso();
@@ -108,6 +109,8 @@ export default async function PatientPage({
     countOpenTripsByRecurrence({ patientId: id }, today),
   ]);
   if (!patient) notFound();
+  // Health data shown: the read is traced (never breaks the page).
+  await auditRead(user, { action: "patient.view", entity: "Patient", entityId: patient.id });
 
   const prescriptions = patient.prescriptions.map((p) => {
     const dates = { validFrom: toIsoDate(p.validFrom), validTo: toIsoDate(p.validTo) };
@@ -170,7 +173,7 @@ export default async function PatientPage({
           }
         />
         <div className="space-y-2">
-          <SyncNotice value={query[SYNC_PARAM]} />
+          <SyncNotice query={query} />
           {!patient.active ? (
             <Warning tone="info">
               Patient désactivé : ses récurrences ne génèrent plus de courses. Sa fiche et son historique sont conservés.

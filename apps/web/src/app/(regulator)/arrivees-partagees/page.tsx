@@ -5,6 +5,7 @@ import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
 import { Card, EmptyState, PageHeader } from "@/components/ui/layout";
 import { Table, TBody, Td, THead, Th } from "@/components/ui/table";
+import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatAddress, isShareable } from "@/lib/domain/rules";
@@ -40,7 +41,7 @@ export default async function SharedArrivalsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const params = await searchParams;
   const rawDate = Array.isArray(params.date) ? params.date[0] : params.date;
   const date = isIsoDate(rawDate) ? rawDate : tomorrowIso();
@@ -85,6 +86,14 @@ export default async function SharedArrivalsPage({
       select: { routeId: true, tripId: true, kind: true, sequence: true },
     }),
     db.route.count({ where: { serviceDate } }),
+    // Trace of the read (patients' names and care facilities of the day); never breaks the page.
+    // A facility's sheet (handed to its reception desk) names that facility.
+    auditRead(
+      user,
+      facilityFilter
+        ? { action: "shared_arrivals.view", entity: "Facility", entityId: facilityFilter, serviceDate: date }
+        : { action: "shared_arrivals.view", entity: "Trip", entityId: null, serviceDate: date },
+    ),
   ]);
 
   const coPassengers = coPassengersFromStops(stops);

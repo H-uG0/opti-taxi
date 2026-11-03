@@ -1,67 +1,10 @@
 /**
  * Dashboard indicators of the simulated period, computed by @/lib/kpis from
- * the same rows as /tableau-de-bord. The page's loader
- * (app/(regulator)/tableau-de-bord/load-kpis.ts) is server-only, so its four
- * queries are repeated here with the script's own client: keep them in step.
+ * the rows of @/lib/kpis-load, the same loader as /tableau-de-bord: French
+ * summary lines for the console (pure).
  */
-import type { PrismaClient } from "@prisma/client";
-import { SERVED_TRIP_STATUSES, type KpiData, type PeriodKpis } from "@/lib/kpis";
-import { formatShortDate, fromIsoDate, toIsoDate } from "@/lib/time";
-
-export async function loadKpiRows(prisma: PrismaClient, from: string, to: string): Promise<KpiData> {
-  const serviceDate = { gte: fromIsoDate(from), lte: fromIsoDate(to) };
-  const [routes, recorded, trips, runs] = await Promise.all([
-    prisma.route.findMany({
-      where: { serviceDate },
-      select: {
-        id: true,
-        serviceDate: true,
-        vehicleId: true,
-        distanceKm: true,
-        emptyKm: true,
-        revenue: true,
-        cost: true,
-        margin: true,
-        validatedAt: true,
-        _count: { select: { stops: true } },
-      },
-    }),
-    prisma.routeStop.groupBy({ by: ["routeId"], where: { completedAt: { not: null }, route: { serviceDate } } }),
-    prisma.trip.findMany({
-      where: { serviceDate, routeId: { not: null }, status: { in: [...SERVED_TRIP_STATUSES] } },
-      select: {
-        serviceDate: true,
-        status: true,
-        routeId: true,
-        direction: true,
-        shared: true,
-        appointmentMinute: true,
-        plannedDropoffMinute: true,
-        stops: { where: { kind: "DROPOFF", completedAt: { not: null } }, select: { completedAt: true } },
-      },
-    }),
-    prisma.optimizationRun.findMany({ where: { serviceDate }, select: { serviceDate: true, startedAt: true } }),
-  ]);
-
-  const recordedRouteIds = new Set(recorded.map((row) => row.routeId));
-  return {
-    routes: routes.map(({ id, _count, serviceDate: date, ...route }) => ({
-      ...route,
-      serviceDate: toIsoDate(date),
-      stopCount: _count.stops,
-      hasRecordedStatus: recordedRouteIds.has(id),
-    })),
-    trips: trips.map(({ stops, serviceDate: date, ...trip }) => ({
-      ...trip,
-      serviceDate: toIsoDate(date),
-      dropoffCompletedAt: stops.reduce<Date | null>(
-        (latest, stop) => (stop.completedAt && (!latest || stop.completedAt > latest) ? stop.completedAt : latest),
-        null,
-      ),
-    })),
-    runs: runs.map((run) => ({ serviceDate: toIsoDate(run.serviceDate), startedAt: run.startedAt })),
-  };
-}
+import type { PeriodKpis } from "@/lib/kpis";
+import { formatShortDate } from "@/lib/time";
 
 const decimal = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const percent = new Intl.NumberFormat("fr-FR", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 });

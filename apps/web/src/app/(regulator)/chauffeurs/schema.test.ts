@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { REVOKE_SESSIONS } from "@/lib/auth/revoke";
 import { fieldErrorsFromZod } from "@/lib/forms";
 import {
+  ACCESS_STILL_DISABLED_NOTE,
+  accountActiveData,
   accountSchema,
+  accountUpdate,
+  accountUpdateMessage,
   assignmentConflicts,
   describeBreak,
   driverFormValues,
   driverSchema,
   generatePassword,
+  OPEN_SESSION_NOTE,
 } from "./schema";
 
 const valid = {
@@ -144,6 +150,83 @@ describe("accountSchema", () => {
   it("rejects an invalid e-mail", () => {
     expect(update.safeParse({ email: "pas-un-email" }).error?.issues[0]?.message).toBe("Adresse e-mail invalide.");
     expect(update.safeParse({ email: "" }).error?.issues[0]?.message).toBe("Champ obligatoire.");
+  });
+});
+
+describe("accountActiveData", () => {
+  it("ends the open sessions when disabling, not when enabling", () => {
+    expect(accountActiveData(false)).toEqual({ active: false, sessionVersion: { increment: 1 } });
+    expect(accountActiveData(false)).toMatchObject(REVOKE_SESSIONS);
+    expect(accountActiveData(true)).toEqual({ active: true });
+  });
+});
+
+describe("accountUpdate", () => {
+  const current = "marc@exemple.fr";
+
+  it("changes nothing when the e-mail is the same and no password is given", () => {
+    expect(accountUpdate(current, { email: current, passwordHash: null })).toBeNull();
+  });
+
+  it("ends the open sessions on a new e-mail, keeping the password", () => {
+    const update = accountUpdate(current, { email: "marc.durand@exemple.fr", passwordHash: null });
+    expect(update).toEqual({
+      data: { email: "marc.durand@exemple.fr", ...REVOKE_SESSIONS },
+      actions: ["account.update"],
+      emailChanged: true,
+      passwordReset: false,
+    });
+  });
+
+  it("ends the open sessions on a new password, keeping the e-mail", () => {
+    const update = accountUpdate(current, { email: current, passwordHash: "$2b$10$hash" });
+    expect(update).toEqual({
+      data: { passwordHash: "$2b$10$hash", ...REVOKE_SESSIONS },
+      actions: ["account.password_reset"],
+      emailChanged: false,
+      passwordReset: true,
+    });
+  });
+
+  it("records both changes when the e-mail and the password change together", () => {
+    const update = accountUpdate(current, { email: "autre@exemple.fr", passwordHash: "$2b$10$hash" });
+    expect(update).toEqual({
+      data: { email: "autre@exemple.fr", passwordHash: "$2b$10$hash", ...REVOKE_SESSIONS },
+      actions: ["account.update", "account.password_reset"],
+      emailChanged: true,
+      passwordReset: true,
+    });
+  });
+});
+
+describe("accountUpdateMessage", () => {
+  const emailOnly = { emailChanged: true, passwordReset: false };
+  const passwordOnly = { emailChanged: false, passwordReset: true };
+  const both = { emailChanged: true, passwordReset: true };
+
+  it("on an active account, asks to pass on the new credentials and says open sessions end", () => {
+    expect(accountUpdateMessage(emailOnly, true)).toBe(
+      `Identifiant modifié : communiquez-le au chauffeur. Il se connecte désormais avec la nouvelle adresse et son mot de passe actuel. ${OPEN_SESSION_NOTE}`,
+    );
+    expect(accountUpdateMessage(passwordOnly, true)).toBe(
+      `Mot de passe réinitialisé : communiquez-le au chauffeur. L'ancien mot de passe ne permet plus de se connecter. ${OPEN_SESSION_NOTE}`,
+    );
+    expect(accountUpdateMessage(both, true)).toBe(
+      `Identifiant modifié et mot de passe réinitialisé : communiquez-les au chauffeur. L'ancien mot de passe ne permet plus de se connecter. ${OPEN_SESSION_NOTE}`,
+    );
+  });
+
+  it("on a disabled account, promises neither a sign-in nor an open session", () => {
+    for (const change of [emailOnly, passwordOnly, both]) {
+      const message = accountUpdateMessage(change, false);
+      expect(message).toMatch(/communiquez-l/);
+      expect(message.endsWith(ACCESS_STILL_DISABLED_NOTE)).toBe(true);
+      expect(message).not.toContain(OPEN_SESSION_NOTE);
+      expect(message).not.toMatch(/se connecte désormais|ne permet plus/);
+    }
+    expect(accountUpdateMessage(emailOnly, false)).toBe(
+      `Identifiant modifié : communiquez-le au chauffeur. ${ACCESS_STILL_DISABLED_NOTE}`,
+    );
   });
 });
 

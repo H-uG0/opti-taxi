@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { CalendarPlus, ListChecks } from "lucide-react";
+import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
@@ -53,7 +54,7 @@ function headerDescription(view: PlanningDayView, availableVehicles: number): st
 }
 
 export default async function PlanningPage({ searchParams }: { searchParams: SearchParams }) {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const params = await searchParams;
   const today = todayIso();
   const tomorrow = tomorrowIso();
@@ -61,7 +62,11 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   const date = isIsoDate(requested) ? requested : tomorrow;
   const requestedTrip = firstParam(params.trip) ?? null;
 
-  const view = await loadPlanningDay(date);
+  const [view] = await Promise.all([
+    loadPlanningDay(date),
+    // The day's patients and stop addresses are on screen (timeline, map, trip panel).
+    auditRead(user, { action: "plan.view", entity: "Route", entityId: null, serviceDate: date }),
+  ]);
 
   const past = date < today;
   const hasRoutes = view.vehicles.some((v) => v.route !== null);

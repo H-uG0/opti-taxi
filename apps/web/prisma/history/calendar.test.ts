@@ -48,11 +48,14 @@ describe("pickSimulationDates", () => {
 
   it("returns the working days before today, oldest first, never today", () => {
     // 2026-11-02 is a Monday: Saturday 31/10 back to Thursday 29/10.
-    expect(pickSimulationDates("2026-11-02", 3, everyDay)).toEqual(["2026-10-29", "2026-10-30", "2026-10-31"]);
+    expect(pickSimulationDates("2026-11-02", 3, { hasTrips: everyDay })).toEqual({
+      dates: ["2026-10-29", "2026-10-30", "2026-10-31"],
+      leftAlone: [],
+    });
   });
 
   it("skips Sundays and days without trips", () => {
-    const dates = pickSimulationDates("2026-11-02", 20, (date) => date !== "2026-10-27");
+    const { dates } = pickSimulationDates("2026-11-02", 20, { hasTrips: (date) => date !== "2026-10-27" });
     expect(dates).toHaveLength(20);
     expect(dates.some((date) => isoWeekday(date) === 7)).toBe(false);
     expect(dates).not.toContain("2026-10-27");
@@ -61,9 +64,24 @@ describe("pickSimulationDates", () => {
     expect([...dates].sort()).toEqual(dates);
   });
 
+  it("passes over the dates holding foreign rows and still finds `count` days (the seed's Monday)", () => {
+    // Tuesday 3 November 2026: the seed generated Monday 2/11 onwards.
+    const { dates, leftAlone } = pickSimulationDates("2026-11-03", 20, {
+      hasTrips: everyDay,
+      foreignDates: new Set(["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-01", "2026-10-20"]),
+    });
+    expect(dates).toHaveLength(20);
+    expect(dates.at(-1)).toBe("2026-10-31");
+    expect(dates).not.toContain("2026-11-02");
+    expect(dates).not.toContain("2026-10-20");
+    expect(dates[0]).toBe("2026-10-08");
+    // Sunday 1/11 is never simulated anyway; today and later are never looked at.
+    expect(leftAlone).toEqual(["2026-10-20", "2026-11-02"]);
+  });
+
   it("stops at the lookback limit", () => {
-    expect(pickSimulationDates("2026-11-02", 20, () => false, 30)).toEqual([]);
-    expect(pickSimulationDates("2026-11-02", 20, everyDay, 7)).toHaveLength(6);
+    expect(pickSimulationDates("2026-11-02", 20, { hasTrips: () => false, maxLookbackDays: 30 }).dates).toEqual([]);
+    expect(pickSimulationDates("2026-11-02", 20, { hasTrips: everyDay, maxLookbackDays: 7 }).dates).toHaveLength(6);
   });
 });
 

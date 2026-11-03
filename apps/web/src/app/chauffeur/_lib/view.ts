@@ -36,6 +36,11 @@ export type StopView = {
   completedMinute: number | null;
   /** Real minus planned time, null when not recorded. */
   lateMinutes: number | null;
+  /**
+   * First name of the other crew member when they recorded the status (pickup,
+   * dropoff or absence); null when the signed-in driver did, or when unknown.
+   */
+  recordedBy: string | null;
   address: string;
   lat: number;
   lng: number;
@@ -128,6 +133,10 @@ export function buildRouteView(
   const shared = coPassengers(like);
   const onBoard = onBoardAfterStops(like);
   const nameOfTrip = new Map(route.stops.map((stop) => [stop.tripId, displayName(stop.trip.patient)]));
+  const isDriver = route.driverId === driverId;
+  const partner = isDriver ? route.crewMate : route.driver;
+  const partnerId = isDriver ? route.crewMateId : route.driverId;
+  const partnerFirstName = partner && partnerId && partnerId !== driverId ? partner.firstName.trim() || null : null;
 
   const stops: StopView[] = [...route.stops]
     .sort((a, b) => a.sequence - b.sequence)
@@ -144,6 +153,10 @@ export function buildRouteView(
         plannedMinute: stop.startMinute,
         completedMinute: stop.completedAt ? minuteOfDay(stop.completedAt) : null,
         lateMinutes: stop.completedAt ? minutesLate(stop.startMinute, stop.completedAt) : null,
+        recordedBy:
+          (state === "done" || state === "no_show") && partnerId && stop.completedBy?.driverId === partnerId
+            ? partnerFirstName
+            : null,
         address: stop.address,
         lat: stop.lat,
         lng: stop.lng,
@@ -177,8 +190,6 @@ export function buildRouteView(
       };
     });
 
-  const isDriver = route.driverId === driverId;
-  const partner = isDriver ? route.crewMate : route.driver;
   const plannedBreak =
     route.breakStartMinute !== null && route.breakEndMinute !== null
       ? { startMinute: route.breakStartMinute, endMinute: route.breakEndMinute }

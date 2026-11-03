@@ -4,27 +4,22 @@ import { toIsoDate } from "@/lib/time";
 
 /**
  * What grid selection reads: full rows, or the subset the optimizer request is
- * built from. createdAt and id only break same-day ties (see supersedes): a
- * caller that selects a subset of columns must keep them, or two grids
- * starting the same day fall back to input order.
+ * built from. createdAt and id only break same-day ties (see supersedes); they
+ * are required so a caller selecting a subset of columns cannot leave them out.
  */
-type DatedGrid = Pick<TariffGrid, "vehicleType" | "department" | "validFrom" | "validTo"> &
-  Partial<Pick<TariffGrid, "createdAt" | "id">>;
+type DatedGrid = Pick<TariffGrid, "vehicleType" | "department" | "validFrom" | "validTo" | "createdAt" | "id">;
 
 /**
  * Does `grid` supersede `current`? The later start wins; on the same start day
  * (e.g. a grid duplicated the same day to fix a typo) the one created last
- * wins, then the greater id, so with createdAt and id supplied the result never
- * depends on the input order. A grid without them counts as created at the
- * epoch with an empty id: between two such grids the first one in input order
- * is kept.
+ * wins, then the greater id, so the result never depends on the input order.
  */
 function supersedes(grid: DatedGrid, current: DatedGrid): boolean {
   const byStart = grid.validFrom.getTime() - current.validFrom.getTime();
   if (byStart !== 0) return byStart > 0;
-  const byCreation = (grid.createdAt?.getTime() ?? 0) - (current.createdAt?.getTime() ?? 0);
+  const byCreation = grid.createdAt.getTime() - current.createdAt.getTime();
   if (byCreation !== 0) return byCreation > 0;
-  return (grid.id ?? "") > (current.id ?? "");
+  return grid.id > current.id;
 }
 
 /**

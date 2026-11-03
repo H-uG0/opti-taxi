@@ -4,6 +4,7 @@
  */
 import type { Payer, Prisma, PrescribedMode, SharingScope, TripDirection } from "@prisma/client";
 import { z } from "zod";
+import { LAT_RANGE, LNG_RANGE } from "@/components/address/address-utils";
 import { allowedVehicleTypesFor, formatAddress, initialSharingStatus, sharingAllowedFor } from "@/lib/domain/rules";
 import { fromIsoDate, isIsoDate, isoWeekday, parseMinute, toIsoDate } from "@/lib/time";
 import { prescriptionValidOn } from "./trip-rules";
@@ -37,21 +38,61 @@ const optionalText = (max: number, message: string) =>
 
 const optionalId = optionalText(64, "Identifiant invalide.");
 
-/** Accepts "43.29" or "43,29"; empty -> undefined. */
-const optionalCoordinate = (min: number, max: number, message: string) =>
+/** "43.29" or "43,29" -> 43.29; empty, missing or not a number -> null. */
+function coordinateValue(value: string | undefined): number | null {
+  const text = value?.trim();
+  if (!text) return null;
+  const n = Number(text.replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+
+type Range = { readonly min: number; readonly max: number };
+
+const inRange = (n: number, range: Range) => n >= range.min && n <= range.max;
+
+function formatBound(value: number): string {
+  return String(value).replace(".", ",");
+}
+
+/**
+ * A typed coordinate of the destination, in metropolitan France (the ranges of
+ * the address forms): a point outside goes to the optimizer hundreds of
+ * kilometres away. Accepts "43.29" or "43,29"; empty -> undefined.
+ */
+const optionalCoordinate = (label: string, range: Range, example: string) =>
   z
     .string()
     .trim()
     .optional()
     .transform((value, ctx) => {
       if (!value) return undefined;
-      const n = Number(value.replace(",", "."));
-      if (!Number.isFinite(n) || n < min || n > max) {
-        ctx.addIssue({ code: "custom", message });
+      const n = coordinateValue(value);
+      if (n === null) {
+        ctx.addIssue({ code: "custom", message: `${label} invalide : nombre décimal attendu (ex. ${example}).` });
+        return z.NEVER;
+      }
+      if (!inRange(n, range)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `${label} invalide : hors de France métropolitaine (entre ${formatBound(range.min)} et ${formatBound(range.max)}).`,
+        });
         return z.NEVER;
       }
       return n;
     });
+
+/** Most common typing mistake on a coordinate pair, shown instead of the two range errors. */
+export const SWAPPED_COORDINATES_MESSAGE =
+  "Latitude et longitude semblent inversées (Marseille : latitude 43,30 ; longitude 5,37).";
+
+/** Latitude typed as longitude and the reverse: the pair is outside France, the swapped pair inside. */
+function looksSwapped(rawLat: string | undefined, rawLng: string | undefined): boolean {
+  const lat = coordinateValue(rawLat);
+  const lng = coordinateValue(rawLng);
+  if (lat === null || lng === null) return false;
+  const inFrance = (la: number, lo: number) => inRange(la, LAT_RANGE) && inRange(lo, LNG_RANGE);
+  return !inFrance(lat, lng) && inFrance(lng, lat);
+}
 
 const isoDateField = z
   .string({ error: "Choisissez une date." })
@@ -99,8 +140,8 @@ const newTripSchema = z.object({
   direction: z.enum(["OUTBOUND", "RETURN"], { error: "Choisissez le sens de la course." }),
   facilityId: optionalId,
   destinationAddress: optionalText(200, "Adresse trop longue (200 caractères au plus)."),
-  destinationLat: optionalCoordinate(-90, 90, "Latitude invalide (ex. 43.2965)."),
-  destinationLng: optionalCoordinate(-180, 180, "Longitude invalide (ex. 5.3698)."),
+  destinationLat: optionalCoordinate("Latitude", LAT_RANGE, "43,2965"),
+  destinationLng: optionalCoordinate("Longitude", LNG_RANGE, "5,3698"),
   serviceDate: isoDateField,
   time: minuteField,
   notes: optionalText(500, "Note trop longue (500 caractères au plus)."),
@@ -119,7 +160,8 @@ function addError(errors: FieldErrors, field: string, message: string) {
  * values so every error shows at once:
  * - a CPAM trip needs a prescription and a care facility;
  * - a private trip goes to a facility or to a free address;
- * - free coordinates come as a latitude + longitude pair;
+ * - free coordinates come as a latitude + longitude pair, in metropolitan
+ *   France; a pair typed the wrong way round is reported as such;
  * - no trip in the past.
  */
 export function parseNewTrip(raw: NewTripValues, todayIso: string): ParseResult<NewTripInput> {
@@ -140,6 +182,10 @@ export function parseNewTrip(raw: NewTripValues, todayIso: string): ParseResult<
     if (filled("destinationLat") !== filled("destinationLng")) {
       addError(errors, filled("destinationLat") ? "destinationLng" : "destinationLat", "Saisissez la latitude et la longitude.");
     }
+  }
+  if (looksSwapped(raw.destinationLat, raw.destinationLng)) {
+    errors.destinationLat = [SWAPPED_COORDINATES_MESSAGE];
+    delete errors.destinationLng;
   }
   const date = raw.serviceDate?.trim();
   if (date && isIsoDate(date) && date < todayIso) {

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatMinute, todayIso, toIsoDate } from "@/lib/time";
@@ -19,7 +20,7 @@ export default async function EditRecurrencePage({
 }: {
   params: Promise<{ id: string; recurrenceId: string }>;
 }) {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const { id, recurrenceId } = await params;
   const recurrence = await db.recurrence.findFirst({
     where: { id: recurrenceId, patientId: id },
@@ -27,6 +28,8 @@ export default async function EditRecurrencePage({
   });
   if (!recurrence) notFound();
   const { patient } = recurrence;
+  // Care facility and treatment schedule of an identified patient are shown in the form (traced on the patient).
+  await auditRead(user, { action: "recurrence.view", entity: "Patient", entityId: patient.id });
 
   const today = todayIso();
   const [{ facilities, prescriptions }, openTrips] = await Promise.all([

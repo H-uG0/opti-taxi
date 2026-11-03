@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { StopKind, TripStatus } from "@prisma/client";
-import { decideStopAction, stopControls, type StopAction, type StopSnapshot } from "./transitions";
+import {
+  decideStopAction,
+  STOP_AUDIT_ACTIONS,
+  stopAuditAction,
+  stopControls,
+  stopWrite,
+  type StopAction,
+  type StopSnapshot,
+} from "./transitions";
 
 const NOW = new Date("2026-11-02T08:15:00Z");
 const EARLIER = new Date("2026-11-02T07:50:00Z");
@@ -128,6 +136,40 @@ describe("decideStopAction: undo", () => {
       type: "refuse",
       reason: "CANCELLED",
     });
+  });
+});
+
+describe("stopWrite", () => {
+  const USER = "user_1";
+  const applied = (action: StopAction, stop: StopSnapshot) => {
+    const decision = decideStopAction(action, stop, NOW);
+    if (decision.type !== "apply") throw new Error(`${action} should apply`);
+    return stopWrite(decision, USER);
+  };
+
+  it("records who set the status with its time", () => {
+    expect(applied("PICKUP", snapshot("PICKUP", "ASSIGNED"))).toEqual({ completedAt: NOW, completedById: USER });
+    expect(applied("DROPOFF", snapshot("DROPOFF", "PICKED_UP"))).toEqual({ completedAt: NOW, completedById: USER });
+    expect(applied("NO_SHOW", snapshot("PICKUP", "ASSIGNED"))).toEqual({ completedAt: NOW, completedById: USER });
+  });
+
+  it("clears the author with the time on undo", () => {
+    expect(applied("UNDO", snapshot("PICKUP", "PICKED_UP", EARLIER, true))).toEqual({ completedAt: null, completedById: null });
+    expect(applied("UNDO", snapshot("DROPOFF", "DROPPED_OFF", EARLIER, true))).toEqual({ completedAt: null, completedById: null });
+  });
+});
+
+describe("STOP_AUDIT_ACTIONS / stopAuditAction", () => {
+  it("names one audit action per status action (an undo depends on the stop kind)", () => {
+    expect(STOP_AUDIT_ACTIONS).toEqual({ PICKUP: "stop.pickup", DROPOFF: "stop.dropoff", NO_SHOW: "stop.no_show" });
+  });
+
+  it("names the stop kind an undo reverts", () => {
+    expect(stopAuditAction("PICKUP", "PICKUP")).toBe("stop.pickup");
+    expect(stopAuditAction("NO_SHOW", "PICKUP")).toBe("stop.no_show");
+    expect(stopAuditAction("DROPOFF", "DROPOFF")).toBe("stop.dropoff");
+    expect(stopAuditAction("UNDO", "PICKUP")).toBe("stop.undo_pickup");
+    expect(stopAuditAction("UNDO", "DROPOFF")).toBe("stop.undo_dropoff");
   });
 });
 

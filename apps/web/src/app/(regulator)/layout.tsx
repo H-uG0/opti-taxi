@@ -16,7 +16,11 @@ export default async function RegulatorLayout({ children }: { children: React.Re
         <div className="mt-auto border-t border-slate-200 px-5 py-3 text-sm">
           <p className="truncate font-medium text-slate-800">{user.name}</p>
           <form action={logout}>
-            <button type="submit" className="text-xs text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline">
+            <button
+              type="submit"
+              title="Ferme la session sur tous vos appareils"
+              className="text-xs text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline"
+            >
               Se déconnecter
             </button>
           </form>
@@ -26,7 +30,7 @@ export default async function RegulatorLayout({ children }: { children: React.Re
         <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 lg:hidden print:hidden">
           <p className="font-semibold text-slate-900">Opti-Taxi</p>
           <form action={logout}>
-            <button type="submit" className="text-sm text-slate-600">
+            <button type="submit" title="Ferme la session sur tous vos appareils" className="text-sm text-slate-600">
               Déconnexion
             </button>
           </form>

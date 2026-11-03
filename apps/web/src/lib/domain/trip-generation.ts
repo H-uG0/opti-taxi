@@ -5,7 +5,7 @@
  *
  * No server-only import: the seed calls generateTrips with its own client.
  */
-import type { Prisma, PrismaClient, PrescribedMode, RecurrenceLegs, SharingScope } from "@prisma/client";
+import type { Prisma, PrescribedMode, RecurrenceLegs, SharingScope } from "@prisma/client";
 import { addDays, fromIsoDate, isoWeekday, toIsoDate } from "@/lib/time";
 import { allowedVehicleTypesFor, formatAddress, initialSharingStatus, sharingAllowedFor } from "./rules";
 
@@ -96,9 +96,12 @@ export function planTripsFromRecurrences(
   return trips;
 }
 
-/** Creates the missing trips of [fromIso, toIso]. Existing trips (even edited or cancelled) are left untouched. */
+/**
+ * Creates the missing trips of [fromIso, toIso]. Existing trips (even edited or cancelled) are left untouched.
+ * Takes a transaction client (a full PrismaClient also fits) so callers can run it with their audit event.
+ */
 export async function generateTrips(
-  prisma: PrismaClient,
+  prisma: Prisma.TransactionClient,
   fromIso: string,
   toIso: string,
 ): Promise<{ planned: number; created: number }> {

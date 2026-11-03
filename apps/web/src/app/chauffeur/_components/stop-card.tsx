@@ -262,6 +262,8 @@ function ClosedStopCard({ stop }: { stop: StopView }) {
           <span className="min-w-0 flex-1">
             <span className={cn("block truncate text-sm font-semibold", stop.state === "no_show" ? "text-red-800" : "text-slate-700")}>
               {label}
+              {/* Status recorded from the other crew member's phone. */}
+              {stop.recordedBy ? <span className="font-normal text-slate-600"> · par {stop.recordedBy}</span> : null}
             </span>
             <span className="block truncate text-sm text-slate-600">{stop.patient}</span>
           </span>
@@ -275,6 +277,7 @@ function ClosedStopCard({ stop }: { stop: StopView }) {
               <>
                 {" "}
                 · saisie à <span className="tabular font-semibold">{formatMinute(stop.completedMinute)}</span>
+                {stop.recordedBy ? <> par {stop.recordedBy}</> : null}
                 <Lateness minutes={stop.lateMinutes} />
               </>
             ) : null}

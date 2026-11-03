@@ -1,21 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { hashPassword, lockedPasswordHash, verifyPassword } from "./password";
-import { passwordVersion } from "./session-check";
+import { hashPassword, verifyPassword } from "./password";
 
-describe("lockedPasswordHash", () => {
-  it("is a bcrypt hash that the previous password no longer matches, and changes the session fingerprint", async () => {
-    const previous = await hashPassword("ancien-mot-de-passe");
-    const locked = await lockedPasswordHash();
-    expect(locked).toMatch(/^\$2[aby]\$10\$/);
-    expect(await verifyPassword("ancien-mot-de-passe", previous)).toBe(true);
-    expect(await verifyPassword("ancien-mot-de-passe", locked)).toBe(false);
-    expect(await verifyPassword("", locked)).toBe(false);
-    expect(passwordVersion(locked)).not.toBe(passwordVersion(previous));
-  });
-
-  it("draws a new secret every time", async () => {
-    const [a, b] = await Promise.all([lockedPasswordHash(), lockedPasswordHash()]);
+describe("hashPassword / verifyPassword", () => {
+  it("stores a salted bcrypt hash that only the same password matches", async () => {
+    const [a, b] = await Promise.all([hashPassword("mot-de-passe-du-chauffeur"), hashPassword("mot-de-passe-du-chauffeur")]);
+    expect(a).toMatch(/^\$2[aby]\$10\$/);
     expect(a).not.toBe(b);
-    expect(passwordVersion(a)).not.toBe(passwordVersion(b));
+    expect(await verifyPassword("mot-de-passe-du-chauffeur", a)).toBe(true);
+    expect(await verifyPassword("mot-de-passe-du-chauffeuR", a)).toBe(false);
+    expect(await verifyPassword("", a)).toBe(false);
   });
 });

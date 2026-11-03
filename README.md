@@ -57,9 +57,20 @@ docker compose up -d --build optimizer
 cd services/optimizer && python -m venv .venv && .venv/Scripts/pip install -e ".[dev]"
 .venv/Scripts/python -m uvicorn app.main:app --port 8100
 
-# 4. Lancer le web
+# 4. Historique fictif (facultatif, l'optimiseur doit tourner)
+pnpm db:history                               # 20 jours ouvrés passés, pour le tableau de bord
+
+# 5. Lancer le web
 pnpm dev                                      # http://localhost:3100
 ```
+
+`pnpm db:history [--days N] [--budget S]` simule les N jours ouvrés précédant aujourd'hui (20 par
+défaut) avec les modules de l'application : génération des courses, optimisation, réponses de partage,
+annulations, absences, horaires réels des chauffeurs, validation, journal d'audit. Il ne touche jamais
+aujourd'hui ni les jours suivants, laisse tels quels les jours qui contiennent des données qu'il n'a pas
+créées (les jours du seed, un jour planifié dans l'application) et remonte d'autant, et peut être
+relancé (il remplace sa simulation précédente). Comme le seed, il refuse une base qui n'est pas locale
+ou qui contient des comptes étrangers au jeu fictif (`@opti-taxi.test`). Compter environ 5 minutes.
 
 ### Comptes de développement (créés par le seed, données fictives)
 
@@ -79,12 +90,62 @@ pnpm lint
 pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
 ```
 
-## Données de santé
+## Données de santé et sécurité
 
 - Jamais de vraies données patients en développement : le seed génère des identités et adresses inventées.
 - Production : hébergeur certifié HDS obligatoire, conformité RGPD.
 - Le géocodage n'envoie que l'adresse saisie (jamais le nom du patient) à la Base Adresse Nationale (IGN Géoplateforme) ; il se désactive en vidant `GEOCODER_URL`.
 - La PWA chauffeur ne met aucune page en cache hors ligne (téléphone perdu = pas de données patients).
+- **Sessions** : jeton signé de 12 h, revérifié en base à chaque requête. La déconnexion ferme les
+  sessions du compte sur tous ses appareils. Désactiver un chauffeur ou son accès, ou lui donner un
+  nouveau mot de passe ou une nouvelle adresse e-mail, coupe sa session ouverte dès sa prochaine action
+  ou actualisation ; une réactivation ne la fait pas revenir (le chauffeur se reconnecte).
+- **Connexion** : après 5 échecs en 15 minutes sur une même adresse e-mail, la connexion à ce compte
+  est refusée pendant 15 minutes ; après 30 tentatives en 5 minutes depuis une même adresse IP, elle est
+  refusée depuis cette adresse pendant 5 minutes. Le message est le même que le compte existe ou non.
+  L'adresse IP n'est prise en compte que derrière un proxy déclaré par `TRUSTED_PROXY_HOPS` (1 derrière
+  nginx) ; sinon toutes les connexions partagent un seul compteur (120 tentatives en 5 minutes), ce que
+  le serveur signale au démarrage en production. Revers assumé : quiconque connaît l'adresse e-mail
+  d'un compte peut en bloquer la connexion 15 minutes, de façon renouvelable ; le blocage, en mémoire,
+  se lève aussi en redémarrant le serveur web.
+- **Journal d'audit** (table `AuditEvent`) : les connexions et déconnexions ; les consultations
+  (liste des patients, fiche patient et ses formulaires, fiche établissement, liste des courses,
+  planning d'un jour, feuille de route, arrivées partagées) ; qui a créé, modifié, annulé ou déplacé un patient, une prescription,
+  une récurrence, un établissement, une course, une tournée, un chauffeur ou un compte, et qui a saisi
+  ou annulé une prise en charge, une dépose ou une absence. Il ne contient que des identifiants, jamais
+  de nom, d'adresse ni de note. L'auteur d'une prise en charge, d'une absence ou d'une réponse de
+  partage est aussi affiché sur la course (Courses et Planning).
+- **Journaux serveur** : les erreurs, y compris celles que Next.js journalise lui-même, sont écrites
+  sans les arguments des requêtes Prisma (qui contiendraient adresses et notes).
+- **En-têtes** : Content-Security-Policy avec nonce par requête, Permissions-Policy,
+  Cross-Origin-Opener-Policy, X-Frame-Options, X-Content-Type-Options, Referrer-Policy ; en production aussi HSTS (2 ans,
+  sous-domaines inclus). En production, le cookie de session s'appelle `__Host-ot_session` et le
+  serveur s'arrête au démarrage si `SESSION_SECRET` est l'exemple fourni ou fait moins de 43
+  caractères (`openssl rand -base64 48`).
+- **Scripts de développement** : `pnpm db:seed`, `pnpm db:reset` et `pnpm db:history` refusent une
+  base qui n'est pas sur cette machine ou qui contient des comptes étrangers au jeu fictif
+  (`SEED_ALLOW_WIPE=1` pour passer outre, jamais avec `NODE_ENV=production`).
+
+## Limites connues
+
+- **Distances** : sans OSRM, les temps et distances sont estimés à vol d'oiseau (× 1,3 et vitesses
+  moyennes), ce que l'interface signale. Brancher OSRM (`docker compose --profile osrm`, voir
+  `infra/osrm`) avant tout usage réel.
+- **Temps de calcul** : 10 s par défaut, relevés automatiquement pour les grosses journées
+  (1 s pour 8 courses, 600 s au plus). Sur une machine chargée, quelques courses peuvent rester non
+  affectées : relancer « Optimiser demain » ou augmenter le temps dans Paramètres.
+- **Marge estimée** : sur les données fictives, elle est proche de zéro ou négative (de l'ordre de
+  −5 000 € sur les 20 jours simulés), car le coût horaire des chauffeurs est compté sur toute
+  l'amplitude de la tournée et les grilles tarifaires du seed sont inventées. Elle ne vaut que par
+  comparaison entre deux plannings ; les vraies grilles CPAM et les vrais coûts se saisissent dans
+  Tarifs, Véhicules et Chauffeurs.
+- **Limites de débit** (connexion, géocodage) : en mémoire, valables pour une seule instance du web.
+  Sur l'hébergeur HDS, les compléter au niveau du proxy : nginx `limit_req` sur toutes les requêtes
+  POST (une Server Action répond à n'importe quelle URL de page, une règle sur `POST /login` seule se
+  contourne), `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`, `next start -H 127.0.0.1`,
+  `TRUSTED_PROXY_HOPS=1`, et HTTPS obligatoire (le cookie de session est Secure). Exemple de
+  configuration en tête de `apps/web/src/lib/auth/rate-limit.ts`.
+- **Journal d'audit** : pas encore d'écran pour le consulter (Prisma Studio ou SQL).
 
 ## Hors périmètre du MVP
 

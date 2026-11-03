@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { OptimizeRequest, PlanResponse, PlanRoute, TripResult } from "@/lib/optimizer/contract";
 import type { RouteRow } from "@/lib/optimizer/persist";
 import {
@@ -828,11 +828,23 @@ describe("refreshRoutes", () => {
   it("reports an optimizer error as a failure, not as unavailable, and goes on with the next dates", async () => {
     const { prisma, writes } = fakePrisma([r1, r3], []);
     let calls = 0;
+    // FastAPI's 422 detail quotes the rejected input: trip and patient ids, coordinates.
+    const detail = 'HTTP 422 : [{"input":{"id":"B","patientId":"pat_42","pickup":{"lat":43.2965,"lng":5.3698}}}]';
     const evaluate = async (): Promise<EvaluateResult> => {
       calls += 1;
-      return { ok: false, error: "HTTP 422", reason: "error" };
+      return { ok: false, error: detail, reason: "error" };
     };
-    expect(await refreshRoutes({ prisma, evaluate }, ["r1", "r3"])).toEqual(outcome({ kept: 2, failed: true }));
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await refreshRoutes({ prisma, evaluate }, ["r1", "r3"])).toEqual(outcome({ kept: 2, failed: true }));
+      expect(warnings.mock.calls).toEqual([
+        ["[planning] routes not recomputed", { serviceDate: "2026-11-02", reason: "error" }],
+        ["[planning] routes not recomputed", { serviceDate: "2026-11-03", reason: "error" }],
+      ]);
+      expect(JSON.stringify(warnings.mock.calls)).not.toContain("pat_42");
+    } finally {
+      warnings.mockRestore();
+    }
     expect(calls).toBe(2);
     expect(writes).toEqual([]);
   });
@@ -901,5 +913,37 @@ describe("refreshRoutes", () => {
     };
     expect(await refreshRoutes({ prisma, evaluate, now: NOW }, ["r1"])).toEqual(outcome({ kept: 1 }));
     expect(writes).toEqual([]);
+  });
+
+  it("reports a database error as a failure and logs it without the query arguments", async () => {
+    // Prisma errors print the query invocation, addresses included.
+    const dbError = Object.assign(new Error('Invalid `prisma.trip.findMany()` invocation: { pickupAddress: "12 rue des Lilas" }'), {
+      name: "PrismaClientKnownRequestError",
+      code: "P2028",
+    });
+    const evaluate = async (): Promise<EvaluateResult> => {
+      throw new Error("not called");
+    };
+    const { prisma } = fakePrisma([r1, r3], []);
+    const failing = (overrides: object) => ({ ...(prisma as object), ...overrides }) as unknown as PrismaClient;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const reading = failing({ route: { findMany: async () => Promise.reject(dbError) } });
+      expect(await refreshRoutes({ prisma: reading, evaluate }, ["r1"])).toEqual(outcome({ kept: 1, failed: true }));
+      // Loading a date fails (settings read): that date is kept, the next one is still tried.
+      const loading = failing({ appSettings: { upsert: async () => Promise.reject(dbError) } });
+      expect(await refreshRoutes({ prisma: loading, evaluate }, ["r1", "r3"])).toEqual(outcome({ kept: 2, failed: true }));
+
+      // Stack frames only ("    at …" lines): the message, with the address, never reaches the log.
+      const prismaFields = { name: "PrismaClientKnownRequestError", code: "P2028", stack: expect.stringMatching(/^\s+at /) };
+      expect(errors.mock.calls).toEqual([
+        ["[planning] reading the routes to recompute failed", { routes: 1, ...prismaFields }],
+        ["[planning] recomputing routes failed", { serviceDate: "2026-11-02", routes: 1, ...prismaFields }],
+        ["[planning] recomputing routes failed", { serviceDate: "2026-11-03", routes: 1, ...prismaFields }],
+      ]);
+      expect(JSON.stringify(errors.mock.calls)).not.toContain("rue des Lilas");
+    } finally {
+      errors.mockRestore();
+    }
   });
 });

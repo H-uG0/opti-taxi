@@ -66,6 +66,23 @@ export type VehicleRowView = {
   route: RouteView | null;
 };
 
+/**
+ * Who recorded something and when: the patient's sharing answer (regulator)
+ * or a stop status (crew). `byName` is null when the account is unknown
+ * (recorded before the audit trail, or account deleted since).
+ */
+export type RecordedByView = {
+  /** Real instant of the record (ISO). */
+  at: string;
+  byName: string | null;
+};
+
+/** A stop of the trip whose status the crew recorded on the roadmap. */
+export type FieldRecordView = RecordedByView & {
+  stopId: string;
+  kind: StopKind;
+};
+
 export type TripView = {
   id: string;
   direction: TripDirection;
@@ -82,6 +99,10 @@ export type TripView = {
   allowedVehicleTypes: VehicleType[];
   sharingAllowed: boolean;
   sharingStatus: SharingStatus;
+  /** When and by whom the patient's answer was last recorded; null when none was (kept after a reset, as on /courses). */
+  sharingAnswer: RecordedByView | null;
+  /** Pick-up (or absence) and drop-off recorded by the crew, in route order; empty before the trip starts. */
+  fieldRecords: FieldRecordView[];
   lockedVehicleId: string | null;
   /** Vehicle of the route the trip is in, null when unassigned. */
   vehicleId: string | null;

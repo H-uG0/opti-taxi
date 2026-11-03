@@ -15,7 +15,18 @@ type Action = (state: FormState, formData: FormData) => Promise<FormState>;
  * Fields are controlled: a server error keeps what was typed, a successful
  * save clears the password fields.
  */
-export function AccountForm({ action, email: savedEmail, hasAccount }: { action: Action; email: string; hasAccount: boolean }) {
+export function AccountForm({
+  action,
+  email: savedEmail,
+  hasAccount,
+  accountActive,
+}: {
+  action: Action;
+  email: string;
+  hasAccount: boolean;
+  /** Whether the existing account can sign in (ignored without an account). */
+  accountActive: boolean;
+}) {
   const [state, setState] = useState<FormState>(IDLE_STATE);
   const [email, setEmail] = useState(savedEmail);
   const [password, setPassword] = useState("");
@@ -124,6 +135,13 @@ export function AccountForm({ action, email: savedEmail, hasAccount }: { action:
       {generated ? (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" role="status">
           Notez ce mot de passe pour le communiquer au chauffeur : il ne sera plus affiché après l&apos;enregistrement.
+        </p>
+      ) : null}
+      {hasAccount ? (
+        <p className="text-xs text-slate-500">
+          {accountActive
+            ? "Changer l'adresse ou le mot de passe déconnecte le chauffeur : il se reconnecte avec ses nouveaux identifiants."
+            : "L'accès est désactivé : les identifiants modifiés serviront une fois l'accès réactivé."}
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">

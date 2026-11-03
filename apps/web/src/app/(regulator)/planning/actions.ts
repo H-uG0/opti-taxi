@@ -2,13 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { loadVehicleInputs, personName, resolveVehicleAvailability } from "@/lib/optimizer/build-request";
 import { readRunDetails } from "@/lib/optimizer/run-details";
+import { LOCKED, lockAction, notLockedOn } from "@/lib/planning/lock";
 import {
   OPTIMIZATION_IN_PROGRESS_ERROR,
   optimizationInProgress,
+  PLANNING_TX_OPTIONS,
   replanBlocker,
   runOptimization,
 } from "@/lib/planning/run-optimization";
@@ -40,7 +43,7 @@ export async function optimizeDay(date: string): Promise<PlanningActionResult> {
   const parsed = dateSchema.safeParse(date);
   if (!parsed.success) return INVALID_DATE;
 
-  const outcome = await runOptimization(parsed.data, user.id);
+  const outcome = await runOptimization(parsed.data, user);
   refreshPages();
   return outcome.ok ? { ok: true, message: outcome.message } : { ok: false, error: outcome.error };
 }
@@ -98,17 +101,31 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
   if (await optimizationInProgress(isoDate)) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
 
   const who = personName(trip.patient);
-  await db.trip.update({ where: { id: trip.id }, data: { lockedVehicleId: target.id } });
-  const outcome = await runOptimization(isoDate, user.id, {
+  const traced = { entity: "Trip", entityId: trip.id, serviceDate: isoDate } as const;
+  // Already locked on the target: nothing to write or trace, the day is still re-optimized.
+  const moved = await db.$transaction(async (tx) => {
+    const { count } = await tx.trip.updateMany({
+      where: { id: trip.id, ...notLockedOn(target.id) },
+      data: { lockedVehicleId: target.id },
+    });
+    if (count > 0) await audit(tx, user, { action: "trip.move", ...traced });
+    return count > 0;
+  }, PLANNING_TX_OPTIONS);
+  const outcome = await runOptimization(isoDate, user, {
     move: { tripId: trip.id, vehicleId: target.id, vehicleLabel: target.label, patientName: who },
   });
   if (!outcome.ok && outcome.moveRejected) {
-    // Undo the lock (unless it was changed meanwhile) so the next optimization does not keep the trip unassigned.
-    if (trip.lockedVehicleId !== target.id) {
-      await db.trip.updateMany({
-        where: { id: trip.id, lockedVehicleId: target.id },
-        data: { lockedVehicleId: trip.lockedVehicleId },
-      });
+    // Undo the lock this move set (unless it was changed meanwhile) so the next optimization does not keep the trip unassigned.
+    // The undo is a change of its own, traced as the lock or unlock it amounts to.
+    if (moved) {
+      const previousLock = trip.lockedVehicleId;
+      await db.$transaction(async (tx) => {
+        const { count } = await tx.trip.updateMany({
+          where: { id: trip.id, lockedVehicleId: target.id },
+          data: { lockedVehicleId: previousLock },
+        });
+        if (count > 0) await audit(tx, user, { action: lockAction(previousLock), ...traced });
+      }, PLANNING_TX_OPTIONS);
     }
     refreshPages();
     return { ok: false, error: outcome.error };
@@ -122,13 +139,18 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
 
 /** « Figer » : keep the trip on the vehicle of its current route at the next optimization. */
 export async function lockTrip(tripId: string): Promise<PlanningActionResult> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const id = idSchema.safeParse(tripId);
   if (!id.success) return UNKNOWN_TRIP;
 
   const trip = await db.trip.findUnique({
     where: { id: id.data },
-    select: { id: true, status: true, route: { select: { vehicleId: true, vehicle: { select: { label: true } } } } },
+    select: {
+      id: true,
+      serviceDate: true,
+      status: true,
+      route: { select: { vehicleId: true, vehicle: { select: { label: true } } } },
+    },
   });
   if (!trip) return UNKNOWN_TRIP;
   if (trip.status === "CANCELLED" || trip.status === "NO_SHOW") {
@@ -137,23 +159,37 @@ export async function lockTrip(tripId: string): Promise<PlanningActionResult> {
   if (!trip.route) {
     return { ok: false, error: "Cette course n'est sur aucune tournée : utilisez « Déplacer vers… » pour la placer et la figer." };
   }
-  await db.trip.update({ where: { id: trip.id }, data: { lockedVehicleId: trip.route.vehicleId } });
+  const vehicleId = trip.route.vehicleId;
+  // Traced only when the lock changes (not when already locked there, e.g. from a stale panel).
+  await db.$transaction(async (tx) => {
+    const { count } = await tx.trip.updateMany({
+      where: { id: trip.id, ...notLockedOn(vehicleId) },
+      data: { lockedVehicleId: vehicleId },
+    });
+    if (count > 0) {
+      await audit(tx, user, { action: "trip.lock", entity: "Trip", entityId: trip.id, serviceDate: toIsoDate(trip.serviceDate) });
+    }
+  }, PLANNING_TX_OPTIONS);
   refreshPages();
   return { ok: true, message: `Course figée sur ${trip.route.vehicle.label} : elle y restera à la prochaine optimisation.` };
 }
 
 /** « Défiger » : let the optimizer move the trip again. */
 export async function unlockTrip(tripId: string): Promise<PlanningActionResult> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const id = idSchema.safeParse(tripId);
   if (!id.success) return UNKNOWN_TRIP;
 
-  const trip = await db.trip.findUnique({ where: { id: id.data }, select: { id: true, lockedVehicleId: true } });
+  const trip = await db.trip.findUnique({ where: { id: id.data }, select: { id: true, serviceDate: true } });
   if (!trip) return UNKNOWN_TRIP;
-  if (trip.lockedVehicleId) {
-    await db.trip.update({ where: { id: trip.id }, data: { lockedVehicleId: null } });
-    refreshPages();
-  }
+  // Conditional write: two concurrent « Défiger » change the row, and trace it, once.
+  await db.$transaction(async (tx) => {
+    const { count } = await tx.trip.updateMany({ where: { id: trip.id, ...LOCKED }, data: { lockedVehicleId: null } });
+    if (count > 0) {
+      await audit(tx, user, { action: "trip.unlock", entity: "Trip", entityId: trip.id, serviceDate: toIsoDate(trip.serviceDate) });
+    }
+  }, PLANNING_TX_OPTIONS);
+  refreshPages();
   return { ok: true, message: "Course défigée : la prochaine optimisation pourra la changer de véhicule." };
 }
 
@@ -163,7 +199,7 @@ export async function unlockTrip(tripId: string): Promise<PlanningActionResult> 
  * route, the regulator must confirm explicitly (`confirmed`).
  */
 export async function validateDay(date: string, confirmed: boolean): Promise<PlanningActionResult> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const parsed = dateSchema.safeParse(date);
   if (!parsed.success) return INVALID_DATE;
   const isoDate = parsed.data;
@@ -199,27 +235,34 @@ export async function validateDay(date: string, confirmed: boolean): Promise<Pla
     return { ok: false, needsConfirmation: true, error: `Le planning comporte ${issues.join(", ")}. Valider quand même ?` };
   }
 
-  await db.route.updateMany({
-    where: { serviceDate, status: "PROPOSED" },
-    data: { status: "VALIDATED", validatedAt: new Date() },
-  });
+  await db.$transaction(async (tx) => {
+    const { count } = await tx.route.updateMany({
+      where: { serviceDate, status: "PROPOSED" },
+      data: { status: "VALIDATED", validatedAt: new Date() },
+    });
+    if (count > 0) await audit(tx, user, { action: "plan.validate", entity: "Route", entityId: null, serviceDate: isoDate });
+  }, PLANNING_TX_OPTIONS);
   refreshPages();
   return { ok: true, message: `Planning du ${formatLongDate(isoDate)} validé (${plural(routes, "tournée")}).` };
 }
 
 /** « Rouvrir » : back to PROPOSED so the day can be adjusted and re-optimized. */
 export async function reopenDay(date: string): Promise<PlanningActionResult> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const parsed = dateSchema.safeParse(date);
   if (!parsed.success) return INVALID_DATE;
   const isoDate = parsed.data;
   if (isoDate < todayIso()) return { ok: false, error: `Le ${formatLongDate(isoDate)} est passé.` };
   if (await optimizationInProgress(isoDate)) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
 
-  const { count } = await db.route.updateMany({
-    where: { serviceDate: fromIsoDate(isoDate), status: "VALIDATED" },
-    data: { status: "PROPOSED", validatedAt: null },
-  });
+  const count = await db.$transaction(async (tx) => {
+    const reopened = await tx.route.updateMany({
+      where: { serviceDate: fromIsoDate(isoDate), status: "VALIDATED" },
+      data: { status: "PROPOSED", validatedAt: null },
+    });
+    if (reopened.count > 0) await audit(tx, user, { action: "plan.reopen", entity: "Route", entityId: null, serviceDate: isoDate });
+    return reopened.count;
+  }, PLANNING_TX_OPTIONS);
   if (count === 0) return { ok: false, error: "Aucune tournée validée à rouvrir ce jour." };
   refreshPages();
   return { ok: true, message: `Planning du ${formatLongDate(isoDate)} rouvert : vous pouvez l'ajuster et le réoptimiser.` };

@@ -29,6 +29,9 @@ const runSelect = {
 
 const personSelect = { select: { firstName: true, lastName: true } } as const;
 
+/** Account that recorded a sharing answer or a stop status: its name only. */
+const recorderSelect = { select: { name: true } } as const;
+
 export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView & { timeLimitSec: number }> {
   const serviceDate = fromIsoDate(isoDate);
   const [settings, vehicles, trips, routes, lastRun, planRun] = await Promise.all([
@@ -52,6 +55,8 @@ export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView 
         detourKm: true,
         estimatedRevenue: true,
         createdAt: true,
+        sharingRespondedAt: true,
+        sharingRespondedBy: recorderSelect,
         patient: personSelect,
         facility: { select: { name: true } },
       },
@@ -89,6 +94,7 @@ export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView 
             departureMinute: true,
             loadAfter: true,
             completedAt: true,
+            completedBy: recorderSelect,
           },
         },
       },

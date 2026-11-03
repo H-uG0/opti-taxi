@@ -3,7 +3,7 @@
  * day summary, co-passengers from route stops and French messages.
  * No server-only import so vitest can cover them.
  */
-import type { SharingStatus, StopKind, TripDirection, TripStatus } from "@prisma/client";
+import type { SharingStatus, TripDirection, TripStatus } from "@prisma/client";
 import { formatShortDate, TIME_ZONE } from "@/lib/time";
 import { keyMinute, sharingConflict } from "./trip-rules";
 
@@ -211,45 +211,8 @@ export function coursesHref(date: string, filters: TripFilters = EMPTY_FILTERS):
   return `/courses?${new URLSearchParams({ date, ...filtersToParams(filters) }).toString()}`;
 }
 
-export type StopForCoPassengers = { routeId: string; tripId: string; kind: StopKind; sequence: number };
-
-/**
- * Co-passengers of each trip: trips on board at the same time in the same route,
- * read from the ordered stops (a patient is on board from its pickup to its dropoff).
- */
-export function coPassengersFromStops(stops: readonly StopForCoPassengers[]): Map<string, string[]> {
-  const byRoute = new Map<string, StopForCoPassengers[]>();
-  for (const stop of stops) {
-    const list = byRoute.get(stop.routeId);
-    if (list) list.push(stop);
-    else byRoute.set(stop.routeId, [stop]);
-  }
-
-  const links = new Map<string, Set<string>>();
-  const link = (a: string, b: string) => {
-    if (a === b) return;
-    let set = links.get(a);
-    if (!set) links.set(a, (set = new Set()));
-    set.add(b);
-  };
-
-  for (const routeStops of byRoute.values()) {
-    const onBoard = new Set<string>();
-    for (const stop of [...routeStops].sort((x, y) => x.sequence - y.sequence)) {
-      if (stop.kind === "PICKUP") {
-        for (const other of onBoard) {
-          link(stop.tripId, other);
-          link(other, stop.tripId);
-        }
-        onBoard.add(stop.tripId);
-      } else {
-        onBoard.delete(stop.tripId);
-      }
-    }
-  }
-
-  return new Map([...links].map(([tripId, set]) => [tripId, [...set]]));
-}
+// Co-passengers from the route stops: one implementation, shared with the detach of a trip.
+export { coPassengersFromStops, type StopForCoPassengers } from "@/lib/planning/detach";
 
 /** "Dupont Marie" -> "Dupont M." (compact co-passenger hint). */
 export function shortPatientName(patient: { firstName: string; lastName: string }): string {

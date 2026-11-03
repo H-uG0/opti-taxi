@@ -1,7 +1,9 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
+import { audit } from "@/lib/audit";
 import { removeTripStops } from "@/lib/planning/detach";
 import { fromIsoDate, toIsoDate } from "@/lib/time";
+import { tripCancelEvents, tripDetachEvents, type AuditActor } from "./audit-events";
 import { EMPTY_SYNC, OPEN_TRIP_STATUSES, planTripChange, type SyncSummary, type SyncTrip, type TripTarget } from "./trip-sync";
 
 /**
@@ -70,15 +72,20 @@ export async function loadOpenTrips(
  * its route has its stops removed the same way as cancelling it in « Courses »
  * (lib/planning/detach.ts); the routes it left are added to `leftRoutes`, to be
  * recomputed once the transaction has committed (lib/planning/refresh-routes.ts).
+ * Every trip cancelled is traced (one trip.cancel per trip, by `actor`) in the
+ * same transaction, and so is every trip taken off its route but kept (trip.detach).
  */
 export async function syncTrips(
   tx: Prisma.TransactionClient,
   trips: SyncTrip[],
   targetFor: (trip: SyncTrip) => TripTarget,
   todayIso: string,
-  leftRoutes?: Set<string>,
+  leftRoutes: Set<string>,
+  actor: AuditActor,
 ): Promise<SyncSummary> {
   const summary: SyncSummary = { ...EMPTY_SYNC };
+  const cancelled: SyncTrip[] = [];
+  const detachedOnly: SyncTrip[] = [];
   for (const trip of trips) {
     const decision = planTripChange(trip, targetFor(trip), todayIso);
     if (decision.type === "deferred") summary.deferred += 1;
@@ -93,22 +100,29 @@ export async function syncTrips(
     if (count === 0) continue;
     if (change.detach) {
       const { routeIds } = await removeTripStops(tx, change.tripId);
-      for (const routeId of routeIds) leftRoutes?.add(routeId);
+      for (const routeId of routeIds) leftRoutes.add(routeId);
       summary.detached += 1;
     }
-    if (change.cancel) summary.cancelled += 1;
-    else summary.updated += 1;
+    if (change.cancel) {
+      summary.cancelled += 1;
+      cancelled.push(trip);
+    } else {
+      summary.updated += 1;
+      if (change.detach) detachedOnly.push(trip);
+    }
   }
+  await audit(tx, actor, [...tripCancelEvents(cancelled), ...tripDetachEvents(detachedOnly)]);
   return summary;
 }
 
-/** Shorthand: loads the open trips matching `where` and syncs them (see syncTrips for `leftRoutes`). */
+/** Shorthand: loads the open trips matching `where` and syncs them (see syncTrips for `leftRoutes` and `actor`). */
 export async function syncOpenTrips(
   tx: Prisma.TransactionClient,
   where: Prisma.TripWhereInput,
   targetFor: (trip: SyncTrip) => TripTarget,
   todayIso: string,
-  leftRoutes?: Set<string>,
+  leftRoutes: Set<string>,
+  actor: AuditActor,
 ): Promise<SyncSummary> {
-  return syncTrips(tx, await loadOpenTrips(tx, where, todayIso), targetFor, todayIso, leftRoutes);
+  return syncTrips(tx, await loadOpenTrips(tx, where, todayIso), targetFor, todayIso, leftRoutes, actor);
 }

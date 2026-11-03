@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { Pencil } from "lucide-react";
+import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { FACILITY_TYPE_LABELS, PRESCRIBED_MODE_LABELS, RECURRENCE_LEGS_LABELS } from "@/lib/labels";
@@ -17,7 +18,6 @@ import { BackLink } from "@/app/(regulator)/patients/_components/back-link";
 import { SyncNotice } from "@/app/(regulator)/patients/_components/sync-notice";
 import { Warning } from "@/app/(regulator)/patients/_components/warning";
 import { formatWeekdays } from "@/app/(regulator)/patients/_lib/status";
-import { SYNC_PARAM } from "@/app/(regulator)/patients/_lib/trip-sync";
 import { setFacilityActive } from "../actions";
 
 export const metadata: Metadata = { title: "Établissement" };
@@ -29,7 +29,7 @@ export default async function FacilityPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const { id } = await params;
   const query = await searchParams;
   const facility = await db.facility.findUnique({
@@ -46,6 +46,8 @@ export default async function FacilityPage({
     },
   });
   if (!facility) notFound();
+  // The page lists the patients treated here, with their days and times.
+  await auditRead(user, { action: "facility.view", entity: "Facility", entityId: facility.id });
 
   const recurrences = [...facility.recurrences].sort(
     (a, b) =>
@@ -89,7 +91,7 @@ export default async function FacilityPage({
           }
         />
         <div className="space-y-2">
-          <SyncNotice value={query[SYNC_PARAM]} />
+          <SyncNotice query={query} />
           {!facility.active ? (
             <Warning tone="info">
               Établissement désactivé : il n&apos;est plus proposé dans les nouvelles récurrences. Son historique est conservé.

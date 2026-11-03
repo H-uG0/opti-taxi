@@ -34,7 +34,7 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
     "pickupServiceMin": 5,              // temps d'arrêt à une prise en charge
     "dropoffServiceMin": 5,             // temps d'arrêt à une dépose
     "unassignedPenalty": 10000,         // € de pénalité par course non affectée
-    "timeLimitSec": 10                  // budget de calcul du solveur
+    "timeLimitSec": 10                  // budget de calcul du solveur, entier 1..600 s (voir plus bas)
   },
   "vehicles": [{
     "id": "veh_taxi_1",
@@ -73,6 +73,14 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
   }]
 }
 ```
+
+### Budget de calcul envoyé par le web (`settings.timeLimitSec`)
+
+Le contrat accepte tout entier de 1 à 600. Le web envoie
+`min(600, max(AppSettings.solverTimeLimitSec, ceil(trips.length / 8)))`, où `trips` est la liste
+des courses envoyées (`effectiveTimeLimitSec` dans `apps/web/src/lib/optimizer/build-request.ts`) :
+le réglage de /parametres (1 à 120 s), relevé à 1 s par tranche de 8 courses pour qu'une grosse
+journée ne soit pas coupée court.
 
 ### Fenêtres horaires dérivées (calculées par l'optimizer, une seule source de vérité)
 

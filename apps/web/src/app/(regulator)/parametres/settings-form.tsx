@@ -5,6 +5,7 @@ import { cn } from "@/components/ui/cn";
 import { Field, Fieldset, FormMessage, Input } from "@/components/ui/form";
 import { formatMinute } from "@/lib/time";
 import { IDLE_STATE, parseDecimal, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
+import { CONTRACT_MAX_TIME_LIMIT_SEC, TRIPS_PER_SOLVER_SECOND } from "@/lib/optimizer/build-request";
 import { FormFooter, UnitInput } from "../vehicules/_lib/ui";
 import { DECREE_LIMITS, MAX_SOLVER_TIME_LIMIT_SEC } from "./schema";
 
@@ -224,10 +225,10 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             <NumberInput name="unassignedPenalty" unit="€" values={values} errors={errors} />
           </Field>
           <Field
-            label="Temps de calcul maximal (s)"
+            label="Temps de calcul de base (s)"
             htmlFor="solverTimeLimitSec"
             error={errors.solverTimeLimitSec}
-            hint={`Entre 1 et ${MAX_SOLVER_TIME_LIMIT_SEC} s. Plus long : meilleures tournées possibles, mais attente plus longue après « Optimiser demain ».`}
+            hint={`Entre 1 et ${MAX_SOLVER_TIME_LIMIT_SEC} s. Relevé automatiquement à 1 s par tranche de ${TRIPS_PER_SOLVER_SECOND} courses pour les grosses journées (${CONTRACT_MAX_TIME_LIMIT_SEC} s au plus). Plus long : meilleures tournées possibles, mais attente plus longue après « Optimiser demain ».`}
           >
             <NumberInput name="solverTimeLimitSec" unit="s" integer values={values} errors={errors} />
           </Field>

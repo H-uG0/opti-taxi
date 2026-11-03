@@ -56,6 +56,8 @@ export const FIELD_BEHAVIOUR = {
   noShowWaitMin: [5, 12],
   /** Fastest catch-up: the time between two taps is at least this share of the planned drive and service time. */
   minTimeRatio: 0.8,
+  /** Two-person crew (ambulance): share of the statuses the crew mate taps rather than the driver. */
+  crewMateTaps: 0.3,
 } as const;
 
 /** Trips that may still be cancelled or carried. */
@@ -257,6 +259,27 @@ export function simulateRouteTimes(
     previous = { stop, tap };
   }
   return { times, lateTripIds };
+}
+
+/**
+ * Account that taps a status (RouteStop.completedById, author of the audit
+ * event): the route's driver, or for a two-person crew sometimes the crew
+ * mate (stable for a trip and stop kind). `accounts` maps a driver id to the
+ * id of its user account; a crew member without one never taps, and null
+ * means neither has an account.
+ */
+export function stopRecorder(
+  crew: { driverId: string | null; crewMateId: string | null },
+  accounts: ReadonlyMap<string, string>,
+  tripId: string,
+  kind: StopKind,
+): string | null {
+  const driver = crew.driverId ? (accounts.get(crew.driverId) ?? null) : null;
+  const crewMate = crew.crewMateId ? (accounts.get(crew.crewMateId) ?? null) : null;
+  if (driver && crewMate) {
+    return unitFromKey(`recorded-by:${tripId}:${kind}`) < FIELD_BEHAVIOUR.crewMateTaps ? crewMate : driver;
+  }
+  return driver ?? crewMate;
 }
 
 // ---------------------------------------------------------------------------

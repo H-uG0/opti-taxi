@@ -82,7 +82,7 @@ export function sharingAnswer(trip: { id: string; patientId: string; direction: 
   return { decision: "ACCEPTED", note: noted ? ACCEPTANCE_NOTE : null };
 }
 
-/** Fields written for an answer, exactly as the « Courses » server action writes them. */
-export function answerData(previous: SharingTrace, answer: SharingAnswer, at: Date): SharingDecisionData {
-  return sharingDecisionData(previous, answer.decision, answer.note ?? undefined, at);
+/** Fields written for an answer recorded by the account `respondedById`, exactly as the « Courses » server action writes them. */
+export function answerData(previous: SharingTrace, answer: SharingAnswer, at: Date, respondedById: string): SharingDecisionData {
+  return sharingDecisionData(previous, answer.decision, answer.note ?? undefined, at, respondedById);
 }

@@ -40,6 +40,7 @@ import {
   type RouteRow,
   type VehicleCrew,
 } from "@/lib/optimizer/persist";
+import { logError } from "@/lib/log";
 import { fromIsoDate, toIsoDate } from "@/lib/time";
 
 /** Same budget as savePlan: the write locks the routes, a re-optimization in flight may hold them. */
@@ -639,7 +640,8 @@ async function refreshDay(deps: RefreshDeps, isoDate: string, routeIds: Readonly
   const result = await deps.evaluate(buildEvaluateRequest(request, dayRoutes));
   if (!result.ok) {
     const unavailable = result.reason === "unreachable" || result.reason === "timeout";
-    console.warn(`[planning] routes of ${isoDate} not recomputed: ${result.error}`);
+    // Ids only: the message can quote the optimizer's error detail (trip ids, coordinates).
+    console.warn("[planning] routes not recomputed", { serviceDate: isoDate, reason: result.reason ?? "error" });
     return { ...NOTHING_REFRESHED, kept: snapshot.length, unavailable, failed: !unavailable, dayStarted };
   }
 
@@ -686,7 +688,7 @@ export async function refreshRoutes(deps: RefreshDeps, routeIds: Iterable<string
   try {
     routes = await deps.prisma.route.findMany({ where: { id: { in: ids } }, select: { id: true, serviceDate: true } });
   } catch (error) {
-    console.error("[planning] reading the routes to recompute failed", error);
+    logError("[planning] reading the routes to recompute failed", error, { routes: ids.length });
     return { ...NOTHING_REFRESHED, kept: ids.length, failed: true };
   }
 
@@ -708,7 +710,7 @@ export async function refreshRoutes(deps: RefreshDeps, routeIds: Iterable<string
     try {
       outcome = addOutcomes(outcome, await refreshDay(deps, isoDate, dayIds));
     } catch (error) {
-      console.error(`[planning] recomputing the routes of ${isoDate} failed`, error);
+      logError("[planning] recomputing routes failed", error, { serviceDate: isoDate, routes: dayIds.size });
       outcome = addOutcomes(outcome, { ...NOTHING_REFRESHED, kept: dayIds.size, failed: true });
     }
   }

@@ -6,6 +6,8 @@ import {
   buildPlanningView,
   computeDayKpis,
   dayStatusOf,
+  fieldRecordsByTrip,
+  sharingAnswerOf,
   toKpiRows,
   waitAtFacility,
   type PlanningRawInput,
@@ -87,6 +89,8 @@ const trip = (id: string, overrides: Partial<RawTrip> = {}): RawTrip => ({
   detourKm: null,
   estimatedRevenue: null,
   createdAt: new Date("2026-11-01T10:00:00Z"),
+  sharingRespondedAt: null,
+  sharingRespondedBy: null,
   patient: { firstName: "Patient", lastName: id.toUpperCase() },
   facility: { name: "Dialyse Aix" },
   ...overrides,
@@ -100,6 +104,7 @@ const stop = (
   minute: number,
   loadAfter: number,
   completedAt: Date | null = null,
+  completedBy: { name: string } | null = null,
 ) => ({
   id,
   sequence,
@@ -113,6 +118,7 @@ const stop = (
   departureMinute: minute + 5,
   loadAfter,
   completedAt,
+  completedBy,
 });
 
 const route = (overrides: Partial<RawRoute> = {}): RawRoute => ({
@@ -284,6 +290,98 @@ describe("buildPlanningView", () => {
       }),
     );
     expect(view.trips.filter((t) => t.outboundNoShow).map((t) => t.id)).toEqual(["ra"]);
+  });
+
+  it("shows who recorded the sharing answer and each stop status, and only their names", () => {
+    const pickedUp = new Date("2026-11-03T07:02:00Z");
+    const droppedOff = new Date("2026-11-03T07:41:00Z");
+    const view = buildPlanningView(
+      input({
+        trips: [
+          trip("a", {
+            routeId: "r1",
+            status: "DROPPED_OFF",
+            sharingStatus: "ACCEPTED",
+            sharingRespondedAt: new Date("2026-11-02T16:40:00Z"),
+            sharingRespondedBy: { name: "Marie Régul" },
+          }),
+          trip("b", { routeId: "r1", status: "ASSIGNED", sharingStatus: "PROPOSED" }),
+        ],
+        routes: [
+          route({
+            stops: [
+              stop("s1", 0, "a", "PICKUP", 420, 1, pickedUp, { name: "Jean Route" }),
+              stop("s2", 1, "b", "PICKUP", 430, 2),
+              // Recorded before the audit trail, or by an account deleted since: no name.
+              stop("s3", 2, "a", "DROPOFF", 460, 1, droppedOff, null),
+              stop("s4", 3, "b", "DROPOFF", 470, 0),
+            ],
+          }),
+        ],
+      }),
+    );
+    const a = view.trips.find((t) => t.id === "a");
+    const b = view.trips.find((t) => t.id === "b");
+    expect(a?.sharingAnswer).toEqual({ at: "2026-11-02T16:40:00.000Z", byName: "Marie Régul" });
+    expect(a?.fieldRecords).toEqual([
+      { stopId: "s1", kind: "PICKUP", at: pickedUp.toISOString(), byName: "Jean Route" },
+      { stopId: "s3", kind: "DROPOFF", at: droppedOff.toISOString(), byName: null },
+    ]);
+    expect(b).toMatchObject({ sharingAnswer: null, fieldRecords: [] });
+    // The timeline stops carry the done flag only: no recorded instant, no account.
+    const stops = view.vehicles[0]?.route?.stops ?? [];
+    expect(stops.map((s) => s.completed)).toEqual([true, false, true, false]);
+    for (const s of stops) {
+      expect(Object.keys(s).sort()).toEqual([
+        "address",
+        "arrivalMinute",
+        "completed",
+        "departureMinute",
+        "id",
+        "kind",
+        "lat",
+        "lng",
+        "loadAfter",
+        "sequence",
+        "startMinute",
+        "tripId",
+      ]);
+    }
+  });
+});
+
+describe("recorded by", () => {
+  const at = new Date("2026-11-02T16:40:00Z");
+
+  it("gives the last recorded sharing answer with its time, also after a reset of the answer", () => {
+    expect(sharingAnswerOf({ sharingRespondedAt: at, sharingRespondedBy: { name: "Marie Régul" } })).toEqual({
+      at: "2026-11-02T16:40:00.000Z",
+      byName: "Marie Régul",
+    });
+    // Recorded before the audit trail, by an account deleted since, or a blank name: no author.
+    expect(sharingAnswerOf({ sharingRespondedAt: at, sharingRespondedBy: null })).toEqual({
+      at: "2026-11-02T16:40:00.000Z",
+      byName: null,
+    });
+    expect(sharingAnswerOf({ sharingRespondedAt: at, sharingRespondedBy: { name: "  " } })?.byName).toBeNull();
+    expect(sharingAnswerOf({ sharingRespondedAt: null, sharingRespondedBy: null })).toBeNull();
+  });
+
+  it("lists the recorded stops of each trip in route order, over every route", () => {
+    const t1 = new Date("2026-11-03T07:00:00Z");
+    const t2 = new Date("2026-11-03T07:30:00Z");
+    const t3 = new Date("2026-11-03T09:00:00Z");
+    const records = fieldRecordsByTrip([
+      // Unsorted on purpose: the order is the stop sequence.
+      { stops: [stop("s3", 2, "a", "DROPOFF", 460, 0, t2, { name: "Jean" }), stop("s1", 0, "a", "PICKUP", 420, 1, t1, { name: "Jean" })] },
+      { stops: [stop("s9", 0, "n", "PICKUP", 540, 1, t3, { name: "Paul" }), stop("s10", 1, "n", "DROPOFF", 580, 0)] },
+    ]);
+    expect(records.get("a")?.map((r) => [r.stopId, r.kind, r.byName])).toEqual([
+      ["s1", "PICKUP", "Jean"],
+      ["s3", "DROPOFF", "Jean"],
+    ]);
+    expect(records.get("n")).toEqual([{ stopId: "s9", kind: "PICKUP", at: t3.toISOString(), byName: "Paul" }]);
+    expect(records.has("b")).toBe(false);
   });
 });
 

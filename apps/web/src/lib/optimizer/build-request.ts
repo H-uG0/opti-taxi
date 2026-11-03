@@ -118,6 +118,9 @@ export type TariffInput = Pick<
   | "sharedDiscount3"
   | "validFrom"
   | "validTo"
+  // Not sent to the optimizer: break same-day ties between grids (tariffsInForce).
+  | "createdAt"
+  | "id"
 >;
 
 export type OptimizeInput = {

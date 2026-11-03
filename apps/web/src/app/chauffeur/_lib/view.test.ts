@@ -12,6 +12,8 @@ function makeStop(
   kind: StopKind,
   trip: { direction: TripDirection; status?: TripStatus; patient: string; appointmentMinute?: number; readyMinute?: number },
   completedAt: string | null = null,
+  /** Driver id of the account that recorded completedAt (null: a regulator, or not recorded). */
+  completedByDriverId: string | null = null,
 ): DriverRouteStop {
   const [firstName = "", lastName = ""] = trip.patient.split(" ");
   return {
@@ -25,6 +27,7 @@ function makeStop(
     startMinute: 480 + sequence * 15,
     loadAfter: 0,
     completedAt: completedAt ? new Date(completedAt) : null,
+    completedBy: completedAt ? { driverId: completedByDriverId } : null,
     trip: {
       direction: trip.direction,
       status: trip.status ?? "ASSIGNED",
@@ -188,6 +191,34 @@ describe("buildRouteView", () => {
       makeStop(1, "trip_c", "DROPOFF", { ...C, status: "NO_SHOW" }),
     ]);
     expect(buildRouteView(closed, DRIVER, true, flagged).stops.some((stop) => stop.outboundNoShow)).toBe(false);
+  });
+
+  it("names the other crew member on the statuses they recorded", () => {
+    const route = makeRoute([
+      makeStop(0, "trip_a", "PICKUP", { ...A, status: "PICKED_UP" }, "2026-11-02T07:02:00Z", CREW),
+      makeStop(1, "trip_b", "PICKUP", { ...B, status: "NO_SHOW" }, "2026-11-02T07:20:00Z", CREW),
+      makeStop(2, "trip_a", "DROPOFF", { ...A, status: "DROPPED_OFF" }, "2026-11-02T07:40:00Z", DRIVER),
+      makeStop(3, "trip_b", "DROPOFF", { ...B, status: "NO_SHOW" }),
+      // Recorded before the author was kept, or by a regulator account (no driver link).
+      makeStop(4, "trip_c", "PICKUP", { ...C, status: "PICKED_UP" }, "2026-11-02T09:35:00Z"),
+      makeStop(5, "trip_c", "DROPOFF", C),
+    ]);
+    const asDriver = buildRouteView(route, DRIVER, true);
+    expect(asDriver.stops.map((stop) => stop.recordedBy)).toEqual(["Lucie", "Lucie", null, null, null, null]);
+
+    const asCrew = buildRouteView(route, CREW, true);
+    expect(asCrew.stops.map((stop) => stop.recordedBy)).toEqual([null, null, "Karim", null, null, null]);
+  });
+
+  it("names nobody without a crew mate, nor on a status later cancelled by the regulator", () => {
+    const solo = makeRoute(
+      [makeStop(0, "trip_a", "PICKUP", { ...A, status: "PICKED_UP" }, "2026-11-02T07:02:00Z", CREW)],
+      { crewMateId: null, crewMate: null },
+    );
+    expect(buildRouteView(solo, DRIVER, true).stops[0]?.recordedBy).toBeNull();
+
+    const cancelled = makeRoute([makeStop(0, "trip_a", "PICKUP", { ...A, status: "CANCELLED" }, "2026-11-02T07:02:00Z", CREW)]);
+    expect(buildRouteView(cancelled, DRIVER, true).stops[0]?.recordedBy).toBeNull();
   });
 
   it("ignores blank access notes", () => {

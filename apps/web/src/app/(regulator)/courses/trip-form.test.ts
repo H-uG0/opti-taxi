@@ -7,6 +7,7 @@ import {
   prescriptionUsableOn,
   scheduleSchema,
   sharingDecisionSchema,
+  SWAPPED_COORDINATES_MESSAGE,
   type NewTripValues,
 } from "./trip-form";
 
@@ -93,6 +94,19 @@ describe("parseNewTrip", { timeout: 30_000 }, () => {
 
     const outOfRange = parseNewTrip({ ...privateValues, destinationLat: "123" }, TODAY);
     expect(!outOfRange.ok && outOfRange.errors.destinationLat?.[0]).toMatch(/Latitude invalide/);
+
+    // Same ranges as the address forms: a point outside metropolitan France is refused.
+    const abroad = parseNewTrip({ ...privateValues, destinationLat: "48.85", destinationLng: "-61.5" }, TODAY);
+    expect(!abroad.ok && abroad.errors.destinationLng).toEqual(["Longitude invalide : hors de France métropolitaine (entre -5,5 et 10)."]);
+    expect(!abroad.ok && abroad.errors.destinationLat).toBeUndefined();
+
+    const notANumber = parseNewTrip({ ...privateValues, destinationLat: "nord" }, TODAY);
+    expect(!notANumber.ok && notANumber.errors.destinationLat).toEqual(["Latitude invalide : nombre décimal attendu (ex. 43,2965)."]);
+
+    // Latitude and longitude typed the wrong way round: one message that says so.
+    const swapped = parseNewTrip({ ...privateValues, destinationLat: "5,3806", destinationLng: "43.3027" }, TODAY);
+    expect(!swapped.ok && swapped.errors.destinationLat).toEqual([SWAPPED_COORDINATES_MESSAGE]);
+    expect(!swapped.ok && swapped.errors.destinationLng).toBeUndefined();
 
     // Coordinates may be left empty (geocoded by the server).
     expect(parseNewTrip({ ...privateValues, destinationLat: "", destinationLng: "" }, TODAY).ok).toBe(true);

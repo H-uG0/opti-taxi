@@ -39,21 +39,23 @@ describe("sharing answers", () => {
     for (const t of occasional) expect(sharingAnswer(t).note).toMatch(/aller/);
   });
 
-  it("writes the fields of the « Courses » action", () => {
+  it("writes the fields of the « Courses » action, with the regulator account that recorded the answer", () => {
     const at = new Date("2026-10-11T15:10:00Z");
     const refusal = knownRefusal("patient-1");
-    expect(answerData(UNANSWERED, refusal, at)).toEqual({
+    expect(answerData(UNANSWERED, refusal, at, "regulator-1")).toEqual({
       sharingStatus: "REFUSED",
       sharingProposedAt: at,
       sharingRespondedAt: at,
+      sharingRespondedById: "regulator-1",
       sharingNote: refusal.note,
     });
     const proposedAt = new Date("2026-10-11T15:00:00Z");
     const proposed = { ...UNANSWERED, sharingStatus: "PROPOSED" as const, sharingProposedAt: proposedAt };
-    expect(answerData(proposed, { decision: "ACCEPTED", note: null }, at)).toEqual({
+    expect(answerData(proposed, { decision: "ACCEPTED", note: null }, at, "regulator-1")).toEqual({
       sharingStatus: "ACCEPTED",
       sharingProposedAt: proposedAt,
       sharingRespondedAt: at,
+      sharingRespondedById: "regulator-1",
       sharingNote: null,
     });
   });

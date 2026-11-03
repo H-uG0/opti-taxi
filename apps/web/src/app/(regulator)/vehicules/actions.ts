@@ -3,9 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { fromIsoDate, todayIso } from "@/lib/time";
+import { PLANNING_TX_OPTIONS } from "@/lib/planning/run-optimization";
+import { fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import { crewMemberName, crewQualificationErrors } from "./_lib/crew";
 import {
   errorState,
@@ -120,7 +122,7 @@ const activeArgs = z.object({ id: idSchema, active: z.boolean() });
  * are kept and reported, the regulator re-runs those days.
  */
 export async function setVehicleActive(vehicleId: string, active: boolean): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const args = activeArgs.safeParse({ id: vehicleId, active });
   if (!args.success) return messageState("Requête invalide.");
 
@@ -152,27 +154,40 @@ export async function setVehicleActive(vehicleId: string, active: boolean): Prom
 
   if (!vehicle.active) return successState("Ce véhicule est déjà désactivé.");
   const today = fromIsoDate(todayIso());
-  const [, released, routes] = await db.$transaction([
-    db.vehicle.update({ where: { id: vehicle.id }, data: { active: false } }),
-    db.trip.updateMany({
+  // Same budget as the other writes of trips: savePlan or a sync may hold their rows for a while.
+  const { released, routes } = await db.$transaction(async (tx) => {
+    await tx.vehicle.update({ where: { id: vehicle.id }, data: { active: false } });
+    const released = await tx.trip.updateManyAndReturn({
       where: { lockedVehicleId: vehicle.id, serviceDate: { gte: today } },
       data: { lockedVehicleId: null },
-    }),
+      select: { id: true, serviceDate: true },
+    });
+    await audit(
+      tx,
+      user,
+      released.map((trip) => ({
+        action: "trip.unlock" as const,
+        entity: "Trip" as const,
+        entityId: trip.id,
+        serviceDate: toIsoDate(trip.serviceDate),
+      })),
+    );
     // Planned routes are left as they are: the regulator re-runs those days.
-    db.route.findMany({
+    const routes = await tx.route.findMany({
       where: { vehicleId: vehicle.id, serviceDate: { gte: today } },
       select: { serviceDate: true, status: true },
-    }),
-  ]);
+    });
+    return { released, routes };
+  }, PLANNING_TX_OPTIONS);
   revalidateFleet(vehicle.id);
   revalidatePath("/planning");
   revalidatePath("/courses");
 
   const parts = ["Véhicule désactivé : il n'est plus proposé à l'optimisation."];
-  if (released.count > 0) {
-    const many = released.count > 1;
+  if (released.length > 0) {
+    const many = released.length > 1;
     parts.push(
-      `${released.count} course${many ? "s" : ""} à venir figée${many ? "s" : ""} sur ce véhicule ${many ? "ont" : "a"} été libérée${many ? "s" : ""}.`,
+      `${released.length} course${many ? "s" : ""} à venir figée${many ? "s" : ""} sur ce véhicule ${many ? "ont" : "a"} été libérée${many ? "s" : ""}.`,
     );
   }
   const notice = upcomingRoutesNotice(toUpcomingRoutes(routes), "vehicle");

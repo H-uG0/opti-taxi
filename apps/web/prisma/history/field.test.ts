@@ -8,6 +8,7 @@ import {
   fieldStatusUpdates,
   plannedTapMinute,
   simulateRouteTimes,
+  stopRecorder,
   type DayTrip,
   type PlannedStop,
   type TripTiming,
@@ -259,5 +260,32 @@ describe("fieldStatusUpdates", () => {
       { where: { id: { in: ["t3", "t4"] }, status: "ASSIGNED" }, data: { status: "NO_SHOW" } },
     ]);
     for (const update of updates) expect(update.where.status).toBe("ASSIGNED");
+  });
+});
+
+describe("stopRecorder", () => {
+  const accounts = new Map([
+    ["driver-1", "user-1"],
+    ["mate-1", "user-2"],
+  ]);
+
+  it("credits the driver's account on a one-person route", () => {
+    expect(stopRecorder({ driverId: "driver-1", crewMateId: null }, accounts, "trip-1", "PICKUP")).toBe("user-1");
+  });
+
+  it("sometimes credits the crew mate of a two-person crew, stably for a trip and stop kind", () => {
+    const crew = { driverId: "driver-1", crewMateId: "mate-1" };
+    const recorders = Array.from({ length: 2000 }, (_, i) => stopRecorder(crew, accounts, `trip-${i}`, i % 2 ? "PICKUP" : "DROPOFF"));
+    const mateShare = recorders.filter((id) => id === "user-2").length / recorders.length;
+    expect(mateShare).toBeGreaterThan(FIELD_BEHAVIOUR.crewMateTaps - 0.04);
+    expect(mateShare).toBeLessThan(FIELD_BEHAVIOUR.crewMateTaps + 0.04);
+    expect(recorders.every((id) => id === "user-1" || id === "user-2")).toBe(true);
+    expect(stopRecorder(crew, accounts, "trip-7", "PICKUP")).toBe(stopRecorder(crew, accounts, "trip-7", "PICKUP"));
+  });
+
+  it("falls back on the crew member who has an account, or none", () => {
+    expect(stopRecorder({ driverId: "driver-2", crewMateId: "mate-1" }, accounts, "trip-1", "DROPOFF")).toBe("user-2");
+    expect(stopRecorder({ driverId: null, crewMateId: null }, accounts, "trip-1", "DROPOFF")).toBeNull();
+    expect(stopRecorder({ driverId: "driver-2", crewMateId: null }, accounts, "trip-1", "DROPOFF")).toBeNull();
   });
 });

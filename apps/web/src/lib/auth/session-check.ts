@@ -1,7 +1,8 @@
 /**
- * Session revocation rules. Session tokens are stateless (12 h), so every
- * request re-reads the account (lib/auth) and keeps the session only while it
- * still matches. Free of Next.js and database imports so it can be unit-tested.
+ * Session revocation rules. Session tokens are signed and carry no server-side
+ * record (12 h), so every request re-reads the account (lib/auth) and keeps the
+ * session only while it still matches. Free of Next.js and database imports so
+ * it can be unit-tested.
  */
 import { createHash } from "node:crypto";
 
@@ -14,8 +15,12 @@ export type SessionUser = {
   driverId: string | null;
 };
 
-/** What the signed cookie carries: the user plus the password version it was opened with. */
-export type SessionClaims = SessionUser & { passwordVersion: string | null };
+/**
+ * What the signed cookie carries: the user plus the password fingerprint and
+ * the account's session version at sign-in (null when the token predates the
+ * claim).
+ */
+export type SessionClaims = SessionUser & { passwordVersion: string | null; sessionVersion: number | null };
 
 /** The account fields the rules read (lib/auth and the login action load exactly these). */
 export type AccountState = {
@@ -24,13 +29,27 @@ export type AccountState = {
   active: boolean;
   driverId: string | null;
   passwordHash: string;
+  sessionVersion: number;
   driver: { active: boolean } | null;
 };
 
+/** Prisma `select` of AccountState, shared by lib/auth and the login action. */
+export const ACCOUNT_STATE_SELECT = {
+  name: true,
+  role: true,
+  active: true,
+  driverId: true,
+  passwordHash: true,
+  sessionVersion: true,
+  driver: { select: { active: true } },
+} as const;
+
 /**
  * Short fingerprint of a password hash. Stored in the session so that any
- * change of the stored hash (password reset, or lockedPasswordHash() on
- * deactivation) ends the sessions opened before it, for good.
+ * change of the stored hash ends the sessions opened before it, for good. The
+ * session version (REVOKE_SESSIONS, lib/auth/revoke.ts) is the main revocation
+ * switch; the fingerprint also covers a hash changed outside the app (a
+ * script, a manual SQL update) that did not bump the version.
  */
 export function passwordVersion(passwordHash: string): string {
   return createHash("sha256").update(passwordHash).digest("hex").slice(0, 16);
@@ -58,13 +77,17 @@ export function accountRefusal(account: Pick<AccountState, "role" | "active" | "
 /**
  * The user a session stands for, or null when it must end: account missing or
  * refused (see accountRefusal), role or driver link changed since the sign-in,
- * or password hash changed since the sign-in. Tokens issued before the password
- * fingerprint existed carry none and are refused: one more sign-in.
+ * session version bumped since the sign-in (logout, deactivation, new password
+ * or e-mail: REVOKE_SESSIONS), or password hash changed since the sign-in.
+ * Tokens issued before either claim existed carry none and are refused: one
+ * more sign-in. A bumped version stays bumped, so reactivating an account does
+ * not bring its old sessions back (e.g. on a lost phone).
  * The name comes from the account, so a renamed driver sees the new name.
  */
 export function sessionIsCurrent(claims: SessionClaims, account: AccountState | null): SessionUser | null {
   if (!account || accountRefusal(account) !== null) return null;
   if (account.role !== claims.role || account.driverId !== claims.driverId) return null;
+  if (claims.sessionVersion === null || claims.sessionVersion !== account.sessionVersion) return null;
   if (claims.passwordVersion === null || claims.passwordVersion !== passwordVersion(account.passwordHash)) return null;
   return { id: claims.id, name: account.name, role: account.role, driverId: account.driverId };
 }

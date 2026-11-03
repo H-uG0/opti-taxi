@@ -15,6 +15,7 @@ import { DIRECTION_LABELS, PAYER_LABELS, SHARING_STATUS_LABELS, TRIP_STATUS_LABE
 import { formatMinute } from "@/lib/time";
 import { cancelTrip, recordSharingDecision, rescheduleTrip, restoreTrip } from "./actions";
 import { ActionForm } from "./action-form";
+import type { RecordTrace } from "./record-trace";
 import {
   canCancel,
   canEditTime,
@@ -34,6 +35,10 @@ export type TripRowData = {
   id: string;
   direction: TripDirection;
   status: TripStatus;
+  /** Statuses recorded by the crew behind `status`, who and when ("Prise en charge enregistrée par … le …"), pickup first. */
+  statusTraces: string[];
+  /** Who recorded the current status and when, under its badge ("par … · 03/11 à 08:12"). */
+  statusTraceShort: string | null;
   payer: Payer;
   patientName: string;
   patientPhone: string | null;
@@ -59,11 +64,16 @@ export type TripRowData = {
   sharingAllowed: boolean;
   sharingStatus: SharingStatus;
   sharingProposedAt: string | null;
-  sharingRespondedAt: string | null;
+  /** Who recorded the patient's answer and when ("Refus enregistré par … le 03/11 à 08:12"). */
+  sharingAnswer: string | null;
+  /** Same, short, under the badge of an accepted or refused sharing ("par … · 03/11 à 08:12"). */
+  sharingAnswerShort: string | null;
   sharingNote: string | null;
   notes: string | null;
   /** Return trip still to do whose outbound leg of the day was closed as patient absent. */
   outboundNoShow: boolean;
+  /** Who recorded that absence on the outbound leg, and when (null when not traced). */
+  outboundNoShowTrace: RecordTrace | null;
 };
 
 export const TRIP_TABLE_COLUMNS = 8;
@@ -91,12 +101,17 @@ export function TripRow({ trip }: { trip: TripRowData }) {
             {trip.origin ? null : <span className="text-xs text-slate-500">Ponctuelle</span>}
           </span>
           {trip.outboundNoShow ? (
-            <span className="mt-1 flex" title={OUTBOUND_NO_SHOW_ADVICE}>
-              <Badge tone="danger">
-                <UserX aria-hidden className="size-3.5 shrink-0" />
-                {OUTBOUND_NO_SHOW_LABEL}
-              </Badge>
-            </span>
+            <>
+              <span className="mt-1 flex" title={OUTBOUND_NO_SHOW_ADVICE}>
+                <Badge tone="danger">
+                  <UserX aria-hidden className="size-3.5 shrink-0" />
+                  {OUTBOUND_NO_SHOW_LABEL}
+                </Badge>
+              </span>
+              {trip.outboundNoShowTrace ? (
+                <TraceHint full={trip.outboundNoShowTrace.full} short={trip.outboundNoShowTrace.short} />
+              ) : null}
+            </>
           ) : null}
         </Td>
         <Td className={cn("max-w-72", muted)}>
@@ -117,6 +132,7 @@ export function TripRow({ trip }: { trip: TripRowData }) {
         </Td>
         <Td className="whitespace-nowrap">
           <Badge tone={TRIP_STATUS_TONES[trip.status]}>{TRIP_STATUS_LABELS[trip.status]}</Badge>
+          {trip.statusTraceShort ? <TraceHint full={trip.statusTraces.at(-1)} short={trip.statusTraceShort} /> : null}
         </Td>
         <Td className={cn("whitespace-nowrap", muted)}>
           <span className={cn("flex items-center gap-1", trip.vehicleLabel ? "font-medium text-slate-800" : "text-slate-500")}>
@@ -136,6 +152,7 @@ export function TripRow({ trip }: { trip: TripRowData }) {
         </Td>
         <Td className={muted}>
           <Badge tone={SHARING_STATUS_TONES[trip.sharingStatus]}>{SHARING_STATUS_LABELS[trip.sharingStatus]}</Badge>
+          {trip.sharingAnswerShort ? <TraceHint full={trip.sharingAnswer ?? undefined} short={trip.sharingAnswerShort} /> : null}
           {conflict ? (
             <span className="mt-1 flex items-center gap-1 text-xs font-medium text-red-700">
               <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
@@ -184,7 +201,9 @@ function TripDetails({ trip }: { trip: TripRowData }) {
         >
           <UserX aria-hidden className="mt-0.5 size-4 shrink-0" />
           <span>
-            <span className="font-semibold">{OUTBOUND_NO_SHOW_LABEL}.</span> {OUTBOUND_NO_SHOW_ADVICE}
+            <span className="font-semibold">{OUTBOUND_NO_SHOW_LABEL}.</span>{" "}
+            {trip.outboundNoShowTrace ? `${trip.outboundNoShowTrace.full}. ` : null}
+            {OUTBOUND_NO_SHOW_ADVICE}
             {trip.patientPhone ? (
               <>
                 {" "}
@@ -203,6 +222,15 @@ function TripDetails({ trip }: { trip: TripRowData }) {
           <Detail label="Payeur">{PAYER_LABELS[trip.payer]}</Detail>
           <Detail label="Prescription">{trip.prescriptionLabel}</Detail>
           <Detail label="Origine">{trip.origin ? `Récurrence « ${trip.origin} »` : "Course ponctuelle"}</Detail>
+          {trip.statusTraces.length > 0 ? (
+            <Detail label="Suivi">
+              <ul className="space-y-0.5">
+                {trip.statusTraces.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </Detail>
+          ) : null}
           {trip.patientPhone ? (
             <Detail label="Téléphone">
               <a href={`tel:${trip.patientPhone.replace(/\s+/g, "")}`} className="tabular text-brand-700 underline-offset-2 hover:underline">
@@ -246,6 +274,15 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
       <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h3>
       {children}
     </section>
+  );
+}
+
+/** Who recorded a status or an answer, under its badge; the full sentence shows on hover and in « Détails ». */
+function TraceHint({ full, short }: { full: string | undefined; short: string }) {
+  return (
+    <span className="mt-0.5 block max-w-48 truncate text-xs text-slate-500" title={full}>
+      {short}
+    </span>
   );
 }
 
@@ -358,9 +395,7 @@ function SharingPanel({ trip }: { trip: TripRowData }) {
         <Detail label="Proposé le">
           <span className="tabular">{trip.sharingProposedAt ?? "—"}</span>
         </Detail>
-        <Detail label="Réponse le">
-          <span className="tabular">{trip.sharingRespondedAt ?? "—"}</span>
-        </Detail>
+        <Detail label="Réponse">{trip.sharingAnswer ?? "—"}</Detail>
         {trip.sharingNote ? (
           <Detail label="Note">
             <span className="whitespace-pre-line">{trip.sharingNote}</span>

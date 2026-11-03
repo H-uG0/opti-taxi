@@ -87,8 +87,12 @@ function trip(id: string, overrides: Partial<TripInput> = {}): TripInput {
   };
 }
 
+let nextTariffId = 1;
+
 function tariff(overrides: Partial<TariffInput> = {}): TariffInput {
   return {
+    id: `tariff_${nextTariffId++}`,
+    createdAt: new Date("2025-12-01T00:00:00Z"),
     vehicleType: "TAXI",
     department: "13",
     baseFare: 13,
@@ -391,6 +395,16 @@ describe("tariffs", () => {
       { vehicleType: "TAXI", department: "13", baseFare: 13, pricePerKm: 1.12, includedKm: 0, sharedDiscount2: 0.23, sharedDiscount3: 0.35 },
       { vehicleType: "VSL", department: "*", baseFare: 9, pricePerKm: 1.12, includedKm: 0, sharedDiscount2: 0.23, sharedDiscount3: 0.35 },
     ]);
+  });
+
+  it("sends the last created grid when two start the same day, whatever the input order", () => {
+    // The last created grid has the smaller id, so only createdAt can pick it.
+    const first = tariff({ id: "tariff_z", baseFare: 12, createdAt: new Date("2026-11-02T08:00:00Z") });
+    const fixed = tariff({ id: "tariff_a", baseFare: 13, createdAt: new Date("2026-11-02T08:05:00Z") });
+    for (const tariffs of [[first, fixed], [fixed, first]]) {
+      const { request } = buildOptimizeRequest(input({ tariffs }));
+      expect(request.tariffs.map((t) => t.baseFare)).toEqual([13]);
+    }
   });
 });
 

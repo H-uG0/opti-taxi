@@ -23,6 +23,7 @@ function LogoutButton({ stacked }: { stacked: boolean }) {
     <form action={logout}>
       <button
         type="submit"
+        title="Ferme la session sur tous vos appareils"
         className={cn(
           "inline-flex min-h-11 items-center rounded-lg font-medium text-brand-50 hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
           stacked ? "min-w-11 flex-col justify-center gap-1 px-1 text-[11px] leading-none" : "gap-1.5 px-3 text-sm",

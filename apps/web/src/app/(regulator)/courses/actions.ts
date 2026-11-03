@@ -3,12 +3,15 @@
 import type { Prisma, RouteStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireUser } from "@/lib/auth";
+import { LOW_GEOCODE_SCORE } from "@/components/address/address-utils";
+import { audit, type AuditEntry } from "@/lib/audit";
+import { requireUser, type SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatAddress } from "@/lib/domain/rules";
 import { getSettings } from "@/lib/domain/settings";
 import { generateTrips } from "@/lib/domain/trip-generation";
-import { geocodeAddress, geocoderEnabled } from "@/lib/geocode";
+import { allowGeocodeSearch, bestMatch, GEOCODE_THROTTLED_MESSAGE, geocoderEnabled, searchAddress } from "@/lib/geocode";
+import { logError, safeErrorFields } from "@/lib/log";
 import { evaluate } from "@/lib/optimizer/client";
 import { isConcurrentWriteError, NOTHING_DETACHED, removeTripStops, type DetachResult } from "@/lib/planning/detach";
 import {
@@ -18,7 +21,7 @@ import {
   refreshRoutes,
   type RefreshOutcome,
 } from "@/lib/planning/refresh-routes";
-import { formatMinute, addDays, todayIso } from "@/lib/time";
+import { formatMinute, addDays, todayIso, toIsoDate } from "@/lib/time";
 import {
   buildNewTripData,
   firstErrorMessage,
@@ -54,22 +57,37 @@ function failure(message: string): ActionResult {
   return { ok: false, message };
 }
 
+/** Interactive transactions of this file: trips, route stops and their audit events. */
+const TX_OPTIONS = { maxWait: 15_000, timeout: 60_000 } as const;
+
+/** Audit event of a change on one trip. */
+function tripEvent(action: AuditEntry["action"], trip: { id: string; serviceDate: Date }): AuditEntry {
+  return { action, entity: "Trip", entityId: trip.id, serviceDate: toIsoDate(trip.serviceDate) };
+}
+
 // ---------------------------------------------------------------------------
 // Week generation
 
 export async function generateWeekTrips(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const parsed = generateWeekSchema.safeParse(formValues(formData, ["weekStart"]));
   if (!parsed.success) return failure(firstErrorMessage(parsed.error));
 
   const from = parsed.data.weekStart;
   const to = addDays(from, 6);
   try {
-    const result = await generateTrips(db, from, to);
+    const result = await db.$transaction(async (tx) => {
+      const generated = await generateTrips(tx, from, to);
+      // Traced only when trips were created: regenerating a complete week changes nothing.
+      if (generated.created > 0) {
+        await audit(tx, user, { action: "trip.generate_week", entity: "Trip", entityId: null, serviceDate: from });
+      }
+      return generated;
+    }, TX_OPTIONS);
     revalidateTripViews();
     return { ok: true, message: generationMessage(result, from, to) };
   } catch (error) {
-    console.error("generateWeekTrips failed", error);
+    logError("[courses] generateWeekTrips failed", error, { weekStart: from });
     return failure("La génération des courses a échoué. Réessayez ou contactez l'administrateur.");
   }
 }
@@ -85,8 +103,15 @@ export type NewTripState = {
   attempt: number;
 };
 
-/** Destination of a private trip without facility: typed coordinates, or geocoded address. */
+const OUTSIDE_FRANCE_MESSAGE = "Adresse localisée hors de France métropolitaine : précisez-la ou saisissez les coordonnées.";
+
+/**
+ * Destination of a private trip without facility: typed coordinates (already
+ * checked in metropolitan France by parseNewTrip), or the geocoded address
+ * (one search taken from the user's allowance).
+ */
 async function freeDestination(
+  user: Pick<SessionUser, "id">,
   address: string,
   lat: number | undefined,
   lng: number | undefined,
@@ -97,20 +122,29 @@ async function freeDestination(
   if (!geocoderEnabled()) {
     return { ok: false, field: "destinationLat", message: "Géocodage indisponible : saisissez la latitude et la longitude." };
   }
+  if (!allowGeocodeSearch(user.id)) {
+    return { ok: false, field: "destinationAddress", message: GEOCODE_THROTTLED_MESSAGE };
+  }
   try {
-    const [best] = await geocodeAddress(address, 1);
-    if (!best || best.score < 0.5) {
+    // The stored point goes to the optimizer: bestMatch checks it again against
+    // the metropolitan France ranges, whatever the parser kept.
+    const match = bestMatch(await searchAddress(address, 1), LOW_GEOCODE_SCORE);
+    if (match.status === "outside_france") {
+      return { ok: false, field: "destinationAddress", message: OUTSIDE_FRANCE_MESSAGE };
+    }
+    if (match.status === "not_found") {
       return { ok: false, field: "destinationAddress", message: "Adresse introuvable ou imprécise : précisez-la ou saisissez les coordonnées." };
     }
+    const best = match.result;
     return { ok: true, destination: { facilityId: null, address: best.label, lat: best.lat, lng: best.lng } };
   } catch (error) {
-    console.error("geocodeAddress failed", error);
+    logError("[courses] geocodeAddress failed", error);
     return { ok: false, field: "destinationAddress", message: "Le géocodage n'a pas répondu : saisissez la latitude et la longitude." };
   }
 }
 
 export async function createTrip(prev: NewTripState, formData: FormData): Promise<NewTripState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const values = formValues(formData, NEW_TRIP_FIELDS);
   const answer = (errors: FieldErrors, message: string | null = null): NewTripState => ({
     errors,
@@ -152,16 +186,19 @@ export async function createTrip(prev: NewTripState, formData: FormData): Promis
     if (!facility) return answer({ facilityId: ["Établissement introuvable ou archivé."] });
     destination = { facilityId: facility.id, address: formatAddress(facility), lat: facility.lat, lng: facility.lng };
   } else {
-    const free = await freeDestination(input.destinationAddress ?? "", input.destinationLat, input.destinationLng);
+    const free = await freeDestination(user, input.destinationAddress ?? "", input.destinationLat, input.destinationLng);
     if (!free.ok) return answer({ [free.field]: [free.message] });
     destination = free.destination;
   }
 
   const data = buildNewTripData(input, patient, prescription, destination);
   try {
-    await db.trip.create({ data });
+    await db.$transaction(async (tx) => {
+      const created = await tx.trip.create({ data, select: { id: true } });
+      await audit(tx, user, { action: "trip.create", entity: "Trip", entityId: created.id, serviceDate: input.serviceDate });
+    }, TX_OPTIONS);
   } catch (error) {
-    console.error("createTrip failed", error);
+    logError("[courses] createTrip failed", error, { patientId: patient.id });
     return answer({}, "La course n'a pas pu être enregistrée. Réessayez.");
   }
 
@@ -188,18 +225,19 @@ const CLEARED_PLANNING = { ...DETACHED_PLANNING, lockedVehicleId: null } satisfi
 const CONCURRENT_CHANGE = "La course a changé entre-temps : rechargez la page.";
 
 /**
- * Runs a transaction that takes a trip out of its route. Null when the trip
- * changed meanwhile: the guarded update found nothing (the callback returns
- * null), or another transaction won the race on the same rows.
+ * Runs a transaction that takes a trip out of its route (and records its audit
+ * event). Null when the trip changed meanwhile: the guarded update found
+ * nothing (the callback returns null), or another transaction won the race on
+ * the same rows.
  */
 async function detachInTransaction(
   fn: (tx: Prisma.TransactionClient) => Promise<DetachResult | null>,
 ): Promise<DetachResult | null> {
   try {
-    return await db.$transaction(fn);
+    return await db.$transaction(fn, TX_OPTIONS);
   } catch (error) {
     if (isConcurrentWriteError(error)) {
-      console.warn("[courses] trip changed by a concurrent transaction", error);
+      console.warn("[courses] trip changed by a concurrent transaction", safeErrorFields(error));
       return null;
     }
     throw error;
@@ -241,13 +279,13 @@ function validatedHint(routeStatus: RouteStatus | null | undefined): string {
 }
 
 export async function cancelTrip(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const parsed = tripIdSchema.safeParse(formData.get("tripId"));
   if (!parsed.success) return failure("Course introuvable.");
 
   const trip = await db.trip.findUnique({
     where: { id: parsed.data },
-    select: { id: true, status: true, routeId: true, route: { select: { status: true } } },
+    select: { id: true, status: true, serviceDate: true, routeId: true, route: { select: { status: true } } },
   });
   if (!trip) return failure("Course introuvable.");
   if (!canCancel(trip.status)) return failure("Seule une course pas encore commencée peut être annulée.");
@@ -260,6 +298,7 @@ export async function cancelTrip(_prev: ActionResult, formData: FormData): Promi
       data: { ...CLEARED_PLANNING, status: "CANCELLED" },
     });
     if (updated.count === 0) return null;
+    await audit(tx, user, tripEvent("trip.cancel", trip));
     return removeTripStops(tx, trip.id);
   });
   if (!detached) return failure(CONCURRENT_CHANGE);
@@ -274,11 +313,11 @@ export async function cancelTrip(_prev: ActionResult, formData: FormData): Promi
 }
 
 export async function restoreTrip(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const parsed = tripIdSchema.safeParse(formData.get("tripId"));
   if (!parsed.success) return failure("Course introuvable.");
 
-  const trip = await db.trip.findUnique({ where: { id: parsed.data }, select: { id: true, status: true } });
+  const trip = await db.trip.findUnique({ where: { id: parsed.data }, select: { id: true, status: true, serviceDate: true } });
   if (!trip) return failure("Course introuvable.");
   if (!canRestore(trip.status)) return failure("Seule une course annulée peut être rétablie.");
 
@@ -288,6 +327,7 @@ export async function restoreTrip(_prev: ActionResult, formData: FormData): Prom
       data: { ...CLEARED_PLANNING, status: "PLANNED" },
     });
     if (updated.count === 0) return null;
+    await audit(tx, user, tripEvent("trip.restore", trip));
     // A trip cancelled elsewhere may still have stops: it starts afresh, outside any route.
     return removeTripStops(tx, trip.id);
   });
@@ -299,7 +339,7 @@ export async function restoreTrip(_prev: ActionResult, formData: FormData): Prom
 }
 
 export async function rescheduleTrip(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const parsed = scheduleSchema.safeParse(formValues(formData, ["tripId", "time"]));
   if (!parsed.success) return failure(firstErrorMessage(parsed.error));
 
@@ -312,6 +352,8 @@ export async function rescheduleTrip(_prev: ActionResult, formData: FormData): P
       routeId: true,
       patientId: true,
       serviceDate: true,
+      appointmentMinute: true,
+      readyMinute: true,
       route: { select: { status: true, vehicle: { select: { label: true } } } },
     },
   });
@@ -319,6 +361,10 @@ export async function rescheduleTrip(_prev: ActionResult, formData: FormData): P
   if (!canEditTime(trip.status)) return failure("L'horaire d'une course commencée ou annulée ne peut plus changer.");
 
   const minute = parsed.data.time;
+  // Same time as stored (double submit, form saved unchanged): nothing is written or traced.
+  if ((trip.direction === "OUTBOUND" ? trip.appointmentMinute : trip.readyMinute) === minute) {
+    return { ok: true, message: `Horaire inchangé : ${keyMinuteLabel(trip.direction)} à ${formatMinute(minute)}.` };
+  }
   const timeData = trip.direction === "OUTBOUND" ? { appointmentMinute: minute } : { readyMinute: minute };
 
   // In a route: the planned stop must still respect the new window (and the
@@ -356,6 +402,7 @@ export async function rescheduleTrip(_prev: ActionResult, formData: FormData): P
       data: fit.fits ? timeData : { ...timeData, ...DETACHED_PLANNING, status: "PLANNED" },
     });
     if (updated.count === 0) return null;
+    await audit(tx, user, tripEvent("trip.reschedule", trip));
     return fit.fits ? NOTHING_DETACHED : removeTripStops(tx, trip.id);
   });
   if (!detached) return failure(CONCURRENT_CHANGE);
@@ -381,7 +428,7 @@ export async function rescheduleTrip(_prev: ActionResult, formData: FormData): P
 }
 
 export async function recordSharingDecision(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const parsed = sharingDecisionSchema.safeParse(formValues(formData, ["tripId", "decision", "note"]));
   if (!parsed.success) return failure(firstErrorMessage(parsed.error));
   const { tripId, decision, note } = parsed.data;
@@ -390,11 +437,14 @@ export async function recordSharingDecision(_prev: ActionResult, formData: FormD
     where: { id: tripId },
     select: {
       id: true,
+      serviceDate: true,
       status: true,
       sharingAllowed: true,
       sharingStatus: true,
       sharingProposedAt: true,
       sharingRespondedAt: true,
+      // Named in the note's history line when this answer is corrected.
+      sharingRespondedBy: { select: { name: true } },
       sharingNote: true,
       shared: true,
     },
@@ -408,13 +458,18 @@ export async function recordSharingDecision(_prev: ActionResult, formData: FormD
     );
   }
 
-  const data = sharingDecisionData(trip, decision, note, new Date());
+  const data = sharingDecisionData(trip, decision, note, new Date(), user.id);
   // Guarded on the answer read above: a concurrent answer is not overwritten (and its trace not lost).
-  const updated = await db.trip.updateMany({
-    where: { id: trip.id, sharingStatus: trip.sharingStatus, sharingRespondedAt: trip.sharingRespondedAt },
-    data,
-  });
-  if (updated.count === 0) return failure(CONCURRENT_CHANGE);
+  const recorded = await db.$transaction(async (tx) => {
+    const updated = await tx.trip.updateMany({
+      where: { id: trip.id, sharingStatus: trip.sharingStatus, sharingRespondedAt: trip.sharingRespondedAt },
+      data,
+    });
+    if (updated.count === 0) return false;
+    await audit(tx, user, tripEvent(decision === "REFUSED" ? "trip.sharing_refuse" : "trip.sharing_accept", trip));
+    return true;
+  }, TX_OPTIONS);
+  if (!recorded) return failure(CONCURRENT_CHANGE);
 
   revalidateTripViews();
   let message = `${SHARING_DECISION_LABELS[decision]} enregistré.`;

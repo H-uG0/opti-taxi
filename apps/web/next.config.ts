@@ -1,19 +1,13 @@
 import type { NextConfig } from "next";
+// Relative import: next.config.ts is compiled on its own, without the "@/" alias.
+import { securityHeaders } from "./src/lib/security-headers";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  // Baseline hardening headers (the app handles health data).
+  // Hardening headers on every response (the app handles health data). The
+  // Content-Security-Policy needs a per-request nonce: src/proxy.ts sets it.
   async headers() {
-    return [
-      {
-        source: "/:path*",
-        headers: [
-          { key: "X-Content-Type-Options", value: "nosniff" },
-          { key: "Referrer-Policy", value: "same-origin" },
-          { key: "X-Frame-Options", value: "DENY" },
-        ],
-      },
-    ];
+    return [{ source: "/:path*", headers: securityHeaders(process.env.NODE_ENV) }];
   },
 };
 

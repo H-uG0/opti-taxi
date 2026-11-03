@@ -3,6 +3,7 @@ import Form from "next/form";
 import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { Plus, Search } from "lucide-react";
+import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { MOBILITY_LABELS, PRESCRIBED_MODE_LABELS } from "@/lib/labels";
@@ -49,7 +50,7 @@ export default async function PatientsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const params = await searchParams;
   const q = first(params.q).trim().slice(0, 100);
   const statusParam = first(params.statut);
@@ -69,6 +70,8 @@ export default async function PatientsPage({
     })),
   };
 
+  // Mobility, prescriptions and care schedules of many patients are on screen (auditRead never throws).
+  const traced = auditRead(user, { action: "patient_list.view", entity: "Patient", entityId: null });
   const [patients, total] = await Promise.all([
     db.patient.findMany({
       where,
@@ -98,6 +101,7 @@ export default async function PatientsPage({
     }),
     db.patient.count({ where }),
   ]);
+  await traced;
 
   const filtered = q !== "" || status !== "actifs";
 

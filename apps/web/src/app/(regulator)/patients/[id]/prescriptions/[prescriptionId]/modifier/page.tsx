@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { todayIso, toIsoDate } from "@/lib/time";
@@ -18,7 +19,7 @@ export default async function EditPrescriptionPage({
 }: {
   params: Promise<{ id: string; prescriptionId: string }>;
 }) {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const { id, prescriptionId } = await params;
   const prescription = await db.prescription.findFirst({
     where: { id: prescriptionId, patientId: id },
@@ -29,6 +30,9 @@ export default async function EditPrescriptionPage({
   });
   if (!prescription) notFound();
   const { patient } = prescription;
+  // Prescribed mode, prescriber and notes of an identified patient are shown in the form.
+  // Traced on the patient: a prescription can be deleted, the patient stays.
+  await auditRead(user, { action: "prescription.view", entity: "Patient", entityId: patient.id });
   const today = todayIso();
   const openTrips = await countOpenTrips({ prescriptionId: prescription.id }, today);
   const recurrences = prescription._count.recurrences;

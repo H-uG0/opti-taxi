@@ -1,5 +1,8 @@
 /** Compact French formatters for the planning screen (complements @/lib/labels). */
-import { TIME_ZONE } from "@/lib/time";
+import type { SharingStatus, StopKind, TripStatus } from "@prisma/client";
+import { recordTrace, sharingAnswerWords, UNKNOWN_AUTHOR } from "@/lib/record-trace";
+import { isoDateOf, TIME_ZONE } from "@/lib/time";
+import type { RecordedByView } from "./types";
 
 const euros0 = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 const decimal1 = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
@@ -35,6 +38,46 @@ export function formatInstant(iso: string): string {
   const day = new Intl.DateTimeFormat("fr-FR", { timeZone: TIME_ZONE, day: "2-digit", month: "2-digit" }).format(date);
   const time = new Intl.DateTimeFormat("fr-FR", { timeZone: TIME_ZONE, hour: "2-digit", minute: "2-digit" }).format(date);
   return `${day} à ${time}`;
+}
+
+const clock = new Intl.DateTimeFormat("fr-FR", { timeZone: TIME_ZONE, hour: "2-digit", minute: "2-digit" });
+
+/** ISO instant -> "08:12" when it falls on isoDate in Europe/Paris, else "02/11 à 18:40". */
+export function formatTimeOn(iso: string, isoDate: string): string {
+  const date = new Date(iso);
+  return isoDateOf(date) === isoDate ? clock.format(date) : formatInstant(iso);
+}
+
+export { UNKNOWN_AUTHOR } from "@/lib/record-trace";
+
+/** "par Marie Durand", or UNKNOWN_AUTHOR. */
+export function recordedByText(byName: string | null): string {
+  return byName ? `par ${byName}` : UNKNOWN_AUTHOR;
+}
+
+/**
+ * Trace of the patient's sharing answer, worded as on /courses (@/lib/record-trace):
+ * "Refus enregistré par Marie Durand le 02/11 à 18:40", or
+ * "Refus enregistré le 02/11 à 18:40 (auteur non tracé)". Null when the
+ * status is no answer to the current proposal (reset by a prescription change).
+ */
+export function sharingAnswerText(answer: RecordedByView, status: SharingStatus): string | null {
+  const what = sharingAnswerWords(status);
+  return what ? recordTrace(what, new Date(answer.at), answer.byName).full : null;
+}
+
+/**
+ * What a recorded stop status means, worded as on /courses (record-trace):
+ * on a pick-up stop of an absent patient, the absence.
+ */
+export function fieldRecordLabel(kind: StopKind, tripStatus: TripStatus): string {
+  if (kind === "DROPOFF") return "Dépose enregistrée";
+  return tripStatus === "NO_SHOW" ? "Absence enregistrée" : "Prise en charge enregistrée";
+}
+
+/** "par Jean Martin · 08:12", author first as on /courses (with the day when recorded on another day than isoDate). */
+export function fieldRecordText(record: RecordedByView, isoDate: string): string {
+  return `${recordedByText(record.byName)} · ${formatTimeOn(record.at, isoDate)}`;
 }
 
 /** "2026-11-03" -> "03/11". */

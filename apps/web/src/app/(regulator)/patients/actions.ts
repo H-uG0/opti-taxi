@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatAddress } from "@/lib/domain/rules";
@@ -16,6 +17,7 @@ import {
   type RefreshOutcome,
 } from "@/lib/planning/refresh-routes";
 import { addDays, formatShortDate, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
+import { activationEvent, alreadyInStateMessage, patientUpdateEvents, renewalEvents, tripCreateEvents } from "./_lib/audit-events";
 import { idSchema } from "./_lib/form-parse";
 import { formString, messageState, type ActionResult, type FormState } from "./_lib/form-state";
 import { parsePatientForm, parsePrescriptionForm, parseRecurrenceForm, readRecurrenceForm } from "./_lib/schemas";
@@ -74,12 +76,18 @@ const REACTIVATED_HINT =
 
 // ---------------------------------------------------------------- patient
 
+// Every change below is traced (lib/audit.ts) in the transaction that writes it.
+
 export async function createPatient(_prev: FormState, formData: FormData): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const parsed = parsePatientForm(formData);
   if (!parsed.success) return parsed.state;
 
-  const patient = await db.patient.create({ data: parsed.data, select: { id: true } });
+  const patient = await db.$transaction(async (tx) => {
+    const created = await tx.patient.create({ data: parsed.data, select: { id: true } });
+    await audit(tx, user, { action: "patient.create", entity: "Patient", entityId: created.id });
+    return created;
+  });
   revalidatePatients();
   redirect(`/patients/${patient.id}`);
 }
@@ -89,7 +97,7 @@ export async function createPatient(_prev: FormState, formData: FormData): Promi
  * copied to them, and unticking « actif » cancels them.
  */
 export async function updatePatient(patientId: string, _prev: FormState, formData: FormData): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const id = idSchema.safeParse(patientId);
   const parsed = parsePatientForm(formData);
   if (!parsed.success) return parsed.state;
@@ -97,19 +105,28 @@ export async function updatePatient(patientId: string, _prev: FormState, formDat
 
   const existing = await db.patient.findUnique({
     where: { id: id.data },
-    select: { id: true, active: true, address: true, postalCode: true, city: true, lat: true, lng: true },
+    select: { id: true, address: true, postalCode: true, city: true, lat: true, lng: true },
   });
   if (!existing) return messageState(NOT_FOUND, null);
 
   const data = parsed.data;
   const today = todayIso();
   const home = { address: formatAddress(data), lat: data.lat, lng: data.lng };
-  const deactivated = existing.active && !data.active;
   const moved = home.address !== formatAddress(existing) || data.lat !== existing.lat || data.lng !== existing.lng;
 
   const leftRoutes = new Set<string>();
   const summary = await db.$transaction(async (tx) => {
+    // Guarded on the opposite state, not on `existing` (read before the
+    // transaction): only the save that switches « actif » traces the
+    // (de)activation and cancels the trips.
+    const flip = await tx.patient.updateMany({
+      where: { id: existing.id, active: !data.active },
+      data: { active: data.active },
+    });
+    const switched = flip.count > 0;
     await tx.patient.update({ where: { id: existing.id }, data });
+    await audit(tx, user, patientUpdateEvents(existing.id, { value: data.active, switched }));
+    const deactivated = switched && !data.active;
     if (!deactivated && !moved) return EMPTY_SYNC;
     return syncOpenTrips(
       tx,
@@ -117,6 +134,7 @@ export async function updatePatient(patientId: string, _prev: FormState, formDat
       () => (deactivated ? CANCEL : { kind: "update", home }),
       today,
       leftRoutes,
+      user,
     );
   }, SYNC_TX_OPTIONS);
   const refresh = await refreshLeftRoutes(leftRoutes);
@@ -128,7 +146,7 @@ export async function updatePatient(patientId: string, _prev: FormState, formDat
 
 /** Deactivation keeps the history (no hard delete) and cancels the patient's open trips to come. */
 export async function setPatientActive(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const input = z
     .object({ patientId: idSchema, active: activeFlag })
     .safeParse({ patientId: formString(formData, "patientId"), active: formString(formData, "active") });
@@ -138,11 +156,19 @@ export async function setPatientActive(_prev: ActionResult, formData: FormData):
 
   const leftRoutes = new Set<string>();
   const summary = await db.$transaction(async (tx) => {
-    const { count } = await tx.patient.updateMany({ where: { id: patientId }, data: { active } });
+    // Guarded on the opposite state: a stale page or a double click that
+    // repeats a state already set writes nothing and traces nothing.
+    const { count } = await tx.patient.updateMany({ where: { id: patientId, active: !active }, data: { active } });
     if (count === 0) return null;
-    return active ? EMPTY_SYNC : syncOpenTrips(tx, { patientId }, () => CANCEL, today, leftRoutes);
+    await audit(tx, user, activationEvent("patient", patientId, active));
+    return active ? EMPTY_SYNC : syncOpenTrips(tx, { patientId }, () => CANCEL, today, leftRoutes, user);
   }, SYNC_TX_OPTIONS);
-  if (!summary) return { ok: false, message: NOT_FOUND };
+  if (!summary) {
+    const current = await db.patient.findUnique({ where: { id: patientId }, select: { id: true } });
+    if (!current) return { ok: false, message: NOT_FOUND };
+    revalidatePatients(); // the page was stale: show the current state
+    return { ok: true, message: alreadyInStateMessage("patient", active) };
+  }
   const refresh = await refreshLeftRoutes(leftRoutes);
 
   revalidatePatients();
@@ -157,7 +183,7 @@ export async function setPatientActive(_prev: ActionResult, formData: FormData):
 // ---------------------------------------------------------------- prescriptions
 
 export async function createPrescription(patientId: string, _prev: FormState, formData: FormData): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const id = idSchema.safeParse(patientId);
   const parsed = parsePrescriptionForm(formData);
   if (!parsed.success) return parsed.state;
@@ -167,8 +193,12 @@ export async function createPrescription(patientId: string, _prev: FormState, fo
   if (!patient) return messageState(NOT_FOUND, null);
 
   const { validFrom, validTo, ...rest } = parsed.data;
-  await db.prescription.create({
-    data: { ...rest, patientId: patient.id, validFrom: fromIsoDate(validFrom), validTo: fromIsoDate(validTo) },
+  await db.$transaction(async (tx) => {
+    const created = await tx.prescription.create({
+      data: { ...rest, patientId: patient.id, validFrom: fromIsoDate(validFrom), validTo: fromIsoDate(validTo) },
+      select: { id: true },
+    });
+    await audit(tx, user, { action: "prescription.create", entity: "Prescription", entityId: created.id });
   });
   revalidatePatients();
   redirect(`/patients/${patient.id}#prescriptions`);
@@ -186,7 +216,7 @@ export async function updatePrescription(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const ids = z.object({ patientId: idSchema, prescriptionId: idSchema }).safeParse({ patientId, prescriptionId });
   const parsed = parsePrescriptionForm(formData);
   if (!parsed.success) return parsed.state;
@@ -214,8 +244,16 @@ export async function updatePrescription(
       where: { id: existing.id },
       data: { ...rest, validFrom: fromIsoDate(validFrom), validTo: fromIsoDate(validTo) },
     });
+    await audit(tx, user, { action: "prescription.update", entity: "Prescription", entityId: existing.id });
     if (!rulesChanged) return EMPTY_SYNC;
-    return syncOpenTrips(tx, { prescriptionId: existing.id }, (trip) => prescriptionTarget(trip, rules), today, leftRoutes);
+    return syncOpenTrips(
+      tx,
+      { prescriptionId: existing.id },
+      (trip) => prescriptionTarget(trip, rules),
+      today,
+      leftRoutes,
+      user,
+    );
   }, SYNC_TX_OPTIONS);
   const refresh = await refreshLeftRoutes(leftRoutes);
 
@@ -229,16 +267,22 @@ export async function updatePrescription(
  * trips: it is refused while anything still uses it.
  */
 export async function deletePrescription(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const input = z
     .object({ patientId: idSchema, prescriptionId: idSchema })
     .safeParse({ patientId: formString(formData, "patientId"), prescriptionId: formString(formData, "prescriptionId") });
   if (!input.success) return { ok: false, message: "Demande invalide." };
   const { patientId, prescriptionId } = input.data;
 
-  // Single statement: deletes only if no recurrence and no trip reference it.
-  const { count } = await db.prescription.deleteMany({
-    where: { id: prescriptionId, patientId, recurrences: { none: {} }, trips: { none: {} } },
+  const count = await db.$transaction(async (tx) => {
+    // Single statement: deletes only if no recurrence and no trip reference it.
+    const deleted = await tx.prescription.deleteMany({
+      where: { id: prescriptionId, patientId, recurrences: { none: {} }, trips: { none: {} } },
+    });
+    if (deleted.count === 1) {
+      await audit(tx, user, { action: "prescription.delete", entity: "Prescription", entityId: prescriptionId });
+    }
+    return deleted.count;
   });
   if (count === 1) {
     revalidatePatients();
@@ -271,7 +315,7 @@ export async function deletePrescription(_prev: ActionResult, formData: FormData
  * inside the renewal's validity are attached to it.
  */
 export async function attachRecurrencesToRenewal(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const input = z
     .object({ patientId: idSchema, fromPrescriptionId: idSchema, toPrescriptionId: idSchema })
     .safeParse({
@@ -321,18 +365,35 @@ export async function attachRecurrencesToRenewal(_prev: ActionResult, formData: 
       include: { patient: true, facility: true, prescription: true },
     });
     if (recurrences.length === 0) return null;
-    const ids = recurrences.map((r) => r.id);
-    const planned = firstOldDay <= fromEnd ? planTripsFromRecurrences(recurrences, firstOldDay, fromEnd) : [];
-    const created = planned.length > 0 ? (await tx.trip.createMany({ data: planned, skipDuplicates: true })).count : 0;
-    await tx.recurrence.updateMany({ where: { id: { in: ids } }, data: { prescriptionId: to.id } });
+    // Guarded on the old prescription: of two concurrent submits, only the first moves (and traces) them.
+    const moved = await tx.recurrence.updateManyAndReturn({
+      where: { id: { in: recurrences.map((r) => r.id) }, prescriptionId: from.id },
+      data: { prescriptionId: to.id },
+      select: { id: true },
+    });
+    if (moved.length === 0) return null;
+    const ids = moved.map((r) => r.id);
+    // Trips up to the end of the old prescription, generated from the recurrences as read before the move.
+    const movedRecurrences = recurrences.filter((r) => ids.includes(r.id));
+    const planned = firstOldDay <= fromEnd ? planTripsFromRecurrences(movedRecurrences, firstOldDay, fromEnd) : [];
+    const createdTrips =
+      planned.length > 0
+        ? await tx.trip.createManyAndReturn({ data: planned, skipDuplicates: true, select: { id: true, serviceDate: true } })
+        : [];
+    const created = createdTrips.length;
+    await audit(tx, user, [
+      ...renewalEvents(ids),
+      ...tripCreateEvents(createdTrips.map((trip) => ({ id: trip.id, serviceDate: toIsoDate(trip.serviceDate) }))),
+    ]);
     const summary = await syncOpenTrips(
       tx,
       { recurrenceId: { in: ids } },
       (trip) => renewalTarget(trip, renewal),
       today,
       leftRoutes,
+      user,
     );
-    return { count: recurrences.length, created, summary };
+    return { count: ids.length, created, summary };
   }, SYNC_TX_OPTIONS);
   if (!result) return { ok: false, message: "Aucune récurrence n'est rattachée à cette prescription." };
   const refresh = await refreshLeftRoutes(leftRoutes);
@@ -378,7 +439,7 @@ async function checkRecurrenceReferences(
 }
 
 export async function createRecurrence(patientId: string, _prev: FormState, formData: FormData): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const id = idSchema.safeParse(patientId);
   const parsed = parseRecurrenceForm(formData);
   if (!parsed.success) return parsed.state;
@@ -393,13 +454,17 @@ export async function createRecurrence(patientId: string, _prev: FormState, form
     return messageState("Vérifiez l'établissement et la prescription.", readRecurrenceForm(formData), refErrors);
   }
 
-  await db.recurrence.create({
-    data: {
-      ...rest,
-      patientId: patient.id,
-      startDate: fromIsoDate(startDate),
-      endDate: endDate ? fromIsoDate(endDate) : null,
-    },
+  await db.$transaction(async (tx) => {
+    const created = await tx.recurrence.create({
+      data: {
+        ...rest,
+        patientId: patient.id,
+        startDate: fromIsoDate(startDate),
+        endDate: endDate ? fromIsoDate(endDate) : null,
+      },
+      select: { id: true },
+    });
+    await audit(tx, user, { action: "recurrence.create", entity: "Recurrence", entityId: created.id });
   });
   revalidatePatients();
   revalidatePath("/(regulator)/etablissements", "layout");
@@ -431,7 +496,7 @@ export async function updateRecurrence(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const ids = z.object({ patientId: idSchema, recurrenceId: idSchema }).safeParse({ patientId, recurrenceId });
   const parsed = parseRecurrenceForm(formData);
   if (!parsed.success) return parsed.state;
@@ -494,6 +559,7 @@ export async function updateRecurrence(
       where: { id: existing.id },
       data: { ...rest, startDate: fromIsoDate(startDate), endDate: endDate ? fromIsoDate(endDate) : null },
     });
+    await audit(tx, user, { action: "recurrence.update", entity: "Recurrence", entityId: existing.id });
     if (sameSchedule(before, after)) return EMPTY_SYNC;
 
     const prescription = await tx.prescription.findUniqueOrThrow({
@@ -521,6 +587,7 @@ export async function updateRecurrence(
       (trip) => recurrenceTarget(trip, before, target),
       today,
       leftRoutes,
+      user,
     );
   }, SYNC_TX_OPTIONS);
   const refresh = await refreshLeftRoutes(leftRoutes);
@@ -533,7 +600,7 @@ export async function updateRecurrence(
 
 /** Deactivating a recurrence cancels its open trips to come; reactivating it does not bring them back. */
 export async function setRecurrenceActive(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const input = z
     .object({ patientId: idSchema, recurrenceId: idSchema, active: activeFlag })
     .safeParse({
@@ -559,9 +626,20 @@ export async function setRecurrenceActive(_prev: ActionResult, formData: FormDat
   const today = todayIso();
   const leftRoutes = new Set<string>();
   const summary = await db.$transaction(async (tx) => {
-    await tx.recurrence.update({ where: { id: recurrence.id }, data: { active } });
-    return active ? EMPTY_SYNC : syncOpenTrips(tx, { recurrenceId: recurrence.id }, () => CANCEL, today, leftRoutes);
+    // Guarded on the opposite state, as setPatientActive.
+    const { count } = await tx.recurrence.updateMany({ where: { id: recurrence.id, active: !active }, data: { active } });
+    if (count === 0) return null;
+    await audit(tx, user, activationEvent("recurrence", recurrence.id, active));
+    return active
+      ? EMPTY_SYNC
+      : syncOpenTrips(tx, { recurrenceId: recurrence.id }, () => CANCEL, today, leftRoutes, user);
   }, SYNC_TX_OPTIONS);
+  if (!summary) {
+    const current = await db.recurrence.findUnique({ where: { id: recurrence.id }, select: { id: true } });
+    if (!current) return { ok: false, message: NOT_FOUND };
+    revalidatePatients(); // the page was stale: show the current state
+    return { ok: true, message: alreadyInStateMessage("recurrence", active) };
+  }
   const refresh = await refreshLeftRoutes(leftRoutes);
 
   revalidatePatients();

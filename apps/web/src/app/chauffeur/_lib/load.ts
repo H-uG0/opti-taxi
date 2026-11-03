@@ -59,6 +59,8 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
           startMinute: true,
           loadAfter: true,
           completedAt: true,
+          // Server-side only: which crew member recorded the status (never sent to the client).
+          completedBy: { select: { driverId: true } },
           trip: {
             select: {
               direction: true,

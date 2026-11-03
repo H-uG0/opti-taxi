@@ -1,17 +1,24 @@
 import Link from "next/link";
 import { RefreshCw } from "lucide-react";
 import { cn } from "@/components/ui/cn";
-import { decodeSync, describeSync } from "../_lib/trip-sync";
+import { saveNotice } from "../_lib/sync-notice";
 
 /**
- * After a save that changed trips (redirect with ?courses=…): what happened to
- * the trips to come, with a link to « Courses ». Renders nothing otherwise.
+ * After a save that changed trips (redirect with ?courses=… and, when routes
+ * were recomputed, ?tournees=…): what happened to the trips to come and to the
+ * routes they left, with a link to « Courses ». Renders nothing otherwise.
  */
-export function SyncNotice({ value, className }: { value: string | string[] | undefined; className?: string }) {
-  const summary = decodeSync(Array.isArray(value) ? value[0] : value);
-  const text = summary ? describeSync(summary) : null;
-  if (!summary || !text) return null;
-  const needsAction = summary.detached > 0 || summary.deferred > 0;
+export function SyncNotice({
+  query,
+  className,
+}: {
+  /** The page's searchParams. */
+  query: Record<string, string | string[] | undefined>;
+  className?: string;
+}) {
+  const notice = saveNotice(query);
+  if (!notice) return null;
+  const { text, needsAction } = notice;
   return (
     <div
       role="status"

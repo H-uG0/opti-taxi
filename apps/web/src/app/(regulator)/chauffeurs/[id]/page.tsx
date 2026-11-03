@@ -117,6 +117,7 @@ export default async function EditDriverPage({
                     action={saveDriverAccount.bind(null, driver.id)}
                     email={account?.email ?? ""}
                     hasAccount={account !== null}
+                    accountActive={account?.active ?? false}
                   />
                   {account ? (
                     <div className="border-t border-slate-200 pt-4">
@@ -129,7 +130,10 @@ export default async function EditDriverPage({
                           account.active ? (
                             <p>Le chauffeur ne pourra plus se connecter. {OPEN_SESSION_NOTE}</p>
                           ) : (
-                            <p>Le chauffeur pourra de nouveau se connecter avec son identifiant actuel.</p>
+                            <p>
+                              Le chauffeur pourra de nouveau se connecter avec son identifiant et son mot de passe
+                              actuels. Les sessions coupées lors de la désactivation ne reprennent pas.
+                            </p>
                           )
                         }
                       />
@@ -220,7 +224,12 @@ export default async function EditDriverPage({
                       {upcomingNotice ? <p className="font-medium text-amber-800">{upcomingNotice}</p> : null}
                     </div>
                   ) : (
-                    <p>Le chauffeur pourra de nouveau être affecté à un véhicule.</p>
+                    <p>
+                      Le chauffeur pourra de nouveau être affecté à un véhicule.
+                      {account && !account.active
+                        ? " Son compte d'accès reste désactivé : réactivez-le ensuite si besoin."
+                        : ""}
+                    </p>
                   )
                 }
               />

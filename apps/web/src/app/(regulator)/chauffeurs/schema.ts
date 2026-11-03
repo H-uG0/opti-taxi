@@ -3,7 +3,8 @@
  * access account. Pure module, unit-tested.
  */
 import { z } from "zod";
-import type { Driver, Qualification, VehicleType } from "@prisma/client";
+import type { Driver, Prisma, Qualification, VehicleType } from "@prisma/client";
+import { REVOKE_SESSIONS } from "@/lib/auth/revoke";
 import { formatDuration, formatMinute } from "@/lib/time";
 import {
   crewMateRequirement,
@@ -214,15 +215,91 @@ export function assignmentConflicts(
 
 /**
  * requireUser (lib/auth) re-checks the account on every request: disabling it,
- * deactivating the driver or resetting the password rejects a session already
- * open at its next server round-trip (an action, or a refresh of the page; a
- * roadmap already on screen stays visible until then). For the rejection to
- * survive a later reactivation, deactivating must also store
- * lockedPasswordHash() (lib/auth/password). Said wherever the regulator could
- * think the phone stays signed in.
+ * deactivating the driver, or setting a new password or e-mail bumps the
+ * account's session version (REVOKE_SESSIONS), which rejects every session
+ * opened before at its next server round-trip (an action, or a refresh of the
+ * page; a roadmap already on screen stays visible until then). Reactivating
+ * later does not bring those sessions back: the driver signs in again, with an
+ * unchanged password. Said wherever the regulator could think the phone stays
+ * signed in.
  */
 export const OPEN_SESSION_NOTE =
   "Une session déjà ouverte sur son téléphone est coupée dès sa prochaine action ou actualisation.";
+
+/**
+ * User data that enables or disables a driver account. Disabling also ends its
+ * open sessions (see OPEN_SESSION_NOTE); enabling restores the sign-in, not
+ * those sessions.
+ */
+export function accountActiveData(active: boolean) {
+  return active ? { active: true } : { active: false, ...REVOKE_SESSIONS };
+}
+
+export type AccountAuditAction = "account.update" | "account.password_reset";
+
+export type AccountChange = {
+  data: Prisma.UserUpdateInput;
+  actions: AccountAuditAction[];
+  emailChanged: boolean;
+  passwordReset: boolean;
+};
+
+/**
+ * What saving the account form does to an existing driver account, or null
+ * when it changes nothing. A new e-mail or a new password also ends every open
+ * session of the account (REVOKE_SESSIONS): whoever holds the old credentials,
+ * e.g. on a lost or handed-over phone, is signed out.
+ */
+export function accountUpdate(
+  currentEmail: string,
+  next: { email: string; passwordHash: string | null },
+): AccountChange | null {
+  const emailChanged = next.email !== currentEmail;
+  const { passwordHash } = next;
+  const passwordReset = passwordHash !== null;
+  if (!emailChanged && !passwordReset) return null;
+
+  const actions: AccountAuditAction[] = [];
+  if (emailChanged) actions.push("account.update");
+  if (passwordReset) actions.push("account.password_reset");
+
+  return {
+    data: {
+      ...(emailChanged ? { email: next.email } : {}),
+      ...(passwordHash !== null ? { passwordHash } : {}),
+      ...REVOKE_SESSIONS,
+    },
+    actions,
+    emailChanged,
+    passwordReset,
+  };
+}
+
+/** Said when the credentials of a disabled account change: they cannot sign in yet. */
+export const ACCESS_STILL_DISABLED_NOTE =
+  "L'accès reste désactivé : réactivez-le pour que le chauffeur puisse se connecter.";
+
+/**
+ * Success message after an account change. `accountActive` is the account's
+ * state as written by that change: a disabled account cannot sign in and has
+ * no open session (disabling it ended them), so neither is promised.
+ */
+export function accountUpdateMessage(
+  change: Pick<AccountChange, "emailChanged" | "passwordReset">,
+  accountActive: boolean,
+): string {
+  const lead =
+    change.emailChanged && change.passwordReset
+      ? "Identifiant modifié et mot de passe réinitialisé : communiquez-les au chauffeur."
+      : change.passwordReset
+        ? "Mot de passe réinitialisé : communiquez-le au chauffeur."
+        : "Identifiant modifié : communiquez-le au chauffeur.";
+  if (!accountActive) return `${lead} ${ACCESS_STILL_DISABLED_NOTE}`;
+  const detail = change.passwordReset
+    ? "L'ancien mot de passe ne permet plus de se connecter."
+    : "Il se connecte désormais avec la nouvelle adresse et son mot de passe actuel.";
+  return `${lead} ${detail} ${OPEN_SESSION_NOTE}`;
+}
 
 export const MIN_PASSWORD_LENGTH = 10;
 export const MAX_PASSWORD_LENGTH = 64;

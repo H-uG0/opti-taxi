@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { audit, type AuditEntry } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { hashPassword } from "@/lib/auth/password";
 import { db } from "@/lib/db";
@@ -19,7 +20,16 @@ import {
   valueOf,
   type FormState,
 } from "@/lib/forms";
-import { accountSchema, assignmentConflicts, DRIVER_MULTI_FIELDS, driverSchema, OPEN_SESSION_NOTE } from "./schema";
+import {
+  accountActiveData,
+  accountSchema,
+  accountUpdate,
+  accountUpdateMessage,
+  assignmentConflicts,
+  DRIVER_MULTI_FIELDS,
+  driverSchema,
+  OPEN_SESSION_NOTE,
+} from "./schema";
 
 const DRIVER_GONE = "Ce chauffeur n'existe plus : rechargez la page.";
 
@@ -31,19 +41,23 @@ function revalidateDriver(driverId?: string) {
 }
 
 export async function createDriver(_state: FormState, formData: FormData): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const values = readForm(formData, DRIVER_MULTI_FIELDS);
   const parsed = driverSchema.safeParse(values);
   if (!parsed.success) return invalidState(parsed.error, values);
 
-  const driver = await db.driver.create({ data: parsed.data, select: { id: true } });
+  const driver = await db.$transaction(async (tx) => {
+    const created = await tx.driver.create({ data: parsed.data, select: { id: true } });
+    await audit(tx, user, { action: "driver.create", entity: "Driver", entityId: created.id });
+    return created;
+  });
   revalidateDriver();
   // Next step for the regulator: give the driver an access account.
   redirect(`/chauffeurs/${driver.id}?cree=1`);
 }
 
 export async function updateDriver(driverId: string, _state: FormState, formData: FormData): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const id = idSchema.safeParse(driverId);
   if (!id.success) return messageState(DRIVER_GONE);
   const current = await db.driver.findUnique({
@@ -74,14 +88,15 @@ export async function updateDriver(driverId: string, _state: FormState, formData
     );
   }
 
-  await db.$transaction([
-    db.driver.update({ where: { id: current.id }, data: parsed.data }),
-    // Keep the login display name in sync with the driver record.
-    db.user.updateMany({
+  await db.$transaction(async (tx) => {
+    await tx.driver.update({ where: { id: current.id }, data: parsed.data });
+    // Keep the login display name in sync with the driver record (covered by driver.update).
+    await tx.user.updateMany({
       where: { driverId: current.id, role: "DRIVER" },
       data: { name: `${parsed.data.firstName} ${parsed.data.lastName}` },
-    }),
-  ]);
+    });
+    await audit(tx, user, { action: "driver.update", entity: "Driver", entityId: current.id });
+  });
   revalidateDriver(current.id);
   return successState("Fiche chauffeur enregistrée.");
 }
@@ -90,51 +105,78 @@ const activeArgs = z.object({ id: idSchema, active: z.boolean() });
 
 /**
  * Deactivate (history kept) or reactivate a driver. Deactivating also removes
- * them from the default crew of every vehicle and disables their login (an
- * open session ends too, see OPEN_SESSION_NOTE). Upcoming routes already
+ * them from the default crew of every vehicle and disables their login (its
+ * open sessions end too, see OPEN_SESSION_NOTE). Upcoming routes already
  * planned with them are kept and reported: the regulator re-runs those days.
  */
 export async function setDriverActive(driverId: string, active: boolean): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const args = activeArgs.safeParse({ id: driverId, active });
   if (!args.success) return messageState("Requête invalide.");
-  const driver = await db.driver.findUnique({ where: { id: args.data.id }, select: { id: true, active: true } });
+  const driver = await db.driver.findUnique({ where: { id: args.data.id }, select: { id: true } });
   if (!driver) return messageState(DRIVER_GONE);
 
+  // Each branch flips the flag with a conditional write: of two concurrent
+  // requests (two tabs), only the one that changes it acts and writes the
+  // audit events; the other one reports the state already reached. Both
+  // revalidate, so a stale page shows the current state.
   if (args.data.active) {
-    if (driver.active) return successState("Ce chauffeur est déjà actif.");
-    await db.driver.update({ where: { id: driver.id }, data: { active: true } });
+    const reactivated = await db.$transaction(async (tx) => {
+      const { count } = await tx.driver.updateMany({ where: { id: driver.id, active: false }, data: { active: true } });
+      if (count === 0) return false;
+      await audit(tx, user, { action: "driver.reactivate", entity: "Driver", entityId: driver.id });
+      return true;
+    });
     revalidateDriver(driver.id);
+    if (!reactivated) return successState("Ce chauffeur est déjà actif.");
     return successState(
       "Chauffeur réactivé. Affectez-le à un véhicule et réactivez son accès si besoin : ils n'ont pas été restaurés.",
     );
   }
 
-  if (!driver.active) return successState("Ce chauffeur est déjà désactivé.");
-  const [, asDriver, asCrewMate, accounts, routes] = await db.$transaction([
-    db.driver.update({ where: { id: driver.id }, data: { active: false } }),
-    db.vehicle.updateMany({ where: { defaultDriverId: driver.id }, data: { defaultDriverId: null } }),
-    db.vehicle.updateMany({ where: { defaultCrewMateId: driver.id }, data: { defaultCrewMateId: null } }),
-    db.user.updateMany({ where: { driverId: driver.id, role: "DRIVER", active: true }, data: { active: false } }),
+  const result = await db.$transaction(async (tx) => {
+    const { count } = await tx.driver.updateMany({ where: { id: driver.id, active: true }, data: { active: false } });
+    if (count === 0) return null;
+    const asDriver = await tx.vehicle.updateMany({ where: { defaultDriverId: driver.id }, data: { defaultDriverId: null } });
+    const asCrewMate = await tx.vehicle.updateMany({
+      where: { defaultCrewMateId: driver.id },
+      data: { defaultCrewMateId: null },
+    });
+    // driverId is unique on User: one account at most. Only an account still
+    // active is disabled (and its sessions ended): one already disabled has no
+    // open session left, disabling it ended them. Conditional, like the account
+    // toggle it may race with.
+    const account = await tx.user.findFirst({ where: { driverId: driver.id, role: "DRIVER" }, select: { id: true } });
+    const accountDisabled = account
+      ? (await tx.user.updateMany({ where: { id: account.id, active: true }, data: accountActiveData(false) })).count === 1
+      : false;
+    const events: AuditEntry[] = [{ action: "driver.deactivate", entity: "Driver", entityId: driver.id }];
+    if (account && accountDisabled) events.push({ action: "account.deactivate", entity: "User", entityId: account.id });
+    await audit(tx, user, events);
     // Planned routes keep their crew: the regulator re-runs those days.
-    db.route.findMany({
+    const routes = await tx.route.findMany({
       where: { serviceDate: { gte: fromIsoDate(todayIso()) }, OR: [{ driverId: driver.id }, { crewMateId: driver.id }] },
       select: { serviceDate: true, status: true },
-    }),
-  ]);
+    });
+    return { detached: asDriver.count + asCrewMate.count, accountDisabled, routes };
+  });
   revalidateDriver(driver.id);
-  const detached = asDriver.count + asCrewMate.count;
+  if (!result) return successState("Ce chauffeur est déjà désactivé.");
+  const { detached, accountDisabled, routes } = result;
   const parts = ["Chauffeur désactivé."];
   if (detached > 0) parts.push(`Retiré de l'équipage par défaut de ${detached} véhicule${detached > 1 ? "s" : ""}.`);
-  if (accounts.count > 0) parts.push(`Son compte d'accès est désactivé : il ne peut plus se connecter. ${OPEN_SESSION_NOTE}`);
+  if (accountDisabled) parts.push(`Son compte d'accès est désactivé : il ne peut plus se connecter. ${OPEN_SESSION_NOTE}`);
   const notice = upcomingRoutesNotice(toUpcomingRoutes(routes), "driver");
   if (notice) parts.push(notice);
   return successState(parts.join(" "));
 }
 
-/** Create the driver's login, or change its e-mail and/or reset its password. */
+/**
+ * Create the driver's login, or change its e-mail and/or reset its password
+ * (either ends its open sessions, see accountUpdate).
+ */
 export async function saveDriverAccount(driverId: string, _state: FormState, formData: FormData): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const id = idSchema.safeParse(driverId);
   if (!id.success) return messageState(DRIVER_GONE);
   const driver = await db.driver.findUnique({
@@ -160,25 +202,36 @@ export async function saveDriverAccount(driverId: string, _state: FormState, for
   const { email, password } = parsed.data;
   const passwordHash = password ? await hashPassword(password) : null;
 
+  let message: string;
   try {
     if (account) {
-      if (email === account.email && !passwordHash) return successState("Aucune modification.");
-      await db.user.update({
-        where: { id: account.id },
-        data: passwordHash ? { email, passwordHash } : { email },
+      const update = accountUpdate(account.email, { email, passwordHash });
+      if (!update) return successState("Aucune modification.");
+      const saved = await db.$transaction(async (tx) => {
+        // `active` as of this write: the message must not promise a sign-in to
+        // a disabled account, even one disabled from another tab meanwhile.
+        const updated = await tx.user.update({ where: { id: account.id }, data: update.data, select: { active: true } });
+        await audit(tx, user, update.actions.map((action) => ({ action, entity: "User", entityId: account.id })));
+        return updated;
       });
+      message = accountUpdateMessage(update, saved.active);
     } else {
       if (!passwordHash) return errorState({ password: "Mot de passe obligatoire pour créer le compte." }, safeValues);
-      await db.user.create({
-        data: {
-          email,
-          name: `${driver.firstName} ${driver.lastName}`,
-          passwordHash,
-          role: "DRIVER",
-          driverId: driver.id,
-          active: true,
-        },
+      await db.$transaction(async (tx) => {
+        const created = await tx.user.create({
+          data: {
+            email,
+            name: `${driver.firstName} ${driver.lastName}`,
+            passwordHash,
+            role: "DRIVER",
+            driverId: driver.id,
+            active: true,
+          },
+          select: { id: true },
+        });
+        await audit(tx, user, { action: "account.create", entity: "User", entityId: created.id });
       });
+      message = "Compte créé. Communiquez l'identifiant et le mot de passe au chauffeur.";
     }
   } catch (error) {
     if (isUniqueViolation(error, "email")) {
@@ -189,33 +242,49 @@ export async function saveDriverAccount(driverId: string, _state: FormState, for
   }
 
   revalidateDriver(driver.id);
-  if (!account) return successState("Compte créé. Communiquez l'identifiant et le mot de passe au chauffeur.");
-  // The old password no longer logs in, and sessions opened with it end.
-  const resetNote = `L'ancien mot de passe ne permet plus de se connecter. ${OPEN_SESSION_NOTE}`;
-  if (passwordHash && email !== account.email) {
-    return successState(`Identifiant modifié et mot de passe réinitialisé : communiquez-les au chauffeur. ${resetNote}`);
-  }
-  if (passwordHash) return successState(`Mot de passe réinitialisé : communiquez-le au chauffeur. ${resetNote}`);
-  return successState("Identifiant modifié.");
+  return successState(message);
 }
 
+/**
+ * Disable (open sessions end, see OPEN_SESSION_NOTE) or re-enable the
+ * driver's login. Re-enabling brings back the sign-in with the unchanged
+ * e-mail and password, not the sessions.
+ */
 export async function setDriverAccountActive(driverId: string, active: boolean): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const args = activeArgs.safeParse({ id: driverId, active });
   if (!args.success) return messageState("Requête invalide.");
+  const target = args.data.active;
   const driver = await db.driver.findUnique({
     where: { id: args.data.id },
     select: { id: true, active: true, user: { select: { id: true, role: true } } },
   });
   if (!driver) return messageState(DRIVER_GONE);
   if (!driver.user || driver.user.role !== "DRIVER") return messageState("Ce chauffeur n'a pas de compte d'accès.");
-  if (args.data.active && !driver.active) return messageState("Réactivez d'abord le chauffeur.");
+  const account = driver.user;
+  if (target && !driver.active) return messageState("Réactivez d'abord le chauffeur.");
 
-  await db.user.update({ where: { id: driver.user.id }, data: { active: args.data.active } });
+  // Conditional write: of two concurrent requests (two tabs), only the one that
+  // flips the flag bumps the session version and writes the audit event.
+  const changed = await db.$transaction(async (tx) => {
+    const { count } = await tx.user.updateMany({
+      where: { id: account.id, active: !target },
+      data: accountActiveData(target),
+    });
+    if (count === 0) return false;
+    await audit(tx, user, {
+      action: target ? "account.reactivate" : "account.deactivate",
+      entity: "User",
+      entityId: account.id,
+    });
+    return true;
+  });
+  // Also when nothing changed: the page was stale, show the current state.
   revalidateDriver(driver.id);
+  if (!changed) return successState(target ? "Cet accès est déjà actif." : "Cet accès est déjà désactivé.");
   return successState(
-    args.data.active
-      ? "Accès réactivé : le chauffeur peut se connecter."
+    target
+      ? "Accès réactivé : le chauffeur se reconnecte avec son identifiant et son mot de passe actuels."
       : `Accès désactivé : le chauffeur ne peut plus se connecter. ${OPEN_SESSION_NOTE}`,
   );
 }

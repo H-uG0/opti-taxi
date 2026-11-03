@@ -4,20 +4,26 @@
  * Status actions of the driver roadmap. Each one:
  * 1. authenticates the driver (requireDriver) before reading anything;
  * 2. loads the stop with its route and checks that the session's driver is the
- *    route's driver or crew mate (a stop id from the client is never trusted);
- * 3. only accepts routes of today (Europe/Paris): statuses are recorded on the day;
- * 4. applies the pure rules of ./_lib/transitions (idempotent: a replay after a
+ *    route's driver or crew mate (a stop id from the client is never trusted)
+ *    and that the route is today's (Europe/Paris): see ./_lib/access;
+ * 3. applies the pure rules of ./_lib/transitions (idempotent: a replay after a
  *    lost response succeeds without writing twice);
- * 5. writes with guarded updates in one transaction, so a concurrent change by
- *    the other crew member is detected instead of being overwritten.
+ * 4. writes with guarded updates in one transaction, so a concurrent change by
+ *    the other crew member is detected instead of being overwritten. The
+ *    stop keeps who recorded it (completedById) and the same transaction
+ *    writes the audit event on the trip (stop.pickup, stop.dropoff,
+ *    stop.no_show, stop.undo_pickup, stop.undo_dropoff).
  */
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { audit } from "@/lib/audit";
 import { requireDriver } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { logError } from "@/lib/log";
 import { todayIso, toIsoDate } from "@/lib/time";
+import { STOP_ACCESS_ERRORS, stopAccess } from "./_lib/access";
 import { latestCompletedStopId } from "./_lib/roadmap";
-import { decideStopAction, type StopAction } from "./_lib/transitions";
+import { decideStopAction, stopAuditAction, stopWrite, type StopAction } from "./_lib/transitions";
 
 export type StopActionResult = { ok: true; message: string } | { ok: false; error: string };
 
@@ -65,12 +71,9 @@ async function runStopAction(action: StopAction, rawStopId: unknown): Promise<St
     },
   });
   // Same answer for a missing stop and someone else's stop: no information leak.
-  if (!stop || (stop.route.driverId !== user.driverId && stop.route.crewMateId !== user.driverId)) {
-    return { ok: false, error: "Cet arrêt ne fait pas partie de vos tournées." };
-  }
-  if (toIsoDate(stop.route.serviceDate) !== todayIso()) {
-    return { ok: false, error: "Les statuts se saisissent uniquement le jour de la tournée." };
-  }
+  if (!stop) return { ok: false, error: STOP_ACCESS_ERRORS["not-yours"] };
+  const access = stopAccess(stop.route, user.driverId, todayIso());
+  if (access !== "ok") return { ok: false, error: STOP_ACCESS_ERRORS[access] };
 
   const routeStops = await db.routeStop.findMany({
     where: { routeId: stop.route.id },
@@ -98,7 +101,7 @@ async function runStopAction(action: StopAction, rawStopId: unknown): Promise<St
       // Guarded by the values the decision was computed from: zero rows means someone changed them meanwhile.
       const stopUpdate = await tx.routeStop.updateMany({
         where: { id: stop.id, completedAt: stop.completedAt },
-        data: { completedAt: decision.completedAt },
+        data: stopWrite(decision, user.id),
       });
       if (stopUpdate.count !== 1) throw new ConflictError();
       if (decision.tripStatus !== stop.trip.status) {
@@ -108,11 +111,17 @@ async function runStopAction(action: StopAction, rawStopId: unknown): Promise<St
         });
         if (tripUpdate.count !== 1) throw new ConflictError();
       }
+      await audit(tx, user, {
+        action: stopAuditAction(action, stop.kind),
+        entity: "Trip",
+        entityId: stop.tripId,
+        serviceDate: toIsoDate(stop.route.serviceDate),
+      });
     });
   } catch (error) {
     revalidatePath("/chauffeur");
     if (error instanceof ConflictError) return { ok: false, error: CONFLICT_ERROR };
-    console.error("Driver stop action failed", { action, stopId: stop.id, error });
+    logError("[chauffeur] stop action failed", error, { action, stopId: stop.id });
     return { ok: false, error: "Enregistrement impossible pour le moment. Réessayez dans un instant." };
   }
 

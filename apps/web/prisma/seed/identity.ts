@@ -56,9 +56,12 @@ export function slugify(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/** Domain of every account the seed creates (.test is reserved, never delivered): see prisma/safety.ts. */
+export const SEED_EMAIL_DOMAIN = "@opti-taxi.test";
+
 /** prenom.nom@opti-taxi.test, ASCII and lowercase. */
 export function devEmail(firstName: string, lastName: string): string {
-  return `${slugify(firstName)}.${slugify(lastName)}@opti-taxi.test`;
+  return `${slugify(firstName)}.${slugify(lastName)}${SEED_EMAIL_DOMAIN}`;
 }
 
 function pairs(rng: Rng, count: number): string {

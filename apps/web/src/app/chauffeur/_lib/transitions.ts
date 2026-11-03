@@ -30,6 +30,23 @@ export const STOP_ACTION_LABELS: Record<StopAction, string> = {
   UNDO: "Annuler",
 };
 
+/**
+ * AuditEvent action of each status action. Events are written on the trip
+ * (entity Trip), never on the stop: stops are deleted when a trip leaves its
+ * route or the day is re-optimized, the trip stays. An undo names the stop
+ * kind it reverts, since the trip alone does not say which status was undone.
+ */
+export const STOP_AUDIT_ACTIONS = {
+  PICKUP: "stop.pickup",
+  DROPOFF: "stop.dropoff",
+  NO_SHOW: "stop.no_show",
+} as const satisfies Record<Exclude<StopAction, "UNDO">, `stop.${string}`>;
+
+export function stopAuditAction(action: StopAction, kind: StopKind): `stop.${string}` {
+  if (action !== "UNDO") return STOP_AUDIT_ACTIONS[action];
+  return kind === "PICKUP" ? "stop.undo_pickup" : "stop.undo_dropoff";
+}
+
 export type StopSnapshot = {
   kind: StopKind;
   completedAt: Date | null;
@@ -116,6 +133,17 @@ export function decideStopAction(action: StopAction, stop: StopSnapshot, now: Da
       };
     }
   }
+}
+
+/**
+ * Stop fields written for an applied decision: the account that records a
+ * status goes with its time (RouteStop.completedById), and an undo clears both.
+ */
+export function stopWrite(
+  decision: Pick<Extract<StopDecision, { type: "apply" }>, "completedAt">,
+  userId: string,
+): { completedAt: Date | null; completedById: string | null } {
+  return { completedAt: decision.completedAt, completedById: decision.completedAt ? userId : null };
 }
 
 /** Buttons of a stop on the roadmap. */

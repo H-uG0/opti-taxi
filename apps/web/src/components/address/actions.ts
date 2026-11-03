@@ -1,7 +1,8 @@
 "use server";
 
 import { requireUser } from "@/lib/auth";
-import { geocodeAddress, geocoderEnabled } from "@/lib/geocode";
+import { allowGeocodeSearch, GEOCODE_THROTTLED_MESSAGE, geocodeAddress, geocoderEnabled } from "@/lib/geocode";
+import { logError } from "@/lib/log";
 import { geocodeQuerySchema } from "./address-schema";
 import type { GeocodeOutcome } from "./address-utils";
 
@@ -10,13 +11,14 @@ import type { GeocodeOutcome } from "./address-utils";
  * address text only (street, postal code, city) — never the person's name.
  */
 export async function geocodeAddressAction(query: unknown): Promise<GeocodeOutcome> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
 
   const parsed = geocodeQuerySchema.safeParse(query);
   if (!parsed.success) {
     return { status: "invalid", message: parsed.error.issues[0]?.message ?? "Adresse invalide." };
   }
   if (!geocoderEnabled()) return { status: "disabled" };
+  if (!allowGeocodeSearch(user.id)) return { status: "error", message: GEOCODE_THROTTLED_MESSAGE };
 
   try {
     const results = await geocodeAddress(parsed.data, 5);
@@ -32,7 +34,8 @@ export async function geocodeAddressAction(query: unknown): Promise<GeocodeOutco
         score: r.score,
       })),
     };
-  } catch {
+  } catch (error) {
+    logError("[address] geocodeAddress failed", error);
     return {
       status: "error",
       message: "Le service de géocodage ne répond pas.",

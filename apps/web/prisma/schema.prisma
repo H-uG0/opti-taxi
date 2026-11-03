@@ -224,11 +224,13 @@ model Trip {
   status TripStatus @default(PLANNED)
 
   /// Prescription compatible avec le partage pour ce trajet (aller/retour).
-  sharingAllowed     Boolean       @default(false)
-  sharingStatus      SharingStatus @default(NOT_PROPOSED)
-  sharingProposedAt  DateTime?
-  sharingRespondedAt DateTime?
-  sharingNote        String?
+  sharingAllowed       Boolean       @default(false)
+  sharingStatus        SharingStatus @default(NOT_PROPOSED)
+  sharingProposedAt    DateTime?
+  sharingRespondedAt   DateTime?
+  /// Compte qui a enregistré la réponse du patient (acceptation ou refus).
+  sharingRespondedById String?
+  sharingNote          String?
 
   /// Verrou manuel : la course reste sur ce véhicule à la réoptimisation.
   lockedVehicleId String?
@@ -246,13 +248,14 @@ model Trip {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  patient       Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  prescription  Prescription? @relation(fields: [prescriptionId], references: [id], onDelete: SetNull)
-  recurrence    Recurrence?   @relation(fields: [recurrenceId], references: [id], onDelete: SetNull)
-  facility      Facility?     @relation(fields: [facilityId], references: [id])
-  lockedVehicle Vehicle?      @relation("TripLockedVehicle", fields: [lockedVehicleId], references: [id], onDelete: SetNull)
-  route         Route?        @relation(fields: [routeId], references: [id], onDelete: SetNull)
-  stops         RouteStop[]
+  patient            Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  prescription       Prescription? @relation(fields: [prescriptionId], references: [id], onDelete: SetNull)
+  recurrence         Recurrence?   @relation(fields: [recurrenceId], references: [id], onDelete: SetNull)
+  facility           Facility?     @relation(fields: [facilityId], references: [id])
+  lockedVehicle      Vehicle?      @relation("TripLockedVehicle", fields: [lockedVehicleId], references: [id], onDelete: SetNull)
+  route              Route?        @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  sharingRespondedBy User?         @relation("TripSharingRespondedBy", fields: [sharingRespondedById], references: [id], onDelete: SetNull)
+  stops              RouteStop[]
 
   @@unique([recurrenceId, serviceDate, direction])
   @@index([serviceDate])
@@ -343,23 +346,26 @@ model Route {
 }
 
 model RouteStop {
-  id               String    @id @default(cuid())
-  routeId          String
-  sequence         Int
-  tripId           String
-  kind             StopKind
-  lat              Float
-  lng              Float
-  address          String
-  arrivalMinute    Int
-  startMinute      Int
-  departureMinute  Int
-  loadAfter        Int
+  id              String    @id @default(cuid())
+  routeId         String
+  sequence        Int
+  tripId          String
+  kind            StopKind
+  lat             Float
+  lng             Float
+  address         String
+  arrivalMinute   Int
+  startMinute     Int
+  departureMinute Int
+  loadAfter       Int
   /// Horodatage réel « pris en charge » / « déposé » saisi par le chauffeur.
-  completedAt      DateTime?
+  completedAt     DateTime?
+  /// Compte (chauffeur ou équipier) qui a saisi completedAt.
+  completedById   String?
 
-  route Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
-  trip  Trip  @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  route       Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  trip        Trip  @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  completedBy User? @relation("RouteStopCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
 
   @@unique([routeId, sequence])
   @@index([tripId])
@@ -429,16 +435,47 @@ model OptimizationRun {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  name         String
-  passwordHash String
-  role         UserRole
-  driverId     String?  @unique
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id             String   @id @default(cuid())
+  email          String   @unique
+  name           String
+  passwordHash   String
+  role           UserRole
+  driverId       String?  @unique
+  active         Boolean  @default(true)
+  /// Incrémenté pour fermer toutes les sessions ouvertes du compte (déconnexion,
+  /// désactivation, nouveau mot de passe ou nouvelle adresse e-mail) : un jeton d'une
+  /// version antérieure est refusé.
+  sessionVersion Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   driver           Driver?           @relation(fields: [driverId], references: [id], onDelete: SetNull)
   optimizationRuns OptimizationRun[]
+  completedStops   RouteStop[]       @relation("RouteStopCompletedBy")
+  sharingResponses Trip[]            @relation("TripSharingRespondedBy")
+  auditEvents      AuditEvent[]
+}
+
+/// Journal des accès et modifications des données de santé (traçabilité HDS / RGPD art. 32).
+/// Ajout seulement : jamais modifié ni supprimé par l'application. Aucun nom, adresse ni note :
+/// seulement qui, quoi, sur quel enregistrement et quand.
+model AuditEvent {
+  id          String    @id @default(cuid())
+  at          DateTime  @default(now())
+  /// Null si le compte a été supprimé depuis (le rôle reste).
+  userId      String?
+  role        UserRole
+  /// Action en notation pointée, ex. « patient.update », « stop.pickup », « roadmap.view ».
+  action      String
+  /// Modèle concerné (« Patient », « Trip », « Route »…), jamais un arrêt (supprimé à chaque réoptimisation).
+  entity      String
+  entityId    String?
+  /// Date de service concernée, quand l'action porte sur une journée planifiée.
+  serviceDate DateTime? @db.Date
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+  @@index([userId, at])
+  @@index([at])
 }

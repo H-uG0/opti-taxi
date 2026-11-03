@@ -81,6 +81,20 @@ function plural(count: number, singular: string, pluralForm = `${singular}s`): s
   return `${count} ${count > 1 ? pluralForm : singular}`;
 }
 
+/** What a date holds that the simulation did not create (counts per kind). */
+export type ForeignRowCounts = { trips: number; routes: number; runs: number; events: number };
+
+/** Why a date is left untouched: the kinds of foreign rows it holds, zeros left out. */
+export function foreignRowsReason(rows: ForeignRowCounts): string {
+  const parts = [
+    rows.trips > 0 ? plural(rows.trips, "course") : null,
+    rows.routes > 0 ? plural(rows.routes, "tournée") : null,
+    rows.runs > 0 ? plural(rows.runs, "optimisation") : null,
+    rows.events > 0 ? `${plural(rows.events, "modification enregistrée", "modifications enregistrées")} dans l'application` : null,
+  ].filter((part) => part !== null);
+  return `données existantes non créées par la simulation (${parts.join(", ")})`;
+}
+
 /** What went wrong on a simulated day, appended to its line ("" when nothing did). */
 function dayWarnings(report: DayReport): string {
   const warnings: string[] = [];

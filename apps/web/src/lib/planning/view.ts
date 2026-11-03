@@ -30,9 +30,12 @@ import { coPassengers, computeTimeRange } from "./timeline";
 import type {
   DayKpis,
   DayStatus,
+  FieldRecordView,
   PlanningDayView,
+  RecordedByView,
   RouteView,
   RunView,
+  StopView,
   TripView,
   UnassignedView,
   VehicleRowView,
@@ -40,6 +43,9 @@ import type {
 } from "./types";
 
 type Person = { firstName: string; lastName: string };
+
+/** Account that recorded a value: only its name is loaded. */
+type Recorder = { name: string } | null;
 
 export type RawVehicle = VehicleInput & { registration: string; depotLabel: string };
 
@@ -55,6 +61,8 @@ export type RawTrip = TripInput & {
   detourKm: number | null;
   estimatedRevenue: number | null;
   createdAt: Date;
+  sharingRespondedAt: Date | null;
+  sharingRespondedBy: Recorder;
   patient: Person;
   facility: { name: string } | null;
 };
@@ -72,6 +80,7 @@ export type RawStop = {
   departureMinute: number;
   loadAfter: number;
   completedAt: Date | null;
+  completedBy: Recorder;
 };
 
 export type RawRoute = {
@@ -145,6 +154,61 @@ export function waitAtFacility(trip: {
       : null;
   }
   return trip.readyMinute !== null && trip.plannedPickupMinute !== null ? trip.plannedPickupMinute - trip.readyMinute : null;
+}
+
+/** The recorder's name, null when no account was recorded (or a blank name). */
+function recorderName(recorder: Recorder): string | null {
+  return recorder?.name.trim() || null;
+}
+
+/**
+ * When and by whom the patient's sharing answer was last recorded; null when
+ * none was. Kept after the answer is reset (prescription changed), as /courses
+ * shows it.
+ */
+export function sharingAnswerOf(trip: Pick<RawTrip, "sharingRespondedAt" | "sharingRespondedBy">): RecordedByView | null {
+  if (!trip.sharingRespondedAt) return null;
+  return { at: trip.sharingRespondedAt.toISOString(), byName: recorderName(trip.sharingRespondedBy) };
+}
+
+/** Stop statuses recorded by the crew, per trip, in route order. */
+export function fieldRecordsByTrip(
+  routes: ReadonlyArray<{ stops: ReadonlyArray<Pick<RawStop, "id" | "sequence" | "tripId" | "kind" | "completedAt" | "completedBy">> }>,
+): Map<string, FieldRecordView[]> {
+  const byTrip = new Map<string, FieldRecordView[]>();
+  for (const route of routes) {
+    for (const stop of [...route.stops].sort((a, b) => a.sequence - b.sequence)) {
+      if (!stop.completedAt) continue;
+      const record: FieldRecordView = {
+        stopId: stop.id,
+        kind: stop.kind,
+        at: stop.completedAt.toISOString(),
+        byName: recorderName(stop.completedBy),
+      };
+      const list = byTrip.get(stop.tripId);
+      if (list) list.push(record);
+      else byTrip.set(stop.tripId, [record]);
+    }
+  }
+  return byTrip;
+}
+
+/** The stop as the timeline draws it (recorded instants and names stay out). */
+function toStopView(stop: RawStop): StopView {
+  return {
+    id: stop.id,
+    sequence: stop.sequence,
+    tripId: stop.tripId,
+    kind: stop.kind,
+    lat: stop.lat,
+    lng: stop.lng,
+    address: stop.address,
+    arrivalMinute: stop.arrivalMinute,
+    startMinute: stop.startMinute,
+    departureMinute: stop.departureMinute,
+    loadAfter: stop.loadAfter,
+    completed: stop.completedAt !== null,
+  };
 }
 
 function runView(
@@ -302,7 +366,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
       breakEndMinute: route.breakEndMinute,
       validatedAt: route.validatedAt?.toISOString() ?? null,
       tripCount: new Set(stops.map((s) => s.tripId)).size,
-      stops: stops.map(({ completedAt, ...stop }) => ({ ...stop, completed: completedAt !== null })),
+      stops: stops.map(toStopView),
     };
   };
 
@@ -345,6 +409,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
 
   const vehicleOfTrip = (trip: RawTrip): string | null => (trip.routeId ? (routeById.get(trip.routeId)?.vehicleId ?? null) : null);
   const returnsToCheck = returnsToCheckAfterNoShow(input.trips);
+  const fieldRecords = fieldRecordsByTrip(input.routes);
 
   const trips: TripView[] = input.trips
     .filter((t) => isActiveTrip(t.status) || vehicleOfTrip(t) !== null)
@@ -366,6 +431,8 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
         allowedVehicleTypes: t.allowedVehicleTypes,
         sharingAllowed: t.sharingAllowed,
         sharingStatus: t.sharingStatus,
+        sharingAnswer: sharingAnswerOf(t),
+        fieldRecords: fieldRecords.get(t.id) ?? [],
         lockedVehicleId: t.lockedVehicleId,
         vehicleId,
         plannedPickupMinute: vehicleId ? t.plannedPickupMinute : null,

@@ -197,7 +197,8 @@ partir de la requête, de la matrice et des tournées produites (avec leurs hora
   129 (même résultat avec une insertion « la moins chère d'abord », une réinsertion limitée aux
   courses retirées par la réparation ou d'autres coefficients de la recherche guidée).
   **Temps conseillé : max(10 s, 1 s par 8 courses)** (20 s pour 160 courses) ;
-  l'avertissement « Recherche interrompue… » l'indique. Le web passe `solverTimeLimitSec` tel quel (10 s par défaut).
+  l'avertissement « Recherche interrompue… » l'indique. Le web envoie min(600, max(`solverTimeLimitSec`, ceil(courses / 8))) (10 s par défaut, voir
+  `effectiveTimeLimitSec` dans `apps/web/src/lib/optimizer/build-request.ts` et `contract/README.md`).
   `tests/test_solver_quality.py` vérifie qu'à 10 s on sert au moins 80 % du meilleur résultat
   connu (139) et le compare à un calcul de 30 s avec `OPTIMIZER_SLOW_TESTS=1`.
 - La réparation des pauses est gloutonne (une pause par véhicule, au moindre détour) : elle peut

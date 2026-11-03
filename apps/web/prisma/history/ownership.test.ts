@@ -15,8 +15,12 @@ function evaluate(where: object, row: Row): Truth {
   for (const [key, condition] of Object.entries(where)) {
     let value: Truth;
     if (key === "NOT") {
-      const inner = evaluate(condition as object, row);
-      value = inner === null ? null : !inner;
+      // Prisma: NOT [a, b] = NOT a AND NOT b.
+      const negated = (Array.isArray(condition) ? condition : [condition]).map((part: object): Truth => {
+        const inner = evaluate(part, row);
+        return inner === null ? null : !inner;
+      });
+      value = negated.reduce(and, true);
     } else if (key === "OR") {
       const parts = (condition as object[]).map((part) => evaluate(part, row));
       value = parts.includes(true) ? true : parts.includes(null) ? null : false;
@@ -26,6 +30,11 @@ function evaluate(where: object, row: Row): Truth {
       else if (condition instanceof Date) value = cell === null ? null : cell instanceof Date && cell.getTime() === condition.getTime();
       else if (typeof condition === "object" && "startsWith" in condition) {
         value = cell === null ? null : typeof cell === "string" && cell.startsWith(String(condition.startsWith));
+      } else if (typeof condition === "object" && "endsWith" in condition) {
+        value = cell === null ? null : typeof cell === "string" && cell.endsWith(String(condition.endsWith));
+      } else if (typeof condition === "object" && "gte" in condition && "lte" in condition) {
+        const { gte, lte } = condition as { gte: Date; lte: Date };
+        value = cell === null ? null : cell instanceof Date && cell >= gte && cell <= lte;
       } else throw new Error(`unsupported filter ${key}`);
     }
     result = and(result, value);
@@ -51,6 +60,14 @@ describe("rows the simulation owns", () => {
     expect(matches(own.runs, { serviceDate: day, id: "cmvzrun" })).toBe(false);
   });
 
+  it("deletes only its own audit events of the date, never the app's", () => {
+    expect(matches(own.events, { serviceDate: day, id: "hist-20261012-ev0001" })).toBe(true);
+    expect(matches(own.events, { serviceDate: day, id: "cmvzevent" })).toBe(false);
+    expect(matches(own.events, { serviceDate: otherDay, id: "hist-20261013-ev0001" })).toBe(false);
+    // An event of the app about no particular day (a login, an account change).
+    expect(matches(own.events, { serviceDate: null, id: "cmvzevent" })).toBe(false);
+  });
+
   it("deletes only the routes of its own runs, never a route without run", () => {
     expect(matches(own.routes, { serviceDate: day, optimizationRunId: "hist-20261012-run1" })).toBe(true);
     expect(matches(own.routes, { serviceDate: day, optimizationRunId: "cmvzrun" })).toBe(false);
@@ -66,6 +83,30 @@ describe("rows the simulation owns", () => {
     expect(matches(foreign.routes, { serviceDate: day, optimizationRunId: "hist-20261012-run1" })).toBe(false);
     expect(matches(foreign.runs, { serviceDate: day, id: "cmvzrun" })).toBe(true);
     expect(matches(foreign.runs, { serviceDate: otherDay, id: "cmvzrun" })).toBe(false);
+  });
+
+  it("counts the app's change events of the date as foreign, never its reads nor the simulation's events", () => {
+    const event = (id: string, action: string, serviceDate: Date | null = day): Row => ({ id, action, serviceDate });
+    // A sharing answer corrected in « Courses » on a simulated trip: regenerating the date would contradict it.
+    expect(matches(foreign.events, event("cmvzevent", "trip.sharing_refuse"))).toBe(true);
+    expect(matches(foreign.events, event("cmvzevent", "trip.cancel"))).toBe(true);
+    expect(matches(foreign.events, event("cmvzevent", "plan.validate"))).toBe(true);
+    // A page viewed on that date changes nothing.
+    expect(matches(foreign.events, event("cmvzevent", "shared_arrivals.view"))).toBe(false);
+    expect(matches(foreign.events, event("cmvzevent", "roadmap.view"))).toBe(false);
+    expect(matches(foreign.events, event("hist-20261012-ev0001", "trip.sharing_accept"))).toBe(false);
+    expect(matches(foreign.events, event("cmvzevent", "trip.cancel", otherDay))).toBe(false);
+    expect(matches(foreign.events, event("cmvzevent", "account.update", null))).toBe(false);
+    expect(matches(foreignRowsWhere({ gte: day, lte: otherDay }).events, event("cmvzevent", "trip.restore", otherDay))).toBe(true);
+  });
+
+  it("finds the foreign rows of a whole period with a date range", () => {
+    const period = foreignRowsWhere({ gte: day, lte: otherDay });
+    expect(matches(period.trips, { serviceDate: otherDay, id: "cmvziv4z5003obers45zpe61a" })).toBe(true);
+    expect(matches(period.trips, { serviceDate: otherDay, id: "hist-20261013-rec1-out" })).toBe(false);
+    expect(matches(period.trips, { serviceDate: new Date("2026-10-14T00:00:00.000Z"), id: "cmvz" })).toBe(false);
+    expect(matches(period.routes, { serviceDate: day, optimizationRunId: null })).toBe(true);
+    expect(matches(period.runs, { serviceDate: new Date("2026-10-11T00:00:00.000Z"), id: "cmvzrun" })).toBe(false);
   });
 
   it("splits every row of the date into exactly one of the two sets", () => {
