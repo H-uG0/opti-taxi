@@ -53,6 +53,25 @@ un des comptes ci-dessous. L'historique des 20 derniers jours ouvrés, utilisé 
 se calcule en arrière-plan pendant quelques minutes après le démarrage. Arrêt : `Ctrl+C`, puis
 `docker compose down` (ajouter `-v` pour repartir d'une base vide au prochain lancement).
 
+### Itinéraires routiers précis (OSRM, facultatif)
+
+Sans OSRM, temps et distances sont estimés à vol d'oiseau. Pour des temps et kilomètres routiers
+réels, calculés sur le poste (aucune adresse ne part chez un tiers) :
+
+```bash
+bash infra/osrm/prepare.sh                    # une fois : ~1 Go à télécharger, environ 1 h
+docker compose --profile osrm up -d osrm      # serveur d'itinéraires, port 5050
+echo "OSRM_URL=http://osrm:5000" > .env       # lu par docker compose (fichier ignoré par git)
+docker compose up -d optimizer                # http://localhost:8100/health -> "matrixSource":"osrm"
+```
+
+Le script fusionne les cartes OpenStreetMap de PACA et de Rhône-Alpes, puis garde le corridor
+desservi (Marseille – Valence – Grenoble – Briançon, `OSRM_BBOX` pour le changer) : le traitement
+tient alors dans 2 Go de mémoire et le serveur en occupe environ 500 Mo. Sous Windows, le lancer
+depuis Git Bash. Hors Docker, l'optimiseur prend `OSRM_URL=http://localhost:5050`. Si OSRM ne répond
+pas, l'optimiseur revient à l'estimation à vol d'oiseau et l'affiche ; supprimer `.env` pour s'en
+passer. OSRM ne connaît pas le trafic : les heures de pointe restent sous-estimées.
+
 ## Démarrage (développement)
 
 Prérequis : Node 22+, pnpm 10, Python 3.12+, PostgreSQL 17 (Docker ou installation locale).
@@ -146,8 +165,9 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
 ## Limites connues
 
 - **Distances** : sans OSRM, les temps et distances sont estimés à vol d'oiseau (× 1,3 et vitesses
-  moyennes), ce que l'interface signale. Brancher OSRM (`docker compose --profile osrm`, voir
-  `infra/osrm`) avant tout usage réel.
+  moyennes), ce que l'interface signale. Cette estimation est optimiste : sur trois journées du jeu
+  fictif, les kilomètres routiers d'OSRM sont 13 à 19 % plus élevés. Brancher OSRM (voir
+  « Itinéraires routiers précis ») avant tout usage réel ; il ne tient pas compte du trafic.
 - **Temps de calcul** : 10 s par défaut, relevés automatiquement pour les grosses journées
   (1 s pour 8 courses, 600 s au plus). Sur une machine chargée, quelques courses peuvent rester non
   affectées : relancer « Optimiser demain » ou augmenter le temps dans Paramètres.

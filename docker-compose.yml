@@ -2,7 +2,8 @@
 #   docker compose up --build                  demo: database, optimizer and web app with
 #                                              fictitious data -> http://localhost:3100
 #   docker compose up -d postgres optimizer    development (then pnpm dev, see README)
-#   docker compose --profile osrm up -d osrm   (after ./infra/osrm/prepare.sh)
+#   docker compose --profile osrm up -d osrm   road times (after bash infra/osrm/prepare.sh), then
+#                                              OSRM_URL=http://osrm:5000 in .env and restart the optimizer
 name: opti-taxi
 
 services:
