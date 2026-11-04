@@ -33,6 +33,34 @@ export const latLngSchema = z.strictObject({
   lng: z.number().min(-180).max(180),
 });
 
+const trafficFactor = z.number().min(1).max(5);
+
+export const trafficSettingsSchema = z
+  .strictObject({
+    bands: z
+      .array(
+        z
+          .strictObject({ startMin: dayMinute, endMin: dayMinute })
+          .refine((band) => band.endMin > band.startMin, { message: "traffic band endMin must be after startMin" }),
+      )
+      .min(1),
+    roadFactors: z.array(trafficFactor),
+    zones: z.array(
+      z.strictObject({
+        lat: z.number().min(-90).max(90),
+        lng: z.number().min(-180).max(180),
+        radiusKm: z.number().gt(0).max(100),
+        factors: z.array(trafficFactor),
+      }),
+    ),
+  })
+  .refine((t) => t.bands.every((band, i) => i === 0 || band.startMin >= (t.bands[i - 1]?.endMin ?? 0)), {
+    message: "traffic bands must be sorted and must not overlap",
+  })
+  .refine((t) => t.roadFactors.length === t.bands.length && t.zones.every((zone) => zone.factors.length === t.bands.length), {
+    message: "one traffic factor per band is required",
+  });
+
 export const settingsSchema = z.strictObject({
   waitBeforeAppointmentMin: z.number().int().min(0).max(180),
   waitAfterSessionMin: z.number().int().min(0).max(180),
@@ -43,6 +71,7 @@ export const settingsSchema = z.strictObject({
   dropoffServiceMin: z.number().int().min(0).max(60),
   unassignedPenalty: z.number().min(0),
   timeLimitSec: z.number().int().min(1).max(600),
+  traffic: trafficSettingsSchema.nullish(),
 });
 
 export const breakRuleSchema = z
@@ -210,6 +239,7 @@ export const planResponseSchema = z.strictObject({
   }),
   meta: z.strictObject({
     matrixSource: z.enum(["osrm", "haversine"]),
+    trafficSource: z.enum(["none", "factors"]),
     solverStatus: z.string(),
     objective: z.number().nullable(),
     wallTimeMs: z.number().int(),

@@ -164,6 +164,8 @@ export type RunView = {
   /** Solver wall time reported by the optimizer. */
   wallTimeMs: number | null;
   matrixSource: string | null;
+  /** What slowed the travel times down ("none", "factors"), null for a run saved before traffic existed. */
+  trafficSource: string | null;
   valid: boolean | null;
   error: string | null;
   tripsCount: number;

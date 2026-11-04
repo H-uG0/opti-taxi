@@ -70,7 +70,24 @@ desservi (Marseille – Valence – Grenoble – Briançon, `OSRM_BBOX` pour le 
 tient alors dans 2 Go de mémoire et le serveur en occupe environ 500 Mo. Sous Windows, le lancer
 depuis Git Bash. Hors Docker, l'optimiseur prend `OSRM_URL=http://localhost:5050`. Si OSRM ne répond
 pas, l'optimiseur revient à l'estimation à vol d'oiseau et l'affiche ; supprimer `.env` pour s'en
-passer. OSRM ne connaît pas le trafic : les heures de pointe restent sous-estimées.
+passer. OSRM calcule à circulation fluide : le trafic s'y ajoute par les facteurs ci-dessous.
+
+### Trafic
+
+Les temps de trajet sont ralentis selon l'heure et l'endroit (Paramètres, section Trafic) : un facteur
+par zone (Marseille, Aix, Grenoble, reste du réseau) et par créneau (pointe du matin, journée, pointe
+du soir). Seule la part du trajet passée dans la zone est ralentie, et aucune adresse ne quitte le
+serveur. Le temps d'un trajet dépend de l'heure attendue de ses deux extrémités (rendez-vous, fin de
+séance), connue avant le calcul : il prend le créneau le plus lent des deux, car un Gap → Marseille
+parti avant la pointe arrive en plein dedans. Solveur, planification et validateur utilisent donc le
+même temps. Le week-end, le facteur « Journée » vaut toute la journée.
+
+Les valeurs fournies sont un point de départ, pas des mesures. Elles se calibrent avec les données de
+V : les heures réelles de prise en charge et de dépose donnent, à partir de 20 trajets mesurés par
+case, une valeur observée que le régulateur applique d'un clic. Elle n'est jamais appliquée seule.
+Une API de trafic (temps réels par créneau) se brancherait comme un autre fournisseur
+(`services/optimizer/app/traffic.py`), sans toucher au solveur ni au validateur, mais enverrait les
+coordonnées des domiciles à un tiers : à valider d'abord (RGPD, HDS).
 
 ## Démarrage (développement)
 
@@ -167,7 +184,11 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
 - **Distances** : sans OSRM, les temps et distances sont estimés à vol d'oiseau (× 1,3 et vitesses
   moyennes), ce que l'interface signale. Cette estimation est optimiste : sur trois journées du jeu
   fictif, les kilomètres routiers d'OSRM sont 13 à 19 % plus élevés. Brancher OSRM (voir
-  « Itinéraires routiers précis ») avant tout usage réel ; il ne tient pas compte du trafic.
+  « Itinéraires routiers précis ») avant tout usage réel.
+- **Trafic** : des facteurs moyens par zone et par créneau, pas le trafic réel du jour (accident,
+  travaux). Les valeurs par défaut ne sont pas mesurées, et la liste des zones n'est pas modifiable
+  dans l'interface (facteurs et rayon le sont). Près d'une limite de créneau, un trajet peut prendre
+  le facteur du créneau voisin.
 - **Temps de calcul** : 10 s par défaut, relevés automatiquement pour les grosses journées
   (1 s pour 8 courses, 600 s au plus). Sur une machine chargée, quelques courses peuvent rester non
   affectées : relancer « Optimiser demain » ou augmenter le temps dans Paramètres.

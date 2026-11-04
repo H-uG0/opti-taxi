@@ -73,6 +73,14 @@ export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planR
               ·
             </span>
             <span>distances : {MATRIX_LABELS[planRun.matrixSource ?? ""] ?? planRun.matrixSource ?? "—"}</span>
+            {planRun.trafficSource ? (
+              <>
+                <span aria-hidden className="text-slate-300">
+                  ·
+                </span>
+                <span>{planRun.trafficSource === "none" ? "trafic non pris en compte" : "trafic pris en compte"}</span>
+              </>
+            ) : null}
           </p>
           {planRun.matrixSource === "haversine" ? (
             <p className="mt-1.5 flex items-start gap-2 text-amber-800">

@@ -28,6 +28,7 @@ from enum import Enum
 from app.matrix import TravelMatrix
 from app.model import Window
 from app.schemas import BreakRule, LatLng, StopKind, Trip, Vehicle
+from app.traffic import stop_reference_minute
 
 
 @dataclass(frozen=True)
@@ -260,8 +261,9 @@ class _Timing:
 def schedule_route(vehicle: Vehicle, stops: Sequence[PlannedStop], matrix: TravelMatrix) -> RouteSchedule:
     """Times, loads and legs of `stops` driven in this order by `vehicle` from and to its depot."""
     points = [vehicle.depot, *(stop.location for stop in stops), vehicle.depot]
+    references = [None, *(stop_reference_minute(stop.trip, stop.kind, matrix) for stop in stops), None]
     legs_km = [matrix.km(a, b) for a, b in zip(points, points[1:], strict=False)]
-    travel = [matrix.minutes(a, b) for a, b in zip(points, points[1:], strict=False)]
+    travel = [matrix.leg(points[k], points[k + 1], references[k], references[k + 1]) for k in range(len(points) - 1)]
     loads, leg_sets = _load_profile(stops)
     legs = tuple(Leg(km, minutes, on_board) for km, minutes, on_board in zip(legs_km, travel, leg_sets, strict=True))
 

@@ -10,6 +10,7 @@ from app.matrix import build_matrix, configured_osrm_url
 from app.plan import PlanOutcome, build_response
 from app.schemas import EvaluateRequest, OptimizeRequest, PlanResponse
 from app.solver import solve
+from app.traffic import with_traffic
 from app.validator import check_plan_references
 
 logger = logging.getLogger("optimizer")
@@ -22,7 +23,7 @@ def optimize(request: OptimizeRequest) -> PlanResponse:
     """Routes of the day computed by the solver, recomputed and validated."""
     started = time.perf_counter()
     matrix, warnings = build_matrix(request_points(request), configured_osrm_url())
-    ctx = make_context(request, matrix)
+    ctx = make_context(request, with_traffic(matrix, request.settings.traffic))
     warnings.extend(ctx.tariffs.missing_warnings(request.vehicles))
     solve_started = time.perf_counter()
     outcome = solve(ctx)
@@ -66,7 +67,7 @@ def evaluate(request: EvaluateRequest) -> PlanResponse:
     """Times, km, revenue and violations of the regulator's plan (stop order as given)."""
     started = time.perf_counter()
     matrix, warnings = build_matrix(request_points(request), configured_osrm_url())
-    ctx = make_context(request, matrix)
+    ctx = make_context(request, with_traffic(matrix, request.settings.traffic))
     warnings.extend(ctx.tariffs.missing_warnings(request.vehicles))
     sequences, reference_violations, reference_warnings = check_plan_references(request, request.routes)
     warnings.extend(reference_warnings)

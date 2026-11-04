@@ -79,7 +79,7 @@ Oui, c'est réalisable. C'est un problème d'optimisation connu (le « Dial-a-Ri
 
 | Difficulté | Réponse proposée |
 | --- | --- |
-| Temps de trajet fiables en montagne et dans le trafic marseillais | OSRM auto-hébergé (gratuit, sans trafic) pour démarrer ; API avec trafic (Google, HERE, PTV) si l'écart avec la réalité est trop fort |
+| Temps de trajet fiables en montagne et dans le trafic marseillais | OSRM auto-hébergé (gratuit, sans trafic) ralenti par des facteurs par zone et par créneau, calibrés sur les temps réels de V ; API avec trafic (Google, HERE, PTV) si l'écart avec la réalité reste trop fort |
 | Heures de retour incertaines (fin de séance variable) | Réoptimisation en journée en version 2 ; durées de séance apprises sur l'historique |
 | Le régulateur doit garder la main | L'outil propose, le régulateur valide ; il peut figer une course et réoptimiser le reste |
 | Facturation CPAM, télétransmission, kilomètres certifiés | Hors périmètre : rester sur le logiciel métier existant, prévoir un export |
@@ -170,7 +170,7 @@ Le régulateur et les chauffeurs passent par la même application ; l'export ver
 | Interface régulateur et chauffeurs | Next.js (App Router), TypeScript, Tailwind, MapLibre GL | Application web mobile pour les chauffeurs : pas de store à gérer |
 | Base de données | PostgreSQL + Prisma (SQL Server possible) | PostGIS utile plus tard pour les requêtes géographiques |
 | Optimisation | Python, FastAPI, Google OR-Tools | Contrat JSON typé : zod côté TypeScript, pydantic côté Python |
-| Temps de trajet | OSRM en Docker | Remplaçable par une API avec trafic si besoin |
+| Temps de trajet | OSRM en Docker, facteurs de trafic par zone et créneau | Remplaçable par une API avec trafic si besoin (`TrafficProvider`) |
 | Hébergement | Hébergeur certifié HDS | Obligatoire dès qu'il y a de vraies données patients |
 
 ## Feuille de route

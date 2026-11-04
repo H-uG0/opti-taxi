@@ -401,6 +401,7 @@ describe("contract fixtures", () => {
       violations: response.validation.violations,
       warnings: response.meta.warnings,
       unassigned: response.unassigned,
+      trafficSource: response.meta.trafficSource,
     });
   });
 });

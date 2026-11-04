@@ -19,6 +19,8 @@ export type RunDetails = {
   violations: Violation[];
   warnings: string[];
   unassigned: Array<{ tripId: string; reason: string }>;
+  /** Runs saved before traffic existed have none. */
+  trafficSource?: string;
 };
 
 /** The OptimizationRun columns the details are read from. */
@@ -33,6 +35,7 @@ const detailsSchema = z.object({
   violations: z.array(violationSchema),
   warnings: z.array(z.string()),
   unassigned: z.array(unassignedSchema),
+  trafficSource: z.string().optional(),
 });
 
 /** Legacy layout: the optimizer KPIs plus the details under the `details` key. */
@@ -47,6 +50,7 @@ export function runDetailsJson(
     violations: response.validation.violations,
     warnings: response.meta.warnings,
     unassigned: response.unassigned,
+    trafficSource: response.meta.trafficSource,
   };
 }
 

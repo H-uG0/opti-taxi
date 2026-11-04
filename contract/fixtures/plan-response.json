@@ -123,6 +123,7 @@
   },
   "meta": {
     "matrixSource": "haversine",
+    "trafficSource": "factors",
     "solverStatus": "ROUTING_SUCCESS",
     "objective": 123456,
     "wallTimeMs": 2140,

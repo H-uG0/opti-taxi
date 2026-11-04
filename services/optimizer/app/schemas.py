@@ -17,6 +17,7 @@ Direction = Literal["OUTBOUND", "RETURN"]
 StopKind = Literal["PICKUP", "DROPOFF"]
 PlanStatus = Literal["OK", "NO_SOLUTION"]
 MatrixSource = Literal["osrm", "haversine"]
+TrafficSource = Literal["none", "factors"]
 ViolationCode = Literal[
     "UNKNOWN_REFERENCE",
     "DUPLICATE_TRIP",
@@ -50,6 +51,43 @@ class LatLng(ContractModel):
     lng: float = Field(ge=-180, le=180)
 
 
+TrafficFactor = Annotated[float, Field(ge=1, le=5)]
+
+
+class TrafficBand(ContractModel):
+    start_min: DayMinute
+    end_min: DayMinute
+
+    @model_validator(mode="after")
+    def _ordered(self) -> TrafficBand:
+        if self.end_min <= self.start_min:
+            raise ValueError("traffic band endMin must be after startMin")
+        return self
+
+
+class TrafficZone(ContractModel):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    radius_km: float = Field(gt=0, le=100)
+    factors: list[TrafficFactor]
+
+
+class TrafficSettings(ContractModel):
+    bands: list[TrafficBand] = Field(min_length=1)
+    road_factors: list[TrafficFactor]
+    zones: list[TrafficZone]
+
+    @model_validator(mode="after")
+    def _consistent(self) -> TrafficSettings:
+        for earlier, later in zip(self.bands, self.bands[1:], strict=False):
+            if later.start_min < earlier.end_min:
+                raise ValueError("traffic bands must be sorted and must not overlap")
+        count = len(self.bands)
+        if len(self.road_factors) != count or any(len(zone.factors) != count for zone in self.zones):
+            raise ValueError("one traffic factor per band is required")
+        return self
+
+
 class Settings(ContractModel):
     wait_before_appointment_min: int = Field(ge=0, le=180)
     wait_after_session_min: int = Field(ge=0, le=180)
@@ -60,6 +98,7 @@ class Settings(ContractModel):
     dropoff_service_min: int = Field(ge=0, le=60)
     unassigned_penalty: float = Field(ge=0)
     time_limit_sec: int = Field(ge=1, le=600)
+    traffic: TrafficSettings | None = None
 
 
 class BreakRule(ContractModel):
@@ -227,6 +266,7 @@ class Validation(ContractModel):
 
 class Meta(ContractModel):
     matrix_source: MatrixSource
+    traffic_source: TrafficSource
     solver_status: str
     objective: float | None
     wall_time_ms: int

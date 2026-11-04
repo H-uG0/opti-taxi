@@ -90,6 +90,7 @@ from app.labels import hhmm, types_text, vehicle_name
 from app.model import FREE_WINDOW, HORIZON_MIN, BreakMode, BreakPlan, Window, break_plan, effective_shift, is_compatible
 from app.pricing import base_revenue
 from app.schemas import LatLng, PlanStatus, StopRef, Trip, Vehicle
+from app.traffic import stop_reference_minute
 
 logger = logging.getLogger("optimizer.solver")
 
@@ -98,6 +99,11 @@ METERS_PER_KM = 1000
 EXCLUSIVE_WEIGHT = 100
 """Exclusive-ride load of a non-shareable patient (vehicle limit); shareable patients weigh 1."""
 MAX_BREAK_SITES = 12
+BREAK_LEG_LOOKBACK_MIN = 120
+"""How long before its window a break can still share a leg, in schedule.py, with a stop whose band
+then times the drive: the 45 min wait allowed around a reference, plus the most two bands can differ
+on a leg. Earlier, the vehicle arrives before the window opens and the band of that stop costs nothing.
+Short enough not to slow the drive after a noon break by the morning peak."""
 LOCKED_PENALTY_FACTOR = 2
 MAX_ROUTE_METERS = 10_000_000
 BREAK_PENALTY = 10**13
@@ -153,6 +159,8 @@ class Node:
     trip: Trip | None = None
     vehicle: int | None = None
     """Owner vehicle (fleet position) of a depot or break node."""
+    reference_min: int | None = None
+    """Minute the stop is expected around (app/traffic.py), None for a depot."""
 
 
 @dataclass(frozen=True)
@@ -193,14 +201,15 @@ def _reachable_alone(ctx: PlanContext, trip: Trip, member: FleetVehicle) -> bool
     matrix, settings = ctx.matrix, ctx.request.settings
     windows = ctx.windows[trip.id]
     depot = member.vehicle.depot
-    pickup_start = max(member.shift.open + matrix.minutes(depot, trip.pickup), windows.pickup.open)
+    at_pickup, at_dropoff = stop_reference_minute(trip, "PICKUP", matrix), stop_reference_minute(trip, "DROPOFF", matrix)
+    pickup_start = max(member.shift.open + matrix.leg(depot, trip.pickup, None, at_pickup), windows.pickup.open)
     if pickup_start > windows.pickup.close:
         return False
-    arrival = pickup_start + settings.pickup_service_min + matrix.minutes(trip.pickup, trip.dropoff)
+    arrival = pickup_start + settings.pickup_service_min + matrix.leg(trip.pickup, trip.dropoff, at_pickup, at_dropoff)
     dropoff_start = max(arrival, windows.dropoff.open)
     if dropoff_start > windows.dropoff.close:
         return False
-    back = dropoff_start + settings.dropoff_service_min + matrix.minutes(trip.dropoff, depot)
+    back = dropoff_start + settings.dropoff_service_min + matrix.leg(trip.dropoff, depot, at_dropoff, None)
     return back <= member.shift.close
 
 
@@ -235,6 +244,11 @@ def screen_trip(ctx: PlanContext, trip: Trip, fleet: Sequence[FleetVehicle]) -> 
         f"Horaires inatteignables ({when}) : aucun véhicule compatible ne peut assurer la course "
         "depuis son dépôt dans ses heures de service"
     )
+
+
+def _middle(window: Window) -> int:
+    """Reference minute of a break (app/traffic.py): the middle of its window."""
+    return (window.open + window.close) // 2
 
 
 def _allow_vehicles(routing: pywrapcp.RoutingModel, index: int, vehicles: Sequence[int]) -> None:
@@ -298,9 +312,25 @@ class _DayModel:
         for trip, _ in self.routable:
             windows = self.ctx.windows[trip.id]
             weight = 1 if trip.shareable else EXCLUSIVE_WEIGHT
-            pickup = Node(Role.PICKUP, self._point(trip.pickup), settings.pickup_service_min, windows.pickup, 1, weight, trip)
+            pickup = Node(
+                Role.PICKUP,
+                self._point(trip.pickup),
+                settings.pickup_service_min,
+                windows.pickup,
+                1,
+                weight,
+                trip,
+                reference_min=stop_reference_minute(trip, "PICKUP", self.ctx.matrix),
+            )
             delivery = Node(
-                Role.DELIVERY, self._point(trip.dropoff), settings.dropoff_service_min, windows.dropoff, -1, -weight, trip
+                Role.DELIVERY,
+                self._point(trip.dropoff),
+                settings.dropoff_service_min,
+                windows.dropoff,
+                -1,
+                -weight,
+                trip,
+                reference_min=stop_reference_minute(trip, "DROPOFF", self.ctx.matrix),
             )
             self.trip_nodes[trip.id] = (len(self.nodes), len(self.nodes) + 1)
             self.nodes.extend((pickup, delivery))
@@ -311,7 +341,9 @@ class _DayModel:
             self.break_nodes[v] = []
             for point in self._break_sites(v, member, member.breaks.window, rule.duration_min):
                 self.break_nodes[v].append(len(self.nodes))
-                self.nodes.append(Node(Role.BREAK, point, rule.duration_min, member.breaks.window, vehicle=v))
+                self.nodes.append(
+                    Node(Role.BREAK, point, rule.duration_min, member.breaks.window, vehicle=v, reference_min=_middle(member.breaks.window))
+                )
 
     def _break_sites(self, v: int, member: FleetVehicle, window: Window, duration: int) -> list[int]:
         """Depot first, then the facilities of the trips this vehicle may serve, nearest first, then
@@ -325,9 +357,10 @@ class _DayModel:
         facilities.pop(depot, None)
         nearest = sorted(facilities, key=lambda p: matrix.km_by_index(depot, p))[: MAX_BREAK_SITES - 1]
         sites = [depot]
+        at_break = _middle(window)
         for point in nearest:
-            begin = max(member.shift.open + matrix.minutes_by_index(depot, point), window.open)
-            if begin <= window.close and begin + duration + matrix.minutes_by_index(point, depot) <= member.shift.close:
+            begin = max(member.shift.open + matrix.leg_by_index(depot, point, None, at_break), window.open)
+            if begin <= window.close and begin + duration + matrix.leg_by_index(point, depot, at_break, None) <= member.shift.close:
                 sites.append(point)
         return [*sites, *self._home_break_sites(v, member, window, duration, sites)]
 
@@ -347,12 +380,13 @@ class _DayModel:
             if v not in candidates or trip.direction != "RETURN" or home in sites or any(home == h for _, h in needed):
                 continue
             pickup = self.ctx.windows[trip.id].pickup
-            ride = settings.pickup_service_min + matrix.minutes(trip.pickup, trip.dropoff) + settings.dropoff_service_min
+            at_pickup, at_dropoff = stop_reference_minute(trip, "PICKUP", matrix), stop_reference_minute(trip, "DROPOFF", matrix)
+            ride = settings.pickup_service_min + matrix.leg(trip.pickup, trip.dropoff, at_pickup, at_dropoff) + settings.dropoff_service_min
             earliest_end, latest_end = pickup.open + ride, pickup.close + ride
             if earliest_end > window.close or latest_end < window.open:
                 continue
-            overshoot = latest_end + min(matrix.minutes_by_index(home, site) for site in sites) - window.close
-            back = max(earliest_end, window.open) + duration + matrix.minutes_by_index(home, sites[0])
+            overshoot = latest_end + min(matrix.leg_by_index(home, site, at_dropoff, None) for site in sites) - window.close
+            back = max(earliest_end, window.open) + duration + matrix.leg_by_index(home, sites[0], at_dropoff, None)
             if overshoot > 0 and back <= member.shift.close:
                 needed.append((overshoot, home))
         needed.sort(key=lambda item: -item[0])  # stable: most needed first, then request order
@@ -360,6 +394,18 @@ class _DayModel:
 
     def node_at(self, index: int) -> Node:
         return self.nodes[self.manager.IndexToNode(index)]
+
+    def _leg(self, a: Node, b: Node) -> int:
+        """Driving minutes between two nodes: the same for the routing model and the checks in Python.
+
+        The drive leaving a break must not be faster than schedule.py will find it: there, the break
+        sits on a leg timed as a whole from the stop before it, possibly in an earlier band.
+        """
+        matrix = self.ctx.matrix
+        minutes = matrix.leg_by_index(a.point, b.point, a.reference_min, b.reference_min)
+        if a.role is not Role.BREAK:
+            return minutes
+        return max(minutes, matrix.slowest_by_index(a.point, b.point, a.window.open - BREAK_LEG_LOOKBACK_MIN, a.window.close))
 
     # -- costs and transit tables
     @staticmethod
@@ -425,7 +471,7 @@ class _DayModel:
                 cost_callbacks[key] = routing.RegisterTransitMatrix(self._node_rows(km_cost_rows[rate], extra))
             routing.SetArcCostEvaluatorOfVehicle(cost_callbacks[key], v)
 
-        time_rows = self._node_rows(self._point_rows(matrix.minutes_table, 1), [node.service_min for node in nodes])
+        time_rows = [[a.service_min + self._leg(a, b) for b in nodes] for a in nodes]
         meters_by_point = self._point_rows(matrix.km_table, METERS_PER_KM)
         self._meter_rows = [meters_by_point[node.point] for node in nodes]
 
@@ -705,17 +751,16 @@ class _DayModel:
 
     def _time_feasible(self, v: int, sequence: Sequence[int]) -> bool:
         """Exact time-window and shift check of one route (earliest service starts)."""
-        matrix = self.ctx.matrix
         shift = self.fleet[v].shift
         previous = self.nodes[v]
         clock = shift.open
         for index in sequence:
             node = self.node_at(index)
-            clock = max(clock + previous.service_min + matrix.minutes_by_index(previous.point, node.point), node.window.open)
+            clock = max(clock + previous.service_min + self._leg(previous, node), node.window.open)
             if clock > node.window.close:
                 return False
             previous = node
-        clock += previous.service_min + matrix.minutes_by_index(previous.point, self.nodes[v].point)
+        clock += previous.service_min + self._leg(previous, self.nodes[v])
         return clock <= shift.close
 
     def _without_trips(self, sequence: Sequence[int], trip_ids: set[str]) -> list[int]:
@@ -873,9 +918,7 @@ class _DayModel:
         matrix = self.ctx.matrix
         vehicle = self.fleet[v].vehicle
         km = matrix.km_by_index(a.point, b.point) + matrix.km_by_index(b.point, c.point) - matrix.km_by_index(a.point, c.point)
-        minutes = (
-            matrix.minutes_by_index(a.point, b.point) + matrix.minutes_by_index(b.point, c.point) - matrix.minutes_by_index(a.point, c.point)
-        )
+        minutes = self._leg(a, b) + self._leg(b, c) - self._leg(a, c)
         return km * vehicle.cost_per_km * CENTS_PER_EURO + minutes * vehicle.cost_per_hour * CENTS_PER_EURO / 60
 
     def _insertion_positions(self, route: Sequence[int], v: int, trip: Trip) -> list[tuple[float, int, int]]:
@@ -887,7 +930,6 @@ class _DayModel:
         and the trip's own detour; only the rides of the other patients on board are left to the
         full check (_first_feasible).
         """
-        matrix = self.ctx.matrix
         member = self.fleet[v]
         depot = self.nodes[v]
         p_node, d_node = self.trip_nodes[trip.id]
@@ -901,7 +943,7 @@ class _DayModel:
         exclusive: list[int] = []
         clock, previous, load, alone = member.shift.open, depot, 0, 0
         for node in stops:
-            clock = max(clock + previous.service_min + matrix.minutes_by_index(previous.point, node.point), node.window.open)
+            clock = max(clock + previous.service_min + self._leg(previous, node), node.window.open)
             load, alone = load + node.seats, alone + node.exclusive
             earliest.append(clock)
             seats.append(load)
@@ -912,7 +954,7 @@ class _DayModel:
         following = depot
         for k in reversed(range(count)):
             node = stops[k]
-            latest[k] = min(node.window.close, latest[k + 1] - matrix.minutes_by_index(node.point, following.point) - node.service_min)
+            latest[k] = min(node.window.close, latest[k + 1] - self._leg(node, following) - node.service_min)
             following = node
 
         limit_m = self.detour_limits_m.get(trip.id)
@@ -928,7 +970,7 @@ class _DayModel:
             departure = earliest[i - 1] + before.service_min if i else member.shift.open
             if departure > pickup.window.close:
                 break  # departures only get later along the route
-            start_p = max(departure + matrix.minutes_by_index(before.point, pickup.point), pickup.window.open)
+            start_p = max(departure + self._leg(before, pickup), pickup.window.open)
             if start_p > pickup.window.close:
                 continue
             if (seats[i - 1] if i else 0) + pickup.seats > capacity or (exclusive[i - 1] if i else 0) + weight > EXCLUSIVE_WEIGHT:
@@ -939,10 +981,8 @@ class _DayModel:
             last, clock, ride = pickup, start_p, 0
             for j in range(i, count + 1):
                 after = stops[j] if j < count else depot
-                start_d = max(clock + last.service_min + matrix.minutes_by_index(last.point, delivery.point), delivery.window.open)
-                on_time = start_d <= delivery.window.close and (
-                    start_d + delivery.service_min + matrix.minutes_by_index(delivery.point, after.point) <= latest[j]
-                )
+                start_d = max(clock + last.service_min + self._leg(last, delivery), delivery.window.open)
+                on_time = start_d <= delivery.window.close and (start_d + delivery.service_min + self._leg(delivery, after) <= latest[j])
                 if on_time and (limit_m is None or ride + self._meters(last, delivery) <= limit_m):
                     cost = extra(pickup, delivery, after_p) if j == i else extra(last, delivery, after)
                     positions.append((base + pickup_cost + cost, i, j))
@@ -952,7 +992,7 @@ class _DayModel:
                 node = stops[j]
                 if node.role is Role.BREAK or seats[j] + pickup.seats > capacity or exclusive[j] + weight > EXCLUSIVE_WEIGHT:
                     break
-                clock = max(clock + last.service_min + matrix.minutes_by_index(last.point, node.point), node.window.open)
+                clock = max(clock + last.service_min + self._leg(last, node), node.window.open)
                 ride += self._meters(last, node)
                 if clock > node.window.close or (limit_m is not None and ride > limit_m):
                     break

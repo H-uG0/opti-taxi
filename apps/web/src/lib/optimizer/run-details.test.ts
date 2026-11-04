@@ -28,6 +28,7 @@ const expected = {
   violations: response.validation.violations,
   warnings: ["Aucune grille tarifaire pour AMBULANCE 05"],
   unassigned: [{ tripId: "t9", reason: "Horaires inatteignables pour le véhicule figé" }],
+  trafficSource: "factors",
 };
 
 /** What Prisma hands back for a Json column: plain JSON. */
@@ -42,7 +43,7 @@ function storedRun(details: unknown, kpis: unknown): StoredRun {
 describe("run details column", () => {
   it("holds the solver status, violations, warnings and unassigned reasons, and no KPI", () => {
     const json = runDetailsJson(response);
-    expect(Object.keys(json).sort()).toEqual(["solverStatus", "unassigned", "violations", "warnings"]);
+    expect(Object.keys(json).sort()).toEqual(["solverStatus", "trafficSource", "unassigned", "violations", "warnings"]);
   });
 
   it("reads back the details after a round trip, next to KPIs stored as they are", () => {

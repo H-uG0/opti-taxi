@@ -9,6 +9,10 @@ Two providers fill the same `TravelMatrix`:
   warning, so planning never fails because the routing server is down.
 
 Identical coordinates are deduplicated: the matrix is indexed by distinct points.
+
+These times are free-flow. `TravelMatrix.traffic` optionally adds one table per time band of the day
+(app/traffic.py); every consumer reads a leg through `leg` / `leg_by_index`, so they do not depend on
+how those tables were filled.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from app.schemas import LatLng, MatrixSource
+from app.schemas import MINUTES_PER_DAY, LatLng, MatrixSource, TrafficSource
 
 ROAD_FACTOR = 1.3
 URBAN_KM = 10.0
@@ -64,18 +68,56 @@ def straight_line_minutes(road_km: float) -> int:
     return math.ceil(minutes - 1e-9)
 
 
+MinutesTable = tuple[tuple[int, ...], ...]
+
+
+@dataclass(frozen=True)
+class TrafficTables:
+    """Minutes between the matrix points in each time band of the day; free-flow outside the bands."""
+
+    source: TrafficSource
+    bands: tuple[tuple[int, int], ...]
+    """[start, end) minutes of each band, sorted."""
+    tables: tuple[MinutesTable, ...]
+    """One table per band, indexed like the matrix."""
+    _band_at: tuple[int, ...] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        band_at = [-1] * (2 * MINUTES_PER_DAY + 1)
+        for band, (start, end) in enumerate(self.bands):
+            band_at[start:end] = [band] * (min(end, len(band_at)) - start)
+        object.__setattr__(self, "_band_at", tuple(band_at))
+
+    def table_at(self, minute: int) -> MinutesTable | None:
+        """Table of the band holding `minute`, None outside the bands (free-flow)."""
+        if not 0 <= minute < len(self._band_at):
+            return None
+        band = self._band_at[minute]
+        return self.tables[band] if band >= 0 else None
+
+    def tables_between(self, first_minute: int, last_minute: int) -> list[MinutesTable]:
+        """Tables of the bands overlapping [first_minute, last_minute]."""
+        return [table for (start, end), table in zip(self.bands, self.tables, strict=True) if start <= last_minute and end > first_minute]
+
+
 @dataclass(frozen=True)
 class TravelMatrix:
     """Minutes and km between distinct points, plus the provider that produced them."""
 
     points: tuple[PointKey, ...]
-    minutes_table: tuple[tuple[int, ...], ...]
+    minutes_table: MinutesTable
+    """Free-flow minutes."""
     km_table: tuple[tuple[float, ...], ...]
     source: MatrixSource
+    traffic: TrafficTables | None = None
     _index: dict[PointKey, int] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_index", {key: i for i, key in enumerate(self.points)})
+
+    @property
+    def traffic_source(self) -> TrafficSource:
+        return self.traffic.source if self.traffic else "none"
 
     def index_of(self, point: LatLng | PointKey) -> int:
         """Row/column of a point; raises KeyError for a point the matrix was not built with."""
@@ -93,6 +135,32 @@ class TravelMatrix:
 
     def km_by_index(self, i: int, j: int) -> float:
         return self.km_table[i][j]
+
+    def leg_by_index(self, i: int, j: int, from_minute: int | None, to_minute: int | None) -> int:
+        """Driving minutes of a leg, given the reference minutes of its two ends (None for a depot,
+        whose time is not known in advance: the other end, give or take the free-flow drive).
+
+        The slower of the bands of its two ends: a long leg that starts before the morning peak
+        drives through the city during it. The same two references give the same minutes everywhere,
+        so the solver, the scheduler and the validator cannot disagree on a leg.
+        """
+        free_flow = self.minutes_table[i][j]
+        if self.traffic is None or (from_minute is None and to_minute is None):
+            return free_flow
+        start = from_minute if from_minute is not None else to_minute - free_flow  # type: ignore[operator]
+        end = to_minute if to_minute is not None else from_minute + free_flow  # type: ignore[operator]
+        tables = (self.traffic.table_at(start), self.traffic.table_at(end))
+        return max((table[i][j] for table in tables if table is not None), default=free_flow)
+
+    def leg(self, a: LatLng, b: LatLng, from_minute: int | None, to_minute: int | None) -> int:
+        return self.leg_by_index(self.index_of(a), self.index_of(b), from_minute, to_minute)
+
+    def slowest_by_index(self, i: int, j: int, first_minute: int, last_minute: int) -> int:
+        """Driving minutes of a leg in the slowest band overlapping [first_minute, last_minute]."""
+        if self.traffic is None:
+            return self.minutes_table[i][j]
+        tables = self.traffic.tables_between(first_minute, last_minute)
+        return max((table[i][j] for table in tables), default=self.minutes_table[i][j])
 
 
 def distinct_points(points: Iterable[LatLng]) -> list[PointKey]:

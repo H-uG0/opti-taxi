@@ -226,6 +226,7 @@ function runView(
     durationMs: run.finishedAt ? run.finishedAt.getTime() - run.startedAt.getTime() : null,
     wallTimeMs: run.wallTimeMs,
     matrixSource: run.matrixSource,
+    trafficSource: details.get(run.id)?.trafficSource ?? null,
     valid: run.valid,
     error: run.error,
     tripsCount: run.tripsCount,

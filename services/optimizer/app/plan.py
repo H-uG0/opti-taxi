@@ -193,6 +193,7 @@ def build_response(ctx: PlanContext, outcome: PlanOutcome, started_at: float) ->
         validation=Validation(valid=not violations, violations=violations),
         meta=Meta(
             matrix_source=ctx.matrix.source,
+            traffic_source=ctx.matrix.traffic_source,
             solver_status=outcome.solver_status,
             objective=outcome.objective,
             wall_time_ms=round((time.perf_counter() - started_at) * 1000),

@@ -48,6 +48,7 @@ docker compose up -d --build optimizer
 | Module | Contenu |
 | --- | --- |
 | `app/matrix.py` | matrice temps/distances : OSRM (`/table`, par blocs de 100 points, délai 10 s) avec repli automatique sur l'estimation à vol d'oiseau ; points identiques dédoublonnés |
+| `app/traffic.py` | temps de trajet par créneau : `TrafficProvider` remplit une table de minutes par créneau (`ZoneFactors` aujourd'hui, une API de trafic demain), minute de référence de chaque arrêt |
 | `app/pricing.py` | grille tarifaire (type + département, repli sur `"*"`), CA d'une course, abattement de partage |
 | `app/model.py` | fenêtres horaires dérivées (source unique), paires aller/retour d'un patient, compatibilité véhicule, mode de pause |
 | `app/solver.py` | modèle OR-Tools (PDPTW) et recherche |
@@ -225,8 +226,10 @@ partir de la requête, de la matrice et des tournées produites (avec leurs hora
   atteignable avant le dernier début de pause possible (retour Gap → Sisteron à midi : sans ce
   domicile, la course ou la pause ne trouvait pas de place). Le planning recalculé, lui, peut
   placer la pause sur n'importe quel trajet à vide.
-- Pas de trafic : OSRM donne des temps sans congestion ; l'estimation à vol d'oiseau est grossière
-  en montagne.
+- Trafic moyen, pas celui du jour : des facteurs par zone et par créneau ralentissent des temps sans
+  congestion (`settings.traffic`, voir le contrat). Le créneau d'un trajet vient de l'heure attendue de
+  ses extrémités, pas de l'heure exacte de passage, inconnue d'une table d'arcs fixe. L'estimation à vol
+  d'oiseau reste grossière en montagne.
 - La recherche locale tourne tout le temps imparti (`timeLimitSec`) : la réponse arrive après ce
   délai, plus le calcul de la matrice et la construction du modèle (~0,5 s pour 160 courses), au
   plus 5 s de plus si la première solution et la réinsertion n'ont pas fini dans le budget, et

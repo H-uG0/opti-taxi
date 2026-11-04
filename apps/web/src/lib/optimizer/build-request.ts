@@ -18,6 +18,7 @@ import type {
 } from "@prisma/client";
 import { isShareable } from "@/lib/domain/rules";
 import { getSettings } from "@/lib/domain/settings";
+import { loadTrafficZones, toContractTraffic, type TrafficInput } from "@/lib/domain/traffic";
 import { tariffsInForce } from "@/lib/domain/tariffs";
 import { fromIsoDate, isoWeekday, WEEKDAY_LABELS } from "@/lib/time";
 import type {
@@ -129,6 +130,8 @@ export type OptimizeInput = {
   vehicles: VehicleInput[];
   trips: TripInput[];
   tariffs: TariffInput[];
+  /** Absent: free-flow travel times (the planning view only needs vehicle availability). */
+  traffic?: TrafficInput;
 };
 
 // ---------------------------------------------------------------------------
@@ -425,7 +428,10 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
   return {
     request: {
       date: input.date,
-      settings: toContractSettings(input.settings, trips.length),
+      settings: {
+        ...toContractSettings(input.settings, trips.length),
+        ...(input.traffic ? { traffic: toContractTraffic(input.traffic, input.date) } : {}),
+      },
       vehicles: available,
       trips,
       tariffs: toContractTariffs(input.tariffs, input.date),
@@ -495,8 +501,9 @@ export function loadVehicleInputs(prisma: PrismaClient): Promise<VehicleInput[]>
 
 export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): Promise<OptimizeInput> {
   const serviceDate = fromIsoDate(isoDate);
-  const [settings, vehicles, trips, tariffs] = await Promise.all([
+  const [settings, zones, vehicles, trips, tariffs] = await Promise.all([
     getSettings(prisma),
+    loadTrafficZones(prisma),
     loadVehicleInputs(prisma),
     prisma.trip.findMany({
       where: { serviceDate, status: { notIn: [...EXCLUDED_TRIP_STATUSES] } },
@@ -507,5 +514,5 @@ export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): 
       where: { validFrom: { lte: serviceDate }, OR: [{ validTo: null }, { validTo: { gte: serviceDate } }] },
     }),
   ]);
-  return { date: isoDate, settings, vehicles, trips, tariffs };
+  return { date: isoDate, settings, vehicles, trips, tariffs, traffic: { ...settings, zones } };
 }

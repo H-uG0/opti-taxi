@@ -405,7 +405,31 @@ model AppSettings {
   solverTimeLimitSec         Int      @default(10)
   /// Numéro de la régulation, proposé en appel direct sur la feuille de route des chauffeurs.
   regulatorPhone             String?
+  /// Temps de trajet ralentis par le trafic (zones et facteurs : TrafficZone).
+  trafficEnabled             Boolean  @default(true)
+  morningPeakStartMinute     Int      @default(420)
+  morningPeakEndMinute       Int      @default(570)
+  eveningPeakStartMinute     Int      @default(960)
+  eveningPeakEndMinute       Int      @default(1140)
+  /// Dernière modification du réglage du trafic : seuls les plannings calculés depuis servent à calibrer les facteurs.
+  trafficChangedAt           DateTime?
   updatedAt                  DateTime @updatedAt
+}
+
+/// Ralentissement dû au trafic, par zone et par créneau : dans la zone, temps de trajet = temps fluide × facteur.
+model TrafficZone {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  /// Ordre d'affichage.
+  position      Int
+  /// Centre et rayon du cercle ; null pour la ligne « hors agglomération » (le reste du réseau).
+  lat           Float?
+  lng           Float?
+  radiusKm      Float?
+  morningFactor Float
+  dayFactor     Float
+  eveningFactor Float
+  updatedAt     DateTime @updatedAt
 }
 
 model OptimizationRun {

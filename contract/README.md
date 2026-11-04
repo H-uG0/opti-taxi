@@ -34,7 +34,12 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
     "pickupServiceMin": 5,              // temps d'arrêt à une prise en charge
     "dropoffServiceMin": 5,             // temps d'arrêt à une dépose
     "unassignedPenalty": 10000,         // € de pénalité par course non affectée
-    "timeLimitSec": 10                  // budget de calcul du solveur, entier 1..600 s (voir plus bas)
+    "timeLimitSec": 10,                 // budget de calcul du solveur, entier 1..600 s (voir plus bas)
+    "traffic": {                        // facultatif, absent ou null = temps de trajet sans trafic (voir plus bas)
+      "bands": [{ "startMin": 420, "endMin": 570 }, { "startMin": 570, "endMin": 960 }],
+      "roadFactors": [1.05, 1],         // un facteur par créneau, hors des zones
+      "zones": [{ "lat": 43.2965, "lng": 5.3698, "radiusKm": 14, "factors": [1.5, 1.2] }]
+    }
   },
   "vehicles": [{
     "id": "veh_taxi_1",
@@ -81,6 +86,25 @@ Le contrat accepte tout entier de 1 à 600. Le web envoie
 des courses envoyées (`effectiveTimeLimitSec` dans `apps/web/src/lib/optimizer/build-request.ts`) :
 le réglage de /parametres (1 à 120 s), relevé à 1 s par tranche de 8 courses pour qu'une grosse
 journée ne soit pas coupée court.
+
+### Trafic (`settings.traffic`)
+
+Les temps de `matrixSource` sont à circulation fluide. Avec `traffic`, l'optimizer calcule une table
+de temps par créneau (`bands`, triés et sans chevauchement ; hors créneau : circulation fluide) :
+
+`temps = base + Σ zones minutes_dans_la_zone × (facteur_zone - 1) + reste × (roadFactor - 1)`, arrondi
+à la minute supérieure, avec `minutes_dans_la_zone` = longueur du segment droit dans le cercle de la
+zone, × 1,3, à 30 km/h, plafonnée à `base`. Un facteur vaut de 1 à 5.
+
+Le temps d'un trajet dépend des **minutes de référence** de ses deux extrémités, connues avant le
+calcul et identiques pour le solveur, la planification et le validateur : il prend le plus lent des
+créneaux de ces deux minutes, car un long trajet parti avant la pointe la traverse en arrivant. Aller :
+rendez-vous à la dépose, rendez-vous moins le trajet direct fluide à la prise en charge. Retour : fin de
+séance à la prise en charge, fin de séance plus le trajet direct fluide à la dépose. Pause : milieu de sa
+fenêtre. Dépôt : pas de référence, l'autre extrémité plus ou moins le trajet fluide.
+
+`meta.trafficSource` dit ce qui a été appliqué : `none` ou `factors`. Une API de trafic (temps par
+créneau demandés à un fournisseur) serait une autre valeur, sans changer le reste du contrat.
 
 ### Fenêtres horaires dérivées (calculées par l'optimizer, une seule source de vérité)
 
@@ -156,6 +180,7 @@ Les courses absentes de `routes` sont non affectées.
   },
   "meta": {
     "matrixSource": "haversine",        // osrm | haversine
+    "trafficSource": "factors",         // none | factors (voir « Trafic »)
     "solverStatus": "ROUTING_SUCCESS",  // libellé du solveur, ou "EVALUATE"
     "objective": 123456,                // valeur interne du solveur, null pour /evaluate
     "wallTimeMs": 2140,

@@ -9,7 +9,16 @@
     "pickupServiceMin": 5,
     "dropoffServiceMin": 5,
     "unassignedPenalty": 10000,
-    "timeLimitSec": 5
+    "timeLimitSec": 5,
+    "traffic": {
+      "bands": [
+        { "startMin": 420, "endMin": 570 },
+        { "startMin": 570, "endMin": 960 },
+        { "startMin": 960, "endMin": 1140 }
+      ],
+      "roadFactors": [1.05, 1, 1.05],
+      "zones": [{ "lat": 43.2965, "lng": 5.3698, "radiusKm": 14, "factors": [1.5, 1.2, 1.5] }]
+    }
   },
   "vehicles": [
     {

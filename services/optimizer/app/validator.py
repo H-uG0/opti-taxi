@@ -29,6 +29,7 @@ from app.schemas import (
     Violation,
     ViolationCode,
 )
+from app.traffic import stop_reference_minute
 
 DISTANCE_TOLERANCE_KM = 0.05
 TIME_TOLERANCE_MIN = 0
@@ -254,7 +255,8 @@ class _RouteCheck:
         points.extend(trip.pickup if stop.kind == "PICKUP" else trip.dropoff for stop, trip in stops)
         points.append(vehicle.depot)
         pairs = list(zip(points, points[1:], strict=False))
-        self.travel = [matrix.minutes(a, b) for a, b in pairs]
+        references = [None, *(stop_reference_minute(trip, stop.kind, matrix) for stop, trip in stops), None]
+        self.travel = [matrix.leg(a, b, references[k], references[k + 1]) for k, (a, b) in enumerate(pairs)]
         self.leg_km = [matrix.km(a, b) for a, b in pairs]
         self.departures = [route.start_min, *(stop.departure_min for stop, _ in stops)]
         self.next_starts = [*(stop.start_min for stop, _ in stops), route.end_min]

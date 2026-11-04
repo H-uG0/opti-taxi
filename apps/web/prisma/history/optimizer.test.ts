@@ -50,7 +50,7 @@ const plan: PlanResponse = {
     margin: 0,
   },
   validation: { valid: true, violations: [] },
-  meta: { matrixSource: "haversine", solverStatus: "ROUTING_SUCCESS", objective: 0, wallTimeMs: 1200, warnings: [] },
+  meta: { matrixSource: "haversine", trafficSource: "none", solverStatus: "ROUTING_SUCCESS", objective: 0, wallTimeMs: 1200, warnings: [] },
 };
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });

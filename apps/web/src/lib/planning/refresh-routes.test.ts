@@ -125,7 +125,7 @@ function response(routes: PlanRoute[], trips: TripResult[], violations: PlanResp
       margin: 0,
     },
     validation: { valid: violations.length === 0, violations },
-    meta: { matrixSource: "haversine", solverStatus: "EVALUATE", objective: null, wallTimeMs: 12, warnings: [] },
+    meta: { matrixSource: "haversine", trafficSource: "none", solverStatus: "EVALUATE", objective: null, wallTimeMs: 12, warnings: [] },
   };
 }
 
@@ -774,6 +774,7 @@ function fakePrisma(routes: FakeRoute[], trips: RefreshTrip[]) {
     (where.id === undefined || (typeof where.id === "string" ? route.id === where.id : where.id.in.includes(route.id)));
   const client = {
     appSettings: { upsert: async () => SETTINGS_ROW },
+    trafficZone: { findMany: async () => [], createMany: async () => ({ count: 0 }) },
     vehicle: { findMany: async () => VEHICLE_ROWS },
     tariffGrid: { findMany: async () => [] },
     route: {

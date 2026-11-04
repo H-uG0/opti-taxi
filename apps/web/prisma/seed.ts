@@ -119,6 +119,7 @@ async function wipe(): Promise<void> {
     prisma.facility.deleteMany(),
     prisma.driver.deleteMany(),
     prisma.tariffGrid.deleteMany(),
+    prisma.trafficZone.deleteMany(),
     prisma.appSettings.deleteMany(),
   ]);
 }
