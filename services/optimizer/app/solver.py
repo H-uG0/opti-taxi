@@ -42,31 +42,41 @@ revenue (twice that for a trip locked by the regulator). Unused vehicles only ca
 (depot site, no km), a constant. The shared-ride discount is not in the objective (not linear): it
 is applied when the plan is recomputed.
 
-Search (budget = settings.timeLimitSec, counted from the start of the search)
-1. First solution: PARALLEL_CHEAPEST_INSERTION, run to completion (stopped early, it leaves most
+Search (budget = settings.timeLimitSec, the model build included: see solve())
+1. Insertion from the breaks, built in Python first: the breaks alone, then every trip by the
+   regret insertion of step 4. It respects the breaks from the start and is the safety net of the
+   later steps, which keep it unless they find better; it may run FIRST_SOLUTION_GRACE_SEC past
+   the budget. It takes seconds where step 2 takes minutes on a large fleet: 3.6 s against 60 s on
+   a 120-vehicle, 300-trip day (tests/bench_fleet.py), whose 2 000 nodes (1 286 break sites) put
+   the OR-Tools heuristic far past the 38 s the web sends. Before it came first, that day got an
+   empty plan.
+2. First solution: PARALLEL_CHEAPEST_INSERTION, run to completion (stopped early, it leaves most
    trips unplaced), even FIRST_SOLUTION_GRACE_SEC past the budget. Break sites are inserted after
-   the trips, so a busy vehicle may get none.
-2. Break repair: a vehicle left without a break gets one at the cheapest feasible empty position,
+   the trips, so a busy vehicle may get none. Its time grows like the cube of the node count.
+3. Break repair: a vehicle left without a break gets one at the cheapest feasible empty position,
    removing the trips that ride through the break window if needed. Exact time and detour checks
    in Python (milliseconds).
-3. Reinsertion: every trip left out (by the repair or by the first solution) goes back at its
+4. Reinsertion: every trip left out (by the repair or by the first solution) goes back at its
    cheapest feasible position, trips with the fewest options first (regret insertion), with the
    same exact checks plus seats, exclusive rides and an empty vehicle at the break; the break
    moves when the trip only fits without it. The local search alone needed 5 to more than 120 s
    to win back the trips the repair drops; this takes milliseconds. The routing model then
    confirms the whole plan once.
-4. Second start, built in Python: the breaks alone, then every trip by the same regret insertion.
-   It respects the breaks from the start: on the seed days it serves more trips than steps 1-3
-   (56 of 56 against 55 on 2026-11-05), on the 160-trip busy day fewer (118 against 129). The
-   start with the lower objective is kept.
-5. GUIDED_LOCAL_SEARCH on the remaining budget, from a plan where every break is performed:
+5. The start with the lower objective is kept: the insertion of step 1 serves more trips on the
+   seed days (56 of 56 against 55 on 2026-11-05), steps 2-4 on the 160-trip busy day (129 against
+   118), as many on a large fleet where step 2 finishes (both 297 of 297, the insertion cheaper).
+6. GUIDED_LOCAL_SEARCH on the remaining budget, from a plan where every break is performed:
    dropping a break would cost more than all the trips, so the best plan keeps them.
+The insertion of step 1 is confirmed by the routing model (ReadAssignmentFromRoutes) right away,
+before any solve: afterwards, a solve that used up its routing limit makes that restore fail.
 If the first solution fails (ROUTING_FAIL_TIMEOUT: the time limit ran out before the heuristic
-produced anything, as on an overloaded machine), the plan of step 4 is built, then the local search
-starts from it (from the breaks alone, always feasible, if the routing model rejects it); the two
-share the rest of the budget, at least FALLBACK_SEARCH_SEC, half each. A plan, possibly with trips
-left out, is returned whenever the model is feasible; its trips left out get the time-limit reason
-(a re-run may place them), with WARNING_FIRST_SOLUTION_FAILED.
+produced anything, as on an overloaded machine), the local search starts from that insertion (from
+the breaks alone, always feasible, if the routing model rejected it) for the rest of the budget, at
+least FALLBACK_SEARCH_SEC. If the first solution ends cut short by its limit (a large fleet: no trip
+placed in 33 s), step 5 keeps the insertion, whose objective is lower. A plan, possibly with trips
+left out, is returned whenever the model is feasible; when it comes from the insertion for one of
+these reasons, its trips left out get the time-limit reason (a re-run may place them), with
+WARNING_FIRST_SOLUTION_FAILED.
 
 Determinism: nodes, candidates and every Python step iterate lists and insertion-ordered dicts
 (never sets), so the model and, under a solution limit, the plan do not depend on PYTHONHASHSEED.
@@ -114,10 +124,12 @@ FIRST_SOLUTION_GRACE_SEC = 5
 """Extra time the first solution may take beyond the budget: interrupted, the insertion heuristic
 leaves most trips unplaced (none of 160 with a 1 s budget). The web client waits the budget + 30 s."""
 FALLBACK_SEARCH_SEC = 5
-"""Least time of the fallback when the first solution failed, in all: half for the insertion from
-the breaks (_built_from_breaks), half for the local search from that plan (see
-_search_without_first_solution). The response then comes at most FIRST_SOLUTION_GRACE_SEC +
-FALLBACK_SEARCH_SEC after the budget."""
+"""Least time of the local search from the insertion when the first solution failed (see
+_search_without_first_solution). The response then comes at most 2 x FIRST_SOLUTION_GRACE_SEC +
+FALLBACK_SEARCH_SEC after the budget (the insertion and the first solution may each use the
+grace)."""
+MIN_SEARCH_SEC = 1.0
+"""Least search budget once the model build is taken out of settings.timeLimitSec (see solve())."""
 MAX_BREAK_MOVES = 30
 """Positions tried, cheapest first, when a trip only fits once the vehicle's break moves."""
 RESTORE_MARGIN_SEC = 1
@@ -289,8 +301,10 @@ class _DayModel:
         self.search_status = "ROUTING_NOT_SOLVED"
         """Status of the last solver run (the routing status changes when an assignment is read)."""
         self.first_solution_failed = False
-        """True when the first solution failed: the plan then comes from the fallback (insertion
-        from the breaks, then local search; see _search_without_first_solution)."""
+        """True when the plan comes from the insertion from the breaks because the first solution
+        failed, or ran out of time with a costlier plan: more time may place more trips."""
+        self.inserted_trips = 0
+        """Trips placed by the insertion from the breaks, the first step of the search."""
         self._lost_cents: list[dict[tuple[str, str], int]] = []
         """Per pickup node: revenue lost (cents) with each candidate tariff (see _lost_revenue_cents)."""
         self._meter_rows: list[list[int]] = []
@@ -555,50 +569,51 @@ class _DayModel:
         return params
 
     def search(self, time_limit_sec: float) -> pywrapcp.Assignment | None:
-        """First solution, break repair, reinsertion, second start, guided local search (see module
-        docstring), all within `time_limit_sec` (the first solution and the repair may use
-        FIRST_SOLUTION_GRACE_SEC more, the fallback after a failed first solution
-        FALLBACK_SEARCH_SEC); None when no plan was found."""
+        """Insertion from the breaks, first solution, break repair, reinsertion, choice of the
+        start, guided local search (see module docstring), all within `time_limit_sec` (the
+        insertion and the first solution may each use FIRST_SOLUTION_GRACE_SEC more, the fallback
+        after a failed first solution FALLBACK_SEARCH_SEC); None when no plan was found."""
         started = time.monotonic()
         deadline = started + time_limit_sec
+        # The safety net, built and confirmed before any solve: once a solve has used up its
+        # routing limit, ReadAssignmentFromRoutes fails, and restoring a start set by
+        # RoutesToAssignment instead took 46 s on a 2 000-node model (0.1 s here).
+        routes = self._built_from_breaks(deadline + FIRST_SOLUTION_GRACE_SEC)
+        self.inserted_trips = self._placed_in(routes)
+        constructed = self.routing.ReadAssignmentFromRoutes(routes, True)
+        inserted = time.monotonic()
+        logger.info("solver: insertion from the breaks %.2f s (%d trips placed)", inserted - started, self.inserted_trips)
+        if constructed is None:
+            logger.warning("solver: plan built from the breaks rejected by the routing model")
         # The routing limit set here also bounds the restore of the repaired plan below: the grace
         # keeps it alive for the repair when the first solution ends near the budget.
-        first_limit = time_limit_sec + FIRST_SOLUTION_GRACE_SEC
+        first_limit = max(deadline - inserted, 0.0) + FIRST_SOLUTION_GRACE_SEC
         first = self.routing.SolveWithParameters(self._params(first_limit, first_solution_only=True))
         self.search_status = _status_name(self.routing)
         built = time.monotonic()
         if first is None:
-            logger.warning("solver: no first solution after %.1f s (%s)", built - started, self.search_status)
+            logger.warning("solver: no first solution after %.1f s (%s)", built - inserted, self.search_status)
             self.first_solution_failed = True
-            return self._search_without_first_solution(deadline)
+            return self._search_without_first_solution(constructed, deadline)
+        cut_short = built - inserted >= first_limit
         if built > deadline:
-            logger.warning("solver: first solution took %.1f s, over the %s s budget", built - started, time_limit_sec)
-        # Both restores below run under the routing limit of the first solution.
-        restore_deadline = started + first_limit - RESTORE_MARGIN_SEC
-        start, kept = self._repaired(first, restore_deadline)
-        repaired = time.monotonic()
+            logger.warning("solver: first solution took %.1f s, over the %s s budget", built - inserted, time_limit_sec)
+        start, kept = self._repaired(first, inserted + first_limit - RESTORE_MARGIN_SEC)
         logger.info(
             "solver: first solution %.2f s (%d trips placed), break repair %d trips kept, reinsertion %d trips placed (%.2f s)",
-            built - started,
+            built - inserted,
             self._placed(first),
             kept,
             self._placed(start),
-            repaired - built,
+            time.monotonic() - built,
         )
-        if repaired < deadline:
-            routes = self._built_from_breaks(min(deadline, restore_deadline))
-            constructed = self.routing.ReadAssignmentFromRoutes(routes, True)
-            if constructed is None:
-                logger.warning("solver: plan built from the breaks rejected by the routing model")
-            else:
-                chosen = constructed.ObjectiveValue() < start.ObjectiveValue()
-                logger.info(
-                    "solver: insertion from the breaks %.2f s (%d trips placed), %s",
-                    time.monotonic() - repaired,
-                    self._placed_in(routes),
-                    "kept as the start" if chosen else "first solution kept",
-                )
-                start = constructed if chosen else start
+        if constructed is not None and constructed.ObjectiveValue() < start.ObjectiveValue():
+            start = constructed
+            # Kept because the first solution ran out of time (a large fleet): more time may help.
+            self.first_solution_failed = cut_short
+            logger.info("solver: start: insertion from the breaks%s", " (first solution cut short)" if cut_short else "")
+        else:
+            logger.info("solver: start: first solution")
         remaining = deadline - time.monotonic()
         if remaining < MIN_LOCAL_SEARCH_SEC:
             return start
@@ -614,34 +629,32 @@ class _DayModel:
         logger.info("solver: local search %.2f s (%d trips placed) -> %s", time.monotonic() - began, self._placed(best), self.search_status)
         return best
 
-    def _search_without_first_solution(self, deadline: float) -> pywrapcp.Assignment | None:
-        """Search when the first solution failed: the rest of the budget, at least
-        FALLBACK_SEARCH_SEC, half for the insertion from the breaks, half for the local search from
-        it; from the breaks-only routes (always feasible) if the routing model rejects it.
+    def _search_without_first_solution(self, constructed: pywrapcp.Assignment | None, deadline: float) -> pywrapcp.Assignment | None:
+        """Search when the first solution failed: local search from the insertion from the breaks
+        (`constructed`, confirmed before the failed solve) until the deadline, at least
+        FALLBACK_SEARCH_SEC; from the breaks-only routes (always feasible) if the routing model
+        rejected the insertion.
 
-        The failed solve closed the model and used up its routing limit, under which
-        ReadAssignmentFromRoutes would fail: the start only sets the routes (RoutesToAssignment)
-        and the search, with a fresh limit, restores it.
+        The failed solve used up its routing limit, under which ReadAssignmentFromRoutes would
+        fail: the breaks-only start only sets the routes (RoutesToAssignment) and the search, with
+        a fresh limit, restores it.
         """
-        now = time.monotonic()
-        end = max(deadline, now + FALLBACK_SEARCH_SEC)
-        constructed = self._built_from_breaks(now + (end - now) / 2)
-        for routes in (constructed, self._breaks_only_routes()):
-            start = self.routing.solver().Assignment()
-            if not self.routing.RoutesToAssignment(routes, True, True, start):
-                continue
-            best = self.routing.SolveFromAssignmentWithParameters(start, self._params(max(end - time.monotonic(), MIN_LOCAL_SEARCH_SEC)))
-            self.search_status = _status_name(self.routing)
-            if best is not None:
-                logger.info(
-                    "solver: local search from %d trips inserted after the breaks: %d trips placed -> %s",
-                    self._placed_in(routes),
-                    self._placed(best),
-                    self.search_status,
-                )
-                return best
-        logger.warning("solver: no start accepted by the routing model (%s)", self.search_status)
-        return None
+        seconds = max(deadline - time.monotonic(), FALLBACK_SEARCH_SEC)
+        if constructed is not None:
+            best = self._local_search(constructed, seconds)
+            logger.info("solver: local search from the insertion: %d trips placed", self._placed(best) if best else 0)
+            return best
+        start = self.routing.solver().Assignment()
+        if not self.routing.RoutesToAssignment(self._breaks_only_routes(), True, True, start):
+            logger.warning("solver: no start accepted by the routing model (%s)", self.search_status)
+            return None
+        best = self.routing.SolveFromAssignmentWithParameters(start, self._params(seconds))
+        self.search_status = _status_name(self.routing)
+        if best is None:
+            logger.warning("solver: no start accepted by the routing model (%s)", self.search_status)
+            return None
+        logger.info("solver: local search from the breaks alone: %d trips placed -> %s", self._placed(best), self.search_status)
+        return best
 
     def _breaks_only_routes(self) -> list[list[int]]:
         """Each vehicle's break at its cheapest feasible site (the depot) and nothing else."""
@@ -1037,26 +1050,30 @@ def solve(ctx: PlanContext) -> SolveOutcome:
 
     build_started = time.monotonic()
     model = _DayModel(ctx, fleet, routable)
+    build_sec = time.monotonic() - build_started
     logger.info(
         "solver: model of %d trips, %d vehicles, %d nodes built in %.2f s",
         len(routable),
         len(fleet),
         len(model.nodes),
-        time.monotonic() - build_started,
+        build_sec,
     )
+    # The model build counts in the budget: on a large fleet it takes tens of seconds (13 s for
+    # 120 vehicles and 300 trips, 28 s for 480), which the web's response margin cannot absorb.
     time_limit_sec = ctx.request.settings.time_limit_sec
-    solution = model.search(time_limit_sec)
+    solution = model.search(max(time_limit_sec - build_sec, MIN_SEARCH_SEC))
     status_name = model.search_status
     if solution is None:
         for trip, _ in routable:
             unassigned[trip.id] = REASON_NO_SOLUTION
         return SolveOutcome({}, unassigned, "NO_SOLUTION", status_name, None, warnings)
-    if model.first_solution_failed:
-        warnings.append(WARNING_FIRST_SOLUTION_FAILED)
 
     sequences = model.sequences(solution)
     served = {ref.trip_id for refs in sequences.values() for ref in refs}
     dropped = [trip for trip, _ in routable if trip.id not in served]
+    if model.first_solution_failed and dropped:
+        # Only then may a re-run place more: a complete plan from the fallback needs no warning.
+        warnings.append(WARNING_FIRST_SOLUTION_FAILED)
     # After a failed first solution the plan comes from a shortened fallback search, and the
     # warning above says a re-run may place more: never tell the regulator there is no room.
     cut_short = model.first_solution_failed or search_cut_short(status_name)

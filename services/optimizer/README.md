@@ -111,38 +111,49 @@ solution respecte alors l'attente cumulée.
   par rapport au type de véhicule le mieux payé pour la course (sur l'arc qui quitte la prise en
   charge) ; course non affectée = pénalité + son meilleur CA (doublée pour une course figée) ;
   pause non prise = pénalité supérieure à toutes les courses réunies.
-- Recherche (tout est compté dans `timeLimitSec`, construction du modèle et matrice en plus) :
-  1. première solution `PARALLEL_CHEAPEST_INSERTION`, **menée à son terme**, quitte à dépasser le
+- Recherche (tout est compté dans `timeLimitSec`, **construction du modèle comprise**, matrice en
+  plus : à 120 véhicules, construire le modèle prend 13 s pour 300 voyages, 28 s pour 480) :
+  1. départ construit en Python, **en premier** : les pauses seules (au dépôt), puis toutes les
+     courses par l'insertion avec regret de l'étape 4. Il respecte les pauses dès le début et sert
+     de filet : les étapes suivantes ne le remplacent que par mieux. Le modèle OR-Tools le confirme
+     aussitôt (`ReadAssignmentFromRoutes`, 0,1 s), avant tout calcul : après un calcul qui a épuisé
+     sa limite de temps, cette confirmation échoue. Il peut dépasser le budget de 5 s au plus ;
+  2. première solution `PARALLEL_CHEAPEST_INSERTION`, **menée à son terme**, quitte à dépasser le
      budget de 5 s au plus (interrompue, elle laisse la plupart des courses de côté : aucune des
-     160 courses de la journée chargée avec un budget de 1 s) ;
-  2. réparation des pauses : un véhicule resté sans pause la reçoit à la position vide la moins
+     160 courses de la journée chargée avec un budget de 1 s). Son temps croît comme le cube du
+     nombre de nœuds (environ 8·10⁻⁹ × nœuds³ s sur la machine de développement) : 0,9 s pour la
+     journée chargée (476 nœuds), 60 s pour 120 véhicules et 300 voyages (2 000 nœuds) ;
+  3. réparation des pauses : un véhicule resté sans pause la reçoit à la position vide la moins
      coûteuse ; si aucune n'est possible, on retire la course la moins chère dont le retrait
      suffit, sinon celle qui traverse le plus la fenêtre de pause, et on recommence ;
-  3. réinsertion : chaque course laissée de côté (par la réparation ou par la première solution)
+  4. réinsertion : chaque course laissée de côté (par la réparation ou par la première solution)
      revient à sa position faisable la moins coûteuse, par insertion avec regret (d'abord la
      course qui n'a qu'une possibilité, puis celle dont le meilleur et le deuxième meilleur
      véhicule diffèrent le plus). Si une course ne tient qu'en déplaçant la pause du véhicule, la
      pause est retirée puis replacée (autre lieu, autre position vide) ;
-  4. second départ construit en Python : les pauses seules (au dépôt), puis toutes les courses
-     par la même insertion avec regret. Il respecte les pauses dès le début, contrairement à la
-     première solution ; le moins coûteux des deux départs (objectif OR-Tools) est gardé. Sur les
-     journées du jeu de démonstration, il sert plus de courses (56 sur 56 le 05/11 contre 55) ;
-     sur la journée chargée de 160 courses, moins (118 contre 129) ;
-  5. `GUIDED_LOCAL_SEARCH` sur le reste du budget, à partir de ce planning où toutes les pauses
+  5. le moins coûteux des deux départs (objectif OR-Tools) est gardé. Sur les journées du jeu de
+     démonstration, le départ Python sert plus de courses (56 sur 56 le 05/11 contre 55) ; sur la
+     journée chargée de 160 courses, moins (118 contre 129) ; à 120 véhicules, autant quand la
+     première solution a le temps de finir (297 sur 297), et il est moins coûteux ;
+  6. `GUIDED_LOCAL_SEARCH` sur le reste du budget, à partir de ce planning où toutes les pauses
      sont prises.
 
-  Étapes 2 à 4 : vérifications exactes en Python (horaires au plus tôt et au plus tard, places,
-  patient non partageable seul à bord, véhicule vide pendant la pause, détours ; de 0,1 à 1 s
-  pour 60 à 160 courses), puis une confirmation de chaque planning par le modèle OR-Tools. Sans
-  elles, la recherche locale mettait de 5 à plus de 120 s à replacer les courses retirées par la
-  réparation des pauses (mesures dans « Limites connues »).
+  Étapes 1, 3 et 4 : vérifications exactes en Python (horaires au plus tôt et au plus tard,
+  places, patient non partageable seul à bord, véhicule vide pendant la pause, détours ; de 0,1 à
+  1 s pour 60 à 160 courses, 3,6 s pour 300 voyages à 120 véhicules), puis une confirmation de
+  chaque planning par le modèle OR-Tools. Sans elles, la recherche locale mettait de 5 à plus de
+  120 s à replacer les courses retirées par la réparation des pauses (mesures dans « Limites
+  connues »).
+- **Première solution coupée par sa limite** (grande flotte : à 120 véhicules et 300 voyages, aucune
+  course placée en 33 s) : l'étape 5 garde le départ Python, moins coûteux. Avant que ce départ
+  passe en premier, la réponse était un planning vide.
 - **Première solution introuvable** (`ROUTING_FAIL_TIMEOUT` : la limite de temps tombe avant que
   l'heuristique produise quoi que ce soit, sur une machine surchargée) : au lieu de répondre
-  `NO_SOLUTION`, on construit le planning depuis les pauses (étape 4), puis la recherche locale
-  part de ce planning (ou des pauses seules, toujours faisable, si OR-Tools le refuse). Les deux
-  se partagent à parts égales le reste du budget, au moins 5 s en tout. Un avertissement
-  (« Construction initiale des tournées interrompue… planning construit par une méthode de
-  secours… ») le signale dans `meta.warnings`.
+  `NO_SOLUTION`, la recherche locale part du départ Python (ou des pauses seules, toujours
+  faisable, si OR-Tools l'a refusé) pour le reste du budget, au moins 5 s.
+- Dans ces deux cas, s'il reste des courses non placées, un avertissement (« Construction initiale
+  des tournées interrompue… planning construit par une méthode de secours… ») le signale dans
+  `meta.warnings`.
 - Motif des courses non placées par le solveur : si la recherche locale a atteint un optimum
   local, « Pas de place dans les tournées… » ; si elle a été interrompue par la limite de temps
   (statut `ROUTING_PARTIAL_SUCCESS_LOCAL_OPTIMUM_NOT_REACHED`) ou si le planning vient de la
@@ -237,19 +248,25 @@ partir de la requête, de la matrice et des tournées produites (avec leurs hora
   congestion (`settings.traffic`, voir le contrat). Le créneau d'un trajet vient de l'heure attendue de
   ses extrémités, pas de l'heure exacte de passage, inconnue d'une table d'arcs fixe. L'estimation à vol
   d'oiseau reste grossière en montagne.
-- La recherche locale tourne tout le temps imparti (`timeLimitSec`) : la réponse arrive après ce
-  délai, plus le calcul de la matrice et la construction du modèle (~0,5 s pour 160 courses), au
-  plus 5 s de plus si la première solution et la réinsertion n'ont pas fini dans le budget, et
-  encore au plus 5 s si la première solution a échoué (le web attend `timeLimitSec` + 30 s).
-- **Grande flotte : planning vide au budget du web.** Matrices et modèle sont construits en Python
-  en O(n²), n comptant aussi les lieux de pause (jusqu'à 24 par véhicule). À l'échelle annoncée par
-  V (120 véhicules, ~300 voyages ; `fleet_day()` des tests, distances à vol d'oiseau, 1,5 cœur) :
-  modèle de 2 000 nœuds dont 1 286 lieux de pause, construit en 13 s (1,4 s sans pauses), 1,9 Go ;
-  première solution OR-Tools en 57 s. Au budget envoyé par le web (38 s), elle est coupée sans
-  avoir placé de course, et la réponse (60 s) ne sert **aucune** course alors que l'insertion depuis
-  les pauses (`_built_from_breaks`) les place toutes (297 sur 297) en 3,3 s. À 480 voyages : modèle
-  en 28 s et 4 Go, aucune course servie au budget de 60 s, 474 sur 476 par l'insertion en 7,4 s.
-  Pistes : insertion d'abord, première solution OR-Tools seulement s'il reste du temps ; moins de
-  lieux de pause candidats quand la flotte est grande. Mesures détaillées : « Test de charge » dans
-  [`docs/besoin-et-solution.md`](../../docs/besoin-et-solution.md). Reproduire :
-  `python -m tests.bench_fleet --vehicles 120 --trips 300 --budget 38`.
+- La recherche locale tourne tout le temps imparti (`timeLimitSec`, construction du modèle
+  comprise ; au moins 1 s de recherche si la construction a pris tout le budget) : la réponse
+  arrive après ce délai, plus le calcul de la matrice, au plus 5 s de plus si le départ Python
+  n'a pas fini dans le budget, 5 s si la première solution non plus, et encore au plus 5 s si
+  elle a échoué (le web attend `timeLimitSec` + 30 s).
+- **Grande flotte.** Matrices et modèle sont construits en Python en O(n²), n comptant aussi les
+  lieux de pause (jusqu'à 24 par véhicule). À l'échelle annoncée par V (120 véhicules ; `fleet_day()`
+  des tests, distances à vol d'oiseau, 1,5 cœur), au budget envoyé par le web :
+
+  | Voyages (budget) | Nœuds (dont pauses) | Modèle | Avant le 7/11 | Depuis | Mémoire |
+  | --- | --- | --- | --- | --- | --- |
+  | 300 (38 s) | 2 000 (1 286) | 13 s | 0 course servie, réponse en 60 s | 297 sur 297, en 49 s | 1,9 Go |
+  | 480 (60 s) | 2 884 (1 812) | 28 s | 0 course servie, réponse en 102 s | 474 sur 476, en 74 s | 4,0 Go |
+
+  La première solution OR-Tools n'a pas le temps de finir : le planning est le départ Python, sans
+  recherche locale (elle ne gagnait que 1 % de km en 10 min à cette taille). Les lieux de pause
+  font deux tiers des nœuds : sans eux, le modèle de 300 voyages se construit en 1,4 s avec
+  0,35 Go. Moins de lieux candidats par véhicule quand la flotte est grande rendrait du temps à la
+  première solution et à la recherche locale (non fait : effet sur la qualité à mesurer). Mesures :
+  « Test de charge » dans [`docs/besoin-et-solution.md`](../../docs/besoin-et-solution.md). Reproduire :
+  `python -m tests.bench_fleet --vehicles 120 --trips 300 --budget 38` ; vérifié par
+  `test_large_fleet_gets_a_full_plan_within_the_web_timeout` (`OPTIMIZER_SLOW_TESTS=1`).

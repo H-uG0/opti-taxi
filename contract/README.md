@@ -87,6 +87,10 @@ des courses envoyées (`effectiveTimeLimitSec` dans `apps/web/src/lib/optimizer/
 le réglage de /parametres (1 à 120 s), relevé à 1 s par tranche de 8 courses pour qu'une grosse
 journée ne soit pas coupée court.
 
+Ce budget comprend la construction du modèle par l'optimizer (depuis le 7 novembre 2026) : à
+120 véhicules, elle prend 13 s pour 300 courses, 28 s pour 480, que la marge du web (budget + 30 s)
+ne pouvait pas absorber en plus. Le calcul de la matrice reste en dehors.
+
 ### Trafic (`settings.traffic`)
 
 Les temps de `matrixSource` sont à circulation fluide. Avec `traffic`, l'optimizer calcule une table

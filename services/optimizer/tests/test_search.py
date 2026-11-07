@@ -159,13 +159,14 @@ def test_break_repair_then_reinsertion_wins_back_dropped_trips(raw: dict[str, An
 
 
 def assert_fallback_plan(plan: PlanResponse, min_served: int) -> None:
-    """Plan after a failed first solution: valid, every break, the warning, and trips left out
-    marked as time-bound (a re-run may place them), never "no room" nor NO_SOLUTION."""
+    """Plan after a failed or cut-short first solution: valid, every break, trips left out marked
+    as time-bound (a re-run may place them), never "no room" nor NO_SOLUTION, and the warning
+    exactly when trips are left out."""
     assert plan.status == "OK"
     assert plan.validation.valid, plan.validation.violations[:5]
     assert plan.routes and all(route.break_ is not None for route in plan.routes)
     assert plan.kpis.trips_served >= min_served
-    assert solver.WARNING_FIRST_SOLUTION_FAILED in plan.meta.warnings
+    assert (solver.WARNING_FIRST_SOLUTION_FAILED in plan.meta.warnings) == (plan.kpis.trips_unassigned > 0)
     assert {u.reason for u in plan.unassigned} <= {solver.REASON_DROPPED_TIME_LIMIT}
 
 
@@ -204,6 +205,26 @@ def test_first_solution_timeout_falls_back_although_the_routing_limit_is_used_up
     if first_solves != ["ROUTING_FAIL_TIMEOUT"]:
         pytest.skip(f"the first solution did not time out in 1 ms on this machine: {first_solves}")
     assert_fallback_plan(plan, min_served=45)
+
+
+def test_first_solution_cut_short_falls_back_to_the_insertion_from_the_breaks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """As on a large fleet (120 vehicles, 300 trips, tests/bench_fleet.py): the first solution runs
+    until its limit and comes back without any trip, and the used-up limit blocks the restore of
+    the insertion from the breaks. The plan must come from that insertion, not be empty (it was,
+    with every trip "not placed in time", before the insertion came first)."""
+
+    def cut_short_first_solve(self: pywrapcp.RoutingModel, parameters: Any, *_: Any) -> Any:
+        time.sleep(parameters.time_limit.ToMilliseconds() / 1000)
+        return self.ReadAssignmentFromRoutes([[] for _ in range(self.vehicles())], True)
+
+    monkeypatch.setattr(pywrapcp.RoutingModel, "SolveWithParameters", cut_short_first_solve)
+    monkeypatch.setattr(solver, "FIRST_SOLUTION_GRACE_SEC", 0)
+    monkeypatch.setattr(solver, "FALLBACK_SEARCH_SEC", 2)
+    raw = generated_day(time_limit_sec=1)
+    model, _ = day_model(raw)
+    inserted = model._placed_in(model._built_from_breaks(time.monotonic() + NO_DEADLINE_SEC))
+    plan = service.optimize(OptimizeRequest.model_validate(raw))
+    assert_fallback_plan(plan, min_served=inserted)
 
 
 def test_fallback_plan_says_a_rerun_may_place_the_trips_left_out(monkeypatch: pytest.MonkeyPatch) -> None:

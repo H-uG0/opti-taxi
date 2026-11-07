@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 
 import pytest
 
 from app import service, solver
 from app.schemas import OptimizeRequest, PlanResponse
-from tests.builders import busy_day, busy_fleet
+from tests.builders import busy_day, busy_fleet, fleet_day
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,8 @@ REFERENCE_SERVED_LONG_RUN = 139
 search serves 129 from 1 s to 20 s, 129 to 139 at 30 s depending on the machine load."""
 MIN_SERVED_RATIO = 0.8
 """Trips served at the default budget, relative to the long run."""
+WEB_RESPONSE_MARGIN_SEC = 30
+"""RESPONSE_MARGIN_SEC of apps/web/src/lib/optimizer/client.ts: the web waits the budget + this."""
 
 
 def optimize(time_limit_sec: int) -> PlanResponse:
@@ -91,3 +94,21 @@ def test_default_budget_reaches_most_of_a_long_run(busy_plan: PlanResponse) -> N
         ratio,
     )
     assert ratio >= MIN_SERVED_RATIO
+
+
+
+@pytest.mark.skipif(not os.environ.get("OPTIMIZER_SLOW_TESTS"), reason="~1 min: set OPTIMIZER_SLOW_TESTS=1")
+@pytest.mark.parametrize(("trips", "budget_sec"), [(300, 38), (480, 60)], ids=["300", "480"])
+def test_large_fleet_gets_a_full_plan_within_the_web_timeout(trips: int, budget_sec: int) -> None:
+    """120 vehicles (scale of V, tests/bench_fleet.py) at the budget the web sends (1 s per 8 trips):
+    every reachable trip served, within the time the web waits. The plan was empty before the
+    insertion from the breaks came first and the model build counted in the budget."""
+    started = time.perf_counter()
+    plan = service.optimize(OptimizeRequest.model_validate(fleet_day(120, trips, time_limit_sec=budget_sec)))
+    elapsed = time.perf_counter() - started
+    logger.info("fleet day: %d of %d trips served in %.1f s", plan.kpis.trips_served, trips, elapsed)
+    assert plan.validation.valid, plan.validation.violations[:5]
+    dropped = [u for u in plan.unassigned if u.reason in (solver.REASON_DROPPED, solver.REASON_DROPPED_TIME_LIMIT)]
+    assert len(dropped) <= trips // 100, dropped[:5]
+    assert elapsed < budget_sec + WEB_RESPONSE_MARGIN_SEC
+
