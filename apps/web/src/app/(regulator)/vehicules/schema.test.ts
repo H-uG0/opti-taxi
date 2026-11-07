@@ -2,17 +2,14 @@ import { describe, expect, it } from "vitest";
 import { crewQualificationErrors, qualificationRequirement, qualificationScope } from "./_lib/crew";
 import { departmentField, departmentLabel, normalizeDepartment } from "./_lib/departments";
 import { fieldErrorsFromZod } from "@/lib/forms";
-import { normalizeRegistration, parseCoordinatePair, vehicleFormValues, vehicleSchema } from "./schema";
+import { normalizeRegistration, vehicleFormValues, vehicleSchema } from "./schema";
 
 const valid = {
   label: "Taxi 1 Marseille",
   registration: "ab 123 cd",
   type: "TAXI",
   capacity: "2",
-  depotLabel: "Dépôt Marseille",
-  depotAddress: "12 rue de la République, 13002 Marseille",
-  depotLat: "43,2965",
-  depotLng: "5.3698",
+  depotId: "depot_marseille",
   department: "13",
   costPerKm: "0,32",
   defaultDriverId: "",
@@ -32,8 +29,7 @@ describe("vehicleSchema", () => {
       registration: "AB-123-CD",
       type: "TAXI",
       capacity: 2,
-      depotLat: 43.2965,
-      depotLng: 5.3698,
+      depotId: "depot_marseille",
       department: "13",
       costPerKm: 0.32,
       defaultDriverId: null,
@@ -65,10 +61,9 @@ describe("vehicleSchema", () => {
     expect(errorsOf({ ...valid, registration: "  " }).registration).toBe("Champ obligatoire.");
   });
 
-  it("detects swapped or foreign coordinates", () => {
-    expect(errorsOf({ ...valid, depotLat: "5.3698", depotLng: "43.2965" }).depotLat).toMatch(/inversées/);
-    expect(errorsOf({ ...valid, depotLat: "40.71", depotLng: "-74.0" }).depotLat).toMatch(/hors de France/);
-    expect(errorsOf({ ...valid, depotLat: "abc" }).depotLat).toMatch(/Nombre attendu/);
+  it("requires a depot", () => {
+    expect(errorsOf({ ...valid, depotId: "" }).depotId).toBe("Choisissez un dépôt.");
+    expect(errorsOf({ ...valid, depotId: "../x" }).depotId).toBe("Identifiant invalide.");
   });
 
   it("requires a crew mate different from the driver, only for ambulances", () => {
@@ -92,20 +87,6 @@ describe("normalizeRegistration", () => {
   it("uppercases and uses single dashes", () => {
     expect(normalizeRegistration(" ab  123_cd ")).toBe("AB-123-CD");
     expect(normalizeRegistration("ab--123-cd-")).toBe("AB-123-CD");
-  });
-});
-
-describe("parseCoordinatePair", () => {
-  it("splits a pair pasted from a map", () => {
-    expect(parseCoordinatePair("43.29651, 5.36978")).toEqual({ lat: "43.29651", lng: "5.36978" });
-    expect(parseCoordinatePair("43,2965 ; 5,3698")).toEqual({ lat: "43,2965", lng: "5,3698" });
-    expect(parseCoordinatePair("43.2965 5.3698")).toEqual({ lat: "43.2965", lng: "5.3698" });
-  });
-
-  it("ignores a single number or text", () => {
-    expect(parseCoordinatePair("43,2965")).toBeNull();
-    expect(parseCoordinatePair("Marseille")).toBeNull();
-    expect(parseCoordinatePair("143.2, 5.3")).toBeNull();
   });
 });
 

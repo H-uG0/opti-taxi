@@ -262,6 +262,22 @@ model Trip {
   @@index([patientId, serviceDate])
 }
 
+/// Dépôt : lieu de rattachement des véhicules (départ et retour des tournées) et du personnel.
+model Depot {
+  id        String   @id @default(cuid())
+  name      String
+  address   String
+  lat       Float
+  lng       Float
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vehicles Vehicle[]
+  drivers  Driver[]
+}
+
 model Vehicle {
   id                String      @id @default(cuid())
   label             String
@@ -269,10 +285,8 @@ model Vehicle {
   type              VehicleType
   /// Patients simultanés (ambulance : 1).
   capacity          Int         @default(2)
-  depotLabel        String
-  depotAddress      String
-  depotLat          Float
-  depotLng          Float
+  /// Dépôt de départ et de retour des tournées.
+  depotId           String
   /// Département de rattachement : sélectionne la grille tarifaire.
   department        String
   costPerKm         Float
@@ -282,10 +296,13 @@ model Vehicle {
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
 
+  depot           Depot   @relation(fields: [depotId], references: [id])
   defaultDriver   Driver? @relation("VehicleDefaultDriver", fields: [defaultDriverId], references: [id], onDelete: SetNull)
   defaultCrewMate Driver? @relation("VehicleDefaultCrewMate", fields: [defaultCrewMateId], references: [id], onDelete: SetNull)
   routes          Route[]
   lockedTrips     Trip[]  @relation("TripLockedVehicle")
+
+  @@index([depotId])
 }
 
 model Driver {
@@ -302,10 +319,13 @@ model Driver {
   breakMinutes           Int             @default(0)
   /// Coût horaire chargé (€/h).
   hourlyCost             Float
+  /// Dépôt de rattachement (facultatif) : où la personne prend son service.
+  depotId                String?
   active                 Boolean         @default(true)
   createdAt              DateTime        @default(now())
   updatedAt              DateTime        @updatedAt
 
+  depot               Depot?    @relation(fields: [depotId], references: [id], onDelete: SetNull)
   user                User?
   defaultForVehicles  Vehicle[] @relation("VehicleDefaultDriver")
   crewMateForVehicles Vehicle[] @relation("VehicleDefaultCrewMate")

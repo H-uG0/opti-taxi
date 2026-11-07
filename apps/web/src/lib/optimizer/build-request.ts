@@ -66,8 +66,8 @@ export type VehicleInput = {
   label: string;
   type: VehicleType;
   capacity: number;
-  depotLat: number;
-  depotLng: number;
+  /** Start and end of the vehicle's routes. */
+  depot: { lat: number; lng: number };
   department: string;
   costPerKm: number;
   active: boolean;
@@ -285,7 +285,7 @@ export function decideVehicle(vehicle: VehicleInput, weekday: number): VehicleDe
       type: vehicle.type,
       // Business rule: an ambulance carries one patient, whatever is stored.
       capacity: vehicle.type === "AMBULANCE" ? 1 : Math.min(Math.max(vehicle.capacity, 1), MAX_CAPACITY),
-      depot: { lat: vehicle.depotLat, lng: vehicle.depotLng },
+      depot: { lat: vehicle.depot.lat, lng: vehicle.depot.lng },
       department: vehicle.department,
       costPerKm: vehicle.costPerKm,
       costPerHour,
@@ -466,8 +466,7 @@ export const vehicleInputSelect = {
   label: true,
   type: true,
   capacity: true,
-  depotLat: true,
-  depotLng: true,
+  depot: { select: { lat: true, lng: true } },
   department: true,
   costPerKm: true,
   active: true,

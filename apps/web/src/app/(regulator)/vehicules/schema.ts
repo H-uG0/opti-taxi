@@ -12,25 +12,17 @@ import {
   numberField,
   optionalIdField,
   optionalNumberField,
-  parseDecimal,
   requiredText,
   REQUIRED,
   type FormValues,
 } from "@/lib/forms";
 
+const CHOOSE_DEPOT = "Choisissez un dépôt.";
+
 export const VEHICLE_TYPES = ["TAXI", "VSL", "AMBULANCE"] as const satisfies readonly VehicleType[];
 
 /** V shares at most 2 patients (DEFAULT_CAPACITY); the VSL texts (avenant 11) allow up to 3. */
 export const MAX_SHARED_CAPACITY = 3;
-
-/** Metropolitan France (Corsica included): catches swapped or mistyped coordinates. */
-export const FRANCE_BOUNDS = { minLat: 41, maxLat: 51.2, minLng: -5.3, maxLng: 9.7 } as const;
-
-export function isInFrance(lat: number, lng: number): boolean {
-  return (
-    lat >= FRANCE_BOUNDS.minLat && lat <= FRANCE_BOUNDS.maxLat && lng >= FRANCE_BOUNDS.minLng && lng <= FRANCE_BOUNDS.maxLng
-  );
-}
 
 /** "ab 123 cd" -> "AB-123-CD": uppercase, spaces and underscores become single dashes. */
 export function normalizeRegistration(raw: string): string {
@@ -40,21 +32,6 @@ export function normalizeRegistration(raw: string): string {
     .replace(/[\s_]+/g, "-")
     .replace(/-{2,}/g, "-")
     .replace(/^-|-$/g, "");
-}
-
-/**
- * A "lat, lng" pair pasted from a map ("43.29651, 5.36978", "43,2965 ; 5,3698").
- * Returns null when the text is not exactly two coordinates.
- */
-export function parseCoordinatePair(text: string): { lat: string; lng: string } | null {
-  const match = /^\s*(-?\d{1,3}(?:[.,]\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:[.,]\d+)?)\s*$/.exec(text);
-  if (!match) return null;
-  const [, lat = "", lng = ""] = match;
-  const latNum = parseDecimal(lat);
-  const lngNum = parseDecimal(lng);
-  if (latNum === undefined || lngNum === undefined || Number.isNaN(latNum) || Number.isNaN(lngNum)) return null;
-  if (Math.abs(latNum) > 90 || Math.abs(lngNum) > 180) return null;
-  return { lat, lng };
 }
 
 const vehicleFields = z.object({
@@ -69,10 +46,12 @@ const vehicleFields = z.object({
   ),
   type: z.enum(VEHICLE_TYPES, { error: "Choisissez un type de véhicule." }),
   capacity: optionalNumberField({ integer: true }),
-  depotLabel: requiredText(60),
-  depotAddress: requiredText(200),
-  depotLat: numberField({ min: -90, max: 90 }),
-  depotLng: numberField({ min: -180, max: 180 }),
+  depotId: z
+    .string({ error: CHOOSE_DEPOT })
+    .trim()
+    .min(1, CHOOSE_DEPOT)
+    .max(64, "Identifiant invalide.")
+    .regex(/^[A-Za-z0-9_-]+$/, "Identifiant invalide."),
   department: departmentField(),
   costPerKm: numberField({ min: 0, max: 10, unit: "€/km" }),
   defaultDriverId: optionalIdField,
@@ -86,15 +65,6 @@ export const vehicleSchema = vehicleFields
         code: "custom",
         path: ["capacity"],
         message: `Entre 1 et ${MAX_SHARED_CAPACITY} patients (règle de V : 2).`,
-      });
-    }
-    if (!isInFrance(v.depotLat, v.depotLng)) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["depotLat"],
-        message: isInFrance(v.depotLng, v.depotLat)
-          ? "Latitude et longitude semblent inversées (Marseille : latitude 43,30 ; longitude 5,37)."
-          : "Coordonnées hors de France métropolitaine : vérifiez la latitude et la longitude.",
       });
     }
     if (v.type === "AMBULANCE" && v.defaultCrewMateId !== null && v.defaultCrewMateId === v.defaultDriverId) {
@@ -121,10 +91,7 @@ type VehicleRecord = Pick<
   | "registration"
   | "type"
   | "capacity"
-  | "depotLabel"
-  | "depotAddress"
-  | "depotLat"
-  | "depotLng"
+  | "depotId"
   | "department"
   | "costPerKm"
   | "defaultDriverId"
@@ -139,10 +106,7 @@ export function vehicleFormValues(vehicle?: VehicleRecord): FormValues {
       registration: "",
       type: "TAXI",
       capacity: String(DEFAULT_CAPACITY.TAXI),
-      depotLabel: "",
-      depotAddress: "",
-      depotLat: "",
-      depotLng: "",
+      depotId: "",
       department: "",
       costPerKm: "",
       defaultDriverId: "",
@@ -154,11 +118,7 @@ export function vehicleFormValues(vehicle?: VehicleRecord): FormValues {
     registration: vehicle.registration,
     type: vehicle.type,
     capacity: String(vehicle.capacity),
-    depotLabel: vehicle.depotLabel,
-    depotAddress: vehicle.depotAddress,
-    // Coordinates keep the dot used by map tools.
-    depotLat: String(vehicle.depotLat),
-    depotLng: String(vehicle.depotLng),
+    depotId: vehicle.depotId,
     department: vehicle.department,
     costPerKm: formatDecimalInput(vehicle.costPerKm),
     defaultDriverId: vehicle.defaultDriverId ?? "",

@@ -8,6 +8,7 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { PLANNING_TX_OPTIONS } from "@/lib/planning/run-optimization";
 import { fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
+import { depotChoiceError } from "@/app/(regulator)/depots/options";
 import { crewMemberName, crewQualificationErrors } from "./_lib/crew";
 import {
   errorState,
@@ -35,17 +36,19 @@ function revalidateFleet(vehicleId?: string) {
 }
 
 /**
- * The default driver / crew mate must exist, be active (unless already
- * assigned to this vehicle) and hold the qualification the type requires.
+ * The depot must exist and be active (unless already the vehicle's). The
+ * default driver / crew mate must exist, be active (unless already assigned
+ * to this vehicle) and hold the qualification the type requires.
  * A person shared with another vehicle is only a warning (form and list):
  * spare vehicles keep the usual driver.
  */
-async function crewErrors(
+async function referenceErrors(
   input: VehicleInput,
-  current: { defaultDriverId: string | null; defaultCrewMateId: string | null } | null,
+  current: { defaultDriverId: string | null; defaultCrewMateId: string | null; depotId: string } | null,
 ): Promise<FieldErrors> {
+  const depotError = await depotChoiceError(input.depotId, current?.depotId ?? null);
   const ids = [input.defaultDriverId, input.defaultCrewMateId].filter((id): id is string => id !== null);
-  if (ids.length === 0) return {};
+  if (ids.length === 0) return depotError ? { depotId: depotError } : {};
 
   const members = await db.driver.findMany({
     where: { id: { in: ids } },
@@ -56,6 +59,7 @@ async function crewErrors(
   const crewMate = input.defaultCrewMateId ? (byId.get(input.defaultCrewMateId) ?? null) : null;
 
   const errors: FieldErrors = { ...crewQualificationErrors(input.type, driver, crewMate) };
+  if (depotError) errors.depotId = depotError;
   if (input.defaultDriverId && !driver) errors.defaultDriverId = "Chauffeur introuvable.";
   else if (driver && !driver.active && driver.id !== current?.defaultDriverId) {
     errors.defaultDriverId = `${crewMemberName(driver)} est désactivé.`;
@@ -73,7 +77,7 @@ export async function createVehicle(_state: FormState, formData: FormData): Prom
   const parsed = vehicleSchema.safeParse(values);
   if (!parsed.success) return invalidState(parsed.error, values);
 
-  const errors = await crewErrors(parsed.data, null);
+  const errors = await referenceErrors(parsed.data, null);
   if (Object.keys(errors).length > 0) return errorState(errors, values);
 
   try {
@@ -92,7 +96,7 @@ export async function updateVehicle(vehicleId: string, _state: FormState, formDa
   if (!id.success) return messageState(VEHICLE_GONE);
   const current = await db.vehicle.findUnique({
     where: { id: id.data },
-    select: { id: true, defaultDriverId: true, defaultCrewMateId: true },
+    select: { id: true, defaultDriverId: true, defaultCrewMateId: true, depotId: true },
   });
   if (!current) return messageState(VEHICLE_GONE);
 
@@ -100,7 +104,7 @@ export async function updateVehicle(vehicleId: string, _state: FormState, formDa
   const parsed = vehicleSchema.safeParse(values);
   if (!parsed.success) return invalidState(parsed.error, values);
 
-  const errors = await crewErrors(parsed.data, current);
+  const errors = await referenceErrors(parsed.data, current);
   if (Object.keys(errors).length > 0) return errorState(errors, values);
 
   try {

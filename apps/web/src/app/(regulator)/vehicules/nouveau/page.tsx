@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/layout";
 import { requireUser } from "@/lib/auth";
 import { createVehicle } from "../actions";
+import { loadDepotOptions } from "@/app/(regulator)/depots/options";
 import { loadDriverOptions } from "../_lib/driver-options";
 import { BackLink } from "../_lib/ui";
 import { vehicleFormValues } from "../schema";
@@ -11,7 +12,7 @@ export const metadata: Metadata = { title: "Nouveau véhicule" };
 
 export default async function NewVehiclePage() {
   await requireUser("REGULATOR");
-  const drivers = await loadDriverOptions();
+  const [drivers, depots] = await Promise.all([loadDriverOptions(), loadDepotOptions()]);
 
   return (
     <div className="max-w-5xl">
@@ -20,7 +21,7 @@ export default async function NewVehiclePage() {
         title="Nouveau véhicule"
         description="Le véhicule sera proposé à l'optimisation dès son enregistrement."
       />
-      <VehicleForm action={createVehicle} initial={vehicleFormValues()} drivers={drivers} submitLabel="Créer le véhicule" />
+      <VehicleForm action={createVehicle} initial={vehicleFormValues()} drivers={drivers} depots={depots} submitLabel="Créer le véhicule" />
     </div>
   );
 }

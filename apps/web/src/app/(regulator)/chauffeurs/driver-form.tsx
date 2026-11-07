@@ -1,7 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
-import { Checkbox, Field, Fieldset, FormMessage, Input } from "@/components/ui/form";
+import { Checkbox, Field, Fieldset, FormMessage, Input, Select } from "@/components/ui/form";
+import type { DepotOption } from "@/app/(regulator)/depots/options";
 import { QUALIFICATION_LABELS } from "@/lib/labels";
 import { WEEKDAY_LABELS } from "@/lib/time";
 import { qualificationScope } from "../vehicules/_lib/crew";
@@ -14,11 +15,13 @@ type Action = (state: FormState, formData: FormData) => Promise<FormState>;
 export function DriverForm({
   action,
   initial,
+  depots,
   submitLabel,
   cancelHref,
 }: {
   action: Action;
   initial: FormValues;
+  depots: DepotOption[];
   submitLabel: string;
   cancelHref?: string;
 }) {
@@ -100,6 +103,30 @@ export function DriverForm({
           </p>
         ) : null}
       </fieldset>
+
+      <Fieldset legend="Rattachement">
+        <Field
+          label="Dépôt de rattachement"
+          htmlFor="depotId"
+          error={errors.depotId}
+          hint="Facultatif : le dépôt où la personne prend son service. Il servira à composer les équipages du jour."
+        >
+          <Select
+            id="depotId"
+            name="depotId"
+            className="sm:max-w-80"
+            defaultValue={valueOf(values, "depotId")}
+            aria-invalid={Boolean(errors.depotId)}
+          >
+            <option value="">— Aucun dépôt —</option>
+            {depots.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.active ? d.name : `${d.name} (désactivé)`}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </Fieldset>
 
       <Fieldset legend="Disponibilités">
         <fieldset aria-describedby={errors.workDays ? "workDays-error" : undefined}>

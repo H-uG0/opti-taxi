@@ -13,6 +13,7 @@ import {
   Share2,
   UserRound,
   Users,
+  Warehouse,
 } from "lucide-react";
 import { cn } from "@/components/ui/cn";
 
@@ -24,6 +25,7 @@ export const REGULATOR_NAV = [
   { href: "/tableau-de-bord", label: "Tableau de bord", icon: BarChart3 },
   { href: "/patients", label: "Patients", icon: Users },
   { href: "/etablissements", label: "Établissements", icon: Building2 },
+  { href: "/depots", label: "Dépôts", icon: Warehouse },
   { href: "/vehicules", label: "Véhicules", icon: Car },
   { href: "/chauffeurs", label: "Chauffeurs", icon: UserRound },
   { href: "/tarifs", label: "Grilles tarifaires", icon: Euro },

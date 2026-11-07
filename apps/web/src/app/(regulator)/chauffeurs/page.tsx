@@ -43,6 +43,7 @@ export default async function DriversPage({
         breakMinutes: true,
         hourlyCost: true,
         active: true,
+        depot: { select: { id: true, name: true } },
         defaultForVehicles: { select: { id: true, label: true, active: true }, orderBy: { label: "asc" } },
         crewMateForVehicles: { select: { id: true, label: true, active: true, type: true }, orderBy: { label: "asc" } },
         // Never select passwordHash.
@@ -94,6 +95,7 @@ export default async function DriversPage({
           <THead>
             <tr>
               <Th>Nom</Th>
+              <Th>Dépôt</Th>
               <Th>Qualifications</Th>
               <Th>Jours</Th>
               <Th>Horaires</Th>
@@ -129,6 +131,15 @@ export default async function DriversPage({
                       <span className="ml-2">
                         <Badge>Désactivé</Badge>
                       </span>
+                    )}
+                  </Td>
+                  <Td className="whitespace-nowrap">
+                    {driver.depot ? (
+                      <Link href={`/depots/${driver.depot.id}`} className="underline-offset-2 hover:text-brand-700 hover:underline">
+                        {driver.depot.name}
+                      </Link>
+                    ) : (
+                      <span className="text-slate-400">—</span>
                     )}
                   </Td>
                   <Td>

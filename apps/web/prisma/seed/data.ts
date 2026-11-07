@@ -308,6 +308,9 @@ export const DRIVERS = {
 
 export type DriverKey = keyof typeof DRIVERS;
 
+/** Depot of the replacement drivers (the others belong to the depot of the vehicle they crew). */
+export const REPLACEMENT_DRIVER_DEPOTS: Partial<Record<DriverKey, DepotKey>> = { kevin: "marseille", sabrina: "gap" };
+
 type VehicleDef = {
   label: string;
   registration: string;

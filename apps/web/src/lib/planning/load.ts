@@ -37,7 +37,7 @@ export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView 
   const [settings, vehicles, trips, routes, lastRun, planRun] = await Promise.all([
     getSettings(db),
     db.vehicle.findMany({
-      select: { ...vehicleInputSelect, registration: true, depotLabel: true },
+      select: { ...vehicleInputSelect, registration: true, depot: { select: { lat: true, lng: true, name: true } } },
       orderBy: { label: "asc" },
     }),
     db.trip.findMany({

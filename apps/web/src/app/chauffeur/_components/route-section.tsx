@@ -69,7 +69,7 @@ function RouteHeader({ route, titleId }: { route: RouteView; titleId: string }) 
           </p>
         ) : null}
         <p>
-          Dépôt : <span className="font-semibold text-slate-900">{vehicle.depotLabel}</span>
+          Dépôt : <span className="font-semibold text-slate-900">{vehicle.depot.name}</span>
         </p>
         <div>
           <p className="tabular flex justify-between font-medium text-slate-800">
@@ -122,7 +122,7 @@ function ReturnMarker({ route, finished }: { route: RouteView; finished: boolean
   if (!finished) {
     return (
       <Marker icon={<Warehouse className="size-5" />} minute={route.endMinute}>
-        Retour au dépôt · {vehicle.depotLabel}
+        Retour au dépôt · {vehicle.depot.name}
       </Marker>
     );
   }
@@ -133,10 +133,10 @@ function ReturnMarker({ route, finished }: { route: RouteView; finished: boolean
         Tous les arrêts sont faits : retour au dépôt
       </p>
       <p className="text-sm text-emerald-950">
-        <span className="font-semibold">{vehicle.depotLabel}</span> · {vehicle.depotAddress} · prévu à{" "}
+        <span className="font-semibold">{vehicle.depot.name}</span> · {vehicle.depot.address} · prévu à{" "}
         <span className="tabular font-semibold">{formatMinute(route.endMinute)}</span>
       </p>
-      <NavLinks lat={vehicle.depotLat} lng={vehicle.depotLng} destination={vehicle.depotAddress} />
+      <NavLinks lat={vehicle.depot.lat} lng={vehicle.depot.lng} destination={vehicle.depot.address} />
     </li>
   );
 }
@@ -155,7 +155,7 @@ export function RouteSection({ route, regulator }: { route: RouteView; regulator
             case "depart":
               return (
                 <Marker key="depart" icon={<Warehouse className="size-5" />} minute={item.minute}>
-                  Départ du dépôt · {route.vehicle.depotLabel}
+                  Départ du dépôt · {route.vehicle.depot.name}
                 </Marker>
               );
             case "break":

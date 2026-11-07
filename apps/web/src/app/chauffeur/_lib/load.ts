@@ -36,10 +36,7 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
           label: true,
           registration: true,
           type: true,
-          depotLabel: true,
-          depotAddress: true,
-          depotLat: true,
-          depotLng: true,
+          depot: { select: { name: true, address: true, lat: true, lng: true } },
         },
       },
       driver: {

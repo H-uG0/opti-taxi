@@ -22,6 +22,7 @@ import {
   REQUIRED,
   timeField,
   type FormValues,
+  optionalIdField,
 } from "@/lib/forms";
 
 export const QUALIFICATIONS = ["TAXI_CARD", "AUXILIARY", "DEA"] as const satisfies readonly Qualification[];
@@ -57,6 +58,7 @@ const driverFields = z.object({
   breakWindowEnd: optionalTimeField(),
   breakMinutes: optionalNumberField({ integer: true, min: 0, max: MAX_BREAK_MINUTES, unit: "min" }),
   hourlyCost: numberField({ min: 0, max: 200, unit: "€/h" }),
+  depotId: optionalIdField,
 });
 
 export const driverSchema = driverFields
@@ -122,6 +124,7 @@ export const driverSchema = driverFields
       breakWindowEndMinute: hasBreak ? (v.breakWindowEnd ?? null) : null,
       breakMinutes: hasBreak ? (v.breakMinutes ?? 0) : 0,
       hourlyCost: v.hourlyCost,
+      depotId: v.depotId,
     };
   });
 
@@ -140,6 +143,7 @@ type DriverRecord = Pick<
   | "breakWindowEndMinute"
   | "breakMinutes"
   | "hourlyCost"
+  | "depotId"
 >;
 
 function timeInput(minute: number | null): string {
@@ -160,6 +164,7 @@ export function driverFormValues(driver?: DriverRecord): FormValues {
       breakWindowEnd: "14:00",
       breakMinutes: "45",
       hourlyCost: "",
+      depotId: "",
     };
   }
   const hasBreak = driver.breakMinutes > 0 && driver.breakWindowStartMinute !== null && driver.breakWindowEndMinute !== null;
@@ -175,6 +180,7 @@ export function driverFormValues(driver?: DriverRecord): FormValues {
     breakWindowEnd: hasBreak ? timeInput(driver.breakWindowEndMinute) : "",
     breakMinutes: hasBreak ? String(driver.breakMinutes) : "",
     hourlyCost: formatDecimalInput(driver.hourlyCost),
+    depotId: driver.depotId ?? "",
   };
 }
 

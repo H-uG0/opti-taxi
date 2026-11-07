@@ -72,10 +72,7 @@ export type RouteView = {
     label: string;
     registration: string;
     type: VehicleType;
-    depotLabel: string;
-    depotAddress: string;
-    depotLat: number;
-    depotLng: number;
+    depot: { name: string; address: string; lat: number; lng: number };
   };
   startMinute: number;
   endMinute: number;

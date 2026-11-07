@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { fromIsoDate, todayIso } from "@/lib/time";
 import { setVehicleActive, updateVehicle } from "../actions";
 import { ConfirmAction } from "@/components/ui/confirm-action";
+import { loadDepotOptions } from "@/app/(regulator)/depots/options";
 import { loadDriverOptions } from "../_lib/driver-options";
 import { BackLink, UpcomingRoutesCallout } from "../_lib/ui";
 import { toUpcomingRoutes, upcomingRoutesNotice } from "../_lib/upcoming-routes";
@@ -22,8 +23,9 @@ export default async function EditVehiclePage({ params }: { params: Promise<{ id
   if (!vehicle) notFound();
 
   const today = fromIsoDate(todayIso());
-  const [drivers, upcomingLocked, routesCount, upcomingRows] = await Promise.all([
+  const [drivers, depots, upcomingLocked, routesCount, upcomingRows] = await Promise.all([
     loadDriverOptions([vehicle.defaultDriverId, vehicle.defaultCrewMateId], vehicle.id),
+    loadDepotOptions(vehicle.depotId),
     db.trip.count({ where: { lockedVehicleId: vehicle.id, serviceDate: { gte: today } } }),
     db.route.count({ where: { vehicleId: vehicle.id } }),
     db.route.findMany({
@@ -53,6 +55,7 @@ export default async function EditVehiclePage({ params }: { params: Promise<{ id
           action={updateVehicle.bind(null, vehicle.id)}
           initial={vehicleFormValues(vehicle)}
           drivers={drivers}
+          depots={depots}
           submitLabel="Enregistrer"
         />
 

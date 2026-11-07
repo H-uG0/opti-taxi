@@ -135,7 +135,7 @@ L'appel élargit le produit : au-delà des tournées, V veut planifier son perso
 **Plan proposé, un lot à la fois, chacun validé avant le suivant :**
 
 1. Cadrage et test de charge à l'échelle annoncée (fait le 7 novembre, voir « Test de charge »).
-2. Dépôts : entité à part, véhicules et personnel rattachés.
+2. Dépôts : entité à part, véhicules et personnel rattachés. Fait le 7 novembre : page Dépôts (création, modification, désactivation refusée tant que des véhicules actifs y sont rattachés), un dépôt obligatoire par véhicule, un dépôt de rattachement facultatif par chauffeur. La migration crée un dépôt par lieu distinct des véhicules existants et rattache chaque chauffeur au dépôt de son véhicule attitré. Le département de tarification reste sur le véhicule. Déplacer un dépôt ne recalcule pas les tournées déjà proposées : l'écran indique les jours à réoptimiser.
 3. Planning du personnel : congés, week-ends, gardes par date, équipages du jour avec paires interdites.
 4. Planning des véhicules : indisponibilités, échéances d'entretien avec alertes, consommation ; l'optimiseur ignore un véhicule indisponible.
 5. Coût et autonomie par véhicule (énergie, consommation) : le choix diesel / électrique découle de la marge, plus une contrainte d'autonomie revérifiée par le validateur.
@@ -212,7 +212,7 @@ La recherche locale apporte peu à cette taille (moins de 1 % de km en moins apr
 
 ## Modèle de données
 
-Neuf entités suffisent pour le MVP ; la course est le pivot, la tournée est ce que produit l'optimiseur.
+Neuf entités suffisent pour le MVP ; la course est le pivot, la tournée est ce que produit l'optimiseur. Le dépôt est devenu une dixième entité le 7 novembre (lot 2).
 
 | Entité | Champs clés | Relations |
 | --- | --- | --- |
@@ -221,8 +221,9 @@ Neuf entités suffisent pour le MVP ; la course est le pivot, la tournée est ce
 | Prescription | mode prescrit (taxi/VSL, ambulance), partage autorisé (aller, retour, les deux, non), début et fin de validité, série oui/non | appartient à un patient |
 | Récurrence | jours, heure de RDV, durée de séance estimée, aller et/ou retour | patient → établissement ; génère des courses |
 | Course | date, origine, destination, fenêtre horaire, type de véhicule requis, statut, partage proposé / accepté / refusé, verrou manuel | liée à une prescription ; placée dans une tournée |
-| Véhicule | immatriculation, type, capacité, dépôt, coût kilométrique | affecté à des tournées |
-| Chauffeur | qualifications (taxi, auxiliaire, ambulancier DE), horaires, pauses | affecté à des tournées |
+| Véhicule | immatriculation, type, capacité, département de tarification, coût kilométrique | rattaché à un dépôt ; affecté à des tournées |
+| Chauffeur | qualifications (taxi, auxiliaire, ambulancier DE), horaires, pauses | rattaché ou non à un dépôt ; affecté à des tournées |
+| Dépôt | nom, adresse, coordonnées, notes, actif | départ et retour des tournées de ses véhicules ; rattachement du personnel |
 | Tournée | date, véhicule, chauffeur, arrêts ordonnés avec heures prévues, km, km à vide, CA estimé, statut (proposée, validée) | regroupe des courses |
 | Grille tarifaire | type de transport, département, forfait, prix au km, abattement de partage, dates de validité | sert au calcul du CA estimé |
 

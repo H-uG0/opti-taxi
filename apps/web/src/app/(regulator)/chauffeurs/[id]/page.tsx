@@ -14,6 +14,7 @@ import { toUpcomingRoutes, upcomingRoutesNotice } from "../../vehicules/_lib/upc
 import { saveDriverAccount, setDriverAccountActive, setDriverActive, updateDriver } from "../actions";
 import { DriverForm } from "../driver-form";
 import { driverFormValues, OPEN_SESSION_NOTE } from "../schema";
+import { loadDepotOptions } from "@/app/(regulator)/depots/options";
 import { AccountForm } from "./account-form";
 
 export const metadata: Metadata = { title: "Fiche chauffeur" };
@@ -41,6 +42,7 @@ export default async function EditDriverPage({
   });
   if (!driver) notFound();
 
+  const depots = await loadDepotOptions(driver.depotId);
   const upcomingRoutes = toUpcomingRoutes(
     await db.route.findMany({
       where: { serviceDate: { gte: fromIsoDate(todayIso()) }, OR: [{ driverId: driver.id }, { crewMateId: driver.id }] },
@@ -87,7 +89,12 @@ export default async function EditDriverPage({
       ) : null}
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
-        <DriverForm action={updateDriver.bind(null, driver.id)} initial={driverFormValues(driver)} submitLabel="Enregistrer" />
+        <DriverForm
+          action={updateDriver.bind(null, driver.id)}
+          initial={driverFormValues(driver)}
+          depots={depots}
+          submitLabel="Enregistrer"
+        />
 
         <div className="space-y-6">
           <Card>

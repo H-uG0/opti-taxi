@@ -36,7 +36,7 @@ export default async function VehiclesPage({
     db.vehicle.findMany({
       where: showInactive ? {} : { active: true },
       orderBy: [{ active: "desc" }, { type: "asc" }, { label: "asc" }],
-      include: { defaultDriver: crewSelect, defaultCrewMate: crewSelect },
+      include: { defaultDriver: crewSelect, defaultCrewMate: crewSelect, depot: { select: { id: true, name: true, address: true } } },
     }),
     db.vehicle.count({ where: { active: false } }),
   ]);
@@ -147,9 +147,13 @@ export default async function VehiclesPage({
                   </Td>
                   <Td className="tabular text-right">{vehicle.capacity}</Td>
                   <Td className="max-w-56">
-                    <span className="block truncate" title={vehicle.depotAddress}>
-                      {vehicle.depotLabel}
-                    </span>
+                    <Link
+                      href={`/depots/${vehicle.depot.id}`}
+                      title={vehicle.depot.address}
+                      className="block truncate underline-offset-2 hover:text-brand-700 hover:underline"
+                    >
+                      {vehicle.depot.name}
+                    </Link>
                   </Td>
                   <Td className="whitespace-nowrap" title={departmentLabel(vehicle.department)}>
                     {vehicle.department}

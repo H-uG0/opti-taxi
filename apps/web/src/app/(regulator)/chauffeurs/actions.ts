@@ -9,6 +9,7 @@ import { hashPassword } from "@/lib/auth/password";
 import { db } from "@/lib/db";
 import { fromIsoDate, todayIso } from "@/lib/time";
 import { toUpcomingRoutes, upcomingRoutesNotice } from "../vehicules/_lib/upcoming-routes";
+import { depotChoiceError } from "@/app/(regulator)/depots/options";
 import {
   errorState,
   idSchema,
@@ -45,6 +46,8 @@ export async function createDriver(_state: FormState, formData: FormData): Promi
   const values = readForm(formData, DRIVER_MULTI_FIELDS);
   const parsed = driverSchema.safeParse(values);
   if (!parsed.success) return invalidState(parsed.error, values);
+  const depotError = await depotChoiceError(parsed.data.depotId, null);
+  if (depotError) return errorState({ depotId: depotError }, values);
 
   const driver = await db.$transaction(async (tx) => {
     const created = await tx.driver.create({ data: parsed.data, select: { id: true } });
@@ -64,6 +67,7 @@ export async function updateDriver(driverId: string, _state: FormState, formData
     where: { id: id.data },
     select: {
       id: true,
+      depotId: true,
       defaultForVehicles: { where: { active: true }, select: { label: true, type: true } },
       crewMateForVehicles: { where: { active: true }, select: { label: true, type: true } },
     },
@@ -73,6 +77,9 @@ export async function updateDriver(driverId: string, _state: FormState, formData
   const values = readForm(formData, DRIVER_MULTI_FIELDS);
   const parsed = driverSchema.safeParse(values);
   if (!parsed.success) return invalidState(parsed.error, values);
+
+  const depotError = await depotChoiceError(parsed.data.depotId, current.depotId);
+  if (depotError) return errorState({ depotId: depotError }, values);
 
   const conflicts = assignmentConflicts(
     parsed.data.qualifications,

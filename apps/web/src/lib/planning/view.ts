@@ -47,7 +47,10 @@ type Person = { firstName: string; lastName: string };
 /** Account that recorded a value: only its name is loaded. */
 type Recorder = { name: string } | null;
 
-export type RawVehicle = VehicleInput & { registration: string; depotLabel: string };
+export type RawVehicle = Omit<VehicleInput, "depot"> & {
+  registration: string;
+  depot: VehicleInput["depot"] & { name: string };
+};
 
 export type RawTrip = TripInput & {
   payer: Payer;
@@ -387,7 +390,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
       type: vehicle.type,
       capacity: available?.capacity ?? vehicle.capacity,
       color: colorById.get(vehicle.id) ?? input.baseColors[vehicle.type],
-      depot: { lat: vehicle.depotLat, lng: vehicle.depotLng, label: vehicle.depotLabel },
+      depot: { lat: vehicle.depot.lat, lng: vehicle.depot.lng, label: vehicle.depot.name },
       driverName: driver ? personName(driver) : null,
       crewMateName: mate ? personName(mate) : null,
       available: available !== undefined,

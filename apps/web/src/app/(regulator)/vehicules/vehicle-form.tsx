@@ -1,8 +1,7 @@
 "use client";
 
-import { useActionState, useState, type ClipboardEvent, type ReactNode } from "react";
+import { useActionState, useState, type ReactNode } from "react";
 import type { Qualification, VehicleType } from "@prisma/client";
-import { ExternalLink } from "lucide-react";
 import { Field, Fieldset, FormMessage, Input, Select } from "@/components/ui/form";
 import { DEFAULT_CAPACITY } from "@/lib/domain/rules";
 import { VEHICLE_TYPE_LABELS } from "@/lib/labels";
@@ -16,9 +15,10 @@ import {
   type CrewSeat,
 } from "./_lib/crew";
 import { DEPARTMENT_NAMES } from "./_lib/departments";
-import { IDLE_STATE, parseDecimal, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
+import { IDLE_STATE, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
+import type { DepotOption } from "@/app/(regulator)/depots/options";
 import { FormFooter, InlineWarning, UnitInput } from "./_lib/ui";
-import { MAX_SHARED_CAPACITY, VEHICLE_TYPES, isInFrance, isVehicleType, parseCoordinatePair } from "./schema";
+import { MAX_SHARED_CAPACITY, VEHICLE_TYPES, isVehicleType } from "./schema";
 
 export type DriverOption = {
   id: string;
@@ -35,11 +35,13 @@ export function VehicleForm({
   action,
   initial,
   drivers,
+  depots,
   submitLabel,
 }: {
   action: Action;
   initial: FormValues;
   drivers: DriverOption[];
+  depots: DepotOption[];
   submitLabel: string;
 }) {
   const [state, formAction] = useActionState(action, IDLE_STATE);
@@ -49,7 +51,7 @@ export function VehicleForm({
     // Remount on every response so uncontrolled inputs show the echoed values.
     <form key={state.submissionId} action={formAction} className="space-y-6">
       {state.status === "error" && state.message ? <FormMessage>{state.message}</FormMessage> : null}
-      <VehicleFields values={values} errors={state.fieldErrors} drivers={drivers} />
+      <VehicleFields values={values} errors={state.fieldErrors} drivers={drivers} depots={depots} />
       <FormFooter cancelHref="/vehicules" submitLabel={submitLabel} />
     </form>
   );
@@ -59,18 +61,19 @@ function VehicleFields({
   values,
   errors,
   drivers,
+  depots,
 }: {
   values: FormValues;
   errors: FieldErrors;
   drivers: DriverOption[];
+  depots: DepotOption[];
 }) {
   const initialType = valueOf(values, "type");
   const [type, setType] = useState<VehicleType>(isVehicleType(initialType) ? initialType : "TAXI");
   const [capacity, setCapacity] = useState(() => valueOf(values, "capacity") || String(DEFAULT_CAPACITY.TAXI));
   const [driverId, setDriverId] = useState(valueOf(values, "defaultDriverId"));
   const [crewMateId, setCrewMateId] = useState(valueOf(values, "defaultCrewMateId"));
-  const [lat, setLat] = useState(valueOf(values, "depotLat"));
-  const [lng, setLng] = useState(valueOf(values, "depotLng"));
+  const [depotId, setDepotId] = useState(valueOf(values, "depotId"));
 
   function changeType(next: VehicleType) {
     if (next === "AMBULANCE") setCapacity("1");
@@ -78,20 +81,13 @@ function VehicleFields({
     setType(next);
   }
 
-  /** Pasting "43.2965, 5.3698" from a map fills both coordinates. */
-  function pasteCoordinates(event: ClipboardEvent<HTMLInputElement>) {
-    const pair = parseCoordinatePair(event.clipboardData.getData("text"));
-    if (!pair) return;
-    event.preventDefault();
-    setLat(pair.lat);
-    setLng(pair.lng);
+  const selectedDepot = depots.find((d) => d.id === depotId);
+  let depotHint: ReactNode = selectedDepot
+    ? `Départ et retour des tournées : ${selectedDepot.address}.`
+    : "Départ et retour des tournées. Les dépôts se gèrent dans la page Dépôts.";
+  if (selectedDepot && !selectedDepot.active) {
+    depotHint = <InlineWarning>Dépôt désactivé : choisissez-en un autre si le véhicule change de dépôt.</InlineWarning>;
   }
-
-  const latNumber = parseDecimal(lat);
-  const lngNumber = parseDecimal(lng);
-  const hasCoordinates =
-    latNumber !== undefined && lngNumber !== undefined && Number.isFinite(latNumber) && Number.isFinite(lngNumber);
-  const coordinatesInFrance = hasCoordinates && isInFrance(latNumber, lngNumber);
 
   const driverRule = driverRequirement(type);
   const crewRule = crewMateRequirement(type);
@@ -227,23 +223,24 @@ function VehicleFields({
         </div>
       </Fieldset>
 
-      <Fieldset legend="Dépôt">
+      <Fieldset legend="Dépôt et tarification">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Field
-            label="Nom du dépôt"
-            htmlFor="depotLabel"
-            hint="Ex. « Dépôt Sisteron »."
-            error={errors.depotLabel}
-            className="lg:col-span-2"
-          >
-            <Input
-              id="depotLabel"
-              name="depotLabel"
+          <Field label="Dépôt" htmlFor="depotId" hint={depotHint} error={errors.depotId} className="lg:col-span-2">
+            <Select
+              id="depotId"
+              name="depotId"
               required
-              maxLength={60}
-              defaultValue={valueOf(values, "depotLabel")}
-              aria-invalid={Boolean(errors.depotLabel)}
-            />
+              value={depotId}
+              onChange={(e) => setDepotId(e.target.value)}
+              aria-invalid={Boolean(errors.depotId)}
+            >
+              <option value="">— Choisir un dépôt —</option>
+              {depots.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.active ? d.name : `${d.name} (désactivé)`}
+                </option>
+              ))}
+            </Select>
           </Field>
           <Field
             label="Département de rattachement"
@@ -271,80 +268,6 @@ function VehicleFields({
               ))}
             </datalist>
           </Field>
-          <Field
-            label="Adresse du dépôt"
-            htmlFor="depotAddress"
-            hint="Point de départ et de retour des tournées."
-            error={errors.depotAddress}
-            className="sm:col-span-2 lg:col-span-4"
-          >
-            <Input
-              id="depotAddress"
-              name="depotAddress"
-              required
-              maxLength={200}
-              autoComplete="street-address"
-              defaultValue={valueOf(values, "depotAddress")}
-              aria-invalid={Boolean(errors.depotAddress)}
-            />
-          </Field>
-          <Field label="Latitude" htmlFor="depotLat" error={errors.depotLat}>
-            <Input
-              id="depotLat"
-              name="depotLat"
-              required
-              inputMode="decimal"
-              autoComplete="off"
-              placeholder="43.2965"
-              className="tabular"
-              value={lat}
-              onChange={(e) => setLat(e.target.value)}
-              onPaste={pasteCoordinates}
-              aria-invalid={Boolean(errors.depotLat)}
-              aria-describedby="coordinates-hint"
-            />
-          </Field>
-          <Field label="Longitude" htmlFor="depotLng" error={errors.depotLng}>
-            <Input
-              id="depotLng"
-              name="depotLng"
-              required
-              inputMode="decimal"
-              autoComplete="off"
-              placeholder="5.3698"
-              className="tabular"
-              value={lng}
-              onChange={(e) => setLng(e.target.value)}
-              onPaste={pasteCoordinates}
-              aria-invalid={Boolean(errors.depotLng)}
-              aria-describedby="coordinates-hint"
-            />
-          </Field>
-          <div id="coordinates-hint" className="space-y-1 text-xs text-slate-500 sm:col-span-2 lg:self-end">
-            <p>
-              Coordonnées en degrés décimaux. Dans OpenStreetMap ou Google Maps, un clic droit sur le dépôt affiche
-              « 43.2965, 5.3698 » : collez ce texte dans l&apos;un des deux champs, ils seront remplis ensemble.
-            </p>
-            {hasCoordinates && !coordinatesInFrance ? (
-              <p>
-                <InlineWarning>Hors de France métropolitaine : latitude et longitude inversées ?</InlineWarning>
-              </p>
-            ) : null}
-            {coordinatesInFrance ? (
-              <p>
-                <a
-                  href={`https://www.openstreetmap.org/?mlat=${latNumber}&mlon=${lngNumber}#map=17/${latNumber}/${lngNumber}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 font-medium text-brand-700 underline-offset-2 hover:underline"
-                >
-                  Vérifier le point sur OpenStreetMap
-                  <ExternalLink aria-hidden className="size-3" />
-                  <span className="sr-only">(nouvel onglet)</span>
-                </a>
-              </p>
-            ) : null}
-          </div>
         </div>
       </Fieldset>
 

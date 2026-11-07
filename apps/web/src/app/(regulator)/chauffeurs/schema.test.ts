@@ -49,7 +49,14 @@ describe("driverSchema", () => {
       breakWindowEndMinute: 840,
       breakMinutes: 45,
       hourlyCost: 24.5,
+      depotId: null,
     });
+  });
+
+  it("keeps the optional depot, blank meaning none", () => {
+    expect(driverSchema.parse({ ...valid, depotId: "depot_gap" }).depotId).toBe("depot_gap");
+    expect(driverSchema.parse({ ...valid, depotId: "" }).depotId).toBeNull();
+    expect(errorsOf({ ...valid, depotId: "../x" }).depotId).toBe("Identifiant invalide.");
   });
 
   it("requires at least one qualification and one work day", () => {

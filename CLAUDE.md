@@ -76,7 +76,7 @@ Toute solution renvoyée doit passer un validateur indépendant qui revérifie c
 ### Langue
 - Interface et documentation en français ; identifiants et commentaires de code en anglais.
 - Correspondance des termes : course = `Trip`, tournée = `Route`, arrêt = `RouteStop`,
-  établissement = `Facility`, récurrence = `Recurrence`, grille tarifaire = `TariffGrid`,
+  établissement = `Facility`, dépôt = `Depot`, récurrence = `Recurrence`, grille tarifaire = `TariffGrid`,
   aller = `OUTBOUND`, retour = `RETURN`, régulateur = `REGULATOR`.
 
 ### Contrat web ↔ optimizer

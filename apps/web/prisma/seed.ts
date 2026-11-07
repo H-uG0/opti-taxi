@@ -37,6 +37,7 @@ import {
   DEPOTS,
   depotLocation,
   DRIVERS,
+  REPLACEMENT_DRIVER_DEPOTS,
   FACILITIES,
   facilityLocation,
   ONE_OFF_CONSULTATION,
@@ -47,6 +48,7 @@ import {
   TREATMENTS,
   VEHICLES,
   type AreaKey,
+  type DepotKey,
   type DriverDef,
   type DriverKey,
   type FacilityKey,
@@ -118,6 +120,7 @@ async function wipe(): Promise<void> {
     prisma.patient.deleteMany(),
     prisma.facility.deleteMany(),
     prisma.driver.deleteMany(),
+    prisma.depot.deleteMany(),
     prisma.tariffGrid.deleteMany(),
     prisma.trafficZone.deleteMany(),
     prisma.appSettings.deleteMany(),
@@ -160,12 +163,38 @@ async function seedFacilities(rng: Rng): Promise<Map<FacilityKey, CreatedFacilit
   return facilities;
 }
 
-async function seedDrivers(rng: Rng): Promise<Map<DriverKey, CreatedDriver>> {
+async function seedDepots(): Promise<Map<DepotKey, string>> {
+  const depots = new Map<DepotKey, string>();
+  for (const key of Object.keys(DEPOTS) as DepotKey[]) {
+    const def = DEPOTS[key];
+    const location = depotLocation(def);
+    const created = await prisma.depot.create({
+      data: {
+        name: def.label,
+        address: formatAddress({ address: def.address, postalCode: def.postalCode, city: TOWNS[def.town].name }),
+        lat: location.lat,
+        lng: location.lng,
+      },
+    });
+    depots.set(key, created.id);
+  }
+  return depots;
+}
+
+/** Depot of a driver: the one of the first vehicle they crew, else their replacement depot. */
+function driverDepot(key: DriverKey): DepotKey | null {
+  const vehicle = VEHICLES.find((v) => v.driver === key || v.crewMate === key);
+  return vehicle?.depot ?? REPLACEMENT_DRIVER_DEPOTS[key] ?? null;
+}
+
+async function seedDrivers(rng: Rng, depots: Map<DepotKey, string>): Promise<Map<DriverKey, CreatedDriver>> {
   const drivers = new Map<DriverKey, CreatedDriver>();
   for (const key of Object.keys(DRIVERS) as DriverKey[]) {
     const def: DriverDef = DRIVERS[key];
+    const depot = driverDepot(key);
     const created = await prisma.driver.create({
       data: {
+        depotId: depot ? (depots.get(depot) ?? null) : null,
         firstName: def.firstName,
         lastName: def.lastName,
         phone: fictitiousMobile(rng),
@@ -189,7 +218,10 @@ function hasOneOf(person: DriverDef, required: readonly string[]): boolean {
 }
 
 /** Vehicles with their default crew; refuses a crew that does not hold the qualifications of rules.ts. */
-async function seedVehicles(drivers: Map<DriverKey, CreatedDriver>): Promise<Map<DriverKey, string>> {
+async function seedVehicles(
+  drivers: Map<DriverKey, CreatedDriver>,
+  depots: Map<DepotKey, string>,
+): Promise<Map<DriverKey, string>> {
   const vehicleOfDriver = new Map<DriverKey, string>();
   for (const vehicle of VEHICLES) {
     const required = REQUIRED_QUALIFICATIONS[vehicle.type];
@@ -203,19 +235,16 @@ async function seedVehicles(drivers: Map<DriverKey, CreatedDriver>): Promise<Map
     }
     if (!required.crewMate && crewMate) throw new Error(`${vehicle.label} : pas d'équipier pour ce type de véhicule`);
 
-    const depot = DEPOTS[vehicle.depot];
-    const location = depotLocation(depot);
+    const depotId = depots.get(vehicle.depot);
+    if (!depotId) throw new Error(`${vehicle.label} : dépôt « ${vehicle.depot} » inconnu`);
     await prisma.vehicle.create({
       data: {
         label: vehicle.label,
         registration: vehicle.registration,
         type: vehicle.type,
         capacity: DEFAULT_CAPACITY[vehicle.type],
-        depotLabel: depot.label,
-        depotAddress: formatAddress({ address: depot.address, postalCode: depot.postalCode, city: TOWNS[depot.town].name }),
-        depotLat: location.lat,
-        depotLng: location.lng,
-        department: depot.department,
+        depotId,
+        department: DEPOTS[vehicle.depot].department,
         costPerKm: vehicle.costPerKm,
         defaultDriverId: driver.id,
         defaultCrewMateId: crewMate?.id ?? null,
@@ -589,9 +618,10 @@ async function main(): Promise<void> {
   await seedSettingsAndTariffs();
   console.log("• Établissements");
   const facilities = await seedFacilities(rng);
-  console.log("• Chauffeurs, véhicules et comptes");
-  const drivers = await seedDrivers(rng);
-  const vehicleOfDriver = await seedVehicles(drivers);
+  console.log("• Dépôts, chauffeurs, véhicules et comptes");
+  const depots = await seedDepots();
+  const drivers = await seedDrivers(rng, depots);
+  const vehicleOfDriver = await seedVehicles(drivers, depots);
   const { regulatorId, accounts } = await seedUsers(drivers, vehicleOfDriver);
   console.log("• Patients, prescriptions et récurrences");
   const names = new NameFactory(rng, Object.values(DRIVERS));
