@@ -19,6 +19,7 @@ import {
 } from "@/lib/optimizer/persist";
 import { formatLongDate, fromIsoDate, todayIso } from "@/lib/time";
 import { withBeforeCommit } from "./before-commit";
+import { emptyPlanIssue } from "./empty-plan";
 import { movePlacementIssue, moveRequestIssue, type MoveTarget } from "./move";
 
 export type RunOutcome =
@@ -175,6 +176,9 @@ export async function runOptimization(
       meta,
     );
   }
+  // Saving replaces every route of the day: never with a plan that serves nothing.
+  const emptyIssue = emptyPlanIssue(plan);
+  if (emptyIssue) return fail(emptyIssue, meta);
   if (options.move) {
     const labels = new Map(request.vehicles.map((v) => [v.id, v.label]));
     const issue = movePlacementIssue(plan, options.move, labels);

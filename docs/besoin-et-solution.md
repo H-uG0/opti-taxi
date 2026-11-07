@@ -203,7 +203,7 @@ La recherche locale apporte peu à cette taille (moins de 1 % de km en moins apr
 
 1. Fait (7 novembre) — solveur : le planning Python est construit en premier et confirmé aussitôt par OR-Tools ; la construction d'OR-Tools vient ensuite et ne le remplace que par un planning moins coûteux. On ne renvoie plus jamais un planning plus pauvre que le planning Python.
 2. À décider — solveur : limiter les lieux de pause candidats par véhicule quand la flotte est grande. Cela rendrait du temps à la construction d'OR-Tools et à la recherche locale ; l'effet sur la qualité des tournées reste à mesurer.
-3. Web : ne jamais remplacer les tournées de la journée par un planning qui ne sert aucune course alors que des courses étaient planifiables (échec au lieu d'enregistrement).
+3. Fait (7 novembre) — web : un planning qui ne sert aucune course alors que des courses étaient envoyées n'est plus enregistré. L'optimisation échoue avec le motif le plus fréquent, et le planning en place est conservé.
 4. Fait (7 novembre), côté optimiseur — la construction du modèle est comptée dans le budget, que la marge du web (budget plus 30 s) n'avait pas à absorber en plus.
 
 **Après les correctifs 1 et 4,** au budget envoyé par le web : 297 voyages placés sur 297 en 49 s pour 300 voyages (le web attend jusqu'à 68 s), 474 sur 476 en 74 s pour 480 voyages (jusqu'à 90 s). La construction d'OR-Tools n'a toujours pas le temps de finir à cette taille : le planning est celui de l'insertion Python, sans recherche locale, ce qui coûte environ 1 % de kilomètres d'après les mesures ci-dessus. Sur les journées plus petites (60 à 300 courses, 10 à 60 véhicules), avant et après donnent le même nombre de courses servies (une de plus sur l'une d'elles) et les mêmes kilomètres à 0,1 % près.
