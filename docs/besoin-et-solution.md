@@ -1,10 +1,12 @@
 # Taxi & Ambulance V — Optimisation des courses : besoin et solution
 
-Nov 2, 2026 · @Hugo Dessaud
+Nov 2, 2026 · @Hugo Dessaud — mis à jour le 7 nov. 2026 (appel avec le PO du 6 nov., test de charge)
 
 ## Contexte
 
 V transporte surtout des patients réguliers (chimiothérapie, dialyse, radiothérapie) sur l'axe Marseille – Grenoble, via Aix, Manosque, Sisteron et Gap. Une même journée peut traverser quatre départements (13, 04, 05, 38), ce qui pèse sur les temps de trajet et sur les tarifs.
+
+**Taille de V (appel avec le PO, 6 novembre 2026).** Environ 120 véhicules répartis entre plusieurs dépôts (différentes villes), environ 2 courses par véhicule et par jour, soit environ 300 voyages par jour. Un voyage est un aller simple : un aller-retour compte pour deux. Chiffres à confirmer : 120 × 2 donne 240, pas 300, et si une « course » est un aller-retour, on arrive à 480 voyages.
 
 V facture trois types de courses, à des prix différents :
 
@@ -67,7 +69,7 @@ Les montants changent souvent (convention taxis 2025, avenants VSL) et varient s
 
 Oui, c'est réalisable. C'est un problème d'optimisation connu (le « Dial-a-Ride Problem » : tournées avec prises en charge, déposes et fenêtres horaires), déjà résolu en production dans le transport sanitaire. Le vrai risque n'est pas l'algorithme : c'est l'adoption par le régulateur et la place face au logiciel que V utilise déjà.
 
-**Preuve que ça marche.** Un éditeur de solveur décrit un outil utilisé chaque jour par un grand transporteur sanitaire français : planification du transport assis la veille pour le lendemain, environ 500 missions et 50 véhicules par secteur, une solution en 5 minutes de calcul ([Hexaly](https://www.hexaly.com/wp-content/uploads/2024/02/Operational-planning-of-medical-vehicle-routes.pdf)). V est sans doute bien plus petite, ce qui rend le problème plus facile.
+**Preuve que ça marche.** Un éditeur de solveur décrit un outil utilisé chaque jour par un grand transporteur sanitaire français : planification du transport assis la veille pour le lendemain, environ 500 missions et 50 véhicules par secteur, une solution en 5 minutes de calcul ([Hexaly](https://www.hexaly.com/wp-content/uploads/2024/02/Operational-planning-of-medical-vehicle-routes.pdf)). Avec environ 120 véhicules, V a plus de véhicules qu'un secteur de ce cas, pour moins de missions : voir « Test de charge » pour ce que cela change.
 
 **Ce qui est simple.**
 
@@ -113,6 +115,35 @@ Un outil web à deux faces : un écran de planification pour le régulateur, une
 
 **Hors périmètre.** Facturation CPAM et télétransmission, prise d'appels, transports d'urgence (exclus du transport partagé par le décret).
 
+## Besoins ajoutés par le PO (6 novembre 2026)
+
+L'appel élargit le produit : au-delà des tournées, V veut planifier son personnel et sa flotte. Lecture des notes prises pendant l'appel, à valider avec le PO :
+
+| Note | Lecture | Existant dans l'application | À confirmer |
+| --- | --- | --- | --- |
+| Planning chauffeur, congés, week-ends, gardes | Savoir qui travaille à une date donnée, pas seulement selon une semaine type | Jours et horaires fixes par chauffeur, sans exception datée | Une garde bloque-t-elle un équipage et un véhicule ? |
+| Personnel : ambulanciers par paires, accompagnants | Former les équipages du jour selon l'entente entre employés (paires possibles ou non) | Équipier possible sur le véhicule et la tournée, sans notion d'entente | « Accompagnant » = employé, ou proche du patient qui prend une place ? |
+| Planning voitures : consommation, révision, entretien | Bloquer un véhicule en entretien, suivre ses échéances et sa consommation | Véhicule actif ou non, coût au km unique | Saisie dans l'outil ou import depuis un logiciel existant ? |
+| Préférence du client pour un type de véhicule ou un chauffeur | Préférence prise en compte sans jamais passer outre la prescription | Rien | Préférence ou exigence ? |
+| Gestion d'affinités | Entre collègues d'après les notes ; peut-être aussi patient–chauffeur et patient–patient en partage | Rien | Lesquelles retenir ? |
+| Cotation du prix du véhicule pour le trajet (Sisteron – Grenoble en diesel, Sisteron – Aix en électrique) | Choisir le véhicule le plus rentable pour le trajet : énergie, consommation, autonomie | Coût au km par véhicule, sans énergie ni autonomie | Coût interne ou devis au client ? Autonomie ou coût ? Où recharger ? |
+| Dépôts dans différentes villes | Dépôt = lieu de rattachement des véhicules et du personnel | Chaque véhicule a déjà son dépôt, saisi en texte et coordonnées | Un véhicule peut-il finir sa journée dans un autre dépôt ? |
+| Partage de clients, sous-traitance (entre parenthèses dans les notes) | Confier à un partenaire les courses non couvertes, ou en recevoir | Rien | Dans quel sens ? Pour plus tard ? Transmettre des données de santé à un tiers demande un cadre RGPD |
+
+**Ce que cela change au positionnement.** La recommandation était un module ajouté au logiciel de V, pas un ERP. Plannings du personnel et suivi de flotte s'en rapprochent : si le logiciel actuel de V les gère, mieux vaut les importer que les refaire. La question du logiciel actuel reste la première à poser.
+
+**Plan proposé, un lot à la fois, chacun validé avant le suivant :**
+
+1. Cadrage et test de charge à l'échelle annoncée (fait le 7 novembre, voir « Test de charge »).
+2. Dépôts : entité à part, véhicules et personnel rattachés.
+3. Planning du personnel : congés, week-ends, gardes par date, équipages du jour avec paires interdites.
+4. Planning des véhicules : indisponibilités, échéances d'entretien avec alertes, consommation ; l'optimiseur ignore un véhicule indisponible.
+5. Coût et autonomie par véhicule (énergie, consommation) : le choix diesel / électrique découle de la marge, plus une contrainte d'autonomie revérifiée par le validateur.
+6. Préférences et affinités patient : bonus ou pénalités dans l'objectif ; seules les exigences explicites deviennent des contraintes dures.
+7. Sous-traitance, plus tard.
+
+**Choix structurant à valider.** Aujourd'hui le chauffeur vient du véhicule (chauffeur attitré). Proposition : fixer d'abord les équipages du jour (proposés automatiquement, ajustés par le régulateur), puis calculer les tournées avec ces équipages. C'est plus simple et plus lisible qu'un calcul simultané, et cela devrait mieux tenir à 120 véhicules. En contrepartie, la solution peut être un peu moins optimale, et une préférence pour un chauffeur reste limitée par les équipages déjà fixés.
+
 ## Moteur d'optimisation
 
 Chaque soir, le moteur affecte chaque course à un véhicule et ordonne les arrêts pour maximiser la marge de la journée, sans violer aucune règle. En recherche opérationnelle, c'est un problème de tournées avec prises en charge, déposes et fenêtres horaires (PDPTW, ou Dial-a-Ride).
@@ -139,7 +170,43 @@ Raisonner en marge plutôt qu'en nombre de courses compte ici : un partage baiss
 | Solveur | Google OR-Tools (Python), routage avec paires prise en charge / dépose | Gratuit ; gère fenêtres horaires, capacités, véhicules autorisés par course ; le détour maximal s'exprime avec une dimension de distance |
 | Alternative pour prototyper vite | VROOM | Moteur open source appelé en HTTP, simple à brancher depuis Node, mais moins souple pour les contraintes de détour |
 | Distances et temps de trajet | OSRM auto-hébergé, extraits OpenStreetMap PACA + Auvergne-Rhône-Alpes | Gratuit ; matrice de temps calculée localement |
-| Taille du problème | Flotte et volume de V à confirmer | Le cas Hexaly traite 500 missions en 5 minutes ; V devrait se résoudre en secondes |
+| Taille du problème | Environ 120 véhicules et 300 voyages par jour (PO, 6 novembre 2026) | Le cas Hexaly traite 500 missions en 5 minutes ; chez V, c'est le nombre de véhicules qui pèse (voir « Test de charge ») |
+
+## Test de charge (7 novembre 2026)
+
+Le service d'optimisation a été lancé sur une journée fictive à l'échelle annoncée par le PO : 120 véhicules répartis sur 6 dépôts (Marseille, Aix, Manosque, Sisteron, Gap, Grenoble), 50 % de taxis, 35 % de VSL, 15 % d'ambulances, pause du midi pour 7 chauffeurs sur 8 ; 150 patients en aller-retour, dont la moitié soignés hors de leur ville (Sisteron – Grenoble, Sisteron – Aix, Gap – Marseille…), et les réglages de trafic par défaut du web. Distances à vol d'oiseau, machine de développement, 1,5 cœur par calcul. Générateur : `fleet_day()` dans `services/optimizer/tests/builders.py` ; banc : `services/optimizer/tests/bench_fleet.py`.
+
+**Résultat : à cette taille, « Optimiser demain » renvoie un planning vide.** Le web accorde au solveur 1 s par tranche de 8 courses (38 s pour 300 voyages). Ce budget ne suffit pas à la première étape du solveur, la construction initiale d'OR-Tools, qui est coupée sans avoir placé une seule course. Le planning vide ne viole aucune contrainte : il est déclaré valide, puis enregistré à la place des tournées déjà proposées pour la journée.
+
+| Scénario | Construction du modèle | Construction initiale OR-Tools | Courses placées au budget du web | Mémoire |
+| --- | --- | --- | --- | --- |
+| 120 véhicules, 300 voyages (budget 38 s) | 13 s | 57 s (coupée à 47 s) | 0 sur 297 atteignables, réponse en 60 s | 1,9 Go |
+| 120 véhicules, 480 voyages (budget 60 s) | 28 s | coupée à 73 s sans avoir fini | 0 sur 476, réponse en 102 s | 4,0 Go |
+| 120 véhicules, 300 voyages, sans pause | 1,4 s | non mesurée | non mesuré | 0,35 Go |
+
+**Le problème n'est pas trop gros : c'est l'ordre des étapes du solveur.** La seconde construction, écrite en Python (insertion par regret), place toutes les courses atteignables en quelques secondes, avec un planning valide : 297 sur 297 en 3,3 s pour 300 voyages, 474 sur 476 en 7,4 s pour 480 voyages. Résultat identique sur un autre tirage du jeu fictif (294 sur 294) et avec 20 % de longs trajets au lieu de 50 % (297 sur 297). Quand la construction d'OR-Tools a le temps de finir, c'est d'ailleurs ce planning Python qui est retenu, car meilleur. Il manque seulement de le construire en premier.
+
+| Budget accordé au solveur (300 voyages) | Courses placées | Véhicules utilisés | Km | Réponse |
+| --- | --- | --- | --- | --- |
+| 38 s (budget actuel du web) | 0 | 0 | 0 | 60 s |
+| Insertion Python seule (mesure hors service) | 297 | 74 | 16 675 | 17 s (dont 13 s de construction du modèle) |
+| Insertion Python puis 38 s de recherche locale (mesure hors service) | 297 | 74 | 16 706 | 57 s |
+| 120 s | 297 | 74 | 16 706 | 134 s |
+| 300 s | 297 | 75 | 16 667 | 318 s |
+| 600 s | 297 | 77 | 16 540 | 614 s |
+
+La recherche locale apporte peu à cette taille (moins de 1 % de km en moins après 10 minutes). Les 3 courses non placées ont des horaires inatteignables par construction du jeu fictif.
+
+**Ce qui pèse : les lieux de pause.** Chaque chauffeur dispose de jusqu'à 24 lieux de pause candidats (dépôt, établissements, domiciles). À 120 véhicules, ils font 64 % des nœuds du modèle (1 286 sur 2 000) ; sans eux, la construction du modèle passe de 13 s à 1,4 s et la mémoire de 1,9 Go à 0,35 Go.
+
+**Correctifs proposés, à valider avant d'y toucher :**
+
+1. Solveur : construire d'abord le planning Python, puis lancer la construction d'OR-Tools seulement s'il reste du temps, sans jamais renvoyer un planning plus pauvre que le planning Python.
+2. Solveur : limiter les lieux de pause candidats par véhicule quand la flotte est grande, en mesurant l'effet sur la qualité des tournées.
+3. Web : ne jamais remplacer les tournées de la journée par un planning qui ne sert aucune course alors que des courses étaient planifiables (échec au lieu d'enregistrement).
+4. Web : compter la construction du modèle dans le délai d'attente. Aujourd'hui c'est le budget plus 30 s, que la construction du modèle à 480 voyages consomme presque entièrement (28 s).
+
+**Une piste métier, à vérifier sur l'historique réel.** Sur ce jeu fictif, environ 300 voyages tiennent sur 61 à 77 véhicules (4 à 5 voyages par véhicule utilisé), contre environ 2,5 annoncés par véhicule chez V. L'écart vient peut-être des hypothèses du jeu : distances à vol d'oiseau, aucun véhicule ni chauffeur indisponible, rendez-vous répartis sur la journée, trajets plus courts que les vrais. C'est précisément ce que l'historique de V permettra de trancher (Feuille de route, phase 1). Les montants de marge du jeu fictif ne disent rien : les coûts y sont inventés.
 
 ## Modèle de données
 
@@ -189,14 +256,23 @@ Les trois premières décident si le projet vaut la peine ; les autres fixent le
 - [ ] Qui fait le planning, comment, et combien de temps cela prend-il chaque jour ?
 - [ ] Quel objectif compte le plus : plus de courses, moins de kilomètres à vide, ou moins de temps de régulation ?
 - [ ] Que recouvrent vos termes : « ambulance » = VSL ? « taxi » = conventionné, privé, ou les deux ?
-- [ ] Combien de véhicules par type, combien de chauffeurs, quels dépôts (Marseille, Sisteron, autre) ?
-- [ ] Combien de courses par jour, et quelle part de patients réguliers ?
+- [ ] Combien de véhicules par type, combien de chauffeurs, quels dépôts ? En partie répondu le 6 novembre : environ 120 véhicules, plusieurs dépôts dans différentes villes.
+- [ ] Combien de courses par jour, et quelle part de patients réguliers ? En partie répondu le 6 novembre : environ 300 voyages (allers simples) par jour, à recouper avec « 2 courses par véhicule et par jour ».
 - [ ] La limite de 2 patients par véhicule est-elle un choix de V ou une contrainte des véhicules ?
 - [ ] Quelle tolérance d'horaire : combien de temps avant le RDV un patient accepte-t-il d'arriver ?
 - [ ] Comment connaît-on l'heure de fin de séance pour organiser le retour ?
 - [ ] Pouvez-vous exporter 2 à 4 semaines d'historique de courses (dates, adresses, horaires, type, prix) ?
 - [ ] Les chauffeurs ont-ils un smartphone professionnel ?
 - [ ] Quel budget et quel délai, et qui hébergera l'application (hébergeur HDS) ?
+
+Ajoutées après l'appel du 6 novembre (entre parenthèses, l'hypothèse retenue en attendant) :
+
+- [ ] Volume : 120 × 2 donne 240, pas 300 ; et si une « course » est un aller-retour, 480 voyages. Quel chiffre, et les 120 véhicules roulent-ils tous chaque jour ? (environ 300 allers simples par jour)
+- [ ] « Accompagnants » : du personnel, ou des proches du patient qui prennent une place à bord ? (du personnel)
+- [ ] « Cotation » : coût interne pour choisir le véhicule, ou prix annoncé au client ? (coût interne)
+- [ ] Électrique : l'exemple Sisteron – Aix s'explique-t-il par l'autonomie, le coût, autre chose ? Où recharge-t-on ? (autonomie et coût, recharge au dépôt)
+- [ ] Préférences et affinités : lesquelles sont impératives ? (paires de collègues interdites impératives, préférences patient souhaitables)
+- [ ] Le logiciel actuel gère-t-il déjà plannings du personnel et entretien ? Si oui, les lots correspondants se réduisent à un import.
 
 ## Brief de démarrage pour Claude Code
 

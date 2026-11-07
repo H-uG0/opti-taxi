@@ -7,6 +7,9 @@ Société de taxi conventionné, VSL et ambulance sur l'axe Marseille – Grenob
 (Aix, Manosque, Sisteron, Gap). Patients surtout réguliers (dialyse, chimio, radiothérapie).
 Objectif : plus de courses facturées par véhicule et par jour, moins de km à vide,
 plus de transports partagés, sans retard aux rendez-vous.
+Taille (PO, 6 nov. 2026, à confirmer) : ~120 véhicules, plusieurs dépôts, ~300 voyages (allers simples) par jour.
+Besoins ajoutés le même jour (planning du personnel et des véhicules, dépôts, préférences, coût par énergie,
+sous-traitance) et test de charge : sections dédiées de docs/besoin-et-solution.md.
 
 ## Ce qu'on construit (MVP)
 Outil web de planification de J+1 :

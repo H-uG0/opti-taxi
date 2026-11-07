@@ -37,6 +37,13 @@ un par valeur de `PYTHONHASHSEED`) :
 .venv/Scripts/python.exe -m pytest -q
 ```
 
+Banc de charge, lancé à la main (une journée fictive à l'échelle de V, un `optimize` puis un
+`evaluate`, résultat en JSON : courses servies, temps de chaque phase, mémoire) :
+
+```bash
+.venv/Scripts/python.exe -m tests.bench_fleet --vehicles 120 --trips 300 --budget 38
+```
+
 Docker (image `python:3.12-slim`, utilisateur non root, port 8100) :
 
 ```bash
@@ -234,5 +241,15 @@ partir de la requête, de la matrice et des tournées produites (avec leurs hora
   délai, plus le calcul de la matrice et la construction du modèle (~0,5 s pour 160 courses), au
   plus 5 s de plus si la première solution et la réinsertion n'ont pas fini dans le budget, et
   encore au plus 5 s si la première solution a échoué (le web attend `timeLimitSec` + 30 s).
-- Matrices et modèle construits en Python en O(n²) : adapté à quelques centaines de courses par
-  jour (taille de la flotte de V) ; au-delà, prévoir des voisinages restreints.
+- **Grande flotte : planning vide au budget du web.** Matrices et modèle sont construits en Python
+  en O(n²), n comptant aussi les lieux de pause (jusqu'à 24 par véhicule). À l'échelle annoncée par
+  V (120 véhicules, ~300 voyages ; `fleet_day()` des tests, distances à vol d'oiseau, 1,5 cœur) :
+  modèle de 2 000 nœuds dont 1 286 lieux de pause, construit en 13 s (1,4 s sans pauses), 1,9 Go ;
+  première solution OR-Tools en 57 s. Au budget envoyé par le web (38 s), elle est coupée sans
+  avoir placé de course, et la réponse (60 s) ne sert **aucune** course alors que l'insertion depuis
+  les pauses (`_built_from_breaks`) les place toutes (297 sur 297) en 3,3 s. À 480 voyages : modèle
+  en 28 s et 4 Go, aucune course servie au budget de 60 s, 474 sur 476 par l'insertion en 7,4 s.
+  Pistes : insertion d'abord, première solution OR-Tools seulement s'il reste du temps ; moins de
+  lieux de pause candidats quand la flotte est grande. Mesures détaillées : « Test de charge » dans
+  [`docs/besoin-et-solution.md`](../../docs/besoin-et-solution.md). Reproduire :
+  `python -m tests.bench_fleet --vehicles 120 --trips 300 --budget 38`.

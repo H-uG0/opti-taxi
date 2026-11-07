@@ -291,3 +291,120 @@ def busy_day(seed: int = 11, time_limit_sec: int = 10) -> Json:
                          types=types, shareable=shareable, facility=facility, locked=BUSY_LOCKS.get(trip_id))
                 )
     return request(busy_fleet(), trips, timeLimitSec=time_limit_sec)
+
+
+# --------------------------------------------------------------------------- fleet day (scale of V)
+
+FLEET_TRAFFIC: Json = {
+    "bands": [{"startMin": 420, "endMin": 570}, {"startMin": 570, "endMin": 960}, {"startMin": 960, "endMin": 1140}],
+    "roadFactors": [1.05, 1, 1.05],
+    "zones": [
+        {"lat": MARSEILLE[0], "lng": MARSEILLE[1], "radiusKm": 14, "factors": [1.5, 1.2, 1.5]},
+        {"lat": AIX[0], "lng": AIX[1], "radiusKm": 8, "factors": [1.35, 1.1, 1.35]},
+        {"lat": GRENOBLE[0], "lng": GRENOBLE[1], "radiusKm": 10, "factors": [1.4, 1.15, 1.4]},
+    ],
+}
+"""The web defaults (DEFAULT_ZONES in apps/web/src/lib/domain/traffic.ts)."""
+
+FLEET_CITIES: list[tuple[str, str, int]] = [
+    ("marseille", "13", 30), ("aix", "13", 15), ("manosque", "04", 10), ("sisteron", "04", 15), ("gap", "05", 15), ("grenoble", "38", 15),
+]
+"""City, department and share (%) of the vehicles and of the patients: an assumption, not V's figures."""
+FLEET_LONG_TRIPS: dict[str, list[str]] = {
+    "marseille": ["fac_aix_ch"],
+    "aix": ["fac_marseille_timone", "fac_marseille_nord"],
+    "manosque": ["fac_aix_ch", "fac_marseille_timone"],
+    "sisteron": ["fac_grenoble_chu", "fac_aix_ch", "fac_gap_ch", "fac_marseille_timone"],
+    "gap": ["fac_grenoble_chu", "fac_marseille_timone", "fac_aix_ch"],
+    "grenoble": ["fac_gap_ch"],
+}
+"""Facilities outside the home city, as in the examples of V (Sisteron - Grenoble, Sisteron - Aix)."""
+FLEET_LOCAL_APPOINTMENTS = [450, 480, 510, 540, 570, 600, 630, 660, 720, 780, 810, 840, 870, 900]
+FLEET_LONG_APPOINTMENTS = [540, 570, 600, 630, 660, 780, 810, 840]
+FLEET_SESSIONS = [60, 90, 120, 150, 180, 240]
+FLEET_LAST_READY_LOCAL = 1050
+FLEET_LAST_READY_LONG = 990
+"""A long return leaves early enough for the driver to be back at the depot within the shift."""
+FLEET_LOCK_EVERY = 40
+"""One patient in 40 has a local outbound frozen by the regulator."""
+FLEET_LOCK_MARGIN_MIN = 90
+FLEET_COST_STEPS = 5
+"""Distinct km costs per vehicle type: they differ between vehicles, as in the seed."""
+
+
+def _fleet_counts(total: int) -> list[int]:
+    """Vehicles or patients per city of FLEET_CITIES, summing exactly to `total` (largest remainder)."""
+    exact = [total * share / 100 for _, _, share in FLEET_CITIES]
+    counts = [int(value) for value in exact]
+    by_remainder = sorted(range(len(exact)), key=lambda i: counts[i] - exact[i])
+    for i in by_remainder[: total - sum(counts)]:
+        counts[i] += 1
+    return counts
+
+
+def fleet_vehicles(count: int = 120) -> list[Json]:
+    """`count` vehicles at the 6 depots of the axis: 50 % taxis, 35 % VSL, 15 % ambulances."""
+    types = ["TAXI", "VSL", "TAXI", "AMBULANCE", "TAXI", "VSL", "TAXI", "VSL", "TAXI", "VSL",
+             "TAXI", "AMBULANCE", "TAXI", "VSL", "TAXI", "VSL", "TAXI", "AMBULANCE", "TAXI", "VSL"]
+    base_cost = {"TAXI": 0.29, "VSL": 0.33, "AMBULANCE": 0.44}
+    fleet: list[Json] = []
+    for (city, department, _), per_city in zip(FLEET_CITIES, _fleet_counts(count), strict=True):
+        for n in range(per_city):
+            type_ = types[n % len(types)]
+            fleet.append(
+                vehicle(
+                    f"{type_.lower()}_{city}_{n + 1:02d}",
+                    offset(CITIES[city], 1.0, -1.0),
+                    type_=type_,
+                    department=department,
+                    shift=BUSY_SHIFTS[len(fleet) % len(BUSY_SHIFTS)],
+                    break_=None if len(fleet) % 8 == 5 else STANDARD_BREAK,
+                    cost_per_km=base_cost[type_] + 0.01 * (n % FLEET_COST_STEPS),
+                )
+            )
+    return fleet
+
+
+def _fleet_lock(fleet: list[Json], city: str, types: tuple[str, ...], appointment: int) -> str | None:
+    """A vehicle of the city able to do this outbound within its shift."""
+    for candidate in fleet:
+        fits = candidate["shiftStartMin"] + FLEET_LOCK_MARGIN_MIN <= appointment <= candidate["shiftEndMin"] - FLEET_LOCK_MARGIN_MIN
+        if city in candidate["id"] and candidate["type"] in types and fits:
+            return str(candidate["id"])
+    return None
+
+
+def fleet_day(
+    vehicles: int = 120, trips: int = 300, *, seed: int = 3, long_share: float = 0.5, time_limit_sec: int = 38
+) -> Json:
+    """A day at the scale V announced (120 vehicles, ~300 one-way trips), entirely fictitious.
+
+    `trips` // 2 patients, outbound + return, `long_share` of them treated outside their city, ~12 %
+    of ambulance patients, a few locks, and the traffic settings of the web. The city shares and the
+    vehicle mix are assumptions: V has not given them yet.
+    """
+    rng = random.Random(seed)
+    fleet = fleet_vehicles(vehicles)
+    result: list[Json] = []
+    index = 0
+    for (city, _, _), patients in zip(FLEET_CITIES, _fleet_counts(trips // 2), strict=True):
+        local = [fid for fid, (fcity, _) in FACILITIES.items() if fcity == city]
+        for _ in range(patients):
+            index += 1
+            pid = f"fleet_{index:03d}"
+            home = offset(CITIES[city], rng.uniform(-6, 6), rng.uniform(-6, 6))
+            is_long = rng.random() < long_share
+            facility = rng.choice(FLEET_LONG_TRIPS[city]) if is_long else rng.choice(local)
+            ambulance = rng.random() < 0.12
+            appointment = rng.choice(FLEET_LONG_APPOINTMENTS if is_long else FLEET_LOCAL_APPOINTMENTS)
+            last_ready = FLEET_LAST_READY_LONG if is_long else FLEET_LAST_READY_LOCAL
+            ready = min(appointment + rng.choice(FLEET_SESSIONS), last_ready)
+            types = ("AMBULANCE",) if ambulance else ("TAXI", "VSL")
+            shareable = (not ambulance) and rng.random() < 0.8
+            fac_point = FACILITIES[facility][1]
+            locked = _fleet_lock(fleet, city, types, appointment) if not is_long and index % FLEET_LOCK_EVERY == 0 else None
+            result.append(trip(f"{pid}_out", pid, "OUTBOUND", home, fac_point, appointment=appointment,
+                               types=types, shareable=shareable, facility=facility, locked=locked))
+            result.append(trip(f"{pid}_ret", pid, "RETURN", fac_point, home, ready=ready,
+                               types=types, shareable=shareable, facility=facility))
+    return request(fleet, result, timeLimitSec=time_limit_sec, traffic=FLEET_TRAFFIC)
