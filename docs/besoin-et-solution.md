@@ -202,7 +202,7 @@ La recherche locale apporte peu à cette taille (moins de 1 % de km en moins apr
 **Correctifs :**
 
 1. Fait (7 novembre) — solveur : le planning Python est construit en premier et confirmé aussitôt par OR-Tools ; la construction d'OR-Tools vient ensuite et ne le remplace que par un planning moins coûteux. On ne renvoie plus jamais un planning plus pauvre que le planning Python.
-2. À décider — solveur : limiter les lieux de pause candidats par véhicule quand la flotte est grande. Cela rendrait du temps à la construction d'OR-Tools et à la recherche locale ; l'effet sur la qualité des tournées reste à mesurer.
+2. Mesuré et écarté (7 novembre) — solveur : limiter les lieux de pause candidats par véhicule (12 aujourd'hui) n'améliore pas les tournées. À 30 et 60 véhicules, on perd des courses (147 servies avec 12 lieux, 146 avec 6, 143 avec 2 sur 160 courses ; 287, 287 puis 275 sur 300). À 120 véhicules, avec 6 ou 4 lieux, les écarts vont dans les deux sens (−3 % à +1 % de km) : c'est du bruit de l'heuristique, pas un gain. Avec 2 lieux, la construction d'OR-Tools a enfin le temps de finir, mais les tournées sont plus longues de 5 % (17 538 km contre 16 675) et, à 480 voyages, 3 courses de moins sont servies.
 3. Fait (7 novembre) — web : un planning qui ne sert aucune course alors que des courses étaient envoyées n'est plus enregistré. L'optimisation échoue avec le motif le plus fréquent, et le planning en place est conservé.
 4. Fait (7 novembre), côté optimiseur — la construction du modèle est comptée dans le budget, que la marge du web (budget plus 30 s) n'avait pas à absorber en plus.
 

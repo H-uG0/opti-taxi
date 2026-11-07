@@ -265,8 +265,9 @@ partir de la requête, de la matrice et des tournées produites (avec leurs hora
   La première solution OR-Tools n'a pas le temps de finir : le planning est le départ Python, sans
   recherche locale (elle ne gagnait que 1 % de km en 10 min à cette taille). Les lieux de pause
   font deux tiers des nœuds : sans eux, le modèle de 300 voyages se construit en 1,4 s avec
-  0,35 Go. Moins de lieux candidats par véhicule quand la flotte est grande rendrait du temps à la
-  première solution et à la recherche locale (non fait : effet sur la qualité à mesurer). Mesures :
+  0,35 Go. Moins de lieux candidats par véhicule (`MAX_BREAK_SITES`) a été mesuré et écarté :
+  perte de courses à 30 et 60 véhicules, aucun gain net à 120 ; à 2 lieux, la première solution
+  finit à temps, mais les tournées sont plus longues de 5 %. Mesures :
   « Test de charge » dans [`docs/besoin-et-solution.md`](../../docs/besoin-et-solution.md). Reproduire :
   `python -m tests.bench_fleet --vehicles 120 --trips 300 --budget 38` ; vérifié par
   `test_large_fleet_gets_a_full_plan_within_the_web_timeout` (`OPTIMIZER_SLOW_TESTS=1`).
