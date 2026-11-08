@@ -98,6 +98,33 @@ enum AbsenceKind {
   OTHER
 }
 
+/// Motif d'indisponibilité datée d'un véhicule. Garde : le véhicule est réservé à la permanence d'urgence.
+enum VehicleUnavailabilityKind {
+  MAINTENANCE
+  REPAIR
+  INSPECTION
+  ON_CALL
+  OTHER
+}
+
+/// Échéance d'entretien ou réglementaire d'un véhicule.
+enum MaintenanceKind {
+  INSPECTION
+  SERVICE
+  TIRES
+  INSURANCE
+  OTHER
+}
+
+/// Énergie d'un véhicule : unité de consommation (litres, kWh), et plus tard coût et autonomie (lot 5).
+enum EnergyType {
+  DIESEL
+  PETROL
+  HYBRID
+  ELECTRIC
+  OTHER
+}
+
 enum RouteStatus {
   PROPOSED
   VALIDATED
@@ -299,6 +326,8 @@ model Vehicle {
   depotId           String
   /// Département de rattachement : sélectionne la grille tarifaire.
   department        String
+  /// Énergie (null : non renseignée).
+  energy            EnergyType?
   costPerKm         Float
   defaultDriverId   String?
   defaultCrewMateId String?
@@ -311,6 +340,9 @@ model Vehicle {
   defaultCrewMate Driver? @relation("VehicleDefaultCrewMate", fields: [defaultCrewMateId], references: [id], onDelete: SetNull)
   routes          Route[]
   dayCrews        DayCrew[]
+  unavailabilities VehicleUnavailability[]
+  maintenance     MaintenanceDeadline[]
+  fuelLogs        FuelLog[]
   lockedTrips     Trip[]  @relation("TripLockedVehicle")
 
   @@index([depotId])
@@ -347,6 +379,60 @@ model Driver {
   crewMateForVehicles Vehicle[] @relation("VehicleDefaultCrewMate")
   routes              Route[]   @relation("RouteDriver")
   crewRoutes          Route[]   @relation("RouteCrewMate")
+}
+
+/// Indisponibilité d'un véhicule du startDate au endDate inclus (entretien, réparation, garde…) : il n'est pas planifié.
+model VehicleUnavailability {
+  id        String                    @id @default(cuid())
+  vehicleId String
+  kind      VehicleUnavailabilityKind
+  startDate DateTime                  @db.Date
+  endDate   DateTime                  @db.Date
+  note      String?
+  createdAt DateTime                  @default(now())
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, startDate])
+  @@index([startDate, endDate])
+}
+
+/// Échéance d'un véhicule : à une date, à un kilométrage, ou au premier des deux. Faite quand doneDate est renseignée.
+model MaintenanceDeadline {
+  id        String          @id @default(cuid())
+  vehicleId String
+  kind      MaintenanceKind
+  /// Précision libre, ex. « Vidange + filtres ».
+  label     String?
+  dueDate   DateTime?       @db.Date
+  dueKm     Int?
+  note      String?
+  doneDate  DateTime?       @db.Date
+  doneKm    Int?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
+}
+
+/// Plein de carburant ou recharge : kilométrage au compteur, quantité (L ou kWh selon l'énergie), montant (€).
+model FuelLog {
+  id         String   @id @default(cuid())
+  vehicleId  String
+  date       DateTime @db.Date
+  odometerKm Int
+  quantity   Float
+  cost       Float
+  /// Plein complet (ou charge complète) : seuls les pleins complets bornent un calcul de consommation.
+  fullTank   Boolean  @default(true)
+  note       String?
+  createdAt  DateTime @default(now())
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, date])
 }
 
 /// Indisponibilité d'une personne du startDate au endDate inclus (congé, maladie, formation, garde…).

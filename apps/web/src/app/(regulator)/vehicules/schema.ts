@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { Vehicle, VehicleType } from "@prisma/client";
 import { DEFAULT_CAPACITY } from "@/lib/domain/rules";
 import { departmentField } from "./_lib/departments";
+import { ENERGY_TYPES } from "./fleet-schema";
 import {
   formatDecimalInput,
   numberField,
@@ -54,6 +55,10 @@ const vehicleFields = z.object({
     .regex(/^[A-Za-z0-9_-]+$/, "Identifiant invalide."),
   department: departmentField(),
   costPerKm: numberField({ min: 0, max: 10, unit: "€/km" }),
+  energy: z
+    .union([z.enum(ENERGY_TYPES), z.literal("")], { error: "Énergie inconnue." })
+    .optional()
+    .transform((v) => (v ? v : null)),
   defaultDriverId: optionalIdField,
   defaultCrewMateId: optionalIdField,
 });
@@ -94,6 +99,7 @@ type VehicleRecord = Pick<
   | "depotId"
   | "department"
   | "costPerKm"
+  | "energy"
   | "defaultDriverId"
   | "defaultCrewMateId"
 >;
@@ -109,6 +115,7 @@ export function vehicleFormValues(vehicle?: VehicleRecord): FormValues {
       depotId: "",
       department: "",
       costPerKm: "",
+      energy: "",
       defaultDriverId: "",
       defaultCrewMateId: "",
     };
@@ -121,6 +128,7 @@ export function vehicleFormValues(vehicle?: VehicleRecord): FormValues {
     depotId: vehicle.depotId,
     department: vehicle.department,
     costPerKm: formatDecimalInput(vehicle.costPerKm),
+    energy: vehicle.energy ?? "",
     defaultDriverId: vehicle.defaultDriverId ?? "",
     defaultCrewMateId: vehicle.defaultCrewMateId ?? "",
   };

@@ -8,7 +8,7 @@ const VEHICLES = [
 ];
 
 function crew(overrides: Partial<DayCrewView>): DayCrewView {
-  return { vehicleId: "taxi", driverId: "d1", crewMateId: null, source: "saved", issues: [], blocked: null, ...overrides };
+  return { vehicleId: "taxi", driverId: "d1", crewMateId: null, source: "saved", issues: [], blocked: null, unavailable: false, ...overrides };
 }
 
 describe("readCrewForm", () => {

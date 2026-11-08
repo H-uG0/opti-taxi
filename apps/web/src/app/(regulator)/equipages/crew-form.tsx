@@ -36,6 +36,8 @@ export type CrewRow = {
   source: CrewSource;
   issues: CrewIssue[];
   blocked: string | null;
+  /** Out of service that day: no crew to choose. */
+  unavailable: boolean;
 };
 
 const SOURCE_TONES: Record<CrewSource, BadgeTone> = { saved: "brand", default: "neutral", replacement: "info", none: "danger" };
@@ -108,46 +110,59 @@ export function CrewForm({
                     </span>
                     <span className="font-mono text-xs text-slate-500">{row.registration}</span>
                   </Td>
-                  <Td className="min-w-56">
-                    <Select
-                      name={driverField(row.vehicleId)}
-                      defaultValue={driverValue}
-                      aria-label={`Chauffeur de ${row.label}`}
-                      aria-invalid={Boolean(driverError)}
-                    >
-                      <option value="">— Personne (reste au dépôt) —</option>
-                      {people.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {optionLabel(p, row, "driver")}
-                        </option>
-                      ))}
-                    </Select>
-                    {driverError ? <p className="mt-1 text-xs font-medium text-red-700">{driverError}</p> : null}
-                  </Td>
-                  <Td className="min-w-56">
-                    {row.type === "AMBULANCE" ? (
-                      <>
+                  {row.unavailable ? (
+                    <Td colSpan={2} className="text-sm text-slate-500">
+                      Véhicule indisponible ce jour : pas d&apos;équipage.{" "}
+                      <a href={`/vehicules/${row.vehicleId}`} className="underline">
+                        Voir la fiche
+                      </a>
+                    </Td>
+                  ) : (
+                    <>
+                      <Td className="min-w-56">
                         <Select
-                          name={crewMateField(row.vehicleId)}
-                          defaultValue={mateValue}
-                          aria-label={`Équipier de ${row.label}`}
-                          aria-invalid={Boolean(mateError)}
+                          name={driverField(row.vehicleId)}
+                          defaultValue={driverValue}
+                          aria-label={`Chauffeur de ${row.label}`}
+                          aria-invalid={Boolean(driverError)}
                         >
-                          <option value="">— Aucun équipier —</option>
+                          <option value="">— Personne (reste au dépôt) —</option>
                           {people.map((p) => (
                             <option key={p.id} value={p.id}>
-                              {optionLabel(p, row, "crewMate")}
+                              {optionLabel(p, row, "driver")}
                             </option>
                           ))}
                         </Select>
-                        {mateError ? <p className="mt-1 text-xs font-medium text-red-700">{mateError}</p> : null}
-                      </>
-                    ) : (
-                      <span className="text-xs text-slate-400">—</span>
-                    )}
-                  </Td>
+                        {driverError ? <p className="mt-1 text-xs font-medium text-red-700">{driverError}</p> : null}
+                      </Td>
+                      <Td className="min-w-56">
+                        {row.type === "AMBULANCE" ? (
+                          <>
+                            <Select
+                              name={crewMateField(row.vehicleId)}
+                              defaultValue={mateValue}
+                              aria-label={`Équipier de ${row.label}`}
+                              aria-invalid={Boolean(mateError)}
+                            >
+                              <option value="">— Aucun équipier —</option>
+                              {people.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {optionLabel(p, row, "crewMate")}
+                                </option>
+                              ))}
+                            </Select>
+                            {mateError ? <p className="mt-1 text-xs font-medium text-red-700">{mateError}</p> : null}
+                          </>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </Td>
+                    </>
+                  )}
                   <Td>
-                    <Badge tone={SOURCE_TONES[row.source]}>{SOURCE_LABELS[row.source]}</Badge>
+                    <Badge tone={row.unavailable ? "warning" : SOURCE_TONES[row.source]}>
+                      {row.unavailable ? "Indisponible" : SOURCE_LABELS[row.source]}
+                    </Badge>
                   </Td>
                   <Td className="text-xs">
                     {row.issues.length === 0 ? (

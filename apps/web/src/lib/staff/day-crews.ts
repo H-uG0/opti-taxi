@@ -15,9 +15,13 @@
  *    other crew member. Vehicles with a default crew are served first: a
  *    spare vehicle (no default driver) only gets the people left over.
  * A vehicle with a blocking problem (`blocked`) is left out of the planning.
+ * A vehicle unavailable that day (maintenance, on-call duty…, lib/fleet)
+ * gets nobody, even a crew fixed earlier, and its default crew is free for
+ * the other vehicles.
  */
 import type { AbsenceKind, Qualification, VehicleType } from "@prisma/client";
 import { REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
+import { unavailabilityOn, unavailabilityText, type DatedVehicleUnavailability } from "@/lib/fleet/availability";
 import { ABSENCE_KIND_LABELS } from "@/lib/labels";
 import { formatShortDate, isoWeekday, WEEKDAY_LABELS } from "@/lib/time";
 
@@ -59,6 +63,8 @@ export type DayCrewView = {
   issues: CrewIssue[];
   /** First blocking problem: the vehicle cannot work that day. Null when it can. */
   blocked: string | null;
+  /** The vehicle itself is unavailable that day (maintenance, on-call duty…): no crew to choose. */
+  unavailable: boolean;
 };
 
 export type DayCrewPlan = {
@@ -78,6 +84,8 @@ export type DayCrewInput = {
   absences: readonly DatedAbsence[];
   incompatibilities: readonly Incompatibility[];
   saved: readonly SavedCrew[];
+  /** Vehicle unavailability (absent: none). */
+  vehicleUnavailabilities?: readonly DatedVehicleUnavailability[];
 };
 
 const TYPE_ORDER: Record<VehicleType, number> = { TAXI: 0, VSL: 1, AMBULANCE: 2 };
@@ -137,6 +145,13 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
   const people = new Map(input.people.map((p) => [p.id, p]));
   const savedByVehicle = new Map(input.saved.map((s) => [s.vehicleId, s]));
   const vehicles = input.vehicles.filter((v) => v.active).sort(compareVehicles);
+  /** Vehicles out of service that day: no seat, nobody reserved. */
+  const outOfService = new Map(
+    vehicles.flatMap((v) => {
+      const u = unavailabilityOn(v.id, date, input.vehicleUnavailabilities ?? []);
+      return u ? [[v.id, u] as const] : [];
+    }),
+  );
   /** Person -> label of the vehicle that holds them. */
   const taken = new Map<string, string>();
 
@@ -150,7 +165,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
   // 1. Crews fixed by the regulator reserve their people first.
   for (const vehicle of vehicles) {
     const saved = savedByVehicle.get(vehicle.id);
-    if (!saved) continue;
+    if (!saved || outOfService.has(vehicle.id)) continue;
     const crewMateId = vehicle.type === "AMBULANCE" ? saved.crewMateId : null;
     const draft: Draft = { vehicle, driverId: saved.driverId, crewMateId, source: "saved", issues: [] };
     for (const [seat, id] of [["driver", saved.driverId], ["crewMate", crewMateId]] as const) {
@@ -178,7 +193,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
 
   // 2. Default crews, member by member, when available.
   for (const vehicle of vehicles) {
-    if (savedByVehicle.has(vehicle.id)) continue;
+    if (savedByVehicle.has(vehicle.id) || outOfService.has(vehicle.id)) continue;
     const draft: Draft = { vehicle, driverId: null, crewMateId: null, source: "default", issues: [] };
     const seats: Seat[] = vehicle.type === "AMBULANCE" ? ["driver", "crewMate"] : ["driver"];
     for (const seat of seats) {
@@ -235,6 +250,20 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
   const crews: DayCrewView[] = [];
   const byVehicle = new Map(drafts.map((d) => [d.vehicle.id, d]));
   for (const vehicle of vehicles) {
+    const outage = outOfService.get(vehicle.id);
+    if (outage) {
+      const message = `Véhicule indisponible (${unavailabilityText(outage).toLowerCase()})`;
+      crews.push({
+        vehicleId: vehicle.id,
+        driverId: null,
+        crewMateId: null,
+        source: "none",
+        issues: [{ level: "error", seat: null, message }],
+        blocked: message,
+        unavailable: true,
+      });
+      continue;
+    }
     const draft = byVehicle.get(vehicle.id)!;
     const issues = [...draft.issues];
     const saved = draft.source === "saved";
@@ -279,7 +308,15 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
       issues.push({ level: "error", seat: "crewMate", message: saved ? "Ambulance sans équipier ce jour" : "Aucun équipier disponible" });
     }
     const blocked = issues.find((i) => i.level === "error")?.message ?? null;
-    crews.push({ vehicleId: vehicle.id, driverId: draft.driverId, crewMateId: draft.crewMateId, source: draft.source, issues, blocked });
+    crews.push({
+      vehicleId: vehicle.id,
+      driverId: draft.driverId,
+      crewMateId: draft.crewMateId,
+      source: draft.source,
+      issues,
+      blocked,
+      unavailable: false,
+    });
   }
 
   const absent = input.people

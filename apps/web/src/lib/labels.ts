@@ -87,6 +87,32 @@ export const ABSENCE_KIND_LABELS = {
   OTHER: "Absence",
 } as const;
 
+/** Motifs d'indisponibilité d'un véhicule (VehicleUnavailability.kind). */
+export const VEHICLE_UNAVAILABILITY_LABELS = {
+  MAINTENANCE: "Entretien",
+  REPAIR: "Réparation",
+  INSPECTION: "Contrôle technique",
+  ON_CALL: "Garde",
+  OTHER: "Indisponible",
+} as const;
+
+/** Échéances d'un véhicule (MaintenanceDeadline.kind). */
+export const MAINTENANCE_KIND_LABELS = {
+  INSPECTION: "Contrôle technique",
+  SERVICE: "Révision",
+  TIRES: "Pneumatiques",
+  INSURANCE: "Assurance",
+  OTHER: "Autre échéance",
+} as const;
+
+export const ENERGY_LABELS = {
+  DIESEL: "Diesel",
+  PETROL: "Essence",
+  HYBRID: "Hybride",
+  ELECTRIC: "Électrique",
+  OTHER: "Autre",
+} as const;
+
 export const ROUTE_STATUS_LABELS = {
   PROPOSED: "Proposée",
   VALIDATED: "Validée",

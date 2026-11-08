@@ -30,7 +30,7 @@ Hors périmètre : facturation CPAM, télétransmission, transports d'urgence.
 - Refus de partage tracé sur la course.
 - Horaires et pauses des chauffeurs respectés.
 - Équipage du jour (`lib/staff/day-crews.ts`) : personne absente jamais planifiée, paire interdite jamais réunie,
-  une personne sur un seul véhicule par jour.
+  une personne sur un seul véhicule par jour ; véhicule indisponible (entretien, garde…) jamais planifié.
 - Tarifs stockés en base (type, département, dates de validité), jamais en dur dans le code.
 
 ## Objectif d'optimisation
@@ -80,6 +80,7 @@ Toute solution renvoyée doit passer un validateur indépendant qui revérifie c
 - Correspondance des termes : course = `Trip`, tournée = `Route`, arrêt = `RouteStop`,
   établissement = `Facility`, dépôt = `Depot`, récurrence = `Recurrence`, grille tarifaire = `TariffGrid`,
   absence = `StaffAbsence`, équipage du jour = `DayCrew`, paire interdite = `CrewIncompatibility`,
+  indisponibilité d'un véhicule = `VehicleUnavailability`, échéance = `MaintenanceDeadline`, plein = `FuelLog`,
   aller = `OUTBOUND`, retour = `RETURN`, régulateur = `REGULATOR`.
 
 ### Contrat web ↔ optimizer

@@ -4,7 +4,8 @@ import { useActionState, useState, type ReactNode } from "react";
 import type { Qualification, VehicleType } from "@prisma/client";
 import { Field, Fieldset, FormMessage, Input, Select } from "@/components/ui/form";
 import { DEFAULT_CAPACITY } from "@/lib/domain/rules";
-import { VEHICLE_TYPE_LABELS } from "@/lib/labels";
+import { ENERGY_LABELS, VEHICLE_TYPE_LABELS } from "@/lib/labels";
+import { ENERGY_TYPES } from "./fleet-schema";
 import {
   crewMateRequirement,
   driverRequirement,
@@ -326,6 +327,22 @@ function VehicleFields({
 
       <Fieldset legend="Coût d'exploitation">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Field
+            label="Énergie"
+            htmlFor="energy"
+            error={errors.energy}
+            hint="Unité de consommation (litres ou kWh) des pleins et recharges."
+            className="sm:col-span-2"
+          >
+            <Select id="energy" name="energy" defaultValue={valueOf(values, "energy")} className="sm:max-w-48">
+              <option value="">— Non renseignée —</option>
+              {ENERGY_TYPES.map((e) => (
+                <option key={e} value={e}>
+                  {ENERGY_LABELS[e]}
+                </option>
+              ))}
+            </Select>
+          </Field>
           <Field
             label="Coût kilométrique (€/km)"
             htmlFor="costPerKm"

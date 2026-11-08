@@ -12,6 +12,9 @@ import { db } from "@/lib/db";
 import { formatEuros } from "@/lib/labels";
 import { crewMemberName, crewQualificationErrors, otherSeats, seatsByPerson, sharedCrewWarning } from "./_lib/crew";
 import { departmentLabel } from "./_lib/departments";
+import { unavailabilityOn, unavailabilityText } from "@/lib/fleet/availability";
+import { deadlineAlerts, deadlineName } from "@/lib/fleet/maintenance";
+import { fromIsoDate, todayIso, toIsoDate, tomorrowIso } from "@/lib/time";
 
 export const metadata: Metadata = { title: "Véhicules" };
 
@@ -32,14 +35,48 @@ export default async function VehiclesPage({
   const { inactifs } = await searchParams;
   const showInactive = inactifs === "1";
 
-  const [vehicles, inactiveCount] = await Promise.all([
+  const today = todayIso();
+  const tomorrow = tomorrowIso();
+  const [vehicles, inactiveCount, odometers] = await Promise.all([
     db.vehicle.findMany({
       where: showInactive ? {} : { active: true },
       orderBy: [{ active: "desc" }, { type: "asc" }, { label: "asc" }],
-      include: { defaultDriver: crewSelect, defaultCrewMate: crewSelect, depot: { select: { id: true, name: true, address: true } } },
+      include: {
+        defaultDriver: crewSelect,
+        defaultCrewMate: crewSelect,
+        depot: { select: { id: true, name: true, address: true } },
+        maintenance: { where: { doneDate: null }, select: { kind: true, label: true, dueDate: true, dueKm: true, doneDate: true } },
+        unavailabilities: {
+          where: { endDate: { gte: fromIsoDate(today) }, startDate: { lte: fromIsoDate(tomorrow) } },
+          select: { kind: true, startDate: true, endDate: true },
+        },
+      },
     }),
     db.vehicle.count({ where: { active: false } }),
+    db.fuelLog.groupBy({ by: ["vehicleId"], _max: { odometerKm: true } }),
   ]);
+  const odometerOf = new Map(odometers.map((o) => [o.vehicleId, o._max.odometerKm ?? null]));
+  /** Out of service today or tomorrow, and the deadlines needing attention, per vehicle. */
+  const fleetNotes = new Map(
+    vehicles.map((v) => {
+      const outages = v.unavailabilities.map((u) => ({
+        vehicleId: v.id,
+        kind: u.kind,
+        startDate: toIsoDate(u.startDate),
+        endDate: toIsoDate(u.endDate),
+      }));
+      const outToday = unavailabilityOn(v.id, today, outages);
+      const outTomorrow = outToday ? null : unavailabilityOn(v.id, tomorrow, outages);
+      const alerts = deadlineAlerts(
+        v.maintenance.map((d) => ({ ...d, dueDate: d.dueDate ? toIsoDate(d.dueDate) : null, doneDate: null })),
+        today,
+        odometerOf.get(v.id) ?? null,
+      );
+      return [v.id, { outToday, outTomorrow, alerts }] as const;
+    }),
+  );
+  const overdue = [...fleetNotes.values()].reduce((n, f) => n + f.alerts.filter((a) => a.state.status === "overdue").length, 0);
+  const soon = [...fleetNotes.values()].reduce((n, f) => n + f.alerts.filter((a) => a.state.status === "soon").length, 0);
 
   const active = vehicles.filter((v) => v.active);
   // Every active vehicle is loaded (inactive ones only on demand): enough to
@@ -60,7 +97,9 @@ export default async function VehiclesPage({
         title="Véhicules"
         description={
           active.length > 0
-            ? `${active.length} véhicule${active.length > 1 ? "s" : ""} actif${active.length > 1 ? "s" : ""} — ${counts}`
+            ? `${active.length} véhicule${active.length > 1 ? "s" : ""} actif${active.length > 1 ? "s" : ""} — ${counts}` +
+              (overdue > 0 ? ` · ${overdue} échéance${overdue > 1 ? "s" : ""} dépassée${overdue > 1 ? "s" : ""}` : "") +
+              (soon > 0 ? ` · ${soon} échéance${soon > 1 ? "s" : ""} sous 30 jours` : "")
             : "Flotte proposée à l'optimisation : type, capacité, dépôt, équipage et coût kilométrique."
         }
         actions={
@@ -101,6 +140,7 @@ export default async function VehiclesPage({
               <Th>Département</Th>
               <Th>Chauffeur par défaut</Th>
               <Th className="text-right">Coût/km</Th>
+              <Th>Entretien</Th>
               <Th>Statut</Th>
               <Th>
                 <span className="sr-only">Actions</span>
@@ -212,6 +252,9 @@ export default async function VehiclesPage({
                     </div>
                   </Td>
                   <Td className="tabular text-right whitespace-nowrap">{formatEuros(vehicle.costPerKm)}</Td>
+                  <Td>
+                    <FleetNotesCell notes={fleetNotes.get(vehicle.id)} />
+                  </Td>
                   <Td>{vehicle.active ? <Badge tone="success">Actif</Badge> : <Badge>Désactivé</Badge>}</Td>
                   <Td className="text-right">
                     <LinkButton
@@ -232,6 +275,35 @@ export default async function VehiclesPage({
     </>
   );
 }
+
+function FleetNotesCell({ notes }: { notes: { outToday: OutageNote; outTomorrow: OutageNote; alerts: AlertNote[] } | undefined }) {
+  if (!notes || (!notes.outToday && !notes.outTomorrow && notes.alerts.length === 0)) {
+    return <span className="text-slate-400">—</span>;
+  }
+  return (
+    <div className="space-y-0.5">
+      {notes.outToday ? (
+        <WarningBadge tone="danger" detail={unavailabilityText(notes.outToday)}>
+          Indisponible aujourd&apos;hui
+        </WarningBadge>
+      ) : null}
+      {notes.outTomorrow ? (
+        <WarningBadge tone="warning" detail={unavailabilityText(notes.outTomorrow)}>
+          Indisponible demain
+        </WarningBadge>
+      ) : null}
+      {notes.alerts.slice(0, 2).map(({ deadline, state }, i) => (
+        <WarningBadge key={i} tone={state.status === "overdue" ? "danger" : "warning"} detail={`${deadlineName(deadline)} : ${state.text}`}>
+          {deadlineName(deadline)}
+        </WarningBadge>
+      ))}
+      {notes.alerts.length > 2 ? <p className="text-xs text-slate-500">+{notes.alerts.length - 2} échéance(s)</p> : null}
+    </div>
+  );
+}
+
+type OutageNote = ReturnType<typeof unavailabilityOn>;
+type AlertNote = ReturnType<typeof deadlineAlerts>[number];
 
 /** Badge on its own line; the explanation is in the tooltip and read by screen readers. */
 function WarningBadge({ tone, detail, children }: { tone: BadgeTone; detail: string; children: ReactNode }) {

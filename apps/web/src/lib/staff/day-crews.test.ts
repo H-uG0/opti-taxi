@@ -92,6 +92,23 @@ describe("resolveDayCrews", () => {
     expect(crewOf(result, "A spare")).toMatchObject({ driverId: "spare_a", source: "replacement", blocked: null });
   });
 
+  it("gives nobody to an unavailable vehicle, and its default driver replaces elsewhere", () => {
+    const result = plan({
+      absences: [leave("taxi2")],
+      saved: [{ vehicleId: "Taxi A", driverId: "taxi1", crewMateId: null }],
+      vehicleUnavailabilities: [{ vehicleId: "Taxi A", kind: "MAINTENANCE", startDate: "2026-11-09", endDate: "2026-11-10" }],
+    });
+    expect(crewOf(result, "Taxi A")).toMatchObject({
+      driverId: null,
+      unavailable: true,
+      blocked: "Véhicule indisponible (entretien du 09/11/2026 au 10/11/2026)",
+    });
+    // The crew fixed on Taxi A reserves nobody: taxi1 is free again. Taxi B takes the first
+    // qualified person of its depot by name (spare_a), taxi1 is left idle.
+    expect(crewOf(result, "Taxi B")).toMatchObject({ driverId: "spare_a", source: "replacement", blocked: null });
+    expect(result.idle).toContain("taxi1");
+  });
+
   it("takes someone from another depot when its own has nobody, and says so", () => {
     const result = plan({ absences: [leave("taxi1"), leave("spare_a")] });
     const crew = crewOf(result, "Taxi A");

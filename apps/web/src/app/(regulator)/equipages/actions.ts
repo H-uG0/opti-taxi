@@ -57,9 +57,13 @@ export async function saveDayCrews(_state: FormState, formData: FormData): Promi
     return errorState(errors, values, "Équipages non enregistrés : corrigez les postes signalés.");
   }
 
+  // An unavailable vehicle keeps no crew: once back in service, it gets the usual proposal.
+  const outOfService = new Set(plan.crews.filter((c) => c.unavailable).map((c) => c.vehicleId));
   await db.$transaction([
     db.dayCrew.deleteMany({ where: { serviceDate } }),
-    db.dayCrew.createMany({ data: saved.map((crew) => ({ serviceDate, ...crew })) }),
+    db.dayCrew.createMany({
+      data: saved.filter((crew) => !outOfService.has(crew.vehicleId)).map((crew) => ({ serviceDate, ...crew })),
+    }),
   ]);
   refreshPages();
   return successState(`Équipages enregistrés.${routes > 0 ? REPLAN_NOTICE : ""}`);

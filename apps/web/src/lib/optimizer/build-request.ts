@@ -559,7 +559,7 @@ export type DayCrewContext = {
 /** Everything the crews of isoDate depend on, resolved (lib/staff/day-crews.ts). */
 export async function loadDayCrewContext(prisma: PrismaClient, isoDate: string): Promise<DayCrewContext> {
   const serviceDate = fromIsoDate(isoDate);
-  const [vehicles, people, absences, incompatibilities, saved] = await Promise.all([
+  const [vehicles, people, absences, incompatibilities, saved, outages] = await Promise.all([
     prisma.vehicle.findMany({
       select: { id: true, label: true, type: true, active: true, depotId: true, defaultDriverId: true, defaultCrewMateId: true },
     }),
@@ -570,6 +570,10 @@ export async function loadDayCrewContext(prisma: PrismaClient, isoDate: string):
     }),
     prisma.crewIncompatibility.findMany({ select: { driverAId: true, driverBId: true } }),
     prisma.dayCrew.findMany({ where: { serviceDate }, select: { vehicleId: true, driverId: true, crewMateId: true } }),
+    prisma.vehicleUnavailability.findMany({
+      where: { startDate: { lte: serviceDate }, endDate: { gte: serviceDate } },
+      select: { vehicleId: true, kind: true, startDate: true, endDate: true },
+    }),
   ]);
   const input: DayCrewInput = {
     date: isoDate,
@@ -578,6 +582,7 @@ export async function loadDayCrewContext(prisma: PrismaClient, isoDate: string):
     absences: absences.map((a) => ({ ...a, startDate: toIsoDate(a.startDate), endDate: toIsoDate(a.endDate) })),
     incompatibilities,
     saved,
+    vehicleUnavailabilities: outages.map((u) => ({ ...u, startDate: toIsoDate(u.startDate), endDate: toIsoDate(u.endDate) })),
   };
   return { input, plan: resolveDayCrews(input), people: new Map(people.map((p) => [p.id, p])) };
 }

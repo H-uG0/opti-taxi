@@ -53,6 +53,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
         source: crew?.source ?? "none",
         issues: crew?.issues ?? [],
         blocked: crew?.blocked ?? null,
+        unavailable: crew?.unavailable ?? false,
       };
     })
     .sort(

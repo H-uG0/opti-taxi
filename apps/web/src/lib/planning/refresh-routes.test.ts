@@ -788,6 +788,7 @@ function fakePrisma(routes: FakeRoute[], trips: RefreshTrip[]) {
     staffAbsence: { findMany: async () => [] },
     crewIncompatibility: { findMany: async () => [] },
     dayCrew: { findMany: async () => [] },
+    vehicleUnavailability: { findMany: async () => [] },
     tariffGrid: { findMany: async () => [] },
     route: {
       findMany: async ({ where }: { where: Where }) => routes.filter((r) => matches(r, where)).map((r) => ({ ...r, stops: [...r.stops] })),

@@ -32,6 +32,7 @@ describe("vehicleSchema", () => {
       depotId: "depot_marseille",
       department: "13",
       costPerKm: 0.32,
+      energy: null,
       defaultDriverId: null,
       defaultCrewMateId: null,
     });
@@ -59,6 +60,12 @@ describe("vehicleSchema", () => {
   it("rejects malformed registrations", () => {
     expect(errorsOf({ ...valid, registration: "AB/123" }).registration).toMatch(/Lettres, chiffres/);
     expect(errorsOf({ ...valid, registration: "  " }).registration).toBe("Champ obligatoire.");
+  });
+
+  it("keeps the energy, blank meaning not filled in", () => {
+    expect(vehicleSchema.parse({ ...valid, energy: "ELECTRIC" }).energy).toBe("ELECTRIC");
+    expect(vehicleSchema.parse({ ...valid, energy: "" }).energy).toBeNull();
+    expect(errorsOf({ ...valid, energy: "STEAM" }).energy).toBe("Énergie inconnue.");
   });
 
   it("requires a depot", () => {

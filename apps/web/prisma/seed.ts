@@ -109,6 +109,9 @@ function lookup<K, V>(map: Map<K, V>, key: K, what: string): V {
 async function wipe(): Promise<void> {
   await prisma.$transaction([
     prisma.auditEvent.deleteMany(),
+    prisma.fuelLog.deleteMany(),
+    prisma.maintenanceDeadline.deleteMany(),
+    prisma.vehicleUnavailability.deleteMany(),
     prisma.dayCrew.deleteMany(),
     prisma.staffAbsence.deleteMany(),
     prisma.crewIncompatibility.deleteMany(),
@@ -249,6 +252,7 @@ async function seedVehicles(
         depotId,
         department: DEPOTS[vehicle.depot].department,
         costPerKm: vehicle.costPerKm,
+        energy: vehicle.energy ?? "DIESEL",
         defaultDriverId: driver.id,
         defaultCrewMateId: crewMate?.id ?? null,
       },
@@ -289,6 +293,77 @@ async function seedStaffPlanning(drivers: Map<DriverKey, CreatedDriver>, dates: 
   const [a, b] = [id("julien"), id("kevin")].sort();
   await prisma.crewIncompatibility.create({
     data: { driverAId: a!, driverBId: b!, note: "Ne pas mettre ensemble en équipage (à revoir avec la direction)." },
+  });
+}
+
+/** Litres or kWh per 100 km, and price per unit, of the seeded fill-ups (fictitious). */
+const FUEL_PROFILE = {
+  TAXI: { per100Km: 6.2, price: 1.72 },
+  VSL: { per100Km: 7.1, price: 1.72 },
+  AMBULANCE: { per100Km: 10.8, price: 1.72 },
+  ELECTRIC: { per100Km: 17.5, price: 0.26 },
+} as const;
+
+/**
+ * Vehicle planning examples (lot 4): six weeks of fill-ups per vehicle, the
+ * next technical inspection and insurance of each (one inspection due soon,
+ * one service overdue on mileage), Taxi 1 in maintenance next Thursday and
+ * Ambulance 2 on call next Wednesday (the day its driver is on call).
+ */
+async function seedFleetPlanning(rng: Rng, dates: Dates): Promise<void> {
+  const vehicles = await prisma.vehicle.findMany({ select: { id: true, label: true, type: true, energy: true } });
+  const byLabel = new Map(vehicles.map((v) => [v.label, v.id]));
+  const idOf = (label: string) => {
+    const id = byLabel.get(label);
+    if (!id) throw new Error(`Véhicule « ${label} » inconnu`);
+    return id;
+  };
+  const odometers = new Map<string, number>();
+  for (const v of vehicles) {
+    const profile = v.energy === "ELECTRIC" ? FUEL_PROFILE.ELECTRIC : FUEL_PROFILE[v.type];
+    let km = rng.int(40, 160) * 1000;
+    const fills = [];
+    for (let day = -42; day <= -1; day += rng.int(5, 8)) {
+      const driven = day === -42 ? 0 : rng.int(380, 720);
+      km += driven;
+      const quantity = day === -42 ? 40 : Math.round(((driven * profile.per100Km) / 100) * (0.92 + rng.float(0, 0.16)) * 10) / 10;
+      fills.push({ vehicleId: v.id, date: fromIsoDate(addDays(dates.today, day)), odometerKm: km, quantity, cost: Math.round(quantity * profile.price * 100) / 100 });
+    }
+    await prisma.fuelLog.createMany({ data: fills });
+    odometers.set(v.id, km);
+    await prisma.maintenanceDeadline.createMany({
+      data: [
+        { vehicleId: v.id, kind: "INSPECTION", dueDate: fromIsoDate(addDays(dates.today, rng.int(60, 300))) },
+        { vehicleId: v.id, kind: "INSURANCE", dueDate: fromIsoDate(addDays(dates.today, rng.int(90, 330))) },
+      ],
+    });
+  }
+  const taxi4 = idOf("Taxi 4 (Gap)");
+  await prisma.maintenanceDeadline.updateMany({
+    where: { vehicleId: taxi4, kind: "INSPECTION" },
+    data: { dueDate: fromIsoDate(addDays(dates.today, 12)), note: "Rendez-vous à prendre au centre de Gap." },
+  });
+  const vsl2 = idOf("VSL 2 (Manosque)");
+  await prisma.maintenanceDeadline.create({
+    data: { vehicleId: vsl2, kind: "SERVICE", label: "Vidange + filtres", dueKm: (odometers.get(vsl2) ?? 0) - 300 },
+  });
+  await prisma.vehicleUnavailability.createMany({
+    data: [
+      {
+        vehicleId: idOf("Taxi 1 (Marseille)"),
+        kind: "MAINTENANCE",
+        startDate: fromIsoDate(addDays(dates.nextMonday, 3)),
+        endDate: fromIsoDate(addDays(dates.nextMonday, 3)),
+        note: "Révision au garage de la Valentine.",
+      },
+      {
+        vehicleId: idOf("Ambulance 2 (Gap)"),
+        kind: "ON_CALL",
+        startDate: fromIsoDate(addDays(dates.nextMonday, 2)),
+        endDate: fromIsoDate(addDays(dates.nextMonday, 2)),
+        note: "Garde départementale 8 h – 20 h.",
+      },
+    ],
   });
 }
 
@@ -659,6 +734,8 @@ async function main(): Promise<void> {
   const drivers = await seedDrivers(rng, depots);
   const vehicleOfDriver = await seedVehicles(drivers, depots);
   await seedStaffPlanning(drivers, dates);
+  // Own generator: the patients and trips drawn afterwards stay those of the earlier seeds.
+  await seedFleetPlanning(new Rng(RANDOM_SEED + 4), dates);
   const { regulatorId, accounts } = await seedUsers(drivers, vehicleOfDriver);
   console.log("• Patients, prescriptions et récurrences");
   const names = new NameFactory(rng, Object.values(DRIVERS));

@@ -141,7 +141,10 @@ L'appel élargit le produit : au-delà des tournées, V veut planifier son perso
    - paires interdites dans la fiche chauffeur : jamais proposées ensemble, refusées dans un équipage fixé ;
    - page Équipages, par date : chaque véhicule reçoit son équipage attitré s'il est disponible, sinon un remplaçant qualifié et libre, du même dépôt d'abord. Le régulateur peut modifier puis enregistrer : l'équipage est alors fixé pour ce jour. Un week-end se planifie en y affectant quelqu'un hors de ses jours habituels (signalé, accepté) ;
    - l'optimisation, le planning et les déplacements de courses utilisent l'équipage du jour, et chaque tournée enregistrée garde l'équipage avec lequel elle a été calculée.
-4. Planning des véhicules : indisponibilités, échéances d'entretien avec alertes, consommation ; l'optimiseur ignore un véhicule indisponible.
+4. Planning des véhicules : indisponibilités, échéances d'entretien avec alertes, consommation ; l'optimiseur ignore un véhicule indisponible. Fait le 8 novembre, dans la fiche véhicule :
+   - indisponibilités datées (entretien, réparation, contrôle technique, garde, autre) : le véhicule n'est pas planifié ces jours-là, et son équipage attitré est proposé sur d'autres véhicules. Une garde se saisit donc deux fois : la personne (absence « garde ») et le véhicule (indisponibilité « garde ») ;
+   - échéances à une date, à un kilométrage ou au premier des deux (contrôle technique, révision, pneumatiques, assurance, autre), avec alerte à 30 jours ou 1 000 km dans la liste des véhicules ; « marquer comme faite » relève la date et le dernier kilométrage connu ;
+   - pleins et recharges (date, compteur, quantité, montant, plein complet) : dernier relevé du compteur, consommation mesurée entre pleins complets (L ou kWh aux 100 km selon l'énergie du véhicule) et coût de l'énergie au km, à comparer au coût au km utilisé par l'optimiseur.
 5. Coût et autonomie par véhicule (énergie, consommation) : le choix diesel / électrique découle de la marge, plus une contrainte d'autonomie revérifiée par le validateur.
 6. Préférences et affinités patient : bonus ou pénalités dans l'objectif ; seules les exigences explicites deviennent des contraintes dures.
 7. Sous-traitance, plus tard.
