@@ -7,14 +7,13 @@ import { LinkButton } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { addDays, isIsoDate } from "@/lib/time";
 
-const href = (date: string) => `/planning?date=${date}`;
-
-export function DateNav({ date, tomorrow }: { date: string; tomorrow: string }) {
+export function DateNav({ date, tomorrow, basePath = "/planning" }: { date: string; tomorrow: string; basePath?: string }) {
   const router = useRouter();
+  const href = (day: string) => `${basePath}?date=${day}`;
   const [navigating, startTransition] = useTransition();
 
   return (
-    <nav aria-label="Date du planning" className={cn("flex items-center gap-1.5", navigating && "opacity-70")}>
+    <nav aria-label="Date" className={cn("flex items-center gap-1.5", navigating && "opacity-70")}>
       <LinkButton href={href(addDays(date, -1))} aria-label="Jour précédent" title="Jour précédent">
         <ChevronLeft aria-hidden className="size-4" />
       </LinkButton>

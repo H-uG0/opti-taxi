@@ -297,7 +297,15 @@ async function lockReplanState(tx: Prisma.TransactionClient, isoDate: string, se
  */
 export async function savePlan(
   prisma: PrismaClient,
-  args: { runId: string; isoDate: string; request: OptimizeRequest; response: PlanResponse; now?: Date },
+  args: {
+    runId: string;
+    isoDate: string;
+    request: OptimizeRequest;
+    response: PlanResponse;
+    /** Crew sent with each vehicle (BuildResult.crews); without it, the vehicle's default crew. */
+    crews?: ReadonlyMap<string, { driverId: string; crewMateId: string | null }>;
+    now?: Date;
+  },
 ): Promise<SavePlanResult> {
   const { runId, isoDate, request, response } = args;
   const now = args.now ?? new Date();
@@ -320,7 +328,12 @@ export async function savePlan(
         }),
       ]);
       const current = new Map(currentTrips.map((t) => [t.id, t]));
-      const routes = planRoutes(response, new Map(vehicles.map((v) => [v.id, v])), current);
+      // The route gets the crew the optimizer planned with: the crew of the day.
+      const crewed = vehicles.map((v) => {
+        const crew = args.crews?.get(v.id);
+        return crew ? { ...v, defaultDriverId: crew.driverId, defaultCrewMateId: crew.crewMateId } : v;
+      });
+      const routes = planRoutes(response, new Map(crewed.map((v) => [v.id, v])), current);
 
       // Stops cascade; trips keep their row but lose routeId (onDelete: SetNull).
       await tx.route.deleteMany({ where: { serviceDate } });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyDayCrewPlan,
   buildOptimizeRequest,
   CONTRACT_MAX_TIME_LIMIT_SEC,
   effectiveTimeLimitSec,
@@ -208,6 +209,48 @@ describe("vehicle availability", () => {
     expect(skipped.map((s) => [s.vehicleId, s.reason])).toEqual([
       ["a", "Aucun chauffeur attitré"],
       ["b", expect.stringMatching(/^Chauffeur inactif/)],
+    ]);
+  });
+
+  it("leaves out a vehicle whose crew of the day is blocked, with the reason", () => {
+    const v = vehicle("v1", { dayCrew: { blocked: "Aucun chauffeur disponible" } });
+    const { available, skipped } = resolveVehicleAvailability([v], TUESDAY);
+    expect(available).toEqual([]);
+    expect(skipped[0]?.reason).toBe("Aucun chauffeur disponible");
+  });
+
+  it("keeps a crew of the day on a day its driver does not usually work (weekend duty)", () => {
+    const v = vehicle("v1", { defaultDriver: driver("d1", { workDays: [1, 3, 5] }), dayCrew: { blocked: null } });
+    const { available, crews } = resolveVehicleAvailability([v], TUESDAY);
+    expect(available.map((a) => a.id)).toEqual(["v1"]);
+    expect(crews.get("v1")).toEqual({ driverId: "d1", crewMateId: null });
+  });
+
+  it("puts the crew of the day in place of the default crew", () => {
+    const people = new Map([["spare", driver("spare")], ["mate", driver("mate")]]);
+    const [taxi, amb, other] = applyDayCrewPlan(
+      [vehicle("t"), vehicle("a", { type: "AMBULANCE" }), vehicle("x")],
+      {
+        crews: [
+          { vehicleId: "t", driverId: "spare", crewMateId: null, source: "replacement", issues: [], blocked: null },
+          { vehicleId: "a", driverId: null, crewMateId: "mate", source: "none", issues: [], blocked: "Aucun chauffeur disponible" },
+        ],
+      },
+      people,
+    );
+    expect(taxi).toMatchObject({ defaultDriver: { id: "spare" }, dayCrew: { blocked: null } });
+    expect(amb).toMatchObject({ defaultDriver: null, defaultCrewMate: { id: "mate" }, dayCrew: { blocked: "Aucun chauffeur disponible" } });
+    // Unknown to the plan (an inactive vehicle): unchanged.
+    expect(other).toMatchObject({ defaultDriver: { id: "drv_x" } });
+    expect(other?.dayCrew).toBeUndefined();
+  });
+
+  it("returns the crew sent with each vehicle, for the routes saved from the plan", () => {
+    const amb = vehicle("a", { type: "AMBULANCE", defaultDriver: driver("dea"), defaultCrewMate: driver("aux") });
+    const build = buildOptimizeRequest({ date: TUESDAY, settings, vehicles: [amb, vehicle("t")], trips: [], tariffs: [] });
+    expect([...build.crews.entries()]).toEqual([
+      ["t", { driverId: "drv_t", crewMateId: null }],
+      ["a", { driverId: "dea", crewMateId: "aux" }],
     ]);
   });
 

@@ -746,21 +746,30 @@ function driver(id: string) {
     breakWindowEndMinute: null,
     breakMinutes: 0,
     hourlyCost: 24,
+    // Read by the crews of the day (lib/staff/day-crews.ts): qualified for every seat.
+    qualifications: ["TAXI_CARD", "DEA"] as ("TAXI_CARD" | "DEA")[],
+    depotId: "depot_1",
   };
 }
 
-/** Vehicles working on Monday 2026-11-02 (VehicleInput of build-request.ts). */
+/**
+ * Vehicles working on Monday 2026-11-02: VehicleInput of build-request.ts, plus
+ * the fields the crews of the day read (depot, default crew ids).
+ */
 const VEHICLE_ROWS = VEHICLES.map(({ id, type }) => ({
   id,
   label: id,
   type,
   capacity: 2,
   depot: { lat: 43.3, lng: 5.4 },
+  depotId: "depot_1",
   department: "13",
   costPerKm: 0.3,
   active: true,
   defaultDriver: driver(`drv_${id}`),
+  defaultDriverId: `drv_${id}`,
   defaultCrewMate: null,
+  defaultCrewMateId: null,
 }));
 
 type Where = { id?: string | { in: string[] }; serviceDate?: Date };
@@ -775,6 +784,10 @@ function fakePrisma(routes: FakeRoute[], trips: RefreshTrip[]) {
     appSettings: { upsert: async () => SETTINGS_ROW },
     trafficZone: { findMany: async () => [], createMany: async () => ({ count: 0 }) },
     vehicle: { findMany: async () => VEHICLE_ROWS },
+    driver: { findMany: async () => VEHICLE_ROWS.map((v) => v.defaultDriver) },
+    staffAbsence: { findMany: async () => [] },
+    crewIncompatibility: { findMany: async () => [] },
+    dayCrew: { findMany: async () => [] },
     tariffGrid: { findMany: async () => [] },
     route: {
       findMany: async ({ where }: { where: Where }) => routes.filter((r) => matches(r, where)).map((r) => ({ ...r, stops: [...r.stops] })),

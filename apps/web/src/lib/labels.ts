@@ -78,6 +78,15 @@ export const QUALIFICATION_LABELS = {
   DEA: "Ambulancier DE",
 } as const;
 
+/** Motifs d'indisponibilité d'une personne (StaffAbsence.kind). */
+export const ABSENCE_KIND_LABELS = {
+  LEAVE: "Congé",
+  SICK: "Arrêt maladie",
+  TRAINING: "Formation",
+  ON_CALL: "Garde",
+  OTHER: "Absence",
+} as const;
+
 export const ROUTE_STATUS_LABELS = {
   PROPOSED: "Proposée",
   VALIDATED: "Validée",

@@ -110,7 +110,7 @@ function VehicleFields({
   } else if (driverShared) {
     driverHint = <InlineWarning>{driverShared}</InlineWarning>;
   } else if (driverId === "") {
-    driverHint = `Sans chauffeur par défaut, le véhicule ne sera pas planifié. ${driverRequired}`;
+    driverHint = `Sans chauffeur par défaut, le véhicule n'est planifié que si une personne qualifiée reste libre ce jour-là (page Équipages). ${driverRequired}`;
   }
 
   let crewMateHint: ReactNode = null;
@@ -128,7 +128,7 @@ function VehicleFields({
     } else if (crewMateShared) {
       crewMateHint = <InlineWarning>{crewMateShared}</InlineWarning>;
     } else if (crewMateId === "") {
-      crewMateHint = `Sans équipier, l'ambulance ne sera pas planifiée : elle part à deux. Requis : ${qualificationRequirement(crewRule)}.`;
+      crewMateHint = `Une ambulance part à deux : sans équipier par défaut, elle n'est planifiée que si un équipier qualifié reste libre ce jour-là (page Équipages). Requis : ${qualificationRequirement(crewRule)}.`;
     } else {
       crewMateHint = `Une ambulance part à deux. Requis : ${qualificationRequirement(crewRule)}.`;
     }

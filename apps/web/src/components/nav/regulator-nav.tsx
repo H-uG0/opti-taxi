@@ -7,6 +7,7 @@ import {
   Building2,
   CalendarClock,
   Car,
+  ContactRound,
   Euro,
   ListChecks,
   Settings,
@@ -21,6 +22,7 @@ import { cn } from "@/components/ui/cn";
 export const REGULATOR_NAV = [
   { href: "/planning", label: "Planning J+1", icon: CalendarClock },
   { href: "/courses", label: "Courses", icon: ListChecks },
+  { href: "/equipages", label: "Équipages", icon: ContactRound },
   { href: "/arrivees-partagees", label: "Arrivées partagées", icon: Share2 },
   { href: "/tableau-de-bord", label: "Tableau de bord", icon: BarChart3 },
   { href: "/patients", label: "Patients", icon: Users },

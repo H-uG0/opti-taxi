@@ -136,13 +136,17 @@ L'appel élargit le produit : au-delà des tournées, V veut planifier son perso
 
 1. Cadrage et test de charge à l'échelle annoncée (fait le 7 novembre, voir « Test de charge »).
 2. Dépôts : entité à part, véhicules et personnel rattachés. Fait le 7 novembre : page Dépôts (création, modification, désactivation refusée tant que des véhicules actifs y sont rattachés), un dépôt obligatoire par véhicule, un dépôt de rattachement facultatif par chauffeur. La migration crée un dépôt par lieu distinct des véhicules existants et rattache chaque chauffeur au dépôt de son véhicule attitré. Le département de tarification reste sur le véhicule. Déplacer un dépôt ne recalcule pas les tournées déjà proposées : l'écran indique les jours à réoptimiser.
-3. Planning du personnel : congés, week-ends, gardes par date, équipages du jour avec paires interdites.
+3. Planning du personnel : congés, week-ends, gardes par date, équipages du jour avec paires interdites. Fait le 8 novembre :
+   - absences datées dans la fiche chauffeur (congé, arrêt maladie, formation, garde, autre) : la personne n'est pas planifiée ces jours-là. Une garde est traitée comme une absence pour la journée entière ; le véhicule de garde sera bloqué avec le planning des véhicules (lot 4) ;
+   - paires interdites dans la fiche chauffeur : jamais proposées ensemble, refusées dans un équipage fixé ;
+   - page Équipages, par date : chaque véhicule reçoit son équipage attitré s'il est disponible, sinon un remplaçant qualifié et libre, du même dépôt d'abord. Le régulateur peut modifier puis enregistrer : l'équipage est alors fixé pour ce jour. Un week-end se planifie en y affectant quelqu'un hors de ses jours habituels (signalé, accepté) ;
+   - l'optimisation, le planning et les déplacements de courses utilisent l'équipage du jour, et chaque tournée enregistrée garde l'équipage avec lequel elle a été calculée.
 4. Planning des véhicules : indisponibilités, échéances d'entretien avec alertes, consommation ; l'optimiseur ignore un véhicule indisponible.
 5. Coût et autonomie par véhicule (énergie, consommation) : le choix diesel / électrique découle de la marge, plus une contrainte d'autonomie revérifiée par le validateur.
 6. Préférences et affinités patient : bonus ou pénalités dans l'objectif ; seules les exigences explicites deviennent des contraintes dures.
 7. Sous-traitance, plus tard.
 
-**Choix structurant à valider.** Aujourd'hui le chauffeur vient du véhicule (chauffeur attitré). Proposition : fixer d'abord les équipages du jour (proposés automatiquement, ajustés par le régulateur), puis calculer les tournées avec ces équipages. C'est plus simple et plus lisible qu'un calcul simultané, et cela devrait mieux tenir à 120 véhicules. En contrepartie, la solution peut être un peu moins optimale, et une préférence pour un chauffeur reste limitée par les équipages déjà fixés.
+**Choix structurant, validé le 8 novembre.** Avant, le chauffeur venait du véhicule (chauffeur attitré). Décision : fixer d'abord les équipages du jour (proposés automatiquement, ajustés par le régulateur), puis calculer les tournées avec ces équipages. C'est plus simple et plus lisible qu'un calcul simultané, et cela devrait mieux tenir à 120 véhicules. En contrepartie, la solution peut être un peu moins optimale, et une préférence pour un chauffeur reste limitée par les équipages déjà fixés.
 
 ## Moteur d'optimisation
 
@@ -308,6 +312,7 @@ Hors périmètre : facturation CPAM, télétransmission, transports d'urgence.
 - Attente au lieu de soins <= 45 min au total (avant le RDV + après la séance).
 - Refus de partage tracé sur la course.
 - Horaires et pauses des chauffeurs respectés.
+- Équipage du jour : une personne absente (congé, garde…) n'est jamais planifiée, une paire interdite jamais réunie, une personne sur un seul véhicule par jour.
 - Tarifs stockés en base (type, département, dates de validité), jamais en dur dans le code.
 
 ## Objectif d'optimisation

@@ -93,6 +93,9 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
         actions={
           <>
             <DateNav date={date} tomorrow={tomorrow} />
+            <LinkButton href={`/equipages?date=${date}`} variant="ghost" title="Équipages de ce jour : absences, remplaçants, équipages fixés">
+              Équipages
+            </LinkButton>
             <PlanningToolbar
               date={date}
               optimizeLabel={optimizeLabel}

@@ -186,7 +186,7 @@ export default async function VehiclesPage({
                         ) : vehicle.active ? (
                           <WarningBadge
                             tone="warning"
-                            detail="Sans équipier, l'ambulance n'est pas planifiée : elle part à deux."
+                            detail="Sans équipier par défaut, l'ambulance n'est planifiée que si un équipier qualifié reste libre ce jour-là (page Équipages)."
                           >
                             Équipier à affecter
                           </WarningBadge>

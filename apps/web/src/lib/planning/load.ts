@@ -3,7 +3,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import { getSettings } from "@/lib/domain/settings";
 import { VEHICLE_TYPE_HEX } from "@/components/ui/badge";
-import { tripInputSelect, vehicleInputSelect } from "@/lib/optimizer/build-request";
+import { applyDayCrewPlan, loadDayCrewContext, tripInputSelect, vehicleInputSelect } from "@/lib/optimizer/build-request";
 import { readRunDetails, type RunDetails } from "@/lib/optimizer/run-details";
 import { fromIsoDate } from "@/lib/time";
 import type { PlanningDayView } from "./types";
@@ -34,12 +34,14 @@ const recorderSelect = { select: { name: true } } as const;
 
 export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView & { timeLimitSec: number }> {
   const serviceDate = fromIsoDate(isoDate);
-  const [settings, vehicles, trips, routes, lastRun, planRun] = await Promise.all([
+  const [settings, defaultVehicles, crewContext, trips, routes, lastRun, planRun] = await Promise.all([
     getSettings(db),
     db.vehicle.findMany({
       select: { ...vehicleInputSelect, registration: true, depot: { select: { lat: true, lng: true, name: true } } },
       orderBy: { label: "asc" },
     }),
+    // Crews of the day (absences, replacements, crews fixed on the Équipages page).
+    loadDayCrewContext(db, isoDate),
     db.trip.findMany({
       where: { serviceDate },
       select: {
@@ -113,6 +115,7 @@ export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView 
     if (found) details.set(found.runId, found);
   }
 
+  const vehicles = applyDayCrewPlan(defaultVehicles, crewContext.plan, crewContext.people);
   const view = buildPlanningView({
     date: isoDate,
     settings,

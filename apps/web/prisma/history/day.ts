@@ -197,7 +197,7 @@ export async function optimizeOnce(
     await tx.optimizationRun.update({ where: { id: runId }, data: { startedAt, finishedAt } });
     await tx.auditEvent.createMany({ data: [trail.event(regulator(ctx), "plan.optimize", runId, finishedAt)] });
   });
-  await savePlan(traced, { runId, isoDate, request, response: plan, now: finishedAt });
+  await savePlan(traced, { runId, isoDate, request, response: plan, crews: build.crews, now: finishedAt });
   return { ok: true, finishedAt };
 }
 

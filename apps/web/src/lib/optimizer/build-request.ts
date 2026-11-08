@@ -6,6 +6,10 @@
  *   work that day, which trips are sent, which locks are kept. Unit-tested.
  * - `loadOptimizeInput` (DB): reads everything the builder needs. It receives
  *   the Prisma client as a parameter so this module has no server-only import.
+ *
+ * The crew of each vehicle is the crew of the day (lib/staff/day-crews.ts),
+ * applied by `applyDayCrewPlan` on top of the default crews: absences,
+ * replacements and the crews fixed by the regulator.
  */
 import type {
   AppSettings,
@@ -20,7 +24,8 @@ import { isShareable } from "@/lib/domain/rules";
 import { getSettings } from "@/lib/domain/settings";
 import { loadTrafficZones, toContractTraffic, type TrafficInput } from "@/lib/domain/traffic";
 import { tariffsInForce } from "@/lib/domain/tariffs";
-import { fromIsoDate, isoWeekday, WEEKDAY_LABELS } from "@/lib/time";
+import { resolveDayCrews, type DayCrewInput, type DayCrewPlan, type StaffPerson } from "@/lib/staff/day-crews";
+import { fromIsoDate, isoWeekday, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
 import type {
   OptimizeRequest,
   OptimizerSettings,
@@ -71,8 +76,16 @@ export type VehicleInput = {
   department: string;
   costPerKm: number;
   active: boolean;
+  /** The default driver, or the driver of the day once applyDayCrewPlan ran (`dayCrew` set). */
   defaultDriver: DriverInput | null;
+  /** Same for the crew mate. */
   defaultCrewMate: DriverInput | null;
+  /**
+   * Set by applyDayCrewPlan: the people above are the crew of the day, already
+   * checked for absences and working days; `blocked` says why the vehicle
+   * cannot work that day.
+   */
+  dayCrew?: { blocked: string | null };
 };
 
 export type TripInput = {
@@ -142,9 +155,14 @@ export type SkippedVehicle = { vehicleId: string; label: string; type: VehicleTy
 export type DroppedLock = { tripId: string; vehicleId: string; vehicleLabel: string | null; reason: string };
 export type ExcludedTrip = { tripId: string; reason: string };
 
+/** People sent with a vehicle: the route saved for it gets the same crew. */
+export type VehicleCrewIds = { driverId: string; crewMateId: string | null };
+
 export type VehicleAvailability = {
   /** Contract vehicles that can work that day, in display order. */
   available: OptimizerVehicle[];
+  /** Crew of each available vehicle. */
+  crews: Map<string, VehicleCrewIds>;
   skipped: SkippedVehicle[];
   /** Non-blocking remarks (break ignored, etc.). */
   notes: string[];
@@ -152,6 +170,8 @@ export type VehicleAvailability = {
 
 export type BuildResult = {
   request: OptimizeRequest;
+  /** Crew of each vehicle of the request (savePlan gives it to the route). */
+  crews: Map<string, VehicleCrewIds>;
   skippedVehicles: SkippedVehicle[];
   droppedLocks: DroppedLock[];
   excludedTrips: ExcludedTrip[];
@@ -221,16 +241,20 @@ type VehicleDecision =
   | { ok: false; reason: string };
 
 /**
- * Can this vehicle work on `weekday`? Its default driver must be active and
- * work that day; an ambulance also needs a crew mate working that day. The
- * shift is the driver's, intersected with the crew mate's for an ambulance.
+ * Can this vehicle work on `weekday`? Its driver must be active and work that
+ * day; an ambulance also needs a crew mate working that day. The shift is the
+ * driver's, intersected with the crew mate's for an ambulance. A crew of the
+ * day (`dayCrew`) was checked for the date already: an explicit assignment on
+ * a day the person does not usually work (weekend duty) is kept.
  */
 export function decideVehicle(vehicle: VehicleInput, weekday: number): VehicleDecision {
   const dayLabel = (WEEKDAY_LABELS[weekday] ?? "").toLowerCase();
+  if (vehicle.dayCrew?.blocked) return { ok: false, reason: vehicle.dayCrew.blocked };
+  const ofTheDay = vehicle.dayCrew !== undefined;
   const driver = vehicle.defaultDriver;
   if (!driver) return { ok: false, reason: "Aucun chauffeur attitré" };
   if (!driver.active) return { ok: false, reason: `Chauffeur inactif (${personName(driver)})` };
-  if (!worksOn(driver, weekday)) {
+  if (!ofTheDay && !worksOn(driver, weekday)) {
     return { ok: false, reason: `Chauffeur absent le ${dayLabel} (${personName(driver)})` };
   }
 
@@ -244,7 +268,7 @@ export function decideVehicle(vehicle: VehicleInput, weekday: number): VehicleDe
     if (!mate) return { ok: false, reason: "Ambulance sans équipier attitré (équipage de 2 requis)" };
     if (mate.id === driver.id) return { ok: false, reason: "Le chauffeur et l'équipier sont la même personne" };
     if (!mate.active) return { ok: false, reason: `Équipier inactif (${personName(mate)})` };
-    if (!worksOn(mate, weekday)) {
+    if (!ofTheDay && !worksOn(mate, weekday)) {
       return { ok: false, reason: `Équipier absent le ${dayLabel} (${personName(mate)})` };
     }
     shiftStart = Math.max(shiftStart, mate.shiftStartMinute);
@@ -304,6 +328,7 @@ export function decideVehicle(vehicle: VehicleInput, weekday: number): VehicleDe
 export function resolveVehicleAvailability(vehicles: VehicleInput[], isoDate: string): VehicleAvailability {
   const weekday = isoWeekday(isoDate);
   const available: OptimizerVehicle[] = [];
+  const crews = new Map<string, VehicleCrewIds>();
   const skipped: SkippedVehicle[] = [];
   const notes: string[] = [];
   const takenBy = new Map<string, string>();
@@ -328,9 +353,10 @@ export function resolveVehicleAvailability(vehicles: VehicleInput[], isoDate: st
     }
     for (const id of decision.people) takenBy.set(id, vehicle.label);
     available.push(decision.vehicle);
+    crews.set(vehicle.id, { driverId: decision.people[0] ?? "", crewMateId: decision.people[1] ?? null });
     notes.push(...decision.notes);
   }
-  return { available, skipped, notes };
+  return { available, crews, skipped, notes };
 }
 
 function lockDropReason(
@@ -379,7 +405,7 @@ export function toContractTariffs(grids: TariffInput[], isoDate: string): Optimi
 
 /** Pure: the optimizer request of input.date, plus everything left out and why. */
 export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
-  const { available, skipped, notes } = resolveVehicleAvailability(input.vehicles, input.date);
+  const { available, crews, skipped, notes } = resolveVehicleAvailability(input.vehicles, input.date);
   const availableById = new Map(available.map((v) => [v.id, v]));
   const skippedById = new Map(skipped.map((s) => [s.vehicleId, s]));
   const allById = new Map(input.vehicles.map((v) => [v.id, v]));
@@ -436,6 +462,7 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
       trips,
       tariffs: toContractTariffs(input.tariffs, input.date),
     },
+    crews,
     skippedVehicles: skipped,
     droppedLocks,
     excludedTrips,
@@ -493,9 +520,72 @@ export const tripInputSelect = {
   lockedVehicleId: true,
 } as const;
 
-/** Every vehicle (active or not: locks may point to an inactive one) with its crew. */
+/** Every vehicle (active or not: locks may point to an inactive one) with its default crew. */
 export function loadVehicleInputs(prisma: PrismaClient): Promise<VehicleInput[]> {
   return prisma.vehicle.findMany({ select: vehicleInputSelect, orderBy: { label: "asc" } });
+}
+
+/**
+ * Pure: the vehicles with the crew of the day in place of their default crew
+ * (see VehicleInput.dayCrew). A vehicle the plan does not know (inactive) is
+ * returned unchanged.
+ */
+export function applyDayCrewPlan<V extends VehicleInput>(
+  vehicles: readonly V[],
+  plan: Pick<DayCrewPlan, "crews">,
+  people: ReadonlyMap<string, DriverInput>,
+): V[] {
+  const byVehicle = new Map(plan.crews.map((c) => [c.vehicleId, c]));
+  return vehicles.map((vehicle) => {
+    const crew = byVehicle.get(vehicle.id);
+    if (!crew) return vehicle;
+    return {
+      ...vehicle,
+      defaultDriver: crew.driverId ? (people.get(crew.driverId) ?? null) : null,
+      defaultCrewMate: crew.crewMateId ? (people.get(crew.crewMateId) ?? null) : null,
+      dayCrew: { blocked: crew.blocked },
+    };
+  });
+}
+
+export type DayCrewContext = {
+  /** What the plan was resolved from: resolve it again with other fixed crews (crew form). */
+  input: DayCrewInput;
+  plan: DayCrewPlan;
+  /** Every person, active or not, by id. */
+  people: Map<string, DriverInput & StaffPerson>;
+};
+
+/** Everything the crews of isoDate depend on, resolved (lib/staff/day-crews.ts). */
+export async function loadDayCrewContext(prisma: PrismaClient, isoDate: string): Promise<DayCrewContext> {
+  const serviceDate = fromIsoDate(isoDate);
+  const [vehicles, people, absences, incompatibilities, saved] = await Promise.all([
+    prisma.vehicle.findMany({
+      select: { id: true, label: true, type: true, active: true, depotId: true, defaultDriverId: true, defaultCrewMateId: true },
+    }),
+    prisma.driver.findMany({ select: { ...driverInputSelect, qualifications: true, depotId: true } }),
+    prisma.staffAbsence.findMany({
+      where: { startDate: { lte: serviceDate }, endDate: { gte: serviceDate } },
+      select: { driverId: true, kind: true, startDate: true, endDate: true },
+    }),
+    prisma.crewIncompatibility.findMany({ select: { driverAId: true, driverBId: true } }),
+    prisma.dayCrew.findMany({ where: { serviceDate }, select: { vehicleId: true, driverId: true, crewMateId: true } }),
+  ]);
+  const input: DayCrewInput = {
+    date: isoDate,
+    vehicles,
+    people,
+    absences: absences.map((a) => ({ ...a, startDate: toIsoDate(a.startDate), endDate: toIsoDate(a.endDate) })),
+    incompatibilities,
+    saved,
+  };
+  return { input, plan: resolveDayCrews(input), people: new Map(people.map((p) => [p.id, p])) };
+}
+
+/** Every vehicle with the crew of isoDate (optimisation, planning view, moves). */
+export async function loadDayVehicleInputs(prisma: PrismaClient, isoDate: string): Promise<VehicleInput[]> {
+  const [vehicles, context] = await Promise.all([loadVehicleInputs(prisma), loadDayCrewContext(prisma, isoDate)]);
+  return applyDayCrewPlan(vehicles, context.plan, context.people);
 }
 
 export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): Promise<OptimizeInput> {
@@ -503,7 +593,7 @@ export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): 
   const [settings, zones, vehicles, trips, tariffs] = await Promise.all([
     getSettings(prisma),
     loadTrafficZones(prisma),
-    loadVehicleInputs(prisma),
+    loadDayVehicleInputs(prisma, isoDate),
     prisma.trip.findMany({
       where: { serviceDate, status: { notIn: [...EXCLUDED_TRIP_STATUSES] } },
       select: tripInputSelect,

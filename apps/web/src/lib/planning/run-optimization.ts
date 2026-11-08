@@ -191,7 +191,7 @@ export async function runOptimization(
     const traced = withBeforeCommit(db, (tx) =>
       audit(tx, user, { action: "plan.optimize", entity: "OptimizationRun", entityId: run.id, serviceDate: isoDate }),
     );
-    saved = await savePlan(traced, { runId: run.id, isoDate, request, response: plan });
+    saved = await savePlan(traced, { runId: run.id, isoDate, request, response: plan, crews: build.crews });
   } catch (error) {
     if (error instanceof PlanBlockedError) return fail(error.message, meta);
     logError("[planning] saving the plan failed", error, { runId: run.id, serviceDate: isoDate });

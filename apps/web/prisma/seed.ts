@@ -109,6 +109,9 @@ function lookup<K, V>(map: Map<K, V>, key: K, what: string): V {
 async function wipe(): Promise<void> {
   await prisma.$transaction([
     prisma.auditEvent.deleteMany(),
+    prisma.dayCrew.deleteMany(),
+    prisma.staffAbsence.deleteMany(),
+    prisma.crewIncompatibility.deleteMany(),
     prisma.routeStop.deleteMany(),
     prisma.trip.deleteMany(),
     prisma.route.deleteMany(),
@@ -254,6 +257,39 @@ async function seedVehicles(
     if (vehicle.crewMate) vehicleOfDriver.set(vehicle.crewMate, vehicle.label);
   }
   return vehicleOfDriver;
+}
+
+/**
+ * Staff planning examples (lot 3), next week so the Équipages page shows them:
+ * a taxi driver of Sisteron on leave Monday to Friday (no spare taxi driver in
+ * Sisteron: the replacement comes from another depot), an ambulance driver of
+ * Gap on call on Wednesday (replaced by Gap's spare DEA), and one pair of
+ * people not to put in the same crew.
+ */
+async function seedStaffPlanning(drivers: Map<DriverKey, CreatedDriver>, dates: Dates): Promise<void> {
+  const id = (key: DriverKey) => lookup(drivers, key, "Chauffeur").id;
+  await prisma.staffAbsence.createMany({
+    data: [
+      {
+        driverId: id("thomas"),
+        kind: "LEAVE",
+        startDate: fromIsoDate(dates.nextMonday),
+        endDate: fromIsoDate(addDays(dates.nextMonday, 4)),
+        note: "Congés posés en septembre.",
+      },
+      {
+        driverId: id("franck"),
+        kind: "ON_CALL",
+        startDate: fromIsoDate(addDays(dates.nextMonday, 2)),
+        endDate: fromIsoDate(addDays(dates.nextMonday, 2)),
+        note: "Garde départementale 8 h – 20 h.",
+      },
+    ],
+  });
+  const [a, b] = [id("julien"), id("kevin")].sort();
+  await prisma.crewIncompatibility.create({
+    data: { driverAId: a!, driverBId: b!, note: "Ne pas mettre ensemble en équipage (à revoir avec la direction)." },
+  });
 }
 
 /** The regulator account (its id records the seeded sharing answers) and one account per driver. */
@@ -622,6 +658,7 @@ async function main(): Promise<void> {
   const depots = await seedDepots();
   const drivers = await seedDrivers(rng, depots);
   const vehicleOfDriver = await seedVehicles(drivers, depots);
+  await seedStaffPlanning(drivers, dates);
   const { regulatorId, accounts } = await seedUsers(drivers, vehicleOfDriver);
   console.log("• Patients, prescriptions et récurrences");
   const names = new NameFactory(rng, Object.values(DRIVERS));

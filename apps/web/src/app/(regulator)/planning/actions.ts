@@ -5,7 +5,7 @@ import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { loadVehicleInputs, personName, resolveVehicleAvailability } from "@/lib/optimizer/build-request";
+import { loadDayVehicleInputs, personName, resolveVehicleAvailability } from "@/lib/optimizer/build-request";
 import { readRunDetails } from "@/lib/optimizer/run-details";
 import { LOCKED, lockAction, notLockedOn } from "@/lib/planning/lock";
 import {
@@ -81,7 +81,7 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
   const blocker = await replanBlocker(isoDate);
   if (blocker) return { ok: false, error: blocker };
 
-  const { available, skipped } = resolveVehicleAvailability(await loadVehicleInputs(db), isoDate);
+  const { available, skipped } = resolveVehicleAvailability(await loadDayVehicleInputs(db, isoDate), isoDate);
   const target = available.find((v) => v.id === ids.data.vehicleId);
   if (!target) {
     const skip = skipped.find((s) => s.vehicleId === ids.data.vehicleId);

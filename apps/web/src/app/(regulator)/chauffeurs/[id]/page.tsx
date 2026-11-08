@@ -6,7 +6,8 @@ import { FormMessage } from "@/components/ui/form";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { fromIsoDate, todayIso } from "@/lib/time";
+import { addDays, fromIsoDate, todayIso, toIsoDate, tomorrowIso } from "@/lib/time";
+import { absenceText } from "@/lib/staff/day-crews";
 import { ConfirmAction } from "@/components/ui/confirm-action";
 import { plannedSeatCount } from "../../vehicules/_lib/crew";
 import { BackLink, Callout, UpcomingRoutesCallout } from "../../vehicules/_lib/ui";
@@ -15,7 +16,9 @@ import { saveDriverAccount, setDriverAccountActive, setDriverActive, updateDrive
 import { DriverForm } from "../driver-form";
 import { driverFormValues, OPEN_SESSION_NOTE } from "../schema";
 import { loadDepotOptions } from "@/app/(regulator)/depots/options";
+import { addAbsence, addIncompatibility, deleteAbsence, deleteIncompatibility } from "../staff-actions";
 import { AccountForm } from "./account-form";
+import { AbsenceForm, IncompatibilityForm } from "./staff-cards";
 
 export const metadata: Metadata = { title: "Fiche chauffeur" };
 
@@ -42,7 +45,30 @@ export default async function EditDriverPage({
   });
   if (!driver) notFound();
 
-  const depots = await loadDepotOptions(driver.depotId);
+  const today = todayIso();
+  const [depots, absences, pairs, others] = await Promise.all([
+    loadDepotOptions(driver.depotId),
+    // Recent and upcoming: the last 30 days are kept on screen to correct a mistake.
+    db.staffAbsence.findMany({
+      where: { driverId: driver.id, endDate: { gte: fromIsoDate(addDays(today, -30)) } },
+      orderBy: { startDate: "asc" },
+      select: { id: true, kind: true, startDate: true, endDate: true, note: true },
+    }),
+    db.crewIncompatibility.findMany({
+      where: { OR: [{ driverAId: driver.id }, { driverBId: driver.id }] },
+      select: {
+        id: true,
+        note: true,
+        driverA: { select: { id: true, firstName: true, lastName: true } },
+        driverB: { select: { id: true, firstName: true, lastName: true } },
+      },
+    }),
+    db.driver.findMany({
+      where: { active: true, id: { not: driver.id } },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+      select: { id: true, firstName: true, lastName: true },
+    }),
+  ]);
   const upcomingRoutes = toUpcomingRoutes(
     await db.route.findMany({
       where: { serviceDate: { gte: fromIsoDate(todayIso()) }, OR: [{ driverId: driver.id }, { crewMateId: driver.id }] },
@@ -150,6 +176,88 @@ export default async function EditDriverPage({
               ) : (
                 <p className="text-slate-500">Réactivez le chauffeur pour gérer son accès.</p>
               )}
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader title="Absences et gardes" />
+            <CardBody className="space-y-4 text-sm text-slate-700">
+              <p className="text-xs text-slate-500">
+                Congé, arrêt, formation ou garde : la personne n&apos;est pas proposée dans les équipages de ces jours,
+                et un remplaçant l&apos;est à sa place (page Équipages).
+              </p>
+              {absences.length === 0 ? (
+                <p className="text-slate-500">Aucune absence récente ou à venir.</p>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {absences.map((a) => {
+                    const text = absenceText({ kind: a.kind, startDate: toIsoDate(a.startDate), endDate: toIsoDate(a.endDate) });
+                    const past = toIsoDate(a.endDate) < today;
+                    return (
+                      <li key={a.id} className="space-y-1 py-2">
+                        <p className={past ? "text-slate-500" : "font-medium text-slate-900"}>
+                          {text}
+                          {past ? " (passée)" : ""}
+                        </p>
+                        {a.note ? <p className="text-xs text-slate-500">{a.note}</p> : null}
+                        <ConfirmAction
+                          action={deleteAbsence.bind(null, driver.id, a.id)}
+                          label="Supprimer"
+                          confirmLabel="Confirmer la suppression"
+                          pendingLabel="Suppression…"
+                          variant="ghost"
+                          question={<p>Supprimer « {text} » ?</p>}
+                        />
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <div className="border-t border-slate-200 pt-4">
+                <AbsenceForm action={addAbsence.bind(null, driver.id)} defaultDate={tomorrowIso()} />
+              </div>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader title="Incompatibilités d'équipage" />
+            <CardBody className="space-y-4 text-sm text-slate-700">
+              <p className="text-xs text-slate-500">
+                Personnes avec qui ne pas former d&apos;équipage : elles ne sont jamais proposées ensemble, et un
+                équipage fixé avec elles est refusé.
+              </p>
+              {pairs.length === 0 ? (
+                <p className="text-slate-500">Aucune.</p>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {pairs.map((pair) => {
+                    const other = pair.driverA.id === driver.id ? pair.driverB : pair.driverA;
+                    const name = `${other.firstName} ${other.lastName}`;
+                    return (
+                      <li key={pair.id} className="space-y-1 py-2">
+                        <Link href={`/chauffeurs/${other.id}`} className="font-medium underline-offset-2 hover:underline">
+                          {name}
+                        </Link>
+                        {pair.note ? <p className="text-xs text-slate-500">{pair.note}</p> : null}
+                        <ConfirmAction
+                          action={deleteIncompatibility.bind(null, driver.id, pair.id)}
+                          label="Supprimer"
+                          confirmLabel="Confirmer la suppression"
+                          pendingLabel="Suppression…"
+                          variant="ghost"
+                          question={<p>Ces deux personnes pourront de nouveau être proposées ensemble.</p>}
+                        />
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <div className="border-t border-slate-200 pt-4">
+                <IncompatibilityForm
+                  action={addIncompatibility.bind(null, driver.id)}
+                  people={others.map((o) => ({ id: o.id, name: `${o.lastName.toUpperCase()} ${o.firstName}` }))}
+                />
+              </div>
             </CardBody>
           </Card>
 
