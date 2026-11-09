@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { latenessShown, nextStopTiming, nextStopTimingText, recordedLateness } from "./punctuality";
+import { latenessShown, nextStopTiming, nextStopTimingText, plannedTapMinute, recordedLateness } from "./punctuality";
 
 // A pickup reached at 08:00 (480) for service at 08:05 (485).
 const pickup = { plannedArrivalMinute: 480, plannedMinute: 485, anchorArrivalMinute: null, appointmentMinute: null };
@@ -56,8 +56,18 @@ describe("nextStopTiming", () => {
 describe("recordedLateness", () => {
   it("measures an outbound dropoff from the appointment, not from the planned time", () => {
     // Planned 07:15, appointment 07:30, dropped off 07:40: 10 min late for the appointment (not 25).
-    expect(recordedLateness({ completedMinute: 460, plannedMinute: 435, appointmentMinute: 450 })).toEqual({ minutes: 10, reference: "appointment" });
-    expect(recordedLateness({ completedMinute: 460, plannedMinute: 435, appointmentMinute: null })).toEqual({ minutes: 25, reference: "planned" });
+    expect(recordedLateness({ completedMinute: 460, plannedTapMinute: 435, appointmentMinute: 450 })).toEqual({ minutes: 10, reference: "appointment" });
+    expect(recordedLateness({ completedMinute: 460, plannedTapMinute: 435, appointmentMinute: null })).toEqual({ minutes: 25, reference: "planned" });
+  });
+
+  it("dates a pickup at its planned departure (patient on board), a dropoff and an absence at the planned start", () => {
+    const stop = { startMinute: 480, departureMinute: 495 };
+    expect(plannedTapMinute({ ...stop, kind: "PICKUP", noShow: false })).toBe(495);
+    expect(plannedTapMinute({ ...stop, kind: "PICKUP", noShow: true })).toBe(480);
+    expect(plannedTapMinute({ ...stop, kind: "DROPOFF", noShow: false })).toBe(480);
+    // An ambulance pickup with 15 min of service, tapped on time at 08:15: not late.
+    const tap = plannedTapMinute({ ...stop, kind: "PICKUP", noShow: false });
+    expect(recordedLateness({ completedMinute: 495, plannedTapMinute: tap, appointmentMinute: null })).toEqual({ minutes: 0, reference: "planned" });
   });
 
   it("shows any delay after an appointment, and 5 min or more either way on the planned time", () => {

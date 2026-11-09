@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
-import { LogOut } from "lucide-react";
 import { requireDriverAccount } from "@/lib/auth";
 import { sessionExpiresAt } from "@/lib/auth/session";
 import { cn } from "@/components/ui/cn";
-import { logout } from "@/app/login/actions";
 import { DriverAppProvider } from "./_components/driver-app";
 import { FieldStatusBars } from "./_components/field-status";
+import { LogoutButton } from "./_components/logout-button";
 import { RegulatorCallButton } from "./_components/regulator-call";
 import { loadRegulatorContact } from "./_lib/load";
 
@@ -16,28 +15,6 @@ export const metadata: Metadata = {
   formatDetection: { telephone: false, address: false },
 };
 
-/**
- * Logout keeps its visible label in both layouts. Next to the call button the
- * label goes under the icon, so the header still fits on a 390 px phone.
- */
-function LogoutButton({ stacked }: { stacked: boolean }) {
-  return (
-    <form action={logout}>
-      <button
-        type="submit"
-        title="Ferme la session sur tous vos appareils"
-        className={cn(
-          "inline-flex min-h-11 items-center rounded-lg font-medium text-brand-50 hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
-          stacked ? "min-w-11 flex-col justify-center gap-1 px-1 text-[11px] leading-none" : "gap-1.5 px-3 text-sm",
-        )}
-      >
-        <LogOut aria-hidden className="size-4" />
-        Déconnexion
-      </button>
-    </form>
-  );
-}
-
 export default async function DriverLayout({ children }: { children: React.ReactNode }) {
   // Not requireDriver: the layout also frames the page where a provisional password is changed.
   // Each page checks its own access (the roadmap: requireDriver).
@@ -45,7 +22,12 @@ export default async function DriverLayout({ children }: { children: React.React
   const [regulator, expiresAt] = await Promise.all([loadRegulatorContact(), sessionExpiresAt()]);
 
   return (
-    <DriverAppProvider ownerId={user.id} sessionExpiresAt={expiresAt?.toISOString() ?? null} regulator={regulator}>
+    <DriverAppProvider
+      ownerId={user.id}
+      mustChangePassword={user.mustChangePassword}
+      sessionExpiresAt={expiresAt?.toISOString() ?? null}
+      regulator={regulator}
+    >
       <div className="mx-auto flex min-h-below-banner max-w-lg flex-col bg-slate-50">
         <header className="sticky top-below-banner z-20 shadow-sm">
           <div

@@ -129,6 +129,36 @@ describe("StatusQueue", () => {
     expect(queue.getSnapshot().byStop).toEqual({});
   });
 
+  it("withdraws a status whose send timed out by sending an undo in its place (the server may have it)", async () => {
+    const TIMEOUT: SendOutcome = { kind: "retry", reason: "timeout", maybeReceived: true };
+    const { queue, storage, sent } = setup({ answers: [TIMEOUT, OFFLINE] });
+    await queue.submit("stop_1", "NO_SHOW");
+    expect(queue.getSnapshot().byStop.stop_1).toMatchObject({ action: "NO_SHOW", phase: "queued", uncertain: true });
+
+    // « Retirer ce statut »: the absence is not forgotten silently, an undo replaces it.
+    expect(await queue.cancelQueued("stop_1")).toBe(true);
+    expect(storage.values()).toEqual([expect.objectContaining({ stopId: "stop_1", action: "UNDO" })]);
+    expect(queue.getSnapshot()).toMatchObject({ pending: 1, byStop: { stop_1: { action: "UNDO", phase: "queued" } } });
+    await queue.flush();
+    expect(sent.map((s) => s.action)).toEqual(["NO_SHOW", "UNDO", "UNDO"]);
+    expect(storage.values()).toEqual([]);
+
+    // An undo that may already have reached the server is sent again, never withdrawn.
+    const again = setup({ answers: [TIMEOUT] });
+    await again.queue.submit("stop_2", "UNDO");
+    expect(await again.queue.cancelQueued("stop_2")).toBe(false);
+    expect(again.storage.values()).toEqual([expect.objectContaining({ action: "UNDO" })]);
+  });
+
+  it("forgets a withdrawn status that never left the phone", async () => {
+    const { queue, storage, sent } = setup({ answers: [OFFLINE] });
+    await queue.submit("stop_1", "PICKUP");
+    expect(queue.getSnapshot().byStop.stop_1?.uncertain).toBeUndefined();
+    expect(await queue.cancelQueued("stop_1")).toBe(true);
+    expect(storage.values()).toEqual([]);
+    expect(sent).toHaveLength(1);
+  });
+
   it("drops a refused status with its reason, and goes on with the next ones", async () => {
     const { queue, storage, sent } = setup({
       stored: [
@@ -150,6 +180,16 @@ describe("StatusQueue", () => {
     // A new tap on the stop clears its refusal; « J'ai compris » clears them all.
     await queue.submit("stop_1", "NO_SHOW");
     expect(queue.getSnapshot().refusals).toEqual([]);
+  });
+
+  it("tells the page about each refusal (it is stale: refreshed), not about a status that waits", async () => {
+    const { queue } = setup({ answers: [OFFLINE, { kind: "refused", error: "Conflit.", serverTime: 5 }] });
+    const refused = vi.fn();
+    queue.onRefused(refused);
+    await queue.submit("stop_1", "PICKUP");
+    expect(refused).not.toHaveBeenCalled();
+    await queue.flush();
+    expect(refused).toHaveBeenCalledWith(expect.objectContaining({ stopId: "stop_1", action: "PICKUP", error: "Conflit." }));
   });
 
   it("pauses on an expired session, keeps everything, and resumes after the sign-in", async () => {

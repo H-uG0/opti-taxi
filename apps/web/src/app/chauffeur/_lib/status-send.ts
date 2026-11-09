@@ -3,7 +3,15 @@
  * fetch with a timeout, never a redirect, and the answer read into what the
  * queue does next. Browser only.
  */
-import { classifyStatusResponse, SESSION_URL, stopStatusUrl, type SendOutcome, type SessionResponseBody } from "./status-protocol";
+import {
+  classifyStatusResponse,
+  SESSION_URL,
+  stopStatusUrl,
+  type SendOutcome,
+  type SessionRequestBody,
+  type SessionResponseBody,
+  type StatusRequestBody,
+} from "./status-protocol";
 import type { QueuedStatus } from "./status-queue";
 
 /** A status request still unanswered after this is abandoned and the status waits in the queue. */
@@ -30,35 +38,41 @@ async function postJson(url: string, body: unknown, timeoutMs: number): Promise<
   }
 }
 
-export async function sendQueuedStatus(status: QueuedStatus): Promise<SendOutcome> {
+/** Sends one status of `ownerId`'s queue (the server keeps it waiting if the session is now another account's). */
+export async function sendQueuedStatus(status: QueuedStatus, ownerId: string): Promise<SendOutcome> {
+  // Not even tried: certainly not received.
   if (navigator.onLine === false) return { kind: "retry", reason: "offline" };
   const startedAt = Date.now();
   try {
-    const { status: httpStatus, json } = await postJson(
-      stopStatusUrl(status.stopId),
-      { action: status.action, observedAt: status.observedAt, sentAt: startedAt },
-      SEND_TIMEOUT_MS,
-    );
+    const body: StatusRequestBody = { action: status.action, observedAt: status.observedAt, sentAt: startedAt, ownerId };
+    const { status: httpStatus, json } = await postJson(stopStatusUrl(status.stopId), body, SEND_TIMEOUT_MS);
     return classifyStatusResponse(httpStatus, json);
   } catch {
-    return { kind: "retry", reason: Date.now() - startedAt >= SEND_TIMEOUT_MS ? "timeout" : "offline" };
+    // Abandoned (15 s) or cut without an answer: the server may have recorded it.
+    return { kind: "retry", reason: Date.now() - startedAt >= SEND_TIMEOUT_MS ? "timeout" : "offline", maybeReceived: true };
   }
 }
 
+/** A driver session as the phone sees it: its end on the phone's clock, and whether it still prolongs itself. */
+export type SessionState = { expiresAt: number; renewable: boolean };
+
 /**
  * Asks the server to renew the session if it is close to its end. Returns the
- * session's end on the phone's clock (corrected by the server's clock), "lost"
- * when the server has no current session, null when it could not be asked.
+ * session's end on the phone's clock (corrected by the server's clock) and
+ * whether it can still be renewed, "lost" when the server has no current
+ * session for `ownerId` (expired, or the cookie is now another account's),
+ * null when it could not be asked.
  */
-export async function renewSession(): Promise<number | "lost" | null> {
+export async function renewSession(ownerId: string): Promise<SessionState | "lost" | null> {
   if (navigator.onLine === false) return null;
   try {
-    const { status, json } = await postJson(SESSION_URL, {}, SEND_TIMEOUT_MS);
+    const request: SessionRequestBody = { ownerId };
+    const { status, json } = await postJson(SESSION_URL, request, SEND_TIMEOUT_MS);
     const body = json as SessionResponseBody | null;
     if (status === 401) return "lost";
     if (!body || !body.ok || !body.sessionExpiresAt) return null;
     const offset = body.serverTime - Date.now();
-    return Date.parse(body.sessionExpiresAt) - offset;
+    return { expiresAt: Date.parse(body.sessionExpiresAt) - offset, renewable: body.renewable !== false };
   } catch {
     return null;
   }

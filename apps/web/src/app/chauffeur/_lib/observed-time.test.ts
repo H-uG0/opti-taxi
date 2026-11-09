@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundObservedAt, DEFERRED_AFTER_MS, MAX_STATUS_AGE_MS } from "./observed-time";
+import { boundObservedAt, DEFERRED_AFTER_MS, MAX_STATUS_AGE_MS, previousStatusAt, type RecordedStop } from "./observed-time";
 
 const RECEIVED = new Date("2026-11-03T07:25:00Z");
 const MIN = 60_000;
@@ -67,5 +67,60 @@ describe("boundObservedAt", () => {
       deferred: false,
     });
     expect(boundObservedAt({ observedAt: Number.NaN, sentAt: at(0), receivedAt: RECEIVED, previousAt: null })).toMatchObject({ at: RECEIVED });
+  });
+});
+
+describe("previousStatusAt", () => {
+  const stop = (
+    id: string,
+    sequence: number,
+    kind: "PICKUP" | "DROPOFF",
+    tripId: string,
+    minutes: number | null,
+    cancelled = false,
+  ): RecordedStop => ({
+    id,
+    sequence,
+    kind,
+    tripId,
+    completedAt: minutes === null ? null : new Date(at(minutes * MIN)),
+    cancelled,
+  });
+
+  it("is the latest status recorded on an earlier stop of the route, or the trip's pickup for a dropoff", () => {
+    const route = [
+      stop("a_pick", 1, "PICKUP", "a", -40),
+      stop("b_pick", 2, "PICKUP", "b", -25),
+      stop("a_drop", 3, "DROPOFF", "a", null),
+      stop("c_pick", 4, "PICKUP", "c", -5),
+    ];
+    // A pickup or an absence on stop 3 or later cannot go before b's pickup (08:00), whatever the phone says.
+    expect(previousStatusAt(route[2]!, route)).toEqual(new Date(at(-25 * MIN)));
+    expect(previousStatusAt({ id: "x", sequence: 5, kind: "PICKUP", tripId: "x" }, route)).toEqual(new Date(at(-5 * MIN)));
+    // A later stop recorded meanwhile (crew mate) does not bound an earlier one; the first stop has nothing before it.
+    expect(previousStatusAt(route[1]!, route)).toEqual(new Date(at(-40 * MIN)));
+    expect(previousStatusAt(route[0]!, route)).toBeNull();
+  });
+
+  it("leaves out cancelled trips and the stop itself, never its own trip's pickup", () => {
+    const route = [
+      stop("a_pick", 1, "PICKUP", "a", -40),
+      stop("z_pick", 2, "PICKUP", "z", -10, true),
+      stop("a_drop", 3, "DROPOFF", "a", -30),
+    ];
+    expect(previousStatusAt(route[2]!, route)).toEqual(new Date(at(-40 * MIN)));
+    // A dropoff placed before its pickup in a hand-made route still follows it.
+    const swapped = [stop("a_drop", 1, "DROPOFF", "a", null), stop("a_pick", 2, "PICKUP", "a", -15)];
+    expect(previousStatusAt(swapped[0]!, swapped)).toEqual(new Date(at(-15 * MIN)));
+  });
+
+  it("brings forward a status sent later that would go before a status already recorded", () => {
+    // Pickup of stop 4 tapped offline at 08:00, sent at 08:25; stop 3 was recorded at 08:10 by the crew mate.
+    const previousAt = new Date(at(-15 * MIN));
+    expect(boundObservedAt({ observedAt: at(-25 * MIN), sentAt: at(0), receivedAt: RECEIVED, previousAt })).toEqual({
+      ok: true,
+      at: previousAt,
+      deferred: true,
+    });
   });
 });

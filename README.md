@@ -160,11 +160,14 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
   l'application est rouverte sans connexion. Les statuts tapés hors réseau attendent dans une file sur le
   téléphone (IndexedDB : identifiant de l'arrêt, action, heure du geste, rien d'autre) et partent au
   retour du réseau ; le serveur les enregistre à l'heure du geste (bornée : pas dans le futur, au plus
-  3 h avant, jamais avant la prise en charge) et garde aussi l'heure de réception.
+  3 h avant, jamais avant un statut déjà saisi plus tôt dans la tournée) et garde aussi l'heure de
+  réception. Chaque envoi dit à quel compte appartient la file : sous la session d'un autre compte, le
+  statut attend la reconnexion de son titulaire.
 - **Sessions** : jeton signé de 12 h, revérifié en base à chaque requête. Celle d'un chauffeur est
   prolongée de 12 h dès qu'il en reste moins de 5 et que l'application joint le serveur (statut,
-  ouverture, retour sur l'écran) ; la feuille de route affiche « Session valable jusqu'à HH:MM » et
-  prévient 30 min avant la fin. La déconnexion ferme les
+  ouverture, retour sur l'écran), pendant 7 jours au plus après la saisie du mot de passe
+  (`DRIVER_MAX_SESSION_DAYS`, à valider avec le DPO) ; la feuille de route affiche « Session valable
+  jusqu'à HH:MM » et prévient 30 min avant la fin. La déconnexion ferme les
   sessions du compte sur tous ses appareils. Désactiver un chauffeur ou son accès, ou lui donner un
   nouveau mot de passe ou une nouvelle adresse e-mail, coupe sa session ouverte dès sa prochaine action
   ou actualisation ; une réactivation ne la fait pas revenir (le chauffeur se reconnecte).

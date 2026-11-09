@@ -8,7 +8,9 @@
  *   driver-app.tsx) and replaces the buttons: « Envoi en cours », then
  *   « Enregistré » until the page is refreshed a moment later, or « En
  *   attente d'envoi » when there is no network (sent again by itself);
- * - a status still waiting can be withdrawn (« Retirer ce statut »);
+ * - a status still waiting can be withdrawn (« Retirer ce statut »); one
+ *   whose send got no final answer may be on the server, so withdrawing it
+ *   sends an « Annuler » (the queue decides, see cancelQueued);
  * - a refusal (cancelled trip, status changed by the other crew member…)
  *   puts the buttons back with the reason, and the driver can tap again;
  * - a slow network is announced after a few seconds instead of a silent
@@ -48,6 +50,21 @@ function useSlow(sending: boolean): boolean {
   return slow;
 }
 
+/** Where a status waiting on the phone stands (« elle »: the undo, « il »: the status). */
+function waitingText(local: LocalStatus, sessionLost: boolean): string {
+  const undo = local.action === "UNDO";
+  if (local.uncertain) {
+    // Sent without a final answer (timeout, cut): the server may already have it; a replay changes nothing.
+    return undo
+      ? "Envoi incertain : elle est peut-être déjà enregistrée ; elle est renvoyée sans doublon."
+      : "Envoi incertain : il est peut-être déjà enregistré ; il est renvoyé sans doublon.";
+  }
+  if (sessionLost) return `En attente d'envoi : ${undo ? "elle part" : "il part, avec l'heure du geste,"} après la reconnexion.`;
+  return undo
+    ? "En attente d'envoi : elle part dès que le réseau revient."
+    : "En attente d'envoi : il part dès que le réseau revient, avec l'heure du geste.";
+}
+
 /** The latest status tapped on this stop, in place of the buttons until the page shows it. */
 function LocalStatusPanel({ stopId, local }: { stopId: string; local: LocalStatus }) {
   const { cancelQueued } = useDriverApp();
@@ -57,6 +74,9 @@ function LocalStatusPanel({ stopId, local }: { stopId: string; local: LocalStatu
   const label = local.action === "UNDO" ? "Annulation du statut" : `${STATUS_LABELS[local.action]} à ${at}`;
 
   if (local.phase === "queued") {
+    const undo = local.action === "UNDO";
+    // An undo that may already be on the server is sent again, never taken back (see cancelQueued).
+    const withdrawable = !(undo && local.uncertain);
     return (
       <div role="status" className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
         <div>
@@ -64,22 +84,18 @@ function LocalStatusPanel({ stopId, local }: { stopId: string; local: LocalStatu
             <CloudOff aria-hidden className="size-5 shrink-0" />
             <span className="tabular">{label}</span>
           </p>
-          <p className="mt-0.5 text-sm">
-            {sessionLost
-              ? `En attente d'envoi : ${local.action === "UNDO" ? "elle part" : "il part, avec l'heure du geste,"} après la reconnexion.`
-              : local.action === "UNDO"
-                ? "En attente d'envoi : elle part dès que le réseau revient."
-                : "En attente d'envoi : il part dès que le réseau revient, avec l'heure du geste."}
-          </p>
+          <p className="mt-0.5 text-sm">{waitingText(local, sessionLost !== null)}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => cancelQueued(stopId)}
-          className={cn(bigButton, "min-h-12 border border-amber-400 bg-white text-base text-amber-950 hover:bg-amber-100")}
-        >
-          <Undo2 aria-hidden className="size-5" />
-          {local.action === "UNDO" ? "Ne pas annuler" : "Retirer ce statut"}
-        </button>
+        {withdrawable ? (
+          <button
+            type="button"
+            onClick={() => cancelQueued(stopId)}
+            className={cn(bigButton, "min-h-12 border border-amber-400 bg-white text-base text-amber-950 hover:bg-amber-100")}
+          >
+            <Undo2 aria-hidden className="size-5" />
+            {undo ? "Ne pas annuler" : "Retirer ce statut"}
+          </button>
+        ) : null}
       </div>
     );
   }
@@ -104,9 +120,10 @@ function LocalStatusPanel({ stopId, local }: { stopId: string; local: LocalStatu
   );
 }
 
+/** The reason on the stop itself. Not a live region: the header's refusal bar announces it once. */
 function ActionError({ message }: { message: string }) {
   return (
-    <p role="alert" className="flex items-start gap-2 rounded-xl border border-red-300 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-900">
+    <p className="flex items-start gap-2 rounded-xl border border-red-300 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-900">
       <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
       {message}
     </p>
@@ -230,18 +247,34 @@ export function StopActions({
   );
 }
 
-/** "Annuler" on the stop holding the latest status of the route. */
-export function UndoStatus({ stopId, label }: { stopId: string; label: string }) {
+/**
+ * "Annuler" on the stop holding the latest status of the route (as the page
+ * last saw it). Hidden while this phone holds a newer status of the route
+ * (waiting, or sent and not yet on the page): the server would refuse this
+ * undo, and « Retirer ce statut » on that stop is the undo to offer.
+ */
+export function UndoStatus({
+  stopId,
+  label,
+  routeStopIds,
+}: {
+  stopId: string;
+  label: string;
+  /** Every stop of the route. */
+  routeStopIds: readonly string[];
+}) {
   const { submit } = useDriverApp();
   const { byStop } = useQueueSnapshot();
   const refusal = useRefusal(stopId);
   const local = localStatusShown(false, byStop[stopId]);
+  const newerOnPhone = routeStopIds.some((id) => id !== stopId && byStop[id] !== undefined && byStop[id].action !== "UNDO");
+  if (!local && !refusal && newerOnPhone) return null;
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 border-t border-slate-200 bg-white p-3">
       {local ? (
         <LocalStatusPanel stopId={stopId} local={local} />
-      ) : (
+      ) : newerOnPhone ? null : (
         <button
           type="button"
           onClick={() => submit(stopId, "UNDO")}

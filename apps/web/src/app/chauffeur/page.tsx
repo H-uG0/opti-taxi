@@ -67,7 +67,7 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
   const requested = typeof params.date === "string" ? params.date : null;
   if (params.date !== undefined && !isReadableRoadmapDate(requested, today)) redirect("/chauffeur");
   const date = requested ?? today;
-  // Statuses are recorded on the service day only (the server actions check it too).
+  // Statuses are recorded on the service day only (the status route handler checks it too).
   const editable = date === today;
 
   const [routes, regulator] = await Promise.all([

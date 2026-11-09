@@ -4,7 +4,7 @@ import { Clock } from "lucide-react";
 import { cn } from "@/components/ui/cn";
 import { formatMinute, minuteOfDay } from "@/lib/time";
 import { nextStopTiming, nextStopTimingText } from "../_lib/punctuality";
-import { useMinuteClock } from "./driver-app";
+import { useMinuteClock, useQueueSnapshot } from "./driver-app";
 
 const TONES = {
   early: "bg-sky-50 text-sky-900 ring-sky-200",
@@ -15,21 +15,26 @@ const TONES = {
 /**
  * « En avance / À l'heure / En retard » on the next stop of today's route,
  * read on the phone's clock and updated each minute (nothing during the server
- * render). An outbound dropoff is judged against the appointment.
+ * render). An outbound dropoff is judged against the appointment. Hidden once
+ * a status of the stop is tapped on the phone (waiting in a white zone, or not
+ * yet on the page): the crew is past it, and it would keep counting late.
  */
 export function NextStopTiming({
+  stopId,
   plannedArrivalMinute,
   plannedMinute,
   anchorArrivalMinute,
   appointmentMinute,
 }: {
+  stopId: string;
   plannedArrivalMinute: number;
   plannedMinute: number;
   anchorArrivalMinute: number | null;
   appointmentMinute: number | null;
 }) {
   const now = useMinuteClock();
-  if (now === null) return null;
+  const local = useQueueSnapshot().byStop[stopId];
+  if (now === null || (local && local.action !== "UNDO")) return null;
   const timing = nextStopTiming({
     nowMinute: minuteOfDay(new Date(now)),
     plannedArrivalMinute,

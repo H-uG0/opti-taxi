@@ -7,7 +7,7 @@ import type { Mobility, RouteStatus, StopKind, VehicleType } from "@prisma/clien
 import { minuteOfDay } from "@/lib/time";
 import type { DriverRoute } from "./load";
 import { phoneContact, telHref, type PhoneContact } from "./links";
-import { recordedLateness, type RecordedLateness } from "./punctuality";
+import { plannedTapMinute, recordedLateness, type RecordedLateness } from "./punctuality";
 import {
   buildTimeline,
   coPassengers,
@@ -37,8 +37,13 @@ export type StopView = {
   /** Real time of the recorded status, minutes since midnight Europe/Paris. */
   completedMinute: number | null;
   /**
+   * Planned departure of a pickup whose patient is on board, when it differs
+   * from plannedMinute (the status was due then, after the service time); null otherwise.
+   */
+  plannedDepartureMinute: number | null;
+  /**
    * Real time against the appointment (outbound dropoff with one) or the
-   * planned time (any other stop), null when not recorded.
+   * planned moment of the status (any other stop: plannedTapMinute), null when not recorded.
    */
   lateness: RecordedLateness | null;
   /**
@@ -148,6 +153,11 @@ export function buildRouteView(
   const latestId = latestCompletedStopId(like);
   const pickupOfTrip = new Map(route.stops.filter((stop) => stop.kind === "PICKUP").map((stop) => [stop.tripId, stop.id]));
   const latestStop = route.stops.find((stop) => stop.id === latestId) ?? null;
+  // Planned moment of the latest status: « Pris en charge » is tapped with the patient on board
+  // (planned departure), « Déposé » and « Patient absent » at the planned start.
+  const latestPlannedTap = latestStop
+    ? plannedTapMinute({ ...latestStop, noShow: latestStop.trip.status === "NO_SHOW" })
+    : null;
   const shared = coPassengers(like);
   const onBoard = onBoardAfterStops(like);
   const nameOfTrip = new Map(route.stops.map((stop) => [stop.tripId, displayName(stop.trip.patient)]));
@@ -167,11 +177,12 @@ export function buildRouteView(
       // The appointment an outbound dropoff is judged against.
       const appointmentMinute = trip.direction === "OUTBOUND" && stop.kind === "DROPOFF" ? trip.appointmentMinute : null;
       const completedMinute = stop.completedAt ? minuteOfDay(stop.completedAt) : null;
-      // The latest status recorded before this stop: its real time plus the planned time from it to here.
+      // The latest status recorded before this stop: its real time plus the planned time from its planned moment to here.
       const anchorArrivalMinute =
-        latestStop?.completedAt && latestStop.sequence < stop.sequence
-          ? minuteOfDay(latestStop.completedAt) + (stop.arrivalMinute - latestStop.startMinute)
+        latestStop?.completedAt && latestPlannedTap !== null && latestStop.sequence < stop.sequence
+          ? minuteOfDay(latestStop.completedAt) + (stop.arrivalMinute - latestPlannedTap)
           : null;
+      const plannedTap = plannedTapMinute({ ...stop, noShow: state === "no_show" });
       return {
         id: stop.id,
         position: index + 1,
@@ -181,9 +192,10 @@ export function buildRouteView(
         plannedMinute: stop.startMinute,
         plannedArrivalMinute: stop.arrivalMinute,
         completedMinute,
+        plannedDepartureMinute: state === "done" && stop.kind === "PICKUP" && plannedTap !== stop.startMinute ? plannedTap : null,
         lateness:
           completedMinute !== null
-            ? recordedLateness({ completedMinute, plannedMinute: stop.startMinute, appointmentMinute })
+            ? recordedLateness({ completedMinute, plannedTapMinute: plannedTap, appointmentMinute })
             : null,
         timing: editable && stop.id === nextId ? { appointmentMinute, anchorArrivalMinute } : null,
         pickupStopId: stop.kind === "DROPOFF" ? (pickupOfTrip.get(stop.tripId) ?? null) : null,

@@ -26,9 +26,12 @@ describe("classifyStatusResponse", () => {
   });
 
   it("keeps the status for a later try on a server failure or an answer that is not the route's", () => {
-    expect(classifyStatusResponse(500, { ok: false, code: "server", error: "…" })).toEqual({ kind: "retry", reason: "server" });
-    expect(classifyStatusResponse(502, null)).toEqual({ kind: "retry", reason: "server" });
-    expect(classifyStatusResponse(404, null)).toEqual({ kind: "retry", reason: "server" });
+    // An answer from a server failure or a proxy: the status may be recorded all the same.
+    const maybe = { kind: "retry", reason: "server", maybeReceived: true };
+    expect(classifyStatusResponse(500, { ok: false, code: "server", error: "…" })).toEqual(maybe);
+    expect(classifyStatusResponse(502, null)).toEqual(maybe);
+    expect(classifyStatusResponse(404, null)).toEqual(maybe);
+    // Throttled before anything was read: certainly not recorded.
     expect(classifyStatusResponse(429, { ok: false, code: "refused", error: "…" })).toEqual({ kind: "retry", reason: "server" });
   });
 

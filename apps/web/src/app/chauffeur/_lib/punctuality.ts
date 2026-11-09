@@ -19,7 +19,8 @@ export type NextStopTimingInput = {
   plannedMinute: number;
   /**
    * Earliest arrival given the latest status recorded on the route: its real
-   * time plus the planned time from it to this stop. Null before the first one.
+   * time plus the planned time from its planned moment (plannedTapMinute) to
+   * this stop's arrival. Null before the first one.
    */
   anchorArrivalMinute: number | null;
   /** Appointment of an outbound dropoff, null otherwise. */
@@ -77,20 +78,40 @@ export function nextStopTimingText(timing: NextStopTiming): string {
   }
 }
 
+/**
+ * Planned minute of the status recorded at a stop. « Pris en charge » is
+ * tapped once the patient is on board, at the planned departure from the
+ * pickup (after its service time: 5 min, more for a lying patient or a
+ * wheelchair); « Déposé » on arrival at the dropoff, and « Patient absent »
+ * after waiting at the pickup, both against the planned start. Same reading
+ * as the history simulation (prisma/history/field.ts plannedTapMinute) and
+ * the traffic calibration (lib/domain/traffic-observed.ts).
+ */
+export function plannedTapMinute(stop: {
+  kind: "PICKUP" | "DROPOFF";
+  /** The recorded status is « Patient absent » (a pickup). */
+  noShow: boolean;
+  startMinute: number;
+  departureMinute: number;
+}): number {
+  return stop.kind === "PICKUP" && !stop.noShow ? stop.departureMinute : stop.startMinute;
+}
+
 export type RecordedLateness = { minutes: number; reference: "planned" | "appointment" };
 
 /**
  * Lateness of a recorded stop: against the appointment for an outbound
- * dropoff that has one, against the planned time otherwise.
+ * dropoff that has one, against the planned moment of the status otherwise
+ * (plannedTapMinute: the planned departure for a pickup).
  */
 export function recordedLateness(stop: {
   completedMinute: number;
-  plannedMinute: number;
+  plannedTapMinute: number;
   appointmentMinute: number | null;
 }): RecordedLateness {
   return stop.appointmentMinute !== null
     ? { minutes: stop.completedMinute - stop.appointmentMinute, reference: "appointment" }
-    : { minutes: stop.completedMinute - stop.plannedMinute, reference: "planned" };
+    : { minutes: stop.completedMinute - stop.plannedTapMinute, reference: "planned" };
 }
 
 /** Whether a recorded lateness is worth showing: any delay after an appointment, 5 min or more otherwise. */

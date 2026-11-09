@@ -7,35 +7,42 @@
  * sends server actions one at a time).
  *
  * Steps:
- * 1. same-site request (lib/auth/same-origin) and a current driver session
- *    (getCurrentUser: the session version and password fingerprint are
- *    checked as for every page). No redirect: a JSON 401 keeps the status in
- *    the phone's queue until the driver signs in again;
+ * 1. same-site request (lib/auth/same-origin) and a current driver allowed to
+ *    record statuses (currentDriver, lib/auth: the rules of requireDriver, the
+ *    session version and password fingerprint checked as for every page). No
+ *    redirect: a JSON 401 (or 403 "password") keeps the status in the phone's
+ *    queue until the driver signs in again. The phone also says whose queue
+ *    the status comes from (ownerId): sent under another account's cookie
+ *    (shared phone, two tabs), it is answered 401 and waits for its owner;
  * 2. the stop and its route, checked against the session's driver (route's
  *    driver or crew mate; a stop id from the phone is never trusted);
- * 3. the time of the gesture, bounded (observed-time.ts), and the service day
- *    of that time (Europe/Paris): see ./_lib/access;
- * 4. the pure rules of chauffeur/_lib/transitions (idempotent: a replay after
- *    a lost answer succeeds without writing twice);
- * 5. guarded updates in one transaction, so a concurrent change by the other
+ * 3. a replay of a status already in place (answer lost on the way back)
+ *    succeeds at once without writing, whatever its age (step 4 would refuse
+ *    an old one the server already has);
+ * 4. the time of the gesture, bounded (observed-time.ts: never before the
+ *    statuses already recorded on earlier stops), and the service day of that
+ *    time (Europe/Paris): see chauffeur/_lib/access;
+ * 5. the pure rules of chauffeur/_lib/transitions;
+ * 6. guarded updates in one transaction, so a concurrent change by the other
  *    crew member is detected instead of overwritten. The stop keeps who
  *    recorded it and when the server received it, and the same transaction
  *    writes the audit event on the trip (stop.pickup, stop.dropoff,
  *    stop.no_show, stop.undo_pickup, stop.undo_dropoff; details.observedAt
  *    for a status sent later from the queue).
  * Nothing is revalidated: the phone shows the status at once and refreshes
- * the roadmap a moment later. The answer may renew a driver's session close
- * to its end (lib/auth/session-renewal.ts).
+ * the roadmap a moment later, after a refusal too (the page is then stale).
+ * The answer may renew a driver's session close to its end
+ * (lib/auth/session-renewal.ts).
  */
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { STOP_ACCESS_ERRORS, stopAccess } from "@/app/chauffeur/_lib/access";
-import { boundObservedAt, TOO_OLD_ERROR } from "@/app/chauffeur/_lib/observed-time";
+import { boundObservedAt, previousStatusAt, TOO_OLD_ERROR } from "@/app/chauffeur/_lib/observed-time";
 import { latestCompletedStopId } from "@/app/chauffeur/_lib/roadmap";
 import { STOP_ACTIONS, type StatusErrorCode, type StatusResponseBody } from "@/app/chauffeur/_lib/status-protocol";
-import { decideStopAction, stopAuditAction, stopWrite } from "@/app/chauffeur/_lib/transitions";
+import { decideStopAction, stopAuditAction, stopWrite, type StopSnapshot } from "@/app/chauffeur/_lib/transitions";
 import { audit } from "@/lib/audit";
-import { getCurrentUser, type SessionUser } from "@/lib/auth";
+import { currentDriver, type DriverAccount } from "@/lib/auth";
 import { isSameOriginRequest } from "@/lib/auth/same-origin";
 import { renewDriverSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
@@ -49,9 +56,12 @@ const bodySchema = z.object({
   action: z.enum(STOP_ACTIONS),
   observedAt: epochMs.nullish(),
   sentAt: epochMs.nullish(),
+  /** Account whose queue on the phone holds the status (absent from a page loaded before this field existed). */
+  ownerId: z.string().max(64).nullish(),
 });
 type StatusBody = z.infer<typeof bodySchema>;
 
+// The phone refreshes the roadmap after any refusal (driver-app.tsx), a conflict included.
 const CONFLICT_ERROR = "Le statut a changé entre-temps (autre membre de l'équipage ?). La feuille de route est actualisée.";
 const SERVER_ERROR = "Enregistrement impossible pour le moment : le statut reste gardé et sera renvoyé.";
 
@@ -66,20 +76,29 @@ class ConflictError extends Error {}
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const receivedAt = new Date();
   if (!isSameOriginRequest(request.headers)) return reply(failure(403, "origin", ORIGIN_ERROR), null);
-  const user = await getCurrentUser();
-  if (!user || user.role !== "DRIVER" || !user.driverId) return reply(failure(401, "session", SESSION_ERROR), null);
-  if (user.mustChangePassword) return reply(failure(403, "password", PASSWORD_ERROR), null);
+  const current = await currentDriver();
+  if (!current.ok) {
+    const refusal =
+      current.reason === "password" ? failure(403, "password", PASSWORD_ERROR) : failure(401, "session", SESSION_ERROR);
+    return reply(refusal, null);
+  }
+  const user = current.driver;
 
   const { id } = await context.params;
   const stopId = stopIdSchema.safeParse(id);
   const body = bodySchema.safeParse(await request.json().catch(() => null));
+  // Another account's status (its page still open on a phone now signed in as this one): never
+  // recorded in this account's name; it waits on the phone for its owner's sign-in.
+  if (body.success && body.data.ownerId && body.data.ownerId !== user.id) {
+    return reply(failure(401, "session", SESSION_ERROR), null);
+  }
   const recorded =
     stopId.success && body.success
-      ? await recordStopStatus({ ...user, driverId: user.driverId }, stopId.data, body.data, receivedAt)
+      ? await recordStopStatus(user, stopId.data, body.data, receivedAt)
       : failure(400, "invalid", "Statut illisible : actualisez la feuille de route.");
 
   // Any exchange with the phone renews a driver's session close to its end (never a revoked one:
-  // getCurrentUser checked it above).
+  // currentDriver checked it above).
   const sessionExpiresAt = await renewDriverSession(user, receivedAt).catch((error: unknown) => {
     logError("[chauffeur] session renewal failed", error, { userId: user.id });
     return null;
@@ -91,17 +110,17 @@ function reply({ status, body }: Recorded, sessionExpiresAt: Date | null) {
   return jsonReply(status, { ...body, sessionExpiresAt: sessionExpiresAt?.toISOString() ?? null });
 }
 
-async function recordStopStatus(
-  user: SessionUser & { driverId: string },
-  stopId: string,
-  input: StatusBody,
-  receivedAt: Date,
-): Promise<Recorded> {
+function noop(message: string): Recorded {
+  return { status: 200, body: { ok: true, outcome: "noop", message, serverTime: Date.now(), sessionExpiresAt: null } };
+}
+
+async function recordStopStatus(user: DriverAccount, stopId: string, input: StatusBody, receivedAt: Date): Promise<Recorded> {
   const { action } = input;
   const stop = await db.routeStop.findUnique({
     where: { id: stopId },
     select: {
       id: true,
+      sequence: true,
       kind: true,
       completedAt: true,
       tripId: true,
@@ -118,16 +137,25 @@ async function recordStopStatus(
     where: { routeId: stop.route.id },
     select: { id: true, sequence: true, kind: true, tripId: true, completedAt: true, trip: { select: { status: true } } },
   });
-  // A dropoff is never recorded before its trip's pickup.
-  const pickupAt =
-    stop.kind === "DROPOFF"
-      ? (routeStops.find((s) => s.tripId === stop.tripId && s.kind === "PICKUP")?.completedAt ?? null)
-      : null;
+  const latestId = latestCompletedStopId(routeStops.map((s) => ({ ...s, tripStatus: s.trip.status })));
+  const snapshot: StopSnapshot = {
+    kind: stop.kind,
+    completedAt: stop.completedAt,
+    tripStatus: stop.trip.status,
+    isLatestCompleted: latestId === stop.id,
+  };
+  // A replay of a status already in place (its first answer was lost: phone timeout, network cut) succeeds
+  // before the time bounds, which would refuse it once old (the last dropoff of the evening, sent again the
+  // next morning). Nothing is written: the bounds have nothing to protect. A noop never depends on the time.
+  const replay = decideStopAction(action, snapshot, receivedAt);
+  if (replay.type === "noop") return noop(replay.message);
+
   const observed = boundObservedAt({
     observedAt: input.observedAt ?? null,
     sentAt: input.sentAt ?? null,
     receivedAt,
-    previousAt: pickupAt,
+    // Never before the statuses already recorded on earlier stops of the route, nor a dropoff before its pickup.
+    previousAt: previousStatusAt(stop, routeStops.map((s) => ({ ...s, cancelled: s.trip.status === "CANCELLED" }))),
   });
   if (!observed.ok) return failure(422, "too-old", TOO_OLD_ERROR);
   // The service day is the day of the gesture: a status tapped at 23:55 and sent at 00:05 still counts.
@@ -135,16 +163,9 @@ async function recordStopStatus(
     return failure(403, "wrong-day", STOP_ACCESS_ERRORS["wrong-day"]);
   }
 
-  const latestId = latestCompletedStopId(routeStops.map((s) => ({ ...s, tripStatus: s.trip.status })));
-  const decision = decideStopAction(
-    action,
-    { kind: stop.kind, completedAt: stop.completedAt, tripStatus: stop.trip.status, isLatestCompleted: latestId === stop.id },
-    observed.at,
-  );
+  const decision = decideStopAction(action, snapshot, observed.at);
   if (decision.type === "refuse") return failure(409, "refused", decision.error);
-  if (decision.type === "noop") {
-    return { status: 200, body: { ok: true, outcome: "noop", message: decision.message, serverTime: Date.now(), sessionExpiresAt: null } };
-  }
+  if (decision.type === "noop") return noop(decision.message);
 
   try {
     await db.$transaction(async (tx) => {

@@ -23,6 +23,8 @@ function makeStop(
   completedAt: string | null = null,
   /** Driver id of the account that recorded completedAt (null: a regulator, or not recorded). */
   completedByDriverId: string | null = null,
+  /** Service time above the default 5 min (a lying patient, a wheelchair). */
+  options: { extraServiceMin?: number } = {},
 ): DriverRouteStop {
   const [firstName = "", lastName = ""] = trip.patient.split(" ");
   return {
@@ -33,9 +35,11 @@ function makeStop(
     lat: 43.3 + sequence / 100,
     lng: 5.4,
     address: `${sequence} rue de Test, 13001 Marseille`,
-    // Planned 3 min of wait before each stop: arrival 477, start 480; then +15 min per stop.
+    // Planned 3 min of wait before each stop: arrival 477, start 480, departure after 5 min of service (485);
+    // then +15 min per stop.
     arrivalMinute: 477 + sequence * 15,
     startMinute: 480 + sequence * 15,
+    departureMinute: 485 + sequence * 15 + (options.extraServiceMin ?? 0),
     loadAfter: 0,
     completedAt: completedAt ? new Date(completedAt) : null,
     completedBy: completedAt ? { driverId: completedByDriverId } : null,
@@ -107,8 +111,8 @@ describe("buildRouteView", () => {
     const view = buildRouteView(sharedRoute(), DRIVER, true);
     const [aPickup, bPickup, aDropoff, bDropoff] = view.stops;
 
-    // 07:02 UTC is 08:02 in Paris (winter time): 2 min after the planned 08:00.
-    expect(aPickup).toMatchObject({ state: "done", completedMinute: 482, lateness: { minutes: 2, reference: "planned" } });
+    // 07:02 UTC is 08:02 in Paris (winter time): 3 min before the planned departure (08:05, patient on board).
+    expect(aPickup).toMatchObject({ state: "done", completedMinute: 482, lateness: { minutes: -3, reference: "planned" } });
     expect(aPickup?.controls).toEqual({ primary: null, blockedReason: null, noShow: false, undo: true });
     expect(bPickup).toMatchObject({ isNext: true, state: "pending" });
     expect(bPickup?.controls).toMatchObject({ primary: "PICKUP", noShow: true });
@@ -193,17 +197,28 @@ describe("buildRouteView", () => {
       makeStop(3, "trip_c", "DROPOFF", { ...C, status: "DROPPED_OFF" }, "2026-11-02T08:10:00Z"),
     ]);
     const [pickup, dropoff, returnPickup, returnDropoff] = buildRouteView(route, DRIVER, true).stops;
-    expect(pickup?.lateness).toEqual({ minutes: 1, reference: "planned" });
+    // A pickup is tapped with the patient on board: measured from its planned departure (08:05), shown next to the plan.
+    expect(pickup).toMatchObject({ plannedMinute: 480, plannedDepartureMinute: 485, lateness: { minutes: -4, reference: "planned" } });
     expect(dropoff?.lateness).toEqual({ minutes: 10, reference: "appointment" });
-    expect(returnPickup?.lateness).toEqual({ minutes: 20, reference: "planned" });
+    expect(dropoff?.plannedDepartureMinute).toBeNull();
+    expect(returnPickup?.lateness).toEqual({ minutes: 15, reference: "planned" });
     expect(returnDropoff?.lateness).toEqual({ minutes: 25, reference: "planned" });
+  });
+
+  it("measures an absence from the planned start of the pickup", () => {
+    const route = makeRoute([makeStop(0, "trip_a", "PICKUP", { ...A, status: "NO_SHOW" }, "2026-11-02T07:06:00Z")]);
+    expect(buildRouteView(route, DRIVER, true).stops[0]).toMatchObject({
+      plannedDepartureMinute: null,
+      lateness: { minutes: 6, reference: "planned" },
+    });
   });
 
   it("gives the next stop of today its live reading: the appointment and the arrival after the latest status", () => {
     const view = buildRouteView(sharedRoute(), DRIVER, true);
     const [aPickup, bPickup, aDropoff] = view.stops;
-    // Latest status: A's pickup at 08:02 (planned 08:00); B's pickup is planned to be reached 12 min after it.
-    expect(bPickup?.timing).toEqual({ appointmentMinute: null, anchorArrivalMinute: 482 + (492 - 480) });
+    // Latest status: A's pickup at 08:02, tapped with the patient on board (planned departure 08:05);
+    // B's pickup is planned to be reached 7 min after that departure (492 - 485): 3 min early.
+    expect(bPickup?.timing).toEqual({ appointmentMinute: null, anchorArrivalMinute: 482 + (492 - 485) });
     expect(aPickup?.timing).toBeNull();
     expect(aDropoff?.timing).toBeNull();
 
@@ -212,7 +227,24 @@ describe("buildRouteView", () => {
       makeStop(0, "trip_a", "PICKUP", { ...A, status: "PICKED_UP" }, "2026-11-02T07:02:00Z"),
       makeStop(1, "trip_a", "DROPOFF", { ...A, status: "PICKED_UP" }),
     ]);
-    expect(buildRouteView(atDropoff, DRIVER, true).stops[1]?.timing).toEqual({ appointmentMinute: 540, anchorArrivalMinute: 494 });
+    expect(buildRouteView(atDropoff, DRIVER, true).stops[1]?.timing).toEqual({ appointmentMinute: 540, anchorArrivalMinute: 489 });
+
+    // An ambulance pickup with 15 min of service (departure 08:15), tapped on time at 08:15: the next stop
+    // is reached as planned, not 10 min late.
+    const longService = makeRoute([
+      makeStop(0, "trip_a", "PICKUP", { ...A, status: "PICKED_UP" }, "2026-11-02T07:15:00Z", null, { extraServiceMin: 10 }),
+      makeStop(1, "trip_a", "DROPOFF", { ...A, status: "PICKED_UP" }),
+    ]);
+    const [, longDropoff] = buildRouteView(longService, DRIVER, true).stops;
+    expect(longDropoff?.timing).toEqual({ appointmentMinute: 540, anchorArrivalMinute: 492 });
+    expect(longDropoff?.plannedArrivalMinute).toBe(492);
+
+    // After an absence (tapped at the planned start, after waiting), the anchor is the planned start.
+    const afterNoShow = makeRoute([
+      makeStop(0, "trip_a", "PICKUP", { ...A, status: "NO_SHOW" }, "2026-11-02T07:00:00Z"),
+      makeStop(1, "trip_b", "PICKUP", B),
+    ]);
+    expect(buildRouteView(afterNoShow, DRIVER, true).stops[1]?.timing).toEqual({ appointmentMinute: null, anchorArrivalMinute: 492 });
 
     // Before any status: no anchor. Tomorrow (read-only): no live reading.
     const fresh = makeRoute([makeStop(0, "trip_b", "PICKUP", B), makeStop(1, "trip_b", "DROPOFF", B)]);

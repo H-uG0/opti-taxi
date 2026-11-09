@@ -5,9 +5,12 @@
  *
  * What it does: when a page of the driver app cannot be loaded (no network, no
  * answer within 20 s, or the server unreachable behind the proxy), it answers
- * with a minimal offline page: the regulation's number, the time of the last
- * sync, « Réessayer ». Without it, a PWA killed during a long Waze navigation
- * and reopened in a white zone shows the browser's error page.
+ * with a minimal page: « Pas de réseau » (or « Feuille de route indisponible »
+ * when the network answers but the app does not), the regulation's number,
+ * the time of the last sync, « Réessayer ». Without it, a PWA killed during a
+ * long Waze navigation and reopened in a white zone shows the browser's error
+ * page. The page is static (no script): the statuses waiting on the phone
+ * leave once the roadmap opens again with the network.
  *
  * What it keeps (Cache API, CACHE below), and nothing else:
  * - the app icon, shown on the offline page;
@@ -84,10 +87,11 @@ async function networkOrOfflinePage(request, url) {
   try {
     const response = await withTimeout(fetch(request), NAVIGATION_TIMEOUT_MS);
     // A proxy that cannot reach the app answers 502 to 504: its page is of no use in a car.
-    if (response.status >= 502 && response.status <= 504) return offlinePage(url);
+    if (response.status >= 502 && response.status <= 504) return offlinePage(url, "unavailable");
     return response;
-  } catch {
-    return offlinePage(url);
+  } catch (error) {
+    // No answer in time: the network may be up and the app slow or down. A failed fetch: no network.
+    return offlinePage(url, error instanceof Error && error.message === "timeout" ? "unavailable" : "offline");
   }
 }
 
@@ -154,14 +158,29 @@ p{margin:8px 0}
 .sync{color:#475569;font-size:.9rem;margin-top:20px}
 `;
 
-async function offlinePage(url) {
+/** Words of the page: no network at all, or a network that does not reach the app (timeout, proxy 502–504). */
+const CAUSES = {
+  offline: {
+    title: "Hors connexion",
+    heading: "Pas de réseau",
+    text: "La feuille de route ne s'affiche pas sans connexion&nbsp;: elle n'est jamais gardée sur le téléphone (données de santé).",
+  },
+  unavailable: {
+    title: "Indisponible",
+    heading: "Feuille de route indisponible",
+    text: "Le serveur ne répond pas pour le moment. La feuille de route n'est jamais gardée sur le téléphone (données de santé).",
+  },
+};
+
+async function offlinePage(url, cause) {
+  const words = CAUSES[cause] || CAUSES.offline;
   const meta = await readMeta();
   const retryHref = escapeHtml(url.pathname + url.search);
   const call = meta.regulator
     ? `<a class="btn call" href="${escapeHtml(meta.regulator.href)}">Appeler la régulation · ${escapeHtml(meta.regulator.number)}</a>`
     : `<p><strong>En cas d'urgence, appelez la régulation.</strong></p>`;
   const sync = meta.at
-    ? `Dernière synchronisation de la feuille de route : ${escapeHtml(formatSync(meta.at))}.`
+    ? `Dernière synchronisation de la feuille de route&nbsp;: ${escapeHtml(formatSync(meta.at))}.`
     : "Aucune synchronisation enregistrée sur ce téléphone.";
   const html = `<!doctype html>
 <html lang="fr">
@@ -169,16 +188,16 @@ async function offlinePage(url) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f5e5b">
-<title>Hors connexion — Opti-Taxi</title>
+<title>${words.title} — Opti-Taxi</title>
 <style>${STYLE}</style>
 </head>
 <body>
 <header><small>Feuille de route</small>Opti-Taxi</header>
 <main>
 <img class="icon" src="/icons/icon.svg" alt="">
-<h1>Pas de réseau</h1>
-<p>La feuille de route ne s'affiche pas sans connexion : elle n'est jamais gardée sur le téléphone (données de santé).</p>
-<p class="note">Les statuts déjà saisis restent gardés sur le téléphone et partent dès le retour du réseau, avec l'heure du geste.</p>
+<h1>${words.heading}</h1>
+<p>${words.text}</p>
+<p class="note">Les statuts déjà saisis restent gardés sur le téléphone, avec l'heure du geste. Ils partent quand la feuille de route se rouvre avec du réseau («&nbsp;Réessayer&nbsp;»).</p>
 ${call}
 <a class="btn retry" href="${retryHref}">Réessayer</a>
 <p class="sync">${sync}</p>

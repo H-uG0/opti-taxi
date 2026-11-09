@@ -170,7 +170,11 @@ describe("service worker of the driver app", () => {
     expect(html).toContain("Pas de réseau");
     expect(html).toContain('href="tel:0465710000"');
     expect(html).toContain("04 65 71 00 00");
-    expect(html).toMatch(/Dernière synchronisation de la feuille de route : lundi 9 novembre (à )?08:02/);
+    expect(html).toMatch(/Dernière synchronisation de la feuille de route&nbsp;: lundi 9 novembre (à )?08:02/);
+    // Static page (no script): the statuses leave once the roadmap opens again, not by themselves.
+    expect(html).toContain("Ils partent quand la feuille de route se rouvre avec du réseau");
+    // No colon alone at the start of a line on a narrow phone.
+    expect(html).not.toMatch(/ :/);
     expect(html).toContain('href="/chauffeur?date=2026-11-10">Réessayer');
     expect(response?.headers.get("content-security-policy")).toContain("default-src 'none'");
     expect(response?.headers.get("cache-control")).toBe("no-store");
@@ -201,10 +205,13 @@ describe("service worker of the driver app", () => {
   });
 
   it("shows the offline page when the network does not answer in time, or the proxy cannot reach the app", async () => {
+    // The network answers but the app does not: not called « Pas de réseau ».
     const stuck = setup(() => new Promise<Response>(() => undefined), { timeoutNow: true });
-    expect(await (await stuck.fetch("/chauffeur"))?.text()).toContain("Pas de réseau");
+    const stuckHtml = (await (await stuck.fetch("/chauffeur"))?.text()) ?? "";
+    expect(stuckHtml).toContain("Feuille de route indisponible");
+    expect(stuckHtml).not.toContain("Pas de réseau");
     const proxyDown = setup(async () => new Response("Bad gateway", { status: 502 }));
-    expect(await (await proxyDown.fetch("/chauffeur"))?.text()).toContain("Pas de réseau");
+    expect(await (await proxyDown.fetch("/chauffeur"))?.text()).toContain("Feuille de route indisponible");
     // Without any sync on this phone, it says so.
     expect(await (await proxyDown.fetch("/chauffeur"))?.text()).toContain("Aucune synchronisation enregistrée");
   });

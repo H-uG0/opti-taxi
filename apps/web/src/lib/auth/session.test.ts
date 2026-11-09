@@ -14,7 +14,7 @@ vi.mock("next/headers", () => ({
 }));
 vi.mock("./secret", () => ({ assertSessionSecret: () => "test-secret-0123456789-abcdefghijklmnopqrstuvwxyz" }));
 
-const { createSession, readSession, renewDriverSession, sessionExpiresAt } = await import("./session");
+const { createSession, driverSessionRenewable, readSession, renewDriverSession, sessionExpiresAt } = await import("./session");
 
 const HOUR = 3_600_000;
 const SIGN_IN = new Date("2026-11-08T18:00:00.000Z"); // 19:00 in Paris, the evening before.
@@ -72,5 +72,24 @@ describe("driver session renewal", () => {
     vi.setSystemTime(new Date(SIGN_IN.getTime() + 13 * HOUR));
     expect(await renewDriverSession(DRIVER)).toBeNull();
     expect(await readSession()).toBeNull();
+  });
+
+  it("keeps the sign-in time through renewals and stops renewing 7 days after it", async () => {
+    await createSession(DRIVER, ACCOUNT);
+    // Renewed every 11 h for a week: each renewal keeps the time the password was typed. The 15th, 6 days 21 h
+    // after the sign-in, is the last one.
+    let now = SIGN_IN.getTime();
+    for (let renewal = 0; renewal < 15; renewal++) {
+      now += 11 * HOUR;
+      vi.setSystemTime(new Date(now));
+      expect(await renewDriverSession(DRIVER)).toEqual(new Date(now + 12 * HOUR));
+    }
+    expect(await driverSessionRenewable(DRIVER)).toBe(true);
+    const lastExpiry = new Date(now + 12 * HOUR);
+    // 7 days 8 h after the sign-in, 1 h left: no longer renewed, the token ends as it is.
+    vi.setSystemTime(new Date(now + 11 * HOUR));
+    expect(await driverSessionRenewable(DRIVER)).toBe(false);
+    expect(await renewDriverSession(DRIVER)).toEqual(lastExpiry);
+    expect(await sessionExpiresAt()).toEqual(lastExpiry);
   });
 });

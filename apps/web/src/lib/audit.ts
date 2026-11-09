@@ -35,7 +35,9 @@
  *   (« Revenir au planning précédent »), plan.discard (a waiting plan not
  *   kept), plan.validate, plan.reopen;
  * - field, on the Trip (stops are deleted by re-optimizations): stop.pickup,
- *   stop.dropoff, stop.no_show, stop.undo_pickup, stop.undo_dropoff;
+ *   stop.dropoff, stop.no_show, stop.undo_pickup, stop.undo_dropoff
+ *   (details.observedAt: the time of the gesture, when the status was sent
+ *   from the phone's offline queue more than 1 min after it);
  * - staff and crews: day_crew.save (one per vehicle fixed, details: vehicle
  *   and people ids), day_crew.unfix (one vehicle back to the proposal),
  *   day_crew.reset (the whole date), route.crew_change (« Changer l'équipage »

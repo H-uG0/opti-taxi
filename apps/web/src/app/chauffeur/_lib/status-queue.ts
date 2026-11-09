@@ -13,10 +13,12 @@
  * Sending is idempotent end to end: the server ignores a status already in
  * place (a replay after a lost answer), a second tap of the same status while
  * the first waits adds nothing, and « Annuler » on a status still waiting
- * removes it instead of sending both.
+ * removes it instead of sending both. A status already sent once without a
+ * final answer (timeout, cut, 5xx) may be on the server: withdrawing it sends
+ * an « Annuler » in its place (a no-op on the server if it never arrived).
  *
  * Free of React and browser APIs (storage and sending are injected), so it is
- * unit-tested; the provider (_components/driver-app-provider.tsx) wires it.
+ * unit-tested; the provider (_components/driver-app.tsx) wires it.
  */
 import type { SendOutcome } from "./status-protocol";
 import type { StopAction } from "./transitions";
@@ -47,6 +49,8 @@ export type LocalStatus = {
   phase: LocalPhase;
   /** Server clock once saved (phase "sent"): a page rendered later shows it. */
   serverTime?: number;
+  /** Waiting after a send without a final answer (timeout, cut, 5xx): the server may already have it. */
+  uncertain?: boolean;
 };
 
 /** A status the server refused for good (removed from the queue): shown until the crew reads it. */
@@ -85,6 +89,9 @@ export type QueueDeps = {
   /** A status reached the server: the page can be refreshed a moment later. */
   onDelivered?: (outcome: Extract<SendOutcome, { kind: "ok" }>) => void;
 };
+
+/** A key of the queue: the storage's, or a negative one for a status kept in memory only. */
+type Key = number;
 
 /** In-memory storage: the fallback without IndexedDB, and the tests' storage. */
 export function memoryStorage(initial: QueuedStatus[] = []): QueueStorage & { values(): QueuedStatus[] } {
@@ -131,13 +138,16 @@ export class StatusQueue {
   private waitingForNetwork = false;
   private volatile = false;
   private ready = false;
-  private inFlight: number | null = null;
+  private inFlight: Key | null = null;
+  /** Statuses sent at least once without a final answer: the server may have them. */
+  private uncertain = new Set<Key>();
   private flushing: Promise<void> | null = null;
   private flushAgain = false;
   private refusalIds = 0;
   private memoryKeys = -1;
   private listeners = new Set<() => void>();
   private deliveryListeners = new Set<(outcome: Extract<SendOutcome, { kind: "ok" }>) => void>();
+  private refusalListeners = new Set<(refusal: Refusal) => void>();
   private snapshot: QueueSnapshot = EMPTY_QUEUE_SNAPSHOT;
 
   constructor(private readonly deps: QueueDeps) {}
@@ -151,6 +161,12 @@ export class StatusQueue {
   onDelivered(listener: (outcome: Extract<SendOutcome, { kind: "ok" }>) => void): () => void {
     this.deliveryListeners.add(listener);
     return () => this.deliveryListeners.delete(listener);
+  }
+
+  /** Called after each status the server refused for good (the page is stale: refresh it). */
+  onRefused(listener: (refusal: Refusal) => void): () => void {
+    this.refusalListeners.add(listener);
+    return () => this.refusalListeners.delete(listener);
   }
 
   getSnapshot = (): QueueSnapshot => this.snapshot;
@@ -180,30 +196,32 @@ export class StatusQueue {
       return;
     }
 
-    const value: QueuedStatus = { stopId, action, observedAt };
-    let key: number;
-    try {
-      key = await this.storageOrMemory().add(value);
-    } catch {
-      // Storage refused (quota, private mode): keep it in memory for this visit.
-      key = this.memoryKeys--;
-      this.volatile = true;
-    }
-    this.items.push({ key, value });
-    this.byStop = { ...this.byStop, [stopId]: { action, observedAt, phase: "queued" } };
+    await this.enqueue({ stopId, action, observedAt });
     this.emit();
     await this.flush();
   }
 
   /**
-   * Forgets the stop's latest status still waiting on the phone (« Annuler »
-   * before it was sent). False when there is none, or it is being sent: then
-   * only a new « Annuler » sent to the server can undo it.
+   * Withdraws the stop's latest status still waiting on the phone (« Retirer
+   * ce statut », or « Annuler » before it was sent). Never sent: forgotten.
+   * Sent before without a final answer (uncertain): the server may have it, so
+   * an « Annuler » is queued in its place (the server ignores it if the status
+   * never arrived). False when there is none, when it is being sent (only a
+   * new « Annuler » sent to the server can undo it), or for an uncertain
+   * « Annuler » (it may have undone the status already: it is sent again).
    */
   async cancelQueued(stopId: string): Promise<boolean> {
     await this.start();
     const last = this.lastItemFor(stopId);
     if (!last || last.key === this.inFlight) return false;
+    if (this.uncertain.has(last.key)) {
+      if (last.value.action === "UNDO") return false;
+      await this.removeItem(last.key);
+      await this.enqueue({ stopId, action: "UNDO", observedAt: this.deps.now() });
+      this.emit();
+      await this.flush();
+      return true;
+    }
     await this.removeItem(last.key);
     this.refreshStop(stopId);
     this.emit();
@@ -269,6 +287,20 @@ export class StatusQueue {
     this.emit();
   }
 
+  /** Saves a status (on the phone's storage, else in memory for this visit) and shows it as waiting. */
+  private async enqueue(value: QueuedStatus): Promise<void> {
+    let key: Key;
+    try {
+      key = await this.storageOrMemory().add(value);
+    } catch {
+      // Storage refused (quota, private mode): keep it in memory for this visit.
+      key = this.memoryKeys--;
+      this.volatile = true;
+    }
+    this.items.push({ key, value });
+    this.byStop = { ...this.byStop, [value.stopId]: this.queuedStatus({ key, value }) };
+  }
+
   private storageOrMemory(): QueueStorage {
     this.storage ??= memoryStorage();
     return this.storage;
@@ -282,8 +314,9 @@ export class StatusQueue {
     return undefined;
   }
 
-  private async removeItem(key: number): Promise<void> {
+  private async removeItem(key: Key): Promise<void> {
     this.items = this.items.filter((item) => item.key !== key);
+    this.uncertain.delete(key);
     if (key > 0) await this.storageOrMemory().remove(key).catch(() => undefined);
   }
 
@@ -291,9 +324,14 @@ export class StatusQueue {
   private refreshStop(stopId: string): void {
     const last = this.lastItemFor(stopId);
     const byStop = { ...this.byStop };
-    if (last) byStop[stopId] = { action: last.value.action, observedAt: last.value.observedAt, phase: "queued" };
+    if (last) byStop[stopId] = this.queuedStatus(last);
     else delete byStop[stopId];
     this.byStop = byStop;
+  }
+
+  private queuedStatus(item: StoredStatus): LocalStatus {
+    const status: LocalStatus = { action: item.value.action, observedAt: item.value.observedAt, phase: "queued" };
+    return this.uncertain.has(item.key) ? { ...status, uncertain: true } : status;
   }
 
   private setPhase(item: StoredStatus, local: LocalStatus): void {
@@ -316,12 +354,13 @@ export class StatusQueue {
         try {
           outcome = await this.deps.send(item.value);
         } catch {
-          outcome = { kind: "retry", reason: "server" };
+          outcome = { kind: "retry", reason: "server", maybeReceived: true };
         }
         this.inFlight = null;
 
         if (outcome.kind === "retry" || outcome.kind === "session") {
-          this.setPhase(item, { action, observedAt, phase: "queued" });
+          if (outcome.kind === "retry" && outcome.maybeReceived) this.uncertain.add(item.key);
+          this.setPhase(item, this.queuedStatus(item));
           if (outcome.kind === "session") this.sessionLost = outcome.reason;
           this.waitingForNetwork = outcome.kind === "retry";
           this.emit();
@@ -338,8 +377,10 @@ export class StatusQueue {
           this.deps.onDelivered?.(outcome);
           for (const listener of this.deliveryListeners) listener(outcome);
         } else {
-          this.refusals = [...this.refusals, { id: ++this.refusalIds, stopId, action, observedAt, error: outcome.error }];
+          const refusal: Refusal = { id: ++this.refusalIds, stopId, action, observedAt, error: outcome.error };
+          this.refusals = [...this.refusals, refusal];
           if (latestForStop) this.refreshStop(stopId);
+          for (const listener of this.refusalListeners) listener(refusal);
         }
         this.emit();
       }

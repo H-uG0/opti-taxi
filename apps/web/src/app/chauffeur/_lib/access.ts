@@ -1,7 +1,8 @@
 /**
  * Who may record a status on a stop, and when: the route's driver or crew
  * mate, on the service day only (Europe/Paris). Pure (no server-only import):
- * used by the server actions and the unit tests.
+ * used by the status route handler (api/chauffeur/stops/[id]/status) and the
+ * unit tests.
  */
 import { toIsoDate } from "@/lib/time";
 

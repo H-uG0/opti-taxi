@@ -17,7 +17,7 @@ const fake = vi.hoisted(() => {
       routeStop: { findUnique: vi.fn(), findMany: vi.fn() },
       $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
     },
-    getCurrentUser: vi.fn(),
+    currentDriver: vi.fn(),
     renewDriverSession: vi.fn(),
   };
 });
@@ -25,7 +25,7 @@ const fake = vi.hoisted(() => {
 vi.mock("server-only", () => ({}));
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ "user-agent": "Test/1.0" }) }));
 vi.mock("@/lib/db", () => ({ db: fake.db }));
-vi.mock("@/lib/auth", () => ({ getCurrentUser: fake.getCurrentUser }));
+vi.mock("@/lib/auth", () => ({ currentDriver: fake.currentDriver }));
 vi.mock("@/lib/auth/session", () => ({ renewDriverSession: fake.renewDriverSession }));
 
 const DRIVER = { id: "u1", name: "Julien Marchetti", role: "DRIVER", driverId: "d1", mustChangePassword: false };
@@ -81,7 +81,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
-  fake.getCurrentUser.mockResolvedValue(DRIVER);
+  fake.currentDriver.mockResolvedValue({ ok: true, driver: DRIVER });
   fake.renewDriverSession.mockResolvedValue(new Date("2026-11-09T19:25:00.000Z"));
   fake.tx.routeStop.updateMany.mockResolvedValue({ count: 1 });
   fake.tx.trip.updateMany.mockResolvedValue({ count: 1 });
@@ -123,30 +123,39 @@ describe("POST /api/chauffeur/stops/:id/status", () => {
     expect(auditEvents()[0]).not.toHaveProperty("details");
   });
 
-  it("answers 401 without a current session (the phone keeps the status), before reading anything", async () => {
-    fake.getCurrentUser.mockResolvedValue(null);
+  it("answers 401 without a current driver session (the phone keeps the status), before reading anything", async () => {
+    fake.currentDriver.mockResolvedValue({ ok: false, reason: "session" });
     const { status, body } = await answer(await post("s_pick", { action: "PICKUP", observedAt: NOW.getTime() }));
     expect(status).toBe(401);
     expect(body).toMatchObject({ ok: false, code: "session" });
     expect(fake.db.routeStop.findUnique).not.toHaveBeenCalled();
     expect(fake.renewDriverSession).not.toHaveBeenCalled();
-
-    fake.getCurrentUser.mockResolvedValue({ ...DRIVER, role: "REGULATOR", driverId: null });
-    expect((await post("s_pick", { action: "PICKUP" })).status).toBe(401);
   });
 
   it("waits for the password change of a provisional password", async () => {
-    fake.getCurrentUser.mockResolvedValue({ ...DRIVER, mustChangePassword: true });
+    fake.currentDriver.mockResolvedValue({ ok: false, reason: "password" });
     const { status, body } = await answer(await post("s_pick", { action: "PICKUP" }));
     expect(status).toBe(403);
     expect(body).toMatchObject({ code: "password" });
+  });
+
+  it("never records a status from another account's queue under this session: it waits for its owner", async () => {
+    stops([pickup()], "s_pick");
+    const { status, body } = await answer(await post("s_pick", { action: "PICKUP", observedAt: NOW.getTime(), ownerId: "u2" }));
+    expect(status).toBe(401);
+    expect(body).toMatchObject({ ok: false, code: "session" });
+    expect(fake.db.routeStop.findUnique).not.toHaveBeenCalled();
+    expect(fake.renewDriverSession).not.toHaveBeenCalled();
+
+    const own = await post("s_pick", { action: "PICKUP", observedAt: NOW.getTime(), ownerId: "u1" });
+    expect(own.status).toBe(200);
   });
 
   it("refuses a request from another site", async () => {
     const { status, body } = await answer(await post("s_pick", { action: "PICKUP" }, { origin: "https://evil.example" }));
     expect(status).toBe(403);
     expect(body).toMatchObject({ code: "origin" });
-    expect(fake.getCurrentUser).not.toHaveBeenCalled();
+    expect(fake.currentDriver).not.toHaveBeenCalled();
   });
 
   it("refuses an unreadable body", async () => {
@@ -177,6 +186,17 @@ describe("POST /api/chauffeur/stops/:id/status", () => {
     expect(status).toBe(422);
     expect(body).toMatchObject({ ok: false, code: "too-old" });
     expect(fake.db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("never records a status before one already recorded on an earlier stop of the route", async () => {
+    // The crew mate recorded stop 2 at 08:15; a pickup on stop 3 tapped offline at 08:00 arrives at 08:25.
+    const earlierAt = new Date(NOW.getTime() - 10 * MIN);
+    const later: StopRow = { id: "s_next", sequence: 3, kind: "PICKUP", tripId: "t2", completedAt: null, trip: { status: "ASSIGNED" } };
+    stops([pickup("PICKED_UP", new Date(NOW.getTime() - 40 * MIN)), dropoff("DROPPED_OFF", earlierAt), later], "s_next");
+    await post("s_next", { action: "PICKUP", observedAt: NOW.getTime() - 25 * MIN, sentAt: NOW.getTime() });
+    expect(fake.tx.routeStop.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ completedAt: earlierAt }) }),
+    );
   });
 
   it("never records a dropoff before its trip's pickup, nor a status in the future", async () => {
@@ -212,6 +232,20 @@ describe("POST /api/chauffeur/stops/:id/status", () => {
     const { status, body } = await answer(await post("s_pick", { action: "PICKUP", observedAt: NOW.getTime() - 5 * MIN }));
     expect(status).toBe(200);
     expect(body).toMatchObject({ ok: true, outcome: "noop" });
+    expect(fake.db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges an old replay of a status already recorded instead of calling it too old", async () => {
+    // Last dropoff of the evening (19:10, the 8th), saved but its answer lost; sent again at 08:25 the next morning.
+    const droppedAt = new Date("2026-11-08T18:10:00.000Z");
+    const yesterday = { ...ROUTE, serviceDate: new Date("2026-11-08T00:00:00.000Z") };
+    const pickedAt = new Date(droppedAt.getTime() - 20 * MIN);
+    stops([pickup("DROPPED_OFF", pickedAt), dropoff("DROPPED_OFF", droppedAt)], "s_drop", yesterday);
+    const { status, body } = await answer(
+      await post("s_drop", { action: "DROPOFF", observedAt: droppedAt.getTime(), sentAt: NOW.getTime() }),
+    );
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ ok: true, outcome: "noop", message: "Dépose déjà enregistrée." });
     expect(fake.db.$transaction).not.toHaveBeenCalled();
   });
 

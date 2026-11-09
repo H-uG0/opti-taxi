@@ -62,9 +62,11 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
           lat: true,
           lng: true,
           address: true,
-          // Planned arrival (before any wait) and start: the live early / late reading of the next stop.
+          // Planned arrival (before any wait), start and departure: the live early / late reading of the
+          // next stop, measured from the planned moment of the latest status (see plannedTapMinute).
           arrivalMinute: true,
           startMinute: true,
+          departureMinute: true,
           loadAfter: true,
           completedAt: true,
           // Server-side only: which crew member recorded the status (never sent to the client).

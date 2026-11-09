@@ -181,6 +181,7 @@ function ReturnMarker({ route, finished }: { route: RouteView; finished: boolean
 export function RouteSection({ route, regulator }: { route: RouteView; regulator: RegulatorContact | null }) {
   const titleId = `route-${route.id}`;
   const finished = route.stops.length > 0 && route.nextStop === null;
+  const stopIds = route.stops.map((stop) => stop.id);
 
   return (
     <section aria-labelledby={titleId} className="space-y-3">
@@ -203,7 +204,7 @@ export function RouteSection({ route, regulator }: { route: RouteView; regulator
                 </Marker>
               );
             case "stop":
-              return <StopCard key={item.stop.id} stop={item.stop} total={route.stops.length} regulator={regulator} />;
+              return <StopCard key={item.stop.id} stop={item.stop} routeStopIds={stopIds} regulator={regulator} />;
             case "return":
               return <ReturnMarker key="return" route={route} finished={finished} />;
           }

@@ -23,7 +23,12 @@ export type StatusRequestBody = {
   observedAt: number;
   /** When this request left the phone (the server cancels the phone's clock offset with it). */
   sentAt: number;
+  /** Account whose queue holds the status: refused (401, kept) when the session is now another account's. */
+  ownerId: string;
 };
+
+/** Body of a session request: the account the page belongs to (401 when the cookie is now another's). */
+export type SessionRequestBody = { ownerId: string };
 
 /** Why a status was not recorded. */
 export type StatusErrorCode =
@@ -55,7 +60,8 @@ export type StatusResponseBody =
   | { ok: false; code: StatusErrorCode; error: string; serverTime: number; sessionExpiresAt?: string | null };
 
 export type SessionResponseBody =
-  | { ok: true; sessionExpiresAt: string | null; serverTime: number }
+  /** renewable: the session is still renewed when the app reaches the server (false 7 days after the sign-in). */
+  | { ok: true; sessionExpiresAt: string | null; renewable: boolean; serverTime: number }
   | { ok: false; code: "session" | "origin"; error: string; serverTime: number };
 
 /** Codes for which the status stays in the queue and is sent again later. */
@@ -66,8 +72,12 @@ export type SendOutcome =
   | { kind: "ok"; message: string; serverTime: number; sessionExpiresAt: string | null }
   /** Not recorded and never will be: drop it from the queue and tell the crew. */
   | { kind: "refused"; error: string; serverTime: number | null }
-  /** Not recorded yet (network, timeout, server): keep it, try again later. */
-  | { kind: "retry"; reason: "offline" | "timeout" | "server" }
+  /**
+   * Not recorded yet as far as the phone knows (network, timeout, server): keep it, try again later.
+   * maybeReceived: the request left the phone and got no final answer (timeout, cut, 5xx), so the
+   * server may have recorded it all the same (a replay is then a no-op).
+   */
+  | { kind: "retry"; reason: "offline" | "timeout" | "server"; maybeReceived?: boolean }
   /** Session to open again: keep it, wait for the sign-in. */
   | { kind: "session"; reason: "expired" | "password" };
 
@@ -88,7 +98,8 @@ export function classifyStatusResponse(httpStatus: number, body: unknown): SendO
   const code = isRecord(body) && typeof body.code === "string" ? (body.code as StatusErrorCode) : null;
   if (httpStatus === 401 || code === "session") return { kind: "session", reason: "expired" };
   if (code === "password") return { kind: "session", reason: "password" };
-  if (httpStatus >= 500 || httpStatus === 429 || code === null || KEEP_CODES.has(code)) return { kind: "retry", reason: "server" };
+  if (httpStatus >= 500 || code === null) return { kind: "retry", reason: "server", maybeReceived: true };
+  if (httpStatus === 429 || KEEP_CODES.has(code)) return { kind: "retry", reason: "server" };
   return {
     kind: "refused",
     error: isRecord(body) && typeof body.error === "string" ? body.error : "Statut refusé par le serveur.",

@@ -59,3 +59,42 @@ describe("driver access with a provisional password", () => {
     await expect(requireDriver()).resolves.toMatchObject({ id: "u1", mustChangePassword: false });
   });
 });
+
+describe("driver access without a redirect (the driver's JSON route handlers)", () => {
+  it("gives the driver, or the reason they cannot act yet", async () => {
+    const { currentDriver, currentDriverAccount } = await import("./index");
+    signedIn(false);
+    await expect(currentDriver()).resolves.toMatchObject({ ok: true, driver: { id: "u1", driverId: "d1" } });
+
+    signedIn(true);
+    await expect(currentDriver()).resolves.toEqual({ ok: false, reason: "password" });
+    await expect(currentDriverAccount()).resolves.toMatchObject({ id: "u1", mustChangePassword: true });
+
+    fake.readSession.mockResolvedValue(null);
+    await expect(currentDriver()).resolves.toEqual({ ok: false, reason: "session" });
+    await expect(currentDriverAccount()).resolves.toBeNull();
+  });
+
+  it("refuses a regulator's session", async () => {
+    const { currentDriver } = await import("./index");
+    fake.readSession.mockResolvedValue({
+      id: "u9",
+      name: "Régulation",
+      role: "REGULATOR",
+      driverId: null,
+      passwordVersion: passwordVersion(HASH),
+      sessionVersion: 1,
+    });
+    fake.findUnique.mockResolvedValue({
+      name: "Régulation",
+      role: "REGULATOR",
+      active: true,
+      driverId: null,
+      passwordHash: HASH,
+      sessionVersion: 1,
+      mustChangePassword: false,
+      driver: null,
+    });
+    await expect(currentDriver()).resolves.toEqual({ ok: false, reason: "session" });
+  });
+});

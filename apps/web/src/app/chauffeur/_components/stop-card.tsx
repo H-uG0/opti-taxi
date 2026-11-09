@@ -186,6 +186,7 @@ function OpenStopCard({ stop, total, regulator }: { stop: StopView; total: numbe
 
         {stop.timing ? (
           <NextStopTiming
+            stopId={stop.id}
             plannedArrivalMinute={stop.plannedArrivalMinute}
             plannedMinute={stop.plannedMinute}
             anchorArrivalMinute={stop.timing.anchorArrivalMinute}
@@ -266,7 +267,7 @@ function Lateness({ lateness }: { lateness: RecordedLateness | null }) {
 }
 
 /** A stop with nothing left to do: one line, details on demand, "Annuler" on the latest status. */
-function ClosedStopCard({ stop }: { stop: StopView }) {
+function ClosedStopCard({ stop, routeStopIds }: { stop: StopView; routeStopIds: readonly string[] }) {
   if (stop.state === "pending") return null;
   const label = CLOSED_LABELS[stop.state](stop.kind);
   const struck = stop.state === "skipped" || stop.state === "cancelled";
@@ -294,6 +295,13 @@ function ClosedStopCard({ stop }: { stop: StopView }) {
         <div className="space-y-3 border-t border-slate-200 bg-white px-4 py-3">
           <p className="text-sm text-slate-700">
             {STOP_KIND_LABELS[stop.kind]} prévue à <span className="tabular font-semibold">{formatMinute(stop.plannedMinute)}</span>
+            {/* The lateness of a pickup is measured from the planned departure (patient on board). */}
+            {stop.plannedDepartureMinute !== null ? (
+              <>
+                {" "}
+                (départ <span className="tabular font-semibold">{formatMinute(stop.plannedDepartureMinute)}</span>)
+              </>
+            ) : null}
             {stop.completedMinute !== null ? (
               <>
                 {" "}
@@ -307,18 +315,25 @@ function ClosedStopCard({ stop }: { stop: StopView }) {
         </div>
       </details>
       {stop.controls.undo ? (
-        <div className="border-t border-slate-200 bg-white p-3">
-          <UndoStatus key={`${stop.id}-${stop.state}`} stopId={stop.id} label={`Annuler « ${label} »`} />
-        </div>
+        <UndoStatus key={`${stop.id}-${stop.state}`} stopId={stop.id} label={`Annuler « ${label} »`} routeStopIds={routeStopIds} />
       ) : null}
     </li>
   );
 }
 
-export function StopCard({ stop, total, regulator }: { stop: StopView; total: number; regulator: RegulatorContact | null }) {
+export function StopCard({
+  stop,
+  routeStopIds,
+  regulator,
+}: {
+  stop: StopView;
+  /** Every stop of the route, in order (their count is the total shown on each card). */
+  routeStopIds: readonly string[];
+  regulator: RegulatorContact | null;
+}) {
   return stop.state === "pending" ? (
-    <OpenStopCard stop={stop} total={total} regulator={regulator} />
+    <OpenStopCard stop={stop} total={routeStopIds.length} regulator={regulator} />
   ) : (
-    <ClosedStopCard stop={stop} />
+    <ClosedStopCard stop={stop} routeStopIds={routeStopIds} />
   );
 }
