@@ -205,16 +205,26 @@ Lot de documentation seulement : aucun changement de code, de schéma ni d'écra
   - géolocalisation certifiée et facturation électronique intégrée dans tous les véhicules au plus tard le 1er janvier 2027 (loi 2026-534, art. 27 ; confirmé). V aura donc un logiciel certifié : Opti-Taxi doit s'y brancher ;
   - règles du partage du décret 2025-202 (confirmé) et cinq catégories de soins de l'arrêté du 28 février 2025 (partiel), que l'application ne saisit pas encore ;
   - tarifs des taxis du 1er novembre 2025 et protocole VSL et ambulances du 24 septembre 2025 (partiel) ; décret 2026-812 sur l'ALD (à confirmer) ; accord préalable et article R. 322-10-5 (non revérifiés) ;
-  - une liste « Ce que cela change pour Opti-Taxi » : données par course, validateur, grilles, exports avant le 1er janvier 2027, tableau de bord.
+  - une liste « Ce que cela change pour Opti-Taxi » : données utiles au planning (et celles qui restent dans le logiciel de facturation de V), validateur, territoire de l'ADS, sous-traitance, grilles, exports après le MVP, tableau de bord.
 - **Erreur corrigée** : l'abattement de partage « 15 à 35 % », tiré d'un amendement parlementaire, est remplacé par les taux en vigueur. Taxi : 23 % à 2 patients, 35 % à 3, 37 % à 4 et plus. VSL : 15 % et 33 % si l'entreprise est certifiée (SEFi et géolocalisation certifiée), sinon 23 % et 35 %. Les articles de presse sur la convention taxis sont remplacés par le texte publié.
 - **Concurrence** : grille de 14 capacités pour 8 concurrents (Synovo avec Saphir et EMMAI, Lomaco, SCR'AMBGES, Drivesoft, Ondy, SanteMobile, Amblea, Becose). Elle sépare ce qui est vérifié hors de la page commerciale de ce qui n'est qu'annoncé. Les fiches détaillées et leurs 62 sources sont en annexe.
-- **Colonne Opti-Taxi**, remplie en lisant le code (commit 7954db2), avec une note par case : 2 capacités en place (optimisation J+1 de toute la flotte ; partage du décret, sans les catégories de soins), 4 partielles (planning sans glisser-déposer ni suivi en direct ; application chauffeur sans signature ni photo de la PMT ; personnel sans heures réalisées ni paie ; flotte sans désinfection ni stocks), 8 absentes (géolocalisation et SEFi, facturation, commandes des établissements, information des patients, sous-traitance, export, hébergement HDS, prix).
+- **Colonne Opti-Taxi**, remplie en lisant le code (commit 7954db2), avec une note par case : 1 capacité en place (optimisation J+1 de toute la flotte), 5 partielles (partage du décret sans les catégories de soins ; planning sans glisser-déposer ni suivi en direct ; application chauffeur sans signature ni photo de la PMT ; personnel sans heures réalisées ni paie ; flotte sans désinfection ni stocks), 8 absentes (géolocalisation et SEFi, facturation, commandes des établissements, information des patients, sous-traitance, export, hébergement HDS, prix).
 - **Questions au client** : le logiciel certifié de V passe en tête (éditeur, SEFi, boîtier, import et export, flux certifiés des VSL, SEFi des taxis, plateformes de commande). Suivent la valeur du projet, la réglementation (part de partage, catégorie de soins et motif sur la PMT, conducteurs déclarés, accord préalable) et l'exploitation.
-- **Faisabilité et version 2** : le logiciel certifié de V devient le point d'appui. Export à prévoir avant le 1er janvier 2027 ; positions et kilomètres réels importés du boîtier certifié plutôt qu'un suivi GPS refait.
+- **Faisabilité et version 2** : le logiciel certifié de V devient le point d'appui. Export en version 2, au format du logiciel dont V devra être équipé au 1er janvier 2027 ; positions et kilomètres réels importés du boîtier certifié plutôt qu'un suivi GPS refait.
 - **Point à recouper** : selon la veille concurrence, le service SEFi Taxis est fermé depuis le 1er octobre 2025 (décision de la Commission des téléservices du 16 mars 2026), alors que la convention impose SEFi aux taxis au 1er janvier 2027.
 - **Tarifs** : aucune valeur au-delà du mémo. La recherche en cours sur les tarifs CPAM alimentera le lot tarifaire (TAR-01).
 - **CLAUDE.md non modifié** : un glossaire et des conventions de format sont proposés plus bas (« Proposition pour CLAUDE.md »), à valider par Hugo.
 - Tests : aucun changement de code ; 1 478 tests web, optimiseur inchangé.
+- **Après revue** :
+  - **Partage du décret noté « ✔ partiel »** pour Opti-Taxi, et plus « ✔ en place » : sans les cinq catégories de soins, le partage est proposé, et un refus peut être tracé, pour un soin hors du champ du décret. L'introduction de « Concurrence » ne revendique plus un contrôle complet du décret ; la note dit « proposition horodatée ; acceptation et refus tracés (auteur, heure) », comme le code (la proposition n'a pas d'auteur).
+  - **Grille** : un seul sens par signe. « ✔ partiel » = vérifié, mais pour une partie seulement de la ligne, pour les concurrents (Amblea en optimisation et en partage, Drivesoft, Ondy, SanteMobile, prix de Lomaco) comme pour Opti-Taxi (au lieu de « ◐ partiel », « ◐ » voulant dire « annoncé » dans les autres colonnes).
+  - **Réglementation** : ajout des art. 5.2 (patients du territoire de l'ADS en majorité) et 7.1 (sous-traitance à une entreprise conventionnée, qui facture elle-même) de la convention taxis, non revérifiés, avec la question au client et les conséquences (pénalité et avertissement du validateur ; partenaire conventionné). e-PMT et « Autres textes » ont un niveau (à confirmer, source non conservée) : le mémo ne garde aucun lien pour eux.
+  - **Données** : « Ce que cela change » sépare ce qu'Opti-Taxi doit tenir pour planifier (catégorie de soins, partage compatible, conducteurs et véhicules déclarés) de ce qui reste dans le logiciel de facturation de V (signature, RPPS, péages, motif de prise en charge), par minimisation des données de santé.
+  - **Calendrier** : l'échéance du 1er janvier 2027 est celle de V (équipement) et n'est plus présentée comme celle d'un export d'Opti-Taxi, qui reste après le MVP.
+  - **Conducteur non déclaré** : hypothèse « bloqué pour une course CPAM en taxi conventionné, signalé pour un client privé », alignée sur l'art. 5.1 et le validateur (elle disait « signalé »).
+  - **Sous-traitance (piste 7)** : confrère conventionné, lien à usage limité et expirant, strict nécessaire, ouvertures tracées dans le journal d'audit, hébergement HDS, après validation du cadre RGPD ; Ondy n'est cité que pour la simplicité d'usage.
+  - **Typographie** : espaces insécables avant « : », espaces fines insécables avant « ; ! ? » et à l'intérieur des guillemets, dans tout le document de besoin et tout ce journal, hors blocs de code (qui se collent tels quels dans CLAUDE.md).
+  - **Proposition pour CLAUDE.md** : exemple de titre corrigé (« jeudi 12 novembre 2026 »), titre actuel de la page des transports partagés corrigé (« Arrivées partagées »), modifications liées listées (« verrouillage » dans CLAUDE.md et le document de besoin), et point à trancher sur les boutons de l'application chauffeur.
 
 ## Décisions prises en l'absence d'Hugo (à valider)
 
@@ -262,7 +272,8 @@ Lot de documentation seulement : aucun changement de code, de schéma ni d'écra
 - Lot 8 : historique simulé : 85 % des équipages saisissent leurs statuts (tout ou rien par véhicule et par jour) ; 5 % des patients des séries demandent leur chauffeur (courses figées après le premier calcul) ; absences et garage tirés par personne et par jour ; les pleins du seed et de la simulation sont reconstruits (ceux saisis dans l'application jamais) en gardant le dernier relevé de chaque véhicule.
 - Lot 8 : marge encore négative pour les ambulances du jeu de base et les VSL en ville (voir le tableau) : non corrigée en touchant aux grilles, qui relèvent du lot tarifaire (TAR-01).
 
-- Lot 9 : transport partagé noté « ✔ en place » pour Opti-Taxi : les quatre points de la ligne (proposition, détour, attente, refus) sont dans le code ; l'absence des cinq catégories de soins est dite dans la note. Planning noté « ◐ partiel » : ni glisser-déposer, ni suivi en direct, rien une fois la journée commencée.
+- Lot 9 : transport partagé noté « ✔ partiel » pour Opti-Taxi (« ✔ en place » avant revue) : les quatre points de la ligne (proposition, détour, attente, refus) sont dans le code, mais pas les cinq catégories de soins, qui bornent le champ du décret. Planning noté « ✔ partiel » : ni glisser-déposer, ni suivi en direct, rien une fois la journée commencée.
+- Lot 9 (après revue) : hypothèse pour un conducteur non déclaré = bloqué pour une course CPAM en taxi conventionné (elle ne serait pas remboursée), signalé seulement pour un client privé ; à confirmer avec V (TAR-02). Règle des 50 % du territoire de l'ADS : une pénalité dans l'objectif et un avertissement du validateur, pas une contrainte dure, tant que le mode de calcul de la caisse n'est pas connu.
 - Lot 9 : les textes que le mémo cite sans niveau (décret 2026-787, LFSS 2026, art. 78 et 97 de la loi 2026-534) sont regroupés sous « Autres textes à anticiper », à relire avant d'en faire une règle. Accord préalable et R. 322-10-5, relevés par l'étude de départ mais absents du mémo : « non revérifié ».
 - Lot 9 : les fiches des concurrents vont en annexe du document de besoin, pas dans un fichier à part, pour garder un seul document de référence. Les dix pistes « Ce qu'Opti-Taxi en retient » (dont publier un prix par véhicule et par mois) sont des pistes à valider, pas des décisions.
 
@@ -283,8 +294,8 @@ L'étude des écrans a relevé des termes et des formats qui varient d'un écran
 - Transport partagé : au moins deux patients à bord d'un VSL ou d'un taxi en même temps.
   Partage proposé, accepté, refusé ; « refus du partage ».
 - Course non affectée : sans véhicule après le calcul. Km à vide : sans patient à bord.
-- Menu « Transports partagés » (au lieu d'« Arrivées partagées ») : la page liste arrivées et départs,
-  et son titre dit déjà « Transports partagés ».
+- Menu et titre de page « Transports partagés » (au lieu d'« Arrivées partagées », à renommer ensemble) :
+  la page liste arrivées et départs ; sa description et la fiche par établissement le disent déjà.
 - Absence (personne) ; indisponibilité (véhicule) ; échéance ; plein.
 - Prescription (PMT) ; mode prescrit : assis (TAP) ou allongé (ambulance).
 - Chauffeur (le compte et la personne) ; conducteur seulement au sens de la convention taxis.
@@ -292,14 +303,14 @@ L'étude des écrans a relevé des termes et des formats qui varient d'un écran
 ### Formats d'affichage
 - Heure : « 07:30 ». Plage horaire : « 07:30 – 09:00 ». Durée : « 45 min », « 1 h 05 ».
 - Date dans une liste ou une journée : « 12/11 » ; « 12/11/2025 » si l'année n'est pas l'année en cours.
-  Titre de page : « mardi 12 novembre 2026 ». Période : « du 01/11 au 30/11 » (pas de flèche).
+  Titre de page : « jeudi 12 novembre 2026 ». Période : « du 01/11 au 30/11 » (pas de flèche).
 - Horodatage : « 02/11 à 18:40 » ; « 18:40 » seul si c'est le jour affiché. Un seul module (lib/time.ts).
 - Nom d'une personne sur les écrans de régulation : « DUPONT Marie » (tri par nom),
   « DUPONT M. » dans une cellule étroite ; formulaires dans l'ordre Nom puis Prénom.
 - Nombres : virgule décimale ; espace insécable entre le nombre et l'unité (« 45 min », « 152 km »,
   « 12,50 € ») ; séparateur de milliers fourni par Intl.NumberFormat.
-- Typographie : espace insécable avant « : » ; espace fine insécable avant « ; ! ? » et à l'intérieur
-  des guillemets « » ; « … » en un seul caractère.
+- Typographie (interface et documents en français, hors blocs de code) : espace insécable avant « : » ;
+  espace fine insécable avant « ; ! ? » et à l'intérieur des guillemets « » ; « … » en un seul caractère.
 - Libellés : bouton de création « Nouveau X » ou « Nouvelle X » ; liste à choix « Choisir… » ;
   champ facultatif marqué « (facultatif) » dans son libellé ; « Se déconnecter ».
 - Action destructive : bouton rouge qui répète l'action (« Oui, annuler la course ») et
@@ -308,7 +319,18 @@ L'étude des écrans a relevé des termes et des formats qui varient d'un écran
   (l'historique du navigateur garderait une donnée de santé).
 ```
 
-Points à trancher dans cette proposition : l'ordre des noms sur la feuille de route du chauffeur (aujourd'hui « Marie DUPONT », prénom d'abord, plus naturel à l'oral) ; « 7 h 30 » dans les textes du document de besoin, à garder ou à aligner sur « 07:30 ».
+Modifications liées, à faire dans le même changement si Hugo valide (sinon CLAUDE.md se contredirait) :
+
+- CLAUDE.md, « Ce qu'on construit (MVP) », point 4 : « ajustement manuel, verrouillage, réoptimisation du reste » devient « ajustement manuel, courses figées, réoptimisation du reste » ;
+- `docs/besoin-et-solution.md`, « Modèle de données », ligne Course : « verrou manuel » devient « course figée » ;
+- `docs/besoin-et-solution.md`, « Brief de démarrage pour Claude Code », point 4 : même phrase que CLAUDE.md ;
+- les écrans (libellés, statuts, menu, formats) sont alignés ensuite dans un lot dédié.
+
+Points à trancher dans cette proposition :
+
+- l'ordre des noms sur la feuille de route du chauffeur (aujourd'hui « Marie DUPONT », prénom d'abord, plus naturel à l'oral) ;
+- les statuts accordés avec « course » (« Prise en charge », « Déposée », « Patient absent ») renomment les libellés actuels « Pris en charge », « Déposé » et « Absent » (`lib/labels.ts`). Les boutons de l'application chauffeur (« Pris en charge », « Déposé », « Patient absent ») parlent du patient, et la note (m) de la grille de concurrence les cite : garder leur accord avec le patient, ou les aligner aussi ?
+- « 7 h 30 » dans les textes du document de besoin, à garder ou à aligner sur « 07:30 ».
 
 ## Questions pour le PO
 

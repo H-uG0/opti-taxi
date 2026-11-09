@@ -74,9 +74,9 @@ Vérifiée sur les sources officielles (Légifrance, Service-Public, ameli, Asse
 
 - **Confirmé** : texte officiel lu.
 - **Partiel** : texte officiel lu, mais un point reste à recouper ; il est signalé.
-- **À confirmer** : texte connu par des sources indirectes (questions écrites, blog d'avocat), pas lu sur Légifrance.
+- **À confirmer** : texte connu par des sources indirectes (questions écrites, blog d'avocat, mémo de veille sans lien conservé), pas lu sur Légifrance.
 - **Non confirmé** : aucun texte trouvé.
-- **Non revérifié** : relevé par l'étude de départ, avec une source officielle, mais pas recontrôlé le 9 novembre.
+- **Non revérifié** : relevé par l'étude de départ ou par l'audit réglementaire du projet, avec une source officielle, mais pas recontrôlé le 9 novembre.
 
 Les montants cités servent à comprendre les règles. Ils sont à recontrôler avant toute saisie dans les grilles tarifaires.
 
@@ -85,12 +85,14 @@ Les montants cités servent à comprendre les règles. Ils sont à recontrôler 
 | Loi n° 2026-534 du 25 juin 2026, art. 27 | Géolocalisation certifiée et facturation électronique intégrée dans tous les véhicules | Au plus tard le 1er janvier 2027 | Confirmé |
 | Décret n° 2025-202 et arrêté du 28 février 2025 | Transport partagé à proposer en TAP, pour cinq catégories de soins | 2 mars 2025 | Partiel (règles du partage : confirmé) |
 | Convention-cadre des taxis conventionnés (arrêté du 29 juillet 2025) | Tarifs, abattements de partage, obligations de facturation | Tarifs du 1er novembre 2025 | Partiel |
+| Même convention, art. 5.2 et 7.1 | Patients du territoire de l'ADS en majorité ; sous-traitance à une entreprise conventionnée seulement | 1er novembre 2026 (art. 5.2, selon une question écrite) | Non revérifié |
 | Protocole des transporteurs sanitaires du 24 septembre 2025 | Tarifs VSL et ambulance selon la certification, objectif de partage | 1er octobre 2025, puis 1er juillet 2027 | Partiel |
-| SEFi et prescription électronique (e-PMT) | SEFi obligatoire pour les transporteurs sanitaires (depuis 2021, sans sanction) et pour les taxis ; aucune obligation e-PMT trouvée | 1er janvier 2027 pour les taxis | Partiel |
+| SEFi et prescription électronique (e-PMT) | SEFi obligatoire pour les transporteurs sanitaires (depuis 2021, sans sanction) et pour les taxis ; aucune obligation e-PMT trouvée | 1er janvier 2027 pour les taxis | SEFi : partiel ; e-PMT : à confirmer (source non conservée) |
 | Décret n° 2026-812 du 21 août 2026 | Une ALD non exonérante ne justifie plus seule un transport | 1er octobre 2026 | À confirmer |
 | Accord préalable (DAP) | Obligatoire au-delà de 150 km et pour certaines séries longues | En vigueur | Non revérifié |
 | Art. R. 322-10-5 du code de la sécurité sociale | Remboursement plafonné à la structure de soins appropriée la plus proche | En vigueur | Non revérifié |
 | Avenant 12 des transporteurs sanitaires | — | — | Non confirmé (dernier trouvé : avenant 11) |
+| Décret n° 2026-787, LFSS 2026, loi 2026-534 art. 78 et 97 | Voir « Autres textes à anticiper » | 2027-2028 | À confirmer (source non conservée) |
 
 ### Géolocalisation certifiée et facturation intégrée (loi 2026-534, art. 27) — confirmé
 
@@ -113,7 +115,7 @@ Les montants cités servent à comprendre les règles. Ils sont à recontrôler 
   - information (R. 322-11-7) : le transporteur informe l'accueil du lieu de soins ;
   - refus (R. 322-11-4) : il est mentionné sur la facture ou le justificatif (R. 322-10-2).
 - À confirmer : les bénéficiaires de la C2S et de l'AME ne seraient pas concernés (circulaire CNAM CIR-5/2025, non lue).
-- Dans Opti-Taxi : détour, attente, TAP seul, prescription, refus tracé et feuille des arrivées partagées sont en place. Les cinq catégories de soins ne sont pas saisies.
+- Dans Opti-Taxi : détour, attente, TAP seul, prescription, refus tracé et feuille des arrivées partagées sont en place. Les cinq catégories de soins ne sont pas saisies : le partage est proposé dès que la prescription l'autorise, y compris pour un soin hors de ces catégories, où un refus ne devrait pas coûter au patient la dispense d'avance de frais.
 - Sources : [Légifrance, R. 322-11-1 à R. 322-11-8](https://www.legifrance.gouv.fr/codes/section_lc/LEGITEXT000006073189/LEGISCTA000006173384/), [Service-Public](https://www.service-public.gouv.fr/particuliers/actualites/A18110), [FHF](https://www.fhf.fr/expertises/finances/budget-eprd/conditions-de-mise-en-oeuvre-des-transports-partages-de-patients-0).
 
 ### Taxis conventionnés : convention-cadre et tarifs du 1er novembre 2025 — partiel
@@ -126,11 +128,13 @@ Les montants cités servent à comprendre les règles. Ils sont à recontrôler 
 - Retour à vide d'un transport hospitalier (entrée ou sortie, chimiothérapie, radiothérapie, hémodialyse) : tarif kilométrique +25 % si le trajet en charge fait moins de 50 km, +50 % au-delà.
 - Partage : une facture par patient, sur la distance réellement parcourue par chacun. Abattements de 23 % à 2 patients, 35 % à 3 et 37 % à 4 et plus, hors péages et TPMR. Abattement de 5 % pour un patient seul sur une longue distance (seuil local, 30 km au moins). Le partage est proposé par défaut ; un refus est mentionné sur la facture.
 - Seuls les trajets faits par un conducteur et un véhicule déclarés au référentiel national sont remboursés (art. 5.1). La carte professionnelle doit être valide (art. 3.7).
+- **Territoire de l'ADS (art. 5.2) — non revérifié.** Chaque autorisation de stationnement (ADS) doit prendre en charge en majorité des patients de son territoire, une zone fixée par la caisse, d'au moins deux communes du département (art. 3.1). Contrôle annuel, première année de transition, mode de calcul fixé par une charte nationale. Selon une question écrite, il s'agit d'au moins 50 % de l'activité dans la zone de l'ADS, appliqués pleinement depuis le 1er novembre 2026, avec des sanctions qui vont jusqu'au déconventionnement ([QE 11226](https://questions.assemblee-nationale.fr/dyn/17/questions/QANR5L17QE11226), sans réponse du gouvernement). Aujourd'hui, l'optimiseur affecte un taxi à n'importe quelle course de l'axe (13, 04, 05, 38) : un taxi de Sisteron peut prendre un Gap – Marseille.
+- **Sous-traitance (art. 7.1) — non revérifié.** Une course ne se confie qu'à une entreprise conventionnée, et l'entreprise qui réalise le transport le facture elle-même, y compris en cas de rétrocession.
 - Chaque trajet facturé indique la date, l'heure, les lieux de départ et d'arrivée, l'immatriculation, le conducteur, le nombre de malades, les km en charge et le RPPS du prescripteur (art. 7.3). Le patient signe, ou une mention le remplace (art. 7.2). La caisse contrôle les distances avec un distancier (art. 7.7). Le déconventionnement peut aller jusqu'à 5 ans (art. 9.2).
 - SEFi est obligatoire au plus tard le 1er janvier 2027 (art. 7.5) ; il remplace la norme B2.
 - Corrections : 15 % et 33 % sont les abattements du VSL certifié (avenant 11), pas du taxi. L'objectif de plus de 30 % de partage fin 2027 vient du protocole des transporteurs sanitaires, pas de la convention taxis.
 - Point à recouper : selon la veille concurrence (fiche Lomaco en annexe), la Commission des téléservices a fermé le service SEFi Taxis depuis le 1er octobre 2025 (décision du 16 mars 2026). Comment les taxis tiendront-ils l'échéance du 1er janvier 2027 ?
-- Sources : [arrêté du 29 juillet 2025](https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000052060568), [ameli, convention nationale type](https://www.ameli.fr/taxi-conventionne/textes-reference/convention-nationale-type).
+- Sources : [arrêté du 29 juillet 2025](https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000052060568) (art. 5.2 et 7.1 compris), [ameli, convention nationale type](https://www.ameli.fr/taxi-conventionne/textes-reference/convention-nationale-type), [QE 11226](https://questions.assemblee-nationale.fr/dyn/17/questions/QANR5L17QE11226).
 
 ### VSL et ambulances : protocole du 24 septembre 2025 et SEFi — partiel
 
@@ -145,11 +149,12 @@ Les montants cités servent à comprendre les règles. Ils sont à recontrôler 
 - Repères de la Cour des comptes : cibles implicites pour 2027 de 36 % de partage en VSL et 25 % en taxi ; taux constatés de 21,7 % en VSL en 2024 et d'environ 5 % en taxi.
 - Sources : [arrêté du 29 septembre 2025 (protocole)](https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000052304334), [ameli, tarifs VSL](https://www.ameli.fr/transporteur-sanitaire/exercice-professionnel/facturation/tarifs/vsl-tarifs-conventionnels), [Cour des comptes](https://www.ccomptes.fr/sites/default/files/2026-05/20260527-RALFSS-2026-7-Transports-patients-a-la-charge-de-l-assurance-maladie.pdf).
 
-### Prescription électronique (e-PMT) — partiel
+### Prescription électronique (e-PMT) — à confirmer (source non conservée)
 
 - Les libéraux prescrivent en ligne sur amelipro. La version hospitalière est limitée à 4 établissements.
 - 1,5 million de prescriptions électroniques en 2025.
 - Aucune obligation trouvée pour 2025-2027 : l'amendement du PLFSS 2025 est « tombé ».
+- Source : le mémo du 9 novembre ne garde aucun lien pour ce point (page amelipro, amendement du PLFSS 2025). À retrouver et à relire avant d'en tirer une règle.
 
 ### Prise en charge : ALD, accord préalable, établissement le plus proche
 
@@ -158,21 +163,24 @@ Les montants cités servent à comprendre les règles. Ils sont à recontrôler 
 - **Art. R. 322-10-5 du code de la sécurité sociale — non revérifié.** Le remboursement est calculé sur la distance jusqu'à la structure de soins appropriée la plus proche. Source : [Légifrance](https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000006749252).
 - Sur l'axe de V, une série Sisteron – Aix ou Sisteron – Grenoble dépasse 50 km, et un Gap – Marseille dépasse 150 km : l'accord préalable et le plafond de distance y comptent. Rien n'est suivi aujourd'hui dans l'application.
 
-### Autres textes à anticiper
+### Autres textes à anticiper — à confirmer (source non conservée)
 
-Le mémo du 9 novembre les cite sans niveau de vérification : à relire avant d'en faire une règle.
+Le mémo du 9 novembre les cite sans lien ni niveau de vérification. Aucun de ces points n'a été relu : à relire avant d'en faire une règle.
 
-- Loi 2026-534, mesures anti-fraude : paiement différé pendant une procédure (art. 78), responsabilité solidaire du dirigeant (art. 97). Fraude citée : facturer plusieurs trajets simples au lieu d'un trajet partagé.
-- Décret n° 2026-787 du 13 août 2026 : transport bariatrique (équipage jusqu'à 3 personnes) ; agrément TPMR au 1er janvier 2028.
-- LFSS 2026 : mise sous objectif des établissements prescripteurs au 1er janvier 2027 (modalités à préciser).
-- ADRi et CDRi : aucune obligation trouvée.
+- Loi 2026-534, mesures anti-fraude : paiement différé pendant une procédure (art. 78), responsabilité solidaire du dirigeant (art. 97). Fraude citée : facturer plusieurs trajets simples au lieu d'un trajet partagé. À confirmer : la loi a été lue pour son art. 27 ([Légifrance](https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000054309429)), pas pour ces deux articles.
+- Décret n° 2026-787 du 13 août 2026 : transport bariatrique (équipage jusqu'à 3 personnes) ; agrément TPMR au 1er janvier 2028. À confirmer : texte non lu, source non conservée.
+- LFSS 2026 : mise sous objectif des établissements prescripteurs au 1er janvier 2027 (modalités à préciser). À confirmer : texte non lu, source non conservée.
+- ADRi et CDRi : aucune obligation trouvée (non confirmé).
 
 ### Ce que cela change pour Opti-Taxi
 
-- **Données par course et par patient** : heures et lieux réels, km en charge par patient, nombre de patients à bord, immatriculation et conducteur déclarés, RPPS du prescripteur, péages, signature, case « compatible partage », catégorie de soins (les cinq de l'arrêté), motif de prise en charge (ALD exonérante, hospitalisation, plus de 150 km, série), refus horodaté. L'application a déjà les heures réelles saisies par les équipages, le nombre de patients à bord et les km prévus, l'immatriculation, le conducteur de la tournée, le nom du prescripteur (sans RPPS) et le refus horodaté.
-- **Validateur** : il vérifie déjà le détour, l'attente, le TAP seul et la prescription. À ajouter : le partage seulement pour les cinq catégories de soins, aucun conducteur ni véhicule non déclaré.
+- **Données dont Opti-Taxi a besoin pour planifier et valider** : la catégorie de soins (une des cinq de l'arrêté, à ajouter), la case « compatible partage » de la prescription (déjà saisie : partage autorisé à l'aller, au retour ou les deux), les conducteurs et véhicules déclarés (à ajouter), le refus horodaté (en place), les heures réelles (saisies par les équipages) et les km par course pour l'export (prévus seulement). L'application a aussi le nombre de patients à bord, l'immatriculation et le conducteur de chaque tournée.
+- **Données qui restent dans le logiciel certifié de V** (facturation, hors périmètre) : signature du patient, RPPS du prescripteur, péages, motif de prise en charge (ALD exonérante, hospitalisation, plus de 150 km, série). Opti-Taxi ne les collecte pas : la planification n'en a pas besoin, et ce sont des données de santé (minimisation, RGPD art. 5.1.c). S'il fallait un jour avertir qu'une course ne sera pas remboursée, Opti-Taxi garderait un motif codé, jamais un diagnostic.
+- **Validateur** : il vérifie déjà le détour, l'attente, le TAP seul et la prescription. À ajouter : le partage seulement pour les cinq catégories de soins ; aucun conducteur ni véhicule non déclaré sur une course CPAM en taxi conventionné.
+- **Territoire de l'ADS (taxis)** : rattacher chaque taxi à son ADS et à son territoire, suivre sur l'année glissante la part de patients du territoire, pénaliser dans l'objectif une prise hors territoire quand un taxi approche du seuil, et faire avertir le validateur. Une pénalité plutôt qu'une contrainte dure, tant que le mode de calcul de la caisse n'est pas connu.
+- **Sous-traitance** : un partenaire ne s'enregistre qu'avec son numéro de conventionnement (taxi) ou d'agrément (transport sanitaire) ; il facture lui-même la course confiée, qui sort du chiffre d'affaires et des indicateurs de V.
 - **Grilles tarifaires datées** (lot tarifaire à venir) : taxi avec 4 km inclus, km par département d'ADS, grande ville, majorations, retour à vide, TPMR, abattements 23, 35 et 37 % et 5 % en longue distance ; VSL selon la certification (15 et 33 % ou 23 et 35 %, tarif majoré réservé aux flux certifiés dès le 1er juillet 2027).
-- **Exports avant le 1er janvier 2027** : le planifié, par course et par patient, vers le logiciel SEFi ; le rapprochement entre le prévu et le GPS ; la liste quotidienne des arrivées partagées par établissement (elle existe, à imprimer).
+- **Exports, après le MVP** : V devra être équipé d'un logiciel certifié au 1er janvier 2027 ; l'export d'Opti-Taxi suivra son format. À exporter : le planifié, par course et par patient ; le rapprochement entre le prévu et le GPS ; la liste quotidienne des arrivées partagées par établissement (elle existe déjà, à imprimer).
 - **Tableau de bord** : taux de partage par type (repères : 30 % fin 2027, 36 % en VSL, 25 % en taxi), taux de refus, part des flux certifiés.
 - **Paramètres plutôt que code** : décret d'application de L. 322-5-3, minoration en cas de refus, jonction, participation de 50 à 60 %.
 - Les données de géolocalisation liées à un patient sont des données de santé : hébergeur HDS.
@@ -205,7 +213,7 @@ Oui, c'est réalisable. C'est un problème d'optimisation connu (le « Dial-a-Ri
 
 ## Concurrence (vérifiée le 9 novembre 2026)
 
-Les concurrents forment quatre familles. Les éditeurs historiques (Lomaco, SCR Informatiques, Synovo avec Saphir) vendent un logiciel complet centré sur la facturation CPAM certifiée, avec régulation, personnel et flotte. Les nouveaux entrants (Drivesoft, Ondy, et Becose, pas encore lancé) vendent une suite à prix public par véhicule et par mois. SanteMobile fait la régulation sans facturation pour 3 à 20 véhicules ; Amblea est une plateforme où les établissements commandent des transports, qu'elle répartit entre transporteurs. Aucun ne montre publiquement une optimisation de la journée entière d'une flotte avec temps de calcul et résultats mesurés, ni le contrôle complet du décret 2025-202 avec le refus de partage tracé. Opti-Taxi se place là : planifier J+1 toute la flotte sous contraintes vérifiées, en amont du logiciel de facturation déjà en place, sans le remplacer.
+Les concurrents forment quatre familles. Les éditeurs historiques (Lomaco, SCR Informatiques, Synovo avec Saphir) vendent un logiciel complet centré sur la facturation CPAM certifiée, avec régulation, personnel et flotte. Les nouveaux entrants (Drivesoft, Ondy, et Becose, pas encore lancé) vendent une suite à prix public par véhicule et par mois. SanteMobile fait la régulation sans facturation pour 3 à 20 véhicules ; Amblea est une plateforme où les établissements commandent des transports, qu'elle répartit entre transporteurs. Aucun ne montre publiquement une optimisation de la journée entière d'une flotte avec temps de calcul et résultats mesurés, ni un transport partagé dont le détour, l'attente et le refus sont à la fois contrôlés et tracés. Opti-Taxi se place là : planifier J+1 toute la flotte sous contraintes vérifiées (détour, attente, TAP et refus contrôlés ; catégories de soins du décret à ajouter), en amont du logiciel de facturation déjà en place, sans le remplacer.
 
 > Identification : les huit produits sont identifiés. Pour Becose, l'éditeur n'est établi que par recoupement (même téléphone et même adresse). Le lien entre Synovo et le logiciel taxi Caree n'est pas établi.
 
@@ -213,22 +221,22 @@ Les concurrents forment quatre familles. Les éditeurs historiques (Lomaco, SCR 
 
 | Capacité | Synovo (Saphir, EMMAI) | Lomaco | SCR (SCR'AMBGES) | Drivesoft | Ondy | SanteMobile | Amblea | Becose | Opti-Taxi |
 |---|---|---|---|---|---|---|---|---|---|
-| 1. Régulation, planning (frise, glisser-déposer, temps réel) | ✔ fait | ✔ fait | ◐ annoncé | ◐ annoncé | ✔ fait | ◐ annoncé | ◐ annoncé (a) | ◐ annoncé | ◐ partiel (j) |
-| 2. Optimisation automatique des tournées (J+1 ou jour J) | ◐ annoncé | ◐ annoncé | ◐ annoncé | ◐ annoncé | ? | ◐ annoncé | ✔ fait (b) | ◐ annoncé | ✔ en place (k) |
-| 3. Transport partagé selon le décret 2025-202 (proposition, détour, attente, refus) | ◐ annoncé | ◐ annoncé | ◐ annoncé | ? | ◐ annoncé | ◐ annoncé | ✔ fait (b) | ◐ annoncé | ✔ en place (l) |
-| 4. Application chauffeur (statuts, hors ligne, signature, photo PMT) | ✔ fait | ✔ fait | ◐ annoncé | ✔ fait | ✔ fait | ✔ fait | ✔ fait | ◐ annoncé | ◐ partiel (m) |
-| 5. Géolocalisation certifiée et SEFi (échéance 1er janvier 2027) | ◐ annoncé (c) | ◐ annoncé (d) | ◐ annoncé | ✔ fait (e) | ◐ annoncé | ✘ non | ? | ◐ annoncé | ✘ non (n) |
-| 6. Facturation CPAM et télétransmission | ◐ annoncé | ✔ fait | ◐ annoncé | ✔ fait | ✔ fait (f) | ✘ non | ? | ◐ annoncé | ✘ non (n) |
-| 7. Planning du personnel (congés, gardes, heures, paie) | ◐ annoncé | ◐ annoncé | ◐ annoncé | ◐ annoncé | ? | ✔ fait (g) | ? | ? | ◐ partiel (o) |
-| 8. Flotte (entretien, échéances, désinfection, stocks) | ◐ annoncé | ? | ◐ annoncé | ◐ annoncé | ? | ◐ annoncé | ? | ? | ◐ partiel (p) |
+| 1. Régulation, planning (frise, glisser-déposer, temps réel) | ✔ fait | ✔ fait | ◐ annoncé | ◐ annoncé | ✔ fait | ◐ annoncé | ◐ annoncé (a) | ◐ annoncé | ✔ partiel (j) |
+| 2. Optimisation automatique des tournées (J+1 ou jour J) | ◐ annoncé | ◐ annoncé | ◐ annoncé | ◐ annoncé | ? | ◐ annoncé | ✔ partiel (b) | ◐ annoncé | ✔ en place (k) |
+| 3. Transport partagé selon le décret 2025-202 (proposition, détour, attente, refus) | ◐ annoncé | ◐ annoncé | ◐ annoncé | ? | ◐ annoncé | ◐ annoncé | ✔ partiel (b) | ◐ annoncé | ✔ partiel (l) |
+| 4. Application chauffeur (statuts, hors ligne, signature, photo PMT) | ✔ fait | ✔ fait | ◐ annoncé | ✔ fait | ✔ fait | ✔ fait | ✔ fait | ◐ annoncé | ✔ partiel (m) |
+| 5. Géolocalisation certifiée et SEFi (échéance 1er janvier 2027) | ◐ annoncé (c) | ◐ annoncé (d) | ◐ annoncé | ✔ partiel (e) | ◐ annoncé | ✘ non | ? | ◐ annoncé | ✘ non (n) |
+| 6. Facturation CPAM et télétransmission | ◐ annoncé | ✔ fait | ◐ annoncé | ✔ fait | ✔ partiel (f) | ✘ non | ? | ◐ annoncé | ✘ non (n) |
+| 7. Planning du personnel (congés, gardes, heures, paie) | ◐ annoncé | ◐ annoncé | ◐ annoncé | ◐ annoncé | ? | ✔ partiel (g) | ? | ? | ✔ partiel (o) |
+| 8. Flotte (entretien, échéances, désinfection, stocks) | ◐ annoncé | ? | ◐ annoncé | ◐ annoncé | ? | ◐ annoncé | ? | ? | ✔ partiel (p) |
 | 9. Commandes des établissements (portail, plateformes, API) | ✔ fait | ✔ fait | ◐ annoncé | ◐ annoncé | ✔ fait | ? | ✔ fait | ◐ annoncé | ✘ non (q) |
 | 10. Information des patients (SMS, suivi) | ◐ annoncé | ✔ fait | ◐ annoncé | ? | ✔ fait | ✔ fait | ◐ annoncé | ? | ✘ non |
 | 11. Échange de courses entre transporteurs, sous-traitance | ◐ annoncé | ? | ◐ annoncé (h) | ? | ✔ fait | ? | ✔ fait | ? | ✘ non (r) |
 | 12. Export ou API vers d'autres logiciels | ◐ annoncé | ✔ fait | ◐ annoncé | ◐ annoncé | ✔ fait | ◐ annoncé | ✔ fait | ? | ✘ non (s) |
 | 13. Hébergement HDS | ◐ annoncé | ◐ annoncé | ? | ◐ annoncé | ? | ✘ non | ? | ◐ annoncé | ✘ non (t) |
-| 14. Prix publié | ✘ non | ✔ fait (i) | ✘ non | ✔ fait | ✔ fait | ✘ non | ✘ non | ◐ annoncé | ✘ non (u) |
+| 14. Prix publié | ✘ non | ✔ partiel (i) | ✘ non | ✔ fait | ✔ fait | ✘ non | ✘ non | ◐ annoncé | ✘ non (u) |
 
-Légende : **✔ fait** = vérifié hors de la page commerciale de l'éditeur (registre officiel, store d'applications, presse, document tiers). **◐ annoncé** = affirmé seulement sur la page commerciale. **✘ non** = l'éditeur écrit qu'il ne le fait pas, ou aucun prix n'est publié. **?** = aucune information trouvée. « Fait » ne veut pas dire complet : les fiches précisent ce qui manque.
+Légende : **✔ fait** = vérifié hors de la page commerciale de l'éditeur (registre officiel, store d'applications, presse, document tiers). **✔ partiel** = vérifié de la même façon, mais pour une partie seulement de la ligne ; la note dit ce qui manque. **◐ annoncé** = affirmé seulement sur la page commerciale. **✘ non** = l'éditeur écrit qu'il ne le fait pas, ou aucun prix n'est publié. **?** = aucune information trouvée. Les fiches en annexe donnent le détail.
 
 - (a) Amblea : la régulation est assurée par une équipe d'Amblea ; le transporteur n'a pas de planning de flotte.
 - (b) Amblea : partiel. Regroupements et enchaînements proposés mission par mission, sans optimisation de la journée d'un véhicule ; ni décret cité, ni refus tracé.
@@ -240,11 +248,11 @@ Légende : **✔ fait** = vérifié hors de la page commerciale de l'éditeur (r
 - (h) SCR : bourse de transport côté hôpital (LCR_i), pas d'échange direct entre sociétés.
 - (i) Lomaco : prix public pour le taxi conventionné seulement.
 
-Colonne Opti-Taxi : vérifiée dans le code de l'application au 9 novembre 2026 (commit 7954db2), pas sur une page commerciale. **✔ en place** = la capacité existe dans l'application. **◐ partiel** = une partie existe ; la note dit ce qui manque. **✘ non** = absente.
+Colonne Opti-Taxi : vérifiée dans le code de l'application au 9 novembre 2026 (commit 7954db2), pas sur une page commerciale. **✔ en place** = la capacité existe dans l'application. **✔ partiel** = une partie existe ; la note dit ce qui manque. **✘ non** = absente.
 
 - (j) Opti-Taxi : frise par véhicule, carte et panneau « À traiter ». Une course se déplace par « Déplacer vers… », puis l'outil recalcule la journée ; pas de glisser-déposer. Les statuts saisis par les équipages s'affichent au rechargement de la page, sans suivi en direct. Une fois la journée commencée, plus de recalcul ni de déplacement.
 - (k) Opti-Taxi : « Optimiser demain » calcule les tournées de toute la flotte (OR-Tools et insertion), puis un validateur indépendant revérifie chaque règle dure. Banc fictif de 120 véhicules et 300 voyages : 297 courses placées sur 297 en 15 s (voir « Test de charge »). Pas de recalcul du jour même une fois la journée commencée.
-- (l) Opti-Taxi : détour (10 km par patient ajouté, 30 km au plus) et attente (45 min), réglables sans dépasser ces plafonds ; partage en TAP seulement, si la prescription l'autorise ; proposition, acceptation et refus tracés (auteur, heure) ; feuille des arrivées partagées par établissement, à imprimer. Manque : les cinq catégories de soins de l'arrêté du 28 février 2025 (le partage dépend seulement de la prescription).
+- (l) Opti-Taxi : détour (10 km par patient ajouté, 30 km au plus) et attente (45 min), réglables sans dépasser ces plafonds ; partage en TAP seulement, si la prescription l'autorise ; proposition horodatée ; acceptation et refus tracés (auteur, heure) ; feuille des arrivées partagées par établissement, à imprimer. Manque : les cinq catégories de soins de l'arrêté du 28 février 2025. Le partage dépend seulement de la prescription : il est proposé, et un refus peut être tracé, pour un soin hors de ces catégories.
 - (m) Opti-Taxi : feuille de route web sur téléphone, statuts « pris en charge », « déposé » et « patient absent », file des statuts hors réseau à l'heure du geste, lien vers l'application de navigation. Ni signature, ni photo de la PMT, ni copie de la feuille de route hors réseau.
 - (n) Opti-Taxi : hors périmètre. Aucune géolocalisation, aucune facture : seulement un chiffre d'affaires estimé par course, à partir de grilles tarifaires datées en base.
 - (o) Opti-Taxi : absences datées (congé, maladie, formation, garde), jours et horaires habituels, pause, paires interdites, équipages du jour avec remplaçants proposés. Ni heures réalisées, ni amplitude, ni repos entre deux jours, ni paie.
@@ -260,12 +268,12 @@ Les fiches détaillées des huit concurrents, avec leurs sources numérotées, s
 ### Ce qu'Opti-Taxi en retient (pistes à valider)
 
 1. Montrer en démonstration ce qu'aucun concurrent ne montre publiquement : une optimisation J+1 de toute la flotte, avec son temps de calcul et ses gains mesurés (courses par véhicule, km à vide, part de partage, retards), chaque solution passant par le validateur indépendant.
-2. Rendre visible le transport partagé conforme au décret 2025-202 : regroupements proposés, détour borné à 10 km par patient et 30 km au total, attente bornée à 45 min, refus tracé sur la course.
+2. Rendre visible le transport partagé selon le décret 2025-202 : regroupements proposés, détour borné à 10 km par patient et 30 km au total, attente bornée à 45 min, refus tracé sur la course. Ajouter d'abord les cinq catégories de soins de l'arrêté : sans elles, le partage peut être proposé, et un refus tracé, hors du champ du décret.
 3. Mettre en avant l'équipage du jour (absences, paires interdites, véhicules indisponibles, pauses), car aucun concurrent ne décrit de paires interdites ni de véhicules indisponibles pris en compte dans la planification.
 4. Exporter les tournées et les courses réalisées vers le logiciel de facturation certifié du client, d'abord en CSV puisque Lomaco, SCR et Saphir ne publient pas d'API, et demander au PO lequel il utilise (Lomaco a une instance à Grenoble ; Ondy revendique environ 100 sociétés dans les Bouches-du-Rhône).
 5. Garder la règle « l'outil propose, le régulateur décide » : propositions visibles avant validation, courses figées, et réoptimisation du reste quand une course est ajoutée ou refusée.
 6. Recevoir dans une boîte de réception du planning les commandes venant des établissements (Amblea, Rubis, SPS, LCR_i en Isère), sans ressaisie.
-7. Pour la sous-traitance demandée par le PO, confier une course non affectée à un confrère par un simple lien, sans compte, comme Ondy ; un échange de courses comme Rubis Exchange peut venir ensuite.
+7. Pour la sous-traitance demandée par le PO, confier une course non affectée à un confrère conventionné, qui la facture lui-même (convention taxis, art. 7.1). Une fois le cadre RGPD validé : un lien à usage limité et expirant, qui ne montre que le strict nécessaire (prise en charge, dépose, horaire, mode prescrit), dont chaque ouverture est tracée dans le journal d'audit, sur un hébergement HDS. Ondy sert de repère pour la simplicité d'usage, pas pour le traitement des données (hébergement non certifié HDS, données non chiffrées selon sa fiche Google Play). Un échange de courses comme Rubis Exchange peut venir ensuite.
 8. Ne promettre ni SEFi ni géolocalisation certifiée pour le 1er janvier 2027, mais savoir importer les traces et les statuts d'un boîtier certifié.
 9. Publier un prix par véhicule et par mois, multi-dépôts compris : les repères sont 50 € HT chez Ondy (6 000 € HT par mois pour 120 véhicules) et environ 78 € HT chez Drivesoft, qui impose sa formule Premium au-delà de 50 véhicules.
 10. Afficher l'éditeur, l'hébergeur HDS, ce qui est certifié et ce qui n'est qu'annoncé, avec des chiffres issus du banc d'essai, car Ondy, Becose et Drivesoft se contredisent sur ces points.
@@ -290,7 +298,7 @@ Un outil web à deux faces : un écran de planification pour le régulateur, une
 - Positions et kilomètres réels importés du boîtier certifié de V, plutôt qu'un suivi GPS refait ; SMS de confirmation aux patients.
 - Alertes sur les prescriptions qui arrivent à expiration.
 - Durées de séance et temps de trajet appris sur l'historique.
-- Export vers le logiciel certifié de V, à prévoir avant le 1er janvier 2027 (voir « Réglementation 2025-2027 »).
+- Export vers le logiciel certifié de V. C'est V qui devra être équipé au 1er janvier 2027 (géolocalisation certifiée et facturation intégrée) ; l'export d'Opti-Taxi suivra le format de ce logiciel (voir « Réglementation 2025-2027 »).
 
 **Hors périmètre.** Facturation CPAM et télétransmission, prise d'appels, transports d'urgence (exclus du transport partagé par le décret).
 
@@ -466,8 +474,9 @@ Mise à jour le 9 novembre 2026. La première série passe avant tout : au 1er j
 **Réglementation 2025-2027**
 
 - [ ] Quelle part de vos courses est partagée aujourd'hui, en VSL et en taxi ? Comment prévenez-vous l'accueil des établissements ? (repères de la Cour des comptes : 21,7 % en VSL en 2024, environ 5 % en taxi)
-- [ ] Les prescriptions reçues indiquent-elles la catégorie de soins et le motif de prise en charge ? Depuis le 1er octobre 2026, une ALD non exonérante ne suffit plus (décret 2026-812, à confirmer). (à saisir sur la prescription dans un prochain lot)
-- [ ] Taxis : la liste des conducteurs et des véhicules déclarés à la CPAM est-elle à jour ? Sur Équipages, un remplaçant non déclaré doit-il être bloqué ou seulement signalé ? (signalé)
+- [ ] Les prescriptions reçues indiquent-elles la catégorie de soins et le motif de prise en charge ? Depuis le 1er octobre 2026, une ALD non exonérante ne suffit plus (décret 2026-812, à confirmer). (catégorie de soins : à saisir sur la prescription dans un prochain lot ; motif de prise en charge : reste dans le logiciel de facturation de V, pas dans Opti-Taxi)
+- [ ] Taxis : la liste des conducteurs et des véhicules déclarés à la CPAM est-elle à jour ? Sur Équipages, faut-il bloquer un remplaçant non déclaré, dont les courses CPAM ne seraient pas remboursées (art. 5.1), ou seulement le signaler ? (bloqué pour une course CPAM en taxi conventionné, signalé seulement pour un client privé ; rien n'est contrôlé aujourd'hui)
+- [ ] Taxis : combien d'ADS avez-vous, dans quelles communes, et quelle part des patients de chacune vient de son territoire ? Depuis le 1er novembre 2026, une ADS doit prendre en charge en majorité des patients de son territoire (art. 5.2, non revérifié). (rien n'est suivi : l'optimiseur affecte les taxis sans regarder le territoire)
 - [ ] Accord préalable : quels longs trajets ou quelles séries en demandent un aujourd'hui (plus de 150 km, séries de plus de 50 km), et qui le suit ? (rien n'est suivi dans l'application)
 
 **Exploitation**
