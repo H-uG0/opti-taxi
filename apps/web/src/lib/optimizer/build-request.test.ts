@@ -448,6 +448,21 @@ describe("tariffs", () => {
       expect(request.tariffs.map((t) => t.baseFare)).toEqual([13]);
     }
   });
+
+  it("flags the available vehicles no grid covers on the date (their revenue would be 0 €)", () => {
+    const vsl = vehicle("vsl", { type: "VSL", label: "VSL 2", department: "04" });
+    const off = vehicle("off", { type: "VSL", label: "VSL 9", department: "04", defaultDriver: driver("d9", { workDays: [6] }) });
+    expect(buildOptimizeRequest(input({ vehicles: [vehicle("v1"), vsl, off] })).tariffGaps).toEqual([
+      { vehicleType: "VSL", department: "04", vehicles: ["VSL 2"] },
+    ]);
+    // A grid ending the day before the date no longer covers it; the « * » catch-all does.
+    const ended = tariff({ vehicleType: "VSL", department: "04", validTo: new Date("2026-11-02T00:00:00Z") });
+    expect(buildOptimizeRequest(input({ vehicles: [vsl], tariffs: [ended] })).tariffGaps).toHaveLength(1);
+    const lastDay = tariff({ vehicleType: "VSL", department: "04", validTo: new Date(`${TUESDAY}T00:00:00Z`) });
+    expect(buildOptimizeRequest(input({ vehicles: [vsl], tariffs: [lastDay] })).tariffGaps).toEqual([]);
+    const catchAll = tariff({ vehicleType: "VSL", department: "*" });
+    expect(buildOptimizeRequest(input({ vehicles: [vsl], tariffs: [catchAll] })).tariffGaps).toEqual([]);
+  });
 });
 
 describe("whole request", () => {

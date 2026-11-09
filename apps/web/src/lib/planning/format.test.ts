@@ -6,6 +6,8 @@ import {
   formatTimeOn,
   recordedByText,
   sharingAnswerText,
+  tariffGapList,
+  tariffGapNote,
   UNKNOWN_AUTHOR,
 } from "./format";
 
@@ -49,5 +51,18 @@ describe("recorded values", () => {
   it("puts the author first, then the recorded time, as on /courses", () => {
     expect(fieldRecordText({ at: "2026-11-03T07:02:00.000Z", byName: "Jean Martin" }, DATE)).toBe("par Jean Martin · 08:02");
     expect(fieldRecordText({ at: "2026-11-04T08:00:00.000Z", byName: null }, DATE)).toBe("auteur non tracé · 04/11 à 09:00");
+  });
+});
+
+describe("tariff gaps", () => {
+  const gaps = [
+    { vehicleType: "VSL" as const, department: "04", vehicles: ["VSL 2", "VSL 5"] },
+    { vehicleType: "TAXI" as const, department: "05", vehicles: ["Taxi 9"] },
+  ];
+
+  it("lists each zone with its vehicles, and a short note for the optimization message", () => {
+    expect(tariffGapList(gaps)).toBe("VSL 04 — VSL 2, VSL 5 ; Taxi 05 — Taxi 9");
+    expect(tariffGapNote(gaps)).toBe("sans grille tarifaire : VSL 04, Taxi 05 (CA estimé à 0 €)");
+    expect(tariffGapNote([])).toBe("");
   });
 });

@@ -1,7 +1,7 @@
 import type { TariffGrid } from "@prisma/client";
 import { beforeAll, describe, expect, it } from "vitest";
 import { fromIsoDate } from "@/lib/time";
-import { tariffFor, tariffsInForce } from "./tariffs";
+import { tariffCoverageAlerts, tariffFor, tariffGaps, tariffsInForce, type TariffedVehicle } from "./tariffs";
 
 // The first Date#toISOString() of a test worker can take several seconds on a slow
 // Windows machine (4-7 s observed): pay it once here, outside the per-test timeout.
@@ -150,5 +150,80 @@ describe("tariffFor", () => {
     const expired13 = grid({ from: "2023-01-01", to: "2024-12-31" });
     const inForce = tariffsInForce([expired13, taxiAll], "2026-11-03");
     expect(tariffFor(inForce, "TAXI", "13")).toBe(taxiAll);
+  });
+});
+
+describe("tariff gaps of a planned day", () => {
+  const vehicles: TariffedVehicle[] = [
+    { label: "VSL 2", type: "VSL", department: "04" },
+    { label: "Taxi 1", type: "TAXI", department: "13" },
+    { label: "VSL 5", type: "VSL", department: "04" },
+    { label: "Taxi 9", type: "TAXI", department: "05" },
+  ];
+
+  it("groups the vehicles no grid covers by type and department", () => {
+    const inForce = [grid({ from: "2026-01-01", vehicleType: "TAXI", department: "13" })];
+    expect(tariffGaps(vehicles, inForce)).toEqual([
+      { vehicleType: "VSL", department: "04", vehicles: ["VSL 2", "VSL 5"] },
+      { vehicleType: "TAXI", department: "05", vehicles: ["Taxi 9"] },
+    ]);
+  });
+
+  it("counts the « * » catch-all of the type as coverage", () => {
+    const inForce = [grid({ from: "2026-01-01", vehicleType: "TAXI", department: "*" })];
+    expect(tariffGaps(vehicles, inForce).map((g) => g.vehicleType)).toEqual(["VSL"]);
+  });
+});
+
+describe("tariffCoverageAlerts (tomorrow and the 7 following days)", () => {
+  const vsl: TariffedVehicle[] = [{ label: "VSL 2", type: "VSL", department: "04" }];
+  const vslGrid = (from: string, to: string | null, label: string | null = null) =>
+    grid({ from, to, label, vehicleType: "VSL", department: "04" });
+
+  it("says nothing when every day of the window is covered, including a hand-over on its last day", () => {
+    expect(tariffCoverageAlerts(vsl, [vslGrid("2026-01-01", null)], "2026-11-10", 7)).toEqual([]);
+    const handOver = [vslGrid("2026-01-01", "2026-11-12"), vslGrid("2026-11-13", null)];
+    expect(tariffCoverageAlerts(vsl, handOver, "2026-11-10", 7)).toEqual([]);
+  });
+
+  it("a grid ending today leaves tomorrow without grid", () => {
+    const [alert] = tariffCoverageAlerts(vsl, [vslGrid("2026-01-01", "2026-11-09")], "2026-11-10", 7);
+    expect(alert).toMatchObject({ kind: "missing", uncoveredFrom: "2026-11-10", expiring: null, resumesOn: null, vehicles: ["VSL 2"] });
+  });
+
+  it("a grid ending inside the window with nothing after it", () => {
+    const expiring = vslGrid("2026-01-01", "2026-11-14", "Avenant 2025");
+    const [alert] = tariffCoverageAlerts(vsl, [expiring], "2026-11-10", 7);
+    expect(alert).toMatchObject({
+      kind: "expires",
+      uncoveredFrom: "2026-11-15",
+      expiring: { id: expiring.id, department: "04", label: "Avenant 2025", validTo: "2026-11-14" },
+      resumesOn: null,
+    });
+  });
+
+  it("checks the bounds: a grid ending on the last day of the window is enough, one ending the day before is not", () => {
+    expect(tariffCoverageAlerts(vsl, [vslGrid("2026-01-01", "2026-11-17")], "2026-11-10", 7)).toEqual([]);
+    expect(tariffCoverageAlerts(vsl, [vslGrid("2026-01-01", "2026-11-16")], "2026-11-10", 7)[0]?.uncoveredFrom).toBe("2026-11-17");
+  });
+
+  it("a grid starting inside the window: missing until it starts", () => {
+    const [late] = tariffCoverageAlerts(vsl, [vslGrid("2026-11-13", null)], "2026-11-10", 7);
+    expect(late).toMatchObject({ kind: "missing", uncoveredFrom: "2026-11-10", resumesOn: "2026-11-13" });
+    expect(tariffCoverageAlerts(vsl, [vslGrid("2026-11-10", null)], "2026-11-10", 7)).toEqual([]);
+  });
+
+  it("a gap between two grids", () => {
+    const gap = [vslGrid("2026-01-01", "2026-11-11"), vslGrid("2026-11-14", null)];
+    expect(tariffCoverageAlerts(vsl, gap, "2026-11-10", 7)[0]).toMatchObject({
+      kind: "expires",
+      uncoveredFrom: "2026-11-12",
+      resumesOn: "2026-11-14",
+    });
+  });
+
+  it("the « * » catch-all takes over an expiring department grid", () => {
+    const grids = [vslGrid("2026-01-01", "2026-11-11"), grid({ from: "2026-01-01", vehicleType: "VSL", department: "*" })];
+    expect(tariffCoverageAlerts(vsl, grids, "2026-11-10", 7)).toEqual([]);
   });
 });

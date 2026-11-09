@@ -9,6 +9,7 @@ import { EmptyState, PageHeader } from "@/components/ui/layout";
 import { AvailabilityNotes } from "@/components/planning/availability-notes";
 import { KpiStrip } from "@/components/planning/kpi-strip";
 import { RunBanner } from "@/components/planning/run-banner";
+import { TariffGapBanner } from "@/components/planning/tariff-gap-banner";
 import { formatDayMonth, formatInstant, pluralize } from "@/lib/planning/format";
 import { loadPlanningDay } from "@/lib/planning/load";
 import type { PlanningDayView } from "@/lib/planning/types";
@@ -114,6 +115,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
           <OptimizerStatus />
         </Suspense>
         <RunBanner lastRun={view.lastRun} planRun={view.planRun} />
+        {view.dayStatus !== "EMPTY" && !past ? <TariffGapBanner gaps={view.tariffGaps} date={date} /> : null}
 
         {view.dayStatus === "EMPTY" ? (
           <>

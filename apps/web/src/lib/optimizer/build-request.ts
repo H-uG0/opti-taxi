@@ -23,7 +23,7 @@ import type {
 import { isShareable } from "@/lib/domain/rules";
 import { getSettings } from "@/lib/domain/settings";
 import { loadTrafficZones, toContractTraffic, type TrafficInput } from "@/lib/domain/traffic";
-import { tariffsInForce } from "@/lib/domain/tariffs";
+import { tariffGaps, tariffsInForce, type TariffGap } from "@/lib/domain/tariffs";
 import { resolveDayCrews, type DayCrewInput, type DayCrewPlan, type StaffPerson } from "@/lib/staff/day-crews";
 import { fromIsoDate, isoWeekday, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
 import type {
@@ -176,6 +176,8 @@ export type BuildResult = {
   droppedLocks: DroppedLock[];
   excludedTrips: ExcludedTrip[];
   notes: string[];
+  /** Available vehicles no tariff grid covers that day: their revenue is estimated at 0 €. */
+  tariffGaps: TariffGap[];
 };
 
 // ---------------------------------------------------------------------------
@@ -451,6 +453,7 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
     });
   }
 
+  const tariffs = toContractTariffs(input.tariffs, input.date);
   return {
     request: {
       date: input.date,
@@ -460,13 +463,17 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
       },
       vehicles: available,
       trips,
-      tariffs: toContractTariffs(input.tariffs, input.date),
+      tariffs,
     },
     crews,
     skippedVehicles: skipped,
     droppedLocks,
     excludedTrips,
     notes,
+    tariffGaps: tariffGaps(
+      available.map((v) => ({ label: v.label, type: v.type, department: v.department })),
+      tariffs,
+    ),
   };
 }
 
@@ -593,6 +600,14 @@ export async function loadDayVehicleInputs(prisma: PrismaClient, isoDate: string
   return applyDayCrewPlan(vehicles, context.plan, context.people);
 }
 
+/** Tariff grids that may be in force on isoDate (tariffsInForce picks one per type and department). */
+export function loadTariffInputs(prisma: PrismaClient, isoDate: string): Promise<TariffInput[]> {
+  const serviceDate = fromIsoDate(isoDate);
+  return prisma.tariffGrid.findMany({
+    where: { validFrom: { lte: serviceDate }, OR: [{ validTo: null }, { validTo: { gte: serviceDate } }] },
+  });
+}
+
 export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): Promise<OptimizeInput> {
   const serviceDate = fromIsoDate(isoDate);
   const [settings, zones, vehicles, trips, tariffs] = await Promise.all([
@@ -604,9 +619,7 @@ export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): 
       select: tripInputSelect,
       orderBy: [{ appointmentMinute: "asc" }, { readyMinute: "asc" }, { id: "asc" }],
     }),
-    prisma.tariffGrid.findMany({
-      where: { validFrom: { lte: serviceDate }, OR: [{ validTo: null }, { validTo: { gte: serviceDate } }] },
-    }),
+    loadTariffInputs(prisma, isoDate),
   ]);
   return { date: isoDate, settings, vehicles, trips, tariffs, traffic: { ...settings, zones } };
 }

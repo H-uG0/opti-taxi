@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DriverInput, SettingsInput } from "@/lib/optimizer/build-request";
 import type { RunDetails } from "@/lib/optimizer/run-details";
 import { computeDayKpis as computeDashboardDayKpis, type KpiData } from "@/lib/kpis";
+import { addDays } from "@/lib/time";
 import {
   buildPlanningView,
   computeDayKpis,
@@ -176,10 +177,25 @@ function input(overrides: Partial<PlanningRawInput> = {}): PlanningRawInput {
     lastRun: run(),
     planRun: run(),
     details: new Map(),
+    tariffs: [taxiGrid],
     baseColors: { TAXI: "#c27c0e", VSL: "#2563eb", AMBULANCE: "#dc2626" },
     ...overrides,
   };
 }
+
+const taxiGrid = {
+  id: "g1",
+  vehicleType: "TAXI" as const,
+  department: "13",
+  baseFare: 13,
+  pricePerKm: 1.12,
+  includedKm: 0,
+  sharedDiscount2: 0.23,
+  sharedDiscount3: 0.35,
+  validFrom: new Date("2026-01-01T00:00:00Z"),
+  validTo: null,
+  createdAt: new Date("2026-01-01T00:00:00Z"),
+};
 
 describe("buildPlanningView", () => {
   it("lists vehicles with a route first, then available ones; unavailable ones only as skipped", () => {
@@ -237,6 +253,16 @@ describe("buildPlanningView", () => {
     );
     expect(view.staleTrips.map((s) => s.tripId)).toEqual(["a", "b"]);
     expect(view.trips.some((t) => t.id === "a")).toBe(true);
+  });
+
+  it("flags the available vehicles no tariff grid covers that day", () => {
+    expect(buildPlanningView(input()).tariffGaps).toEqual([]);
+    // Taxi 3 does not work that day: only the available vehicles count.
+    expect(buildPlanningView(input({ tariffs: [] })).tariffGaps).toEqual([
+      { vehicleType: "TAXI", department: "13", vehicles: ["Taxi 1", "Taxi 2"] },
+    ]);
+    const ended = { ...taxiGrid, validTo: new Date(`${addDays(DATE, -1)}T00:00:00Z`) };
+    expect(buildPlanningView(input({ tariffs: [ended] })).tariffGaps).toHaveLength(1);
   });
 
   it("reports the day status, the start of the day and a fitted time range", () => {

@@ -18,6 +18,7 @@ import {
   type SavePlanResult,
 } from "@/lib/optimizer/persist";
 import { formatLongDate, fromIsoDate, todayIso } from "@/lib/time";
+import { tariffGapNote } from "./format";
 import { withBeforeCommit } from "./before-commit";
 import { emptyPlanIssue } from "./empty-plan";
 import { movePlacementIssue, moveRequestIssue, resolveTripRefs, type MoveTarget } from "./move";
@@ -212,6 +213,8 @@ export async function runOptimization(
   ];
   if (plan.meta.matrixSource === "haversine") parts.push("distances estimées à vol d'oiseau");
   if (plan.meta.trafficSource !== "none") parts.push("trafic pris en compte");
+  const tariffNote = tariffGapNote(build.tariffGaps);
+  if (tariffNote) parts.push(tariffNote);
   const violations = plan.validation.violations.length;
   if (violations > 0) parts.push(`${plural(violations, "violation")} à vérifier`);
   return { ok: true, runId: run.id, message: `Planning optimisé : ${parts.join(" · ")}.` };

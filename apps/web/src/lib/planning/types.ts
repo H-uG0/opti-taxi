@@ -12,6 +12,7 @@ import type {
   TripStatus,
   VehicleType,
 } from "@prisma/client";
+import type { TariffGap } from "@/lib/domain/tariffs";
 import type { DroppedLock, ExcludedTrip, SkippedVehicle } from "@/lib/optimizer/build-request";
 
 export type LatLngView = { lat: number; lng: number };
@@ -201,6 +202,8 @@ export type PlanningDayView = {
   droppedLocks: DroppedLock[];
   excludedTrips: ExcludedTrip[];
   notes: string[];
+  /** Available vehicles without tariff grid that day: their revenue is estimated at 0 €. */
+  tariffGaps: TariffGap[];
   /** Trips whose state changed after planning (cancelled while still in a route…). */
   staleTrips: UnassignedView[];
   /** Latest run of any status. */

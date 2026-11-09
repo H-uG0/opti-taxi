@@ -18,6 +18,7 @@ import {
   isStaleRun,
   personName,
   type SettingsInput,
+  type TariffInput,
   type TripInput,
   type VehicleInput,
 } from "@/lib/optimizer/build-request";
@@ -130,6 +131,8 @@ export type PlanningRawInput = {
   lastRun: RawRun | null;
   planRun: RawRun | null;
   details: ReadonlyMap<string, RunDetails>;
+  /** Tariff grids that may be in force that day (loadTariffInputs): vehicles without one are flagged. */
+  tariffs: TariffInput[];
   baseColors: Record<VehicleType, string>;
   /** Time of the page load, to tell a live RUNNING run from an interrupted one; defaults to the current time. */
   now?: Date;
@@ -342,7 +345,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     settings: input.settings,
     vehicles: input.vehicles,
     trips: input.trips,
-    tariffs: [],
+    tariffs: input.tariffs,
   });
   const availableById = new Map(build.request.vehicles.map((v) => [v.id, v]));
   const skippedById = new Map(build.skippedVehicles.map((s) => [s.vehicleId, s]));
@@ -510,6 +513,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     droppedLocks: build.droppedLocks,
     excludedTrips: build.excludedTrips,
     notes: build.notes,
+    tariffGaps: build.tariffGaps,
     staleTrips,
     lastRun: runView(input.lastRun, input.details, input.settings.solverTimeLimitSec, now, patientOf),
     planRun: runView(input.planRun, input.details, input.settings.solverTimeLimitSec, now, patientOf),

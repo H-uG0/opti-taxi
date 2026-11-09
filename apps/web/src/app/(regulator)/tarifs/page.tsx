@@ -1,18 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Copy, Plus } from "lucide-react";
-import type { TariffGrid, VehicleType } from "@prisma/client";
+import type { TariffGrid } from "@prisma/client";
 import { Badge, VehicleTypeBadge, type BadgeTone } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, EmptyState, PageHeader } from "@/components/ui/layout";
 import { TBody, THead, Table, Td, Th } from "@/components/ui/table";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { tariffFor, tariffsInForce } from "@/lib/domain/tariffs";
+import { tariffCoverageAlerts, tariffsInForce } from "@/lib/domain/tariffs";
 import { formatEuros, formatKm, formatPercent, VEHICLE_TYPE_LABELS, VEHICLE_TYPE_SHORT } from "@/lib/labels";
-import { formatLongDate, formatShortDate, todayIso, toIsoDate } from "@/lib/time";
+import { addDays, formatLongDate, formatShortDate, todayIso, tomorrowIso, toIsoDate } from "@/lib/time";
 import { ALL_ZONES, departmentLabel } from "../vehicules/_lib/departments";
 import { Callout } from "../vehicules/_lib/ui";
+import { COVERAGE_DAYS, coverageAlertText } from "./coverage";
 import { FareSimulator, type SimulatorGrid } from "./fare-simulator";
 import { TARIFF_STATUS_LABELS, tariffStatus, VEHICLE_TYPES, type TariffStatus } from "./schema";
 
@@ -66,15 +67,10 @@ export default async function TariffsPage() {
   const inForce = tariffsInForce(grids, today);
   const inForceIds = new Set(inForce.map((g) => g.id));
 
-  // Active vehicles whose (type, department) has no grid in force today: the optimizer would estimate 0 €.
-  const uncovered = new Map<string, { type: VehicleType; department: string; vehicles: string[] }>();
-  for (const vehicle of vehicles) {
-    if (tariffFor(inForce, vehicle.type, vehicle.department)) continue;
-    const key = `${vehicle.type}/${vehicle.department}`;
-    const entry = uncovered.get(key) ?? { type: vehicle.type, department: vehicle.department, vehicles: [] };
-    entry.vehicles.push(vehicle.label);
-    uncovered.set(key, entry);
-  }
+  // The planning works on tomorrow and the next days: a grid ending today leaves tomorrow at 0 €.
+  const tomorrow = tomorrowIso();
+  const coverageEnd = addDays(tomorrow, COVERAGE_DAYS);
+  const coverage = tariffCoverageAlerts(vehicles, grids, tomorrow, COVERAGE_DAYS);
 
   const simulatorGrids: SimulatorGrid[] = grids.map((g) => ({
     id: g.id,
@@ -112,19 +108,24 @@ export default async function TariffsPage() {
           </p>
         </Callout>
 
-        {uncovered.size > 0 ? (
-          <Callout tone="warning" title="Véhicules sans grille en vigueur aujourd'hui">
-            <p>Leur chiffre d&apos;affaires sera estimé à 0 € par l&apos;optimiseur :</p>
-            <ul className="list-disc space-y-0.5 pl-5">
-              {[...uncovered.values()].map((entry) => (
-                <li key={`${entry.type}/${entry.department}`}>
+        {coverage.length > 0 ? (
+          <Callout
+            tone="warning"
+            title={`Véhicules sans grille en vigueur entre le ${formatShortDate(tomorrow)} et le ${formatShortDate(coverageEnd)}`}
+          >
+            <p>Ces jours-là, l&apos;optimiseur estimera leur chiffre d&apos;affaires à 0 € :</p>
+            <ul className="list-disc space-y-1 pl-5">
+              {coverage.map((alert) => (
+                <li key={`${alert.vehicleType}/${alert.department}`}>
                   <span className="font-medium">
-                    {VEHICLE_TYPE_SHORT[entry.type]} · {departmentLabel(entry.department)}
+                    {VEHICLE_TYPE_SHORT[alert.vehicleType]} · {departmentLabel(alert.department)}
                   </span>{" "}
-                  — {entry.vehicles.join(", ")}
+                  — {alert.vehicles.join(", ")}
+                  <span className="block">{coverageAlertText(alert)}</span>
                 </li>
               ))}
             </ul>
+            <p>Créez la grille qui prend le relais (« Dupliquer » sur la grille actuelle, puis sa date d&apos;effet).</p>
           </Callout>
         ) : null}
       </div>

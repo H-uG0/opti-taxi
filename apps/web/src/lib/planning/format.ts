@@ -1,5 +1,7 @@
 /** Compact French formatters for the planning screen (complements @/lib/labels). */
 import type { SharingStatus, StopKind, TripStatus } from "@prisma/client";
+import type { TariffGap } from "@/lib/domain/tariffs";
+import { VEHICLE_TYPE_SHORT } from "@/lib/labels";
 import { recordTrace, sharingAnswerWords, UNKNOWN_AUTHOR } from "@/lib/record-trace";
 import { isoDateOf, TIME_ZONE } from "@/lib/time";
 import type { RecordedByView } from "./types";
@@ -88,4 +90,20 @@ export function formatDayMonth(isoDate: string): string {
 
 export function pluralize(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count > 1 ? plural : singular}`;
+}
+
+/** "VSL 04", "Taxi 05": the tariff zone of a gap. */
+export function tariffZoneName(gap: Pick<TariffGap, "vehicleType" | "department">): string {
+  return `${VEHICLE_TYPE_SHORT[gap.vehicleType]} ${gap.department}`;
+}
+
+/** "VSL 04 — VSL 2, VSL 5 ; Taxi 05 — Taxi 9" (vehicle labels often hold parentheses themselves). */
+export function tariffGapList(gaps: readonly TariffGap[]): string {
+  return gaps.map((gap) => `${tariffZoneName(gap)} — ${gap.vehicles.join(", ")}`).join(" ; ");
+}
+
+/** Part of the optimization message: "sans grille tarifaire : VSL 04, Taxi 05 (CA estimé à 0 €)", "" when none. */
+export function tariffGapNote(gaps: readonly TariffGap[]): string {
+  if (gaps.length === 0) return "";
+  return `sans grille tarifaire : ${gaps.map(tariffZoneName).join(", ")} (CA estimé à 0 €)`;
 }

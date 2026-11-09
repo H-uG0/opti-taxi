@@ -3,7 +3,13 @@ import "server-only";
 import { db } from "@/lib/db";
 import { getSettings } from "@/lib/domain/settings";
 import { VEHICLE_TYPE_HEX } from "@/components/ui/badge";
-import { applyDayCrewPlan, loadDayCrewContext, tripInputSelect, vehicleInputSelect } from "@/lib/optimizer/build-request";
+import {
+  applyDayCrewPlan,
+  loadDayCrewContext,
+  loadTariffInputs,
+  tripInputSelect,
+  vehicleInputSelect,
+} from "@/lib/optimizer/build-request";
 import { readRunDetails, type RunDetails } from "@/lib/optimizer/run-details";
 import { fromIsoDate } from "@/lib/time";
 import type { PlanningDayView } from "./types";
@@ -34,7 +40,7 @@ const recorderSelect = { select: { name: true } } as const;
 
 export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView & { timeLimitSec: number }> {
   const serviceDate = fromIsoDate(isoDate);
-  const [settings, defaultVehicles, crewContext, trips, routes, lastRun, planRun] = await Promise.all([
+  const [settings, defaultVehicles, crewContext, trips, routes, lastRun, planRun, tariffs] = await Promise.all([
     getSettings(db),
     db.vehicle.findMany({
       select: { ...vehicleInputSelect, registration: true, depot: { select: { lat: true, lng: true, name: true } } },
@@ -107,6 +113,7 @@ export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView 
       orderBy: { startedAt: "desc" },
       select: runSelect,
     }),
+    loadTariffInputs(db, isoDate),
   ]);
 
   const details = new Map<string, RunDetails>();
@@ -125,6 +132,7 @@ export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView 
     lastRun,
     planRun,
     details,
+    tariffs,
     baseColors: VEHICLE_TYPE_HEX,
   });
   // view.timeLimitSec: the solver budget scaled with the day's trips, not the bare setting.
