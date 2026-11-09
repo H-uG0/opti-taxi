@@ -3,6 +3,7 @@
  * Shared by the optimizeDay and moveTrip server actions (callers check auth).
  */
 import "server-only";
+import type { Prisma } from "@prisma/client";
 import { audit } from "@/lib/audit";
 import type { SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -20,6 +21,7 @@ import {
 import { formatLongDate, fromIsoDate, todayIso } from "@/lib/time";
 import { tariffGapNote } from "./format";
 import { withBeforeCommit } from "./before-commit";
+import { lockPlanningDay } from "./day-lock";
 import { emptyPlanIssue } from "./empty-plan";
 import { movePlacementIssue, moveRequestIssue, resolveTripRefs, type MoveTarget } from "./move";
 
@@ -59,8 +61,12 @@ function seconds(ms: number): string {
  * a crash or restart. Each run is judged on the solver budget of the trips
  * it sent (see isStaleRun), not on the current settings alone.
  */
-async function runningRuns(serviceDate: Date, solverTimeLimitSec: number): Promise<{ live: string[]; stale: string[] }> {
-  const runs = await db.optimizationRun.findMany({
+async function runningRuns(
+  client: Pick<Prisma.TransactionClient, "optimizationRun">,
+  serviceDate: Date,
+  solverTimeLimitSec: number,
+): Promise<{ live: string[]; stale: string[] }> {
+  const runs = await client.optimizationRun.findMany({
     where: { serviceDate, status: "RUNNING" },
     select: { id: true, startedAt: true, tripsCount: true },
   });
@@ -88,10 +94,17 @@ export async function replanBlocker(isoDate: string): Promise<string | null> {
   return replanBlockReason(isoDate, { validatedRoutes, startedTrips, completedStops });
 }
 
-/** True while an optimization of isoDate is running (runs interrupted by a crash do not count). */
-export async function optimizationInProgress(isoDate: string): Promise<boolean> {
+/**
+ * True while an optimization of isoDate is running (runs interrupted by a
+ * crash do not count). Pass the transaction holding the planning lock of the
+ * date (lockPlanningDay) to rely on the answer until it commits.
+ */
+export async function optimizationInProgress(
+  isoDate: string,
+  client: Pick<Prisma.TransactionClient, "optimizationRun"> = db,
+): Promise<boolean> {
   const { solverTimeLimitSec } = await getSettings(db);
-  const { live } = await runningRuns(fromIsoDate(isoDate), solverTimeLimitSec);
+  const { live } = await runningRuns(client, fromIsoDate(isoDate), solverTimeLimitSec);
   return live.length > 0;
 }
 
@@ -142,26 +155,31 @@ export async function runOptimization(
   const serviceDate = fromIsoDate(isoDate);
   // Budget scaled with the trips sent (effectiveTimeLimitSec), not the bare setting.
   const timeLimitSec = request.settings.timeLimitSec;
-  const { live, stale } = await runningRuns(serviceDate, input.settings.solverTimeLimitSec);
-  if (stale.length > 0) {
-    await db.optimizationRun.updateMany({
-      where: { id: { in: stale }, status: "RUNNING" },
-      data: { status: "FAILED", finishedAt: new Date(), error: "Optimisation interrompue (serveur redémarré ou arrêté)." },
+  // Check and create under the planning lock of the date: two clicks (two
+  // regulators, two tabs) never start two computations of the same date.
+  const run = await db.$transaction(async (tx) => {
+    await lockPlanningDay(tx, isoDate);
+    const { live, stale } = await runningRuns(tx, serviceDate, input.settings.solverTimeLimitSec);
+    if (stale.length > 0) {
+      await tx.optimizationRun.updateMany({
+        where: { id: { in: stale }, status: "RUNNING" },
+        data: { status: "FAILED", finishedAt: new Date(), error: "Optimisation interrompue (serveur redémarré ou arrêté)." },
+      });
+    }
+    if (live.length > 0) return null;
+    // The account was just re-read by requireUser: it exists, as requestedById and AuditEvent.userId require.
+    return tx.optimizationRun.create({
+      data: {
+        serviceDate,
+        status: "RUNNING",
+        requestedById: user.id,
+        tripsCount: request.trips.length,
+        lockedCount: request.trips.filter((t) => t.lockedVehicleId).length,
+      },
+      select: { id: true },
     });
-  }
-  if (live.length > 0) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
-
-  // The account was just re-read by requireUser: it exists, as requestedById and AuditEvent.userId require.
-  const run = await db.optimizationRun.create({
-    data: {
-      serviceDate,
-      status: "RUNNING",
-      requestedById: user.id,
-      tripsCount: request.trips.length,
-      lockedCount: request.trips.filter((t) => t.lockedVehicleId).length,
-    },
-    select: { id: true },
-  });
+  }, PLANNING_TX_OPTIONS);
+  if (!run) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
 
   const fail = async (error: string, extra: { matrixSource?: string; wallTimeMs?: number } = {}) => {
     await db.optimizationRun.update({

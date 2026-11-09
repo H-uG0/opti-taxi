@@ -11,6 +11,9 @@ const fake = vi.hoisted(() => ({
     trip: { count: vi.fn() },
     routeStop: { count: vi.fn() },
     optimizationRun: { findMany: vi.fn(), updateMany: vi.fn(), create: vi.fn(), update: vi.fn() },
+    // Interactive transactions run against the same fakes; the advisory lock is a no-op.
+    $transaction: vi.fn(),
+    $executeRaw: vi.fn(),
   },
   build: vi.fn(),
   optimize: vi.fn(),
@@ -58,6 +61,7 @@ function build(overrides: { excludedTrips?: { tripId: string; reason: string }[]
     excludedTrips: overrides.excludedTrips ?? [],
     droppedLocks: [],
     crews: [],
+    tariffGaps: [],
   };
 }
 
@@ -82,6 +86,8 @@ beforeEach(() => {
   fake.db.optimizationRun.findMany.mockResolvedValue([]);
   fake.db.optimizationRun.create.mockResolvedValue({ id: "run-1" });
   fake.db.optimizationRun.update.mockResolvedValue({});
+  fake.db.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(fake.db));
+  fake.db.$executeRaw.mockResolvedValue(1);
   fake.build.mockReturnValue(build());
   fake.optimize.mockResolvedValue({ ok: true, data: planIgnoringTheMove() });
 });
@@ -113,6 +119,36 @@ describe("runOptimization with a move", () => {
     expect((outcome as { error: string }).error).toMatch(new RegExp(`^La course de ${PATIENT} est incomplète`));
     expect(fake.db.optimizationRun.create).not.toHaveBeenCalled();
     expect(fake.db.optimizationRun.update).not.toHaveBeenCalled();
+    expect(fake.optimize).not.toHaveBeenCalled();
+  });
+});
+
+describe("two computations of the same date", () => {
+  it("checks for a running computation and creates the run under the planning lock of the date", async () => {
+    const order: string[] = [];
+    fake.db.$executeRaw.mockImplementation(async () => {
+      order.push("lock");
+      return 1;
+    });
+    fake.db.optimizationRun.findMany.mockImplementation(async () => {
+      order.push("check");
+      return [];
+    });
+    fake.db.optimizationRun.create.mockImplementation(async () => {
+      order.push("create");
+      return { id: "run-1" };
+    });
+    fake.savePlan.mockResolvedValue({ routes: 1, served: 1, unassigned: 1 });
+    await runOptimization(DATE, REGULATOR);
+    expect(order).toEqual(["lock", "check", "create"]);
+    expect(fake.db.$transaction).toHaveBeenCalled();
+  });
+
+  it("the second click finds the first run and starts nothing", async () => {
+    fake.db.optimizationRun.findMany.mockResolvedValue([{ id: "run-0", startedAt: new Date(), tripsCount: 2 }]);
+    const outcome = await runOptimization(DATE, REGULATOR);
+    expect(outcome).toMatchObject({ ok: false, error: expect.stringMatching(/optimisation de cette date est en cours/) });
+    expect(fake.db.optimizationRun.create).not.toHaveBeenCalled();
     expect(fake.optimize).not.toHaveBeenCalled();
   });
 });

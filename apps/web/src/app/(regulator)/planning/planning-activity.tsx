@@ -10,12 +10,14 @@ import {
   useTransition,
   type ReactNode,
 } from "react";
-import { CircleCheck, LoaderCircle, X, CircleX } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { CircleCheck, LoaderCircle, RefreshCw, X, CircleX } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import type { PlanningActionResult } from "./actions";
 
 type Activity = { label: string; startedAt: number; expectedSec: number | null };
-type Feedback = { tone: "success" | "error"; text: string };
+type Feedback = { tone: "success" | "error"; text: string; reload?: boolean };
 
 type RunOptions = {
   /** Long action (optimizer call): show elapsed time against the solver time limit. */
@@ -26,6 +28,15 @@ type RunOptions = {
 type ActivityContext = {
   busy: boolean;
   run: (label: string, task: () => Promise<PlanningActionResult>, options?: RunOptions) => void;
+  /**
+   * Whether a computation of the date runs, as last polled by
+   * PlanningVersionWatcher; null before any poll (the page's own render tells).
+   */
+  remoteRunning: boolean | null;
+  setRemoteRunning: (running: boolean | null) => void;
+  /** Why the optimizer cannot be called (OptimizerStatus), null when it answered. */
+  optimizerOffline: string | null;
+  setOptimizerOffline: (reason: string | null) => void;
 };
 
 const Context = createContext<ActivityContext | null>(null);
@@ -51,6 +62,8 @@ export function PlanningActivityProvider({ timeLimitSec, children }: { timeLimit
   const [isPending, startTransition] = useTransition();
   const [activity, setActivity] = useState<Activity | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [remoteRunning, setRemoteRunning] = useState<boolean | null>(null);
+  const [optimizerOffline, setOptimizerOffline] = useState<string | null>(null);
 
   const run = useCallback<ActivityContext["run"]>(
     (label, task, options) => {
@@ -62,7 +75,7 @@ export function PlanningActivityProvider({ timeLimitSec, children }: { timeLimit
           // A redirect (expired session) resolves without a result: the router navigates.
           if (!result) return;
           if (result.ok) setFeedback({ tone: "success", text: result.message });
-          else if (!result.needsConfirmation) setFeedback({ tone: "error", text: result.error });
+          else if (!result.needsConfirmation) setFeedback({ tone: "error", text: result.error, reload: result.stale === true });
           options?.onResult?.(result);
         } catch {
           setFeedback({
@@ -78,7 +91,10 @@ export function PlanningActivityProvider({ timeLimitSec, children }: { timeLimit
   );
 
   const busy = isPending || activity !== null;
-  const actions = useMemo(() => ({ busy, run }), [busy, run]);
+  const actions = useMemo(
+    () => ({ busy, run, remoteRunning, setRemoteRunning, optimizerOffline, setOptimizerOffline }),
+    [busy, run, remoteRunning, optimizerOffline],
+  );
   const status = useMemo(() => ({ activity, feedback, dismiss: () => setFeedback(null) }), [activity, feedback]);
 
   return (
@@ -115,6 +131,7 @@ function Elapsed({ startedAt, expectedSec }: { startedAt: number; expectedSec: n
 /** Progress of the running action, then its result. */
 export function PlanningActivityBanner({ className }: { className?: string }) {
   const { activity, feedback, dismiss } = useContext(FeedbackContext);
+  const router = useRouter();
 
   if (activity) {
     return (
@@ -152,6 +169,20 @@ export function PlanningActivityBanner({ className }: { className?: string }) {
     >
       <Icon aria-hidden className="mt-0.5 size-4 shrink-0" />
       <p className="min-w-0 flex-1 break-words">{feedback.text}</p>
+      {feedback.reload ? (
+        <Button
+          size="sm"
+          variant="secondary"
+          className="-my-1"
+          onClick={() => {
+            dismiss();
+            router.refresh();
+          }}
+        >
+          <RefreshCw aria-hidden className="size-3.5" />
+          Recharger
+        </Button>
+      ) : null}
       <button
         type="button"
         onClick={dismiss}
@@ -162,4 +193,9 @@ export function PlanningActivityBanner({ className }: { className?: string }) {
       </button>
     </div>
   );
+}
+
+/** True while the banner shows an action refused on a stale page (it offers « Recharger » itself). */
+export function useStaleFeedback(): boolean {
+  return useContext(FeedbackContext).feedback?.reload === true;
 }

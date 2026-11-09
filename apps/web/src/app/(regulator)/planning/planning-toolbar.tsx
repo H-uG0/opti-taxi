@@ -8,15 +8,29 @@ import { usePlanningActivity } from "./planning-activity";
 
 export type ToolbarProps = {
   date: string;
+  /** Version of the plan shown (lib/planning/version.ts): validating a plan changed since is refused. */
+  version: string;
   optimizeLabel: string;
   /** Why optimizing is not possible right now, or null. */
   optimizeBlocked: string | null;
+  /** A computation of the date was running when the page was rendered, or null. */
+  runningReason: string | null;
   canValidate: boolean;
   canReopen: boolean;
 };
 
-export function PlanningToolbar({ date, optimizeLabel, optimizeBlocked, canValidate, canReopen }: ToolbarProps) {
-  const { busy, run } = usePlanningActivity();
+const RUNNING_ELSEWHERE = "Une optimisation de cette date est en cours sur un autre poste : attendez la fin du calcul.";
+
+export function PlanningToolbar({
+  date,
+  version,
+  optimizeLabel,
+  optimizeBlocked,
+  runningReason,
+  canValidate,
+  canReopen,
+}: ToolbarProps) {
+  const { busy, run, remoteRunning, optimizerOffline } = usePlanningActivity();
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
 
@@ -24,9 +38,15 @@ export function PlanningToolbar({ date, optimizeLabel, optimizeBlocked, canValid
     if (confirmation) confirmRef.current?.focus();
   }, [confirmation]);
 
+  // Why each button is off right now (shown as its title and read by screen readers). A poll of the
+  // version (remoteRunning) is more recent than the page's own render (runningReason).
+  const computing = remoteRunning === null ? runningReason : remoteRunning ? (runningReason ?? RUNNING_ELSEWHERE) : null;
+  const optimizeOff = optimizeBlocked ?? computing ?? optimizerOffline;
+  const validateOff = computing;
+
   const validate = (confirmed: boolean) => {
     setConfirmation(null);
-    run("Validation du planning…", () => validateDay(date, confirmed), {
+    run("Validation du planning…", () => validateDay(date, confirmed, version), {
       onResult: (result) => {
         if (!result.ok && result.needsConfirmation) setConfirmation(result.error);
       },
@@ -37,25 +57,36 @@ export function PlanningToolbar({ date, optimizeLabel, optimizeBlocked, canValid
     <div className="flex flex-wrap items-center gap-2">
       <Button
         onClick={() => run("Optimisation en cours…", () => optimizeDay(date), { long: true })}
-        disabled={busy || optimizeBlocked !== null}
-        title={optimizeBlocked ?? "Calcule les tournées ; les courses figées restent sur leur véhicule"}
-        aria-describedby={optimizeBlocked ? "optimize-blocked" : undefined}
+        disabled={busy || optimizeOff !== null}
+        title={optimizeOff ?? "Calcule les tournées ; les courses figées restent sur leur véhicule"}
+        aria-describedby={optimizeOff ? "optimize-blocked" : undefined}
       >
         <Sparkles aria-hidden className="size-4" />
         {optimizeLabel}
       </Button>
-      {optimizeBlocked ? (
+      {optimizeOff ? (
         <span id="optimize-blocked" className="sr-only">
-          {optimizeBlocked}
+          {optimizeOff}
         </span>
       ) : null}
 
       {canValidate ? (
         <div className="relative">
-          <Button variant="secondary" onClick={() => validate(false)} disabled={busy}>
+          <Button
+            variant="secondary"
+            onClick={() => validate(false)}
+            disabled={busy || validateOff !== null}
+            title={validateOff ?? "Les tournées passent en « Validée » : les chauffeurs les voient comme définitives"}
+            aria-describedby={validateOff ? "validate-blocked" : undefined}
+          >
             <CheckCheck aria-hidden className="size-4" />
             Valider le planning
           </Button>
+          {validateOff ? (
+            <span id="validate-blocked" className="sr-only">
+              {validateOff}
+            </span>
+          ) : null}
           {confirmation ? (
             <div
               role="alertdialog"

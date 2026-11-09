@@ -64,7 +64,7 @@ export function TripPanel({
   onSelectTrip,
   onClose,
 }: TripPanelProps) {
-  const { busy, run } = usePlanningActivity();
+  const { busy, run, optimizerOffline } = usePlanningActivity();
   const selectId = useId();
   const [target, setTarget] = useState("");
 
@@ -81,7 +81,7 @@ export function TripPanel({
     ? "Course annulée."
     : inField
       ? "Course déjà commencée."
-      : replanBlocked;
+      : (replanBlocked ?? optimizerOffline);
   const outbound = trip.direction === "OUTBOUND";
   const sharingAnswerLine = trip.sharingAnswer ? sharingAnswerText(trip.sharingAnswer, trip.sharingStatus) : null;
 
@@ -251,7 +251,7 @@ export function TripPanel({
               size="sm"
               variant="secondary"
               disabled={busy || lockBlocked !== null}
-              onClick={() => run("Verrouillage de la course…", () => lockTrip(trip.id))}
+              onClick={() => run("Verrouillage de la course…", () => lockTrip(trip.id, trip.vehicleId ?? ""))}
               title={lockBlocked ?? "La course restera sur ce véhicule à la prochaine optimisation"}
             >
               <Lock aria-hidden className="size-3.5" />

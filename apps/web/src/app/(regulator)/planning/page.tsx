@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { CalendarPlus, ListChecks } from "lucide-react";
 import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { Badge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
 import { EmptyState, PageHeader } from "@/components/ui/layout";
@@ -13,12 +14,14 @@ import { TariffGapBanner } from "@/components/planning/tariff-gap-banner";
 import { formatDayMonth, formatInstant, pluralize } from "@/lib/planning/format";
 import { loadPlanningDay } from "@/lib/planning/load";
 import type { PlanningDayView } from "@/lib/planning/types";
+import { loadDayVersion } from "@/lib/planning/version";
 import { formatLongDate, isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
 import { DateNav } from "./date-nav";
 import { OptimizerStatus, OptimizerStatusPending } from "./optimizer-status";
 import { PlanningActivityBanner, PlanningActivityProvider } from "./planning-activity";
 import { PlanningBoard } from "./planning-board";
 import { PlanningToolbar } from "./planning-toolbar";
+import { PlanningVersionWatcher } from "./version-watcher";
 
 export const metadata: Metadata = { title: "Planning J+1" };
 
@@ -26,6 +29,13 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+/** A computation of the date running now (not one interrupted by a restart), said for the disabled buttons. */
+function runningReasonOf(view: PlanningDayView): string | null {
+  const run = view.lastRun;
+  if (!run || run.status !== "RUNNING" || run.interrupted) return null;
+  return `Une optimisation de cette date est en cours (lancée le ${formatInstant(run.startedAt)}${run.requestedBy ? ` par ${run.requestedBy}` : ""}) : attendez la fin du calcul.`;
 }
 
 /** Why the routes of the day cannot be recomputed (mirrors replanBlocker on the server). */
@@ -63,6 +73,9 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   const date = isIsoDate(requested) ? requested : tomorrow;
   const requestedTrip = firstParam(params.trip) ?? null;
 
+  // Read before the plan: a change made between the two reads makes the version older than the plan shown,
+  // so an action on this page is refused (never the other way round).
+  const shownVersion = await loadDayVersion(db, date);
   const [view] = await Promise.all([
     loadPlanningDay(date),
     // The day's patients and stop addresses are on screen (timeline, map, trip panel).
@@ -73,6 +86,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   const hasRoutes = view.vehicles.some((v) => v.route !== null);
   const availableVehicles = view.vehicles.filter((v) => v.available).length;
   const replanBlocked = replanBlockedReason(view, past);
+  const runningReason = runningReasonOf(view);
   const optimizeBlocked = replanBlocked ?? (view.kpis.tripsTotal === 0 ? "Aucune course à planifier ce jour." : null);
   const optimizeLabel = hasRoutes ? "Réoptimiser" : date === tomorrow ? "Optimiser demain" : `Optimiser le ${formatDayMonth(date)}`;
   const relativeDay = date === today ? "Aujourd'hui" : date === tomorrow ? "J+1" : null;
@@ -100,8 +114,10 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
             </LinkButton>
             <PlanningToolbar
               date={date}
+              version={shownVersion.version}
               optimizeLabel={optimizeLabel}
               optimizeBlocked={optimizeBlocked}
+              runningReason={runningReason}
               canValidate={!past && (view.dayStatus === "PROPOSED" || view.dayStatus === "MIXED")}
               canReopen={!past && (view.dayStatus === "VALIDATED" || view.dayStatus === "MIXED")}
             />
@@ -111,6 +127,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
 
       <div className="space-y-4">
         <PlanningActivityBanner />
+        <PlanningVersionWatcher key={`${shownVersion.version}/${shownVersion.run ?? ""}`} date={date} shown={shownVersion} />
         <Suspense fallback={<OptimizerStatusPending />}>
           <OptimizerStatus />
         </Suspense>
@@ -142,7 +159,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
                 <p>
                   <span className="font-semibold">{pluralize(view.kpis.tripsTotal, "course")} à planifier</span> avec{" "}
                   {pluralize(availableVehicles, "véhicule disponible", "véhicules disponibles")}.{" "}
-                  {optimizeBlocked ? optimizeBlocked : `Lancez « ${optimizeLabel} » pour obtenir les tournées.`}
+                  {optimizeBlocked ?? runningReason ?? `Lancez « ${optimizeLabel} » pour obtenir les tournées.`}
                 </p>
                 <LinkButton href={`/courses?date=${date}`} size="sm">
                   <ListChecks aria-hidden className="size-4" />
@@ -164,7 +181,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
               droppedLocks={view.droppedLocks}
               timeRange={view.timeRange}
               planned={hasRoutes}
-              replanBlocked={replanBlocked}
+              replanBlocked={replanBlocked ?? runningReason}
               lockBlocked={past ? "Date passée : les verrous ne servent plus." : null}
               initialTripId={initialTripId}
             />

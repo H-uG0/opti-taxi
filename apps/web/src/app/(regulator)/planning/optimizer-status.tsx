@@ -1,5 +1,6 @@
 import { WifiOff } from "lucide-react";
 import { health } from "@/lib/optimizer/client";
+import { OptimizerOfflineSignal } from "./optimizer-offline-signal";
 
 /** Probes the optimizer service (streamed under Suspense so the page never waits on it). */
 export async function OptimizerStatus() {
@@ -15,10 +16,11 @@ export async function OptimizerStatus() {
   }
   return (
     <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-900">
+      <OptimizerOfflineSignal reason="Optimiseur hors ligne : le calcul des tournées est indisponible pour le moment." />
       <WifiOff aria-hidden className="mt-0.5 size-4 shrink-0" />
       <p className="min-w-0 break-words">
         <span className="font-semibold">Optimiseur hors ligne.</span> {result.error} Le planning enregistré reste consultable
-        et modifiable (verrous, validation).
+        et modifiable (verrous, validation) ; « Optimiser » et « Déplacer » attendent son retour.
       </p>
     </div>
   );

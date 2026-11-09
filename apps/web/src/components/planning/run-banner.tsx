@@ -33,7 +33,7 @@ export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planR
           <LoaderCircle aria-hidden className="size-4 shrink-0 motion-safe:animate-spin" />
           Une optimisation de cette date a démarré le {formatInstant(running.startedAt)}
           {running.requestedBy ? ` (${running.requestedBy})` : ""} pour {pluralize(running.tripsCount, "course")} : calcul
-          d&apos;environ {running.timeLimitSec} s, rechargez la page ensuite.
+          d&apos;environ {running.timeLimitSec} s. Un bandeau proposera de recharger le planning à la fin du calcul.
         </p>
       ) : null}
 
