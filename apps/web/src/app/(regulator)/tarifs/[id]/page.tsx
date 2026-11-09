@@ -11,7 +11,14 @@ import { ConfirmAction } from "@/components/ui/confirm-action";
 import { departmentLabel } from "../../vehicules/_lib/departments";
 import { BackLink } from "../../vehicules/_lib/ui";
 import { deleteTariff, updateTariff } from "../actions";
-import { TARIFF_STATUS_LABELS, tariffFormValues, tariffStatus } from "../schema";
+import {
+  certificationLabel,
+  TARIFF_STATUS_LABELS,
+  tariffFormValues,
+  tariffStatus,
+  VERIFICATION_LABELS,
+  VERIFICATION_TONES,
+} from "../schema";
 import { TariffForm } from "../tariff-form";
 
 export const metadata: Metadata = { title: "Modifier une grille tarifaire" };
@@ -22,8 +29,10 @@ export default async function EditTariffPage({ params }: { params: Promise<{ id:
   const grid = await db.tariffGrid.findUnique({ where: { id } });
   if (!grid) notFound();
 
-  // Status needs the sibling grids of the same vehicle type and department.
-  const siblings = await db.tariffGrid.findMany({ where: { vehicleType: grid.vehicleType, department: grid.department } });
+  // Status needs the sibling grids of the same vehicle type, department and certification.
+  const siblings = await db.tariffGrid.findMany({
+    where: { vehicleType: grid.vehicleType, department: grid.department, certified: grid.certified },
+  });
   const today = todayIso();
   const status = tariffStatus(grid, today, new Set(tariffsInForce(siblings, today).map((g) => g.id)));
 
@@ -36,9 +45,16 @@ export default async function EditTariffPage({ params }: { params: Promise<{ id:
           <span className="inline-flex flex-wrap items-center gap-2">
             <VehicleTypeBadge type={grid.vehicleType} />
             <span>{departmentLabel(grid.department)}</span>
+            <span>· {certificationLabel(grid.certified)}</span>
             <Badge tone={status === "IN_FORCE" ? "success" : status === "UPCOMING" ? "info" : "neutral"}>
               {TARIFF_STATUS_LABELS[status]}
             </Badge>
+            <Badge tone={VERIFICATION_TONES[grid.verification]}>{VERIFICATION_LABELS[grid.verification]}</Badge>
+            {grid.sourceUrl ? (
+              <a href={grid.sourceUrl} target="_blank" rel="noreferrer noopener" className="text-sm underline underline-offset-2 hover:text-brand-700">
+                Voir la source
+              </a>
+            ) : null}
           </span>
         }
         actions={

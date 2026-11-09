@@ -61,6 +61,8 @@ const vehicleFields = z.object({
     .transform((v) => (v ? v : null)),
   defaultDriverId: optionalIdField,
   defaultCrewMateId: optionalIdField,
+  /** Checkbox: "on" when ticked, absent otherwise. */
+  tpmrEquipped: z.string().optional(),
 });
 
 export const vehicleSchema = vehicleFields
@@ -86,6 +88,7 @@ export const vehicleSchema = vehicleFields
     capacity: v.type === "AMBULANCE" ? 1 : (v.capacity ?? DEFAULT_CAPACITY[v.type]),
     // Only an ambulance has a crew mate.
     defaultCrewMateId: v.type === "AMBULANCE" ? v.defaultCrewMateId : null,
+    tpmrEquipped: v.tpmrEquipped === "on",
   }));
 
 export type VehicleInput = z.output<typeof vehicleSchema>;
@@ -102,6 +105,7 @@ type VehicleRecord = Pick<
   | "energy"
   | "defaultDriverId"
   | "defaultCrewMateId"
+  | "tpmrEquipped"
 >;
 
 /** Form values of an existing vehicle, or of a new one. */
@@ -118,6 +122,7 @@ export function vehicleFormValues(vehicle?: VehicleRecord): FormValues {
       energy: "",
       defaultDriverId: "",
       defaultCrewMateId: "",
+      tpmrEquipped: "",
     };
   }
   return {
@@ -131,6 +136,7 @@ export function vehicleFormValues(vehicle?: VehicleRecord): FormValues {
     energy: vehicle.energy ?? "",
     defaultDriverId: vehicle.defaultDriverId ?? "",
     defaultCrewMateId: vehicle.defaultCrewMateId ?? "",
+    tpmrEquipped: vehicle.tpmrEquipped ? "on" : "",
   };
 }
 

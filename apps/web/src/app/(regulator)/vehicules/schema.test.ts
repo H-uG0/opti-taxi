@@ -83,8 +83,15 @@ describe("vehicleSchema", () => {
     expect(taxi.defaultCrewMateId).toBeNull();
   });
 
+  it("reads the TPMR equipment checkbox (ticked: « on », unticked: absent)", () => {
+    expect(vehicleSchema.parse(valid).tpmrEquipped).toBe(false);
+    const fitted = vehicleSchema.parse({ ...valid, tpmrEquipped: "on" });
+    expect(fitted.tpmrEquipped).toBe(true);
+    expect(vehicleFormValues(fitted).tpmrEquipped).toBe("on");
+  });
+
   it("round-trips a record through the form values", () => {
-    const parsed = vehicleSchema.parse(valid);
+    const parsed = vehicleSchema.parse({ ...valid, tpmrEquipped: "on" });
     const again = vehicleSchema.parse(vehicleFormValues({ ...parsed }));
     expect(again).toEqual(parsed);
   });

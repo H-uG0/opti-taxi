@@ -10,13 +10,22 @@
  * The crew of each vehicle is the crew of the day (lib/staff/day-crews.ts),
  * applied by `applyDayCrewPlan` on top of the default crews: absences,
  * replacements and the crews fixed by the regulator.
+ *
+ * Billing: the web picks the tariff grid of each vehicle (lib/domain/tariffs.ts
+ * gridForVehicle, with the company's certification of the date and its head
+ * office) and flags each trip for the fares that depend on places and care
+ * (« Grande ville », agglomeration, hospital-linked); the optimizer prices.
  */
 import type {
   AppSettings,
+  EmptyLegRule,
+  FacilityType,
   Mobility,
   Prisma,
   PrismaClient,
+  SharedPatientCount,
   SharingStatus,
+  SurchargeOrder,
   TariffGrid,
   TripDirection,
   TripStatus,
@@ -25,7 +34,18 @@ import type {
 import { isShareable } from "@/lib/domain/rules";
 import { getSettings } from "@/lib/domain/settings";
 import { loadTrafficZones, toContractTraffic, type TrafficInput } from "@/lib/domain/traffic";
-import { tariffGaps, tariffsInForce, type TariffGap } from "@/lib/domain/tariffs";
+import { areasInForce, communeOfAddress, tripAreaFlags, type AreaInput, type Commune } from "@/lib/domain/tariff-areas";
+import {
+  companyStatusOn,
+  gridForVehicle,
+  NO_COMPANY_CONTEXT,
+  tariffGaps,
+  tariffsInForce,
+  toFareGrid,
+  type CompanyTariffContext,
+  type PricedGrid,
+  type TariffGap,
+} from "@/lib/domain/tariffs";
 import { complianceAlerts, COMPLIANCE_KINDS } from "@/lib/fleet/maintenance";
 import type { ReplaceThresholds } from "@/lib/planning/plan-compare";
 import {
@@ -39,11 +59,12 @@ import {
   workTimeBlock,
 } from "@/lib/staff/day-crews";
 import { breakInShift, workTimeSummary } from "@/lib/staff/work-time";
-import { fromIsoDate, isoWeekday, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
+import { addDays, fromIsoDate, isoWeekday, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
 import {
   DEFAULT_MAX_RIDE_EXTRA_MIN,
   MAX_TRIP_SERVICE_MIN,
   type OptimizeRequest,
+  type OptimizerPricingSettings,
   type OptimizerSettings,
   type OptimizerTariff,
   type OptimizerTrip,
@@ -92,6 +113,8 @@ export type VehicleInput = {
   department: string;
   costPerKm: number;
   active: boolean;
+  /** Fitted for a patient in their wheelchair (TPMR supplement); absent: not fitted. */
+  tpmrEquipped?: boolean;
   /** The default driver, or the driver of the day once applyDayCrewPlan ran (`dayCrew` set). */
   defaultDriver: DriverInput | null;
   /** Same for the crew mate. */
@@ -126,6 +149,15 @@ export type TripInput = {
   mobility?: Mobility;
   /** Facility.extraServiceMin of the trip's facility; absent: 0. */
   facilityExtraServiceMin?: number;
+  /** Address snapshots: their communes give the « Grande ville » and agglomeration fares; absent: neither. */
+  pickupAddress?: string;
+  dropoffAddress?: string;
+  /** Type of the trip's facility: dialysis, radiotherapy and chemotherapy are hospital-linked (taxi empty leg). */
+  facilityType?: FacilityType | null;
+  /** Tolls of this patient's invoice (€); absent or null: none. */
+  tollAmount?: number | null;
+  /** Exceptional ambulance proposed by a regulator (TAR-03): billed at the VSL tariff while locked on an ambulance. */
+  exceptionalAmbulanceAt?: Date | null;
 };
 
 /** Stop durations (Paramètres « Temps d'arrêt »); absent fields: no surcharge, ambulance as taxi and VSL. */
@@ -149,21 +181,38 @@ export type SettingsInput = Pick<
   ServiceSettings &
   Partial<Pick<AppSettings, "maxRideExtraMin">>;
 
-export type TariffInput = Pick<
-  TariffGrid,
-  | "vehicleType"
-  | "department"
-  | "baseFare"
-  | "pricePerKm"
-  | "includedKm"
-  | "sharedDiscount2"
-  | "sharedDiscount3"
-  | "validFrom"
-  | "validTo"
-  // Not sent to the optimizer: break same-day ties between grids (tariffsInForce).
-  | "createdAt"
-  | "id"
->;
+export type TariffInput = PricedGrid &
+  Pick<
+    TariffGrid,
+    | "vehicleType"
+    | "department"
+    | "certified"
+    | "validFrom"
+    | "validTo"
+    // Not sent to the optimizer but as the grid's id: break same-day ties between grids (tariffsInForce).
+    | "createdAt"
+    | "id"
+  >;
+
+/** Billing settings of the company (Grilles tarifaires, « Règles de facturation »). */
+export type BillingInput = {
+  company: CompanyTariffContext & { hqCity: string | null };
+  rules: { emptyLegRule: EmptyLegRule; surchargeOrder: SurchargeOrder; sharedPatientCount: SharedPatientCount };
+  areas: AreaInput[];
+  /** Public holidays (ISO dates) around the date. */
+  holidays: string[];
+};
+
+/** Without billing settings (tests, older callers): not certified, no head office, no area, no holiday, no empty leg. */
+export const NO_BILLING: BillingInput = {
+  company: { ...NO_COMPANY_CONTEXT, hqCity: null },
+  rules: { emptyLegRule: "NONE", surchargeOrder: "MULTIPLICATIVE", sharedPatientCount: "DISTINCT" },
+  areas: [],
+  holidays: [],
+};
+
+/** Facility types whose sessions are hospital-linked for the taxi empty-leg surcharge (convention of 2025, art. annexe 2). */
+export const HOSPITAL_LINKED_FACILITY_TYPES: readonly FacilityType[] = ["DIALYSIS", "RADIOTHERAPY", "CHEMOTHERAPY"];
 
 export type OptimizeInput = {
   date: string;
@@ -173,6 +222,8 @@ export type OptimizeInput = {
   vehicles: VehicleInput[];
   trips: TripInput[];
   tariffs: TariffInput[];
+  /** Company certification, head office, billing rules, tariff areas and holidays; absent: NO_BILLING. */
+  billing?: BillingInput;
   /** Absent: free-flow travel times (the planning view only needs vehicle availability). */
   traffic?: TrafficInput;
 };
@@ -461,39 +512,125 @@ export function tripExclusionReason(trip: TripInput): string | null {
   return null;
 }
 
-export function toContractTariffs(grids: TariffInput[], isoDate: string): OptimizerTariff[] {
-  return tariffsInForce(grids, isoDate)
-    .map((g) => ({
-      vehicleType: g.vehicleType,
-      department: g.department,
-      baseFare: g.baseFare,
-      pricePerKm: g.pricePerKm,
-      includedKm: g.includedKm,
-      sharedDiscount2: g.sharedDiscount2,
-      sharedDiscount3: g.sharedDiscount3,
-    }))
-    .sort((a, b) => VEHICLE_TYPE_ORDER[a.vehicleType] - VEHICLE_TYPE_ORDER[b.vehicleType] || a.department.localeCompare(b.department));
+/** A grid row as the contract carries it (id = the row's id). */
+export function toContractTariff(grid: TariffInput): OptimizerTariff {
+  const fare = toFareGrid(grid);
+  return {
+    id: grid.id,
+    vehicleType: grid.vehicleType,
+    baseFare: fare.baseFare,
+    aggloFare: fare.aggloFare,
+    bigCityFare: fare.bigCityFare,
+    includedKm: fare.includedKm,
+    pricePerKm: fare.pricePerKm,
+    shortTripBands: [...fare.shortTripBands],
+    nightRate: fare.nightRate,
+    weekendRate: fare.weekendRate,
+    nightStartMin: fare.nightStartMinute,
+    nightEndMin: fare.nightEndMinute,
+    saturdayFromMin: fare.saturdayFromMinute,
+    surchargeShortTrip: fare.surchargeShortTrip,
+    emptyLegRateShort: fare.emptyLegRateShort,
+    emptyLegRateLong: fare.emptyLegRateLong,
+    emptyLegThresholdKm: fare.emptyLegThresholdKm,
+    sharedDiscounts: [...fare.sharedDiscounts],
+    maxSharedPatients: fare.maxSharedPatients,
+    aloneDiscount: fare.aloneDiscount,
+    aloneThresholdKm: fare.aloneThresholdKm,
+    billableDetourKm: [...fare.billableDetourKm],
+    tpmrFare: fare.tpmrFare,
+  };
+}
+
+/** Contract pricing settings of the date: the billing rules and the holidays of the date and the next two days. */
+export function toContractPricing(billing: BillingInput, isoDate: string): OptimizerPricingSettings {
+  const last = addDays(isoDate, 2);
+  return {
+    emptyLeg: billing.rules.emptyLegRule,
+    emptyLegOrder: billing.rules.surchargeOrder,
+    patientCount: billing.rules.sharedPatientCount,
+    publicHolidays: [...new Set(billing.holidays)].filter((day) => day >= isoDate && day <= last).sort(),
+  };
+}
+
+function communeOf(address: string | undefined): Commune | null {
+  return address ? communeOfAddress(address) : null;
+}
+
+/** What makes a trip cost more or less, whatever the vehicle: places, care, wheelchair, tolls. */
+export function tripBillingFlags(
+  trip: Pick<TripInput, "pickupAddress" | "dropoffAddress" | "facilityType" | "mobility" | "tollAmount">,
+  areas: readonly AreaInput[],
+  headOffice: Commune | null,
+): Pick<OptimizerTrip, "bigCity" | "agglomeration" | "hospitalLinked" | "wheelchair" | "tollAmount"> {
+  const flags = tripAreaFlags(areas, communeOf(trip.pickupAddress), communeOf(trip.dropoffAddress), headOffice);
+  return {
+    ...flags,
+    hospitalLinked: trip.facilityType != null && HOSPITAL_LINKED_FACILITY_TYPES.includes(trip.facilityType),
+    wheelchair: trip.mobility === "WHEELCHAIR",
+    tollAmount: Math.min(Math.max(trip.tollAmount ?? 0, 0), 1000),
+  };
+}
+
+/** Prescribed vehicle types a seated (TAP) trip may exceptionally extend with an ambulance. */
+function isSeatedOnly(types: readonly VehicleType[]): boolean {
+  return types.length > 0 && !types.includes("AMBULANCE") && types.some((t) => t === "TAXI" || t === "VSL");
+}
+
+/**
+ * Is `trip` an exceptional ambulance trip on this date: proposed by a
+ * regulator, still locked on an ambulance, seated only by prescription
+ * (TAR-03)? The optimizer then accepts that ambulance for it, at the VSL
+ * tariff; without the lock, it goes back to taxi or VSL only.
+ */
+export function isExceptionalAmbulanceTrip(
+  trip: Pick<TripInput, "exceptionalAmbulanceAt" | "lockedVehicleId" | "allowedVehicleTypes">,
+  vehicleType: (id: string) => VehicleType | undefined,
+): boolean {
+  if (!trip.exceptionalAmbulanceAt || !trip.lockedVehicleId) return false;
+  return isSeatedOnly(trip.allowedVehicleTypes) && vehicleType(trip.lockedVehicleId) === "AMBULANCE";
 }
 
 /** Pure: the optimizer request of input.date, plus everything left out and why. */
 export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
-  const { available, crews, skipped, notes } = resolveVehicleAvailability(input.vehicles, input.date);
+  const billing = input.billing ?? NO_BILLING;
+  const { available: decided, crews, skipped, notes } = resolveVehicleAvailability(input.vehicles, input.date);
+  const allById = new Map(input.vehicles.map((v) => [v.id, v]));
+
+  // Grids: one per vehicle (gridForVehicle); the seats sent never exceed what the grid lets share.
+  const inForce = tariffsInForce(input.tariffs, input.date);
+  const status = companyStatusOn(billing.company, input.date);
+  const used = new Map<string, TariffInput>();
+  const available: OptimizerVehicle[] = decided.map((vehicle) => {
+    const grid = gridForVehicle(inForce, vehicle, status);
+    if (grid) used.set(grid.id, grid);
+    return {
+      ...vehicle,
+      capacity: grid ? Math.max(1, Math.min(vehicle.capacity, grid.maxSharedPatients)) : vehicle.capacity,
+      tariffId: grid?.id ?? null,
+      tpmrEquipped: allById.get(vehicle.id)?.tpmrEquipped ?? false,
+    };
+  });
   const availableById = new Map(available.map((v) => [v.id, v]));
   const skippedById = new Map(skipped.map((s) => [s.vehicleId, s]));
-  const allById = new Map(input.vehicles.map((v) => [v.id, v]));
+  const areas = areasInForce(billing.areas, input.date);
+  const headOffice = billing.company.hqCity ? { city: billing.company.hqCity, postalCode: null } : null;
 
   const trips: OptimizerTrip[] = [];
   const droppedLocks: DroppedLock[] = [];
   const excludedTrips: ExcludedTrip[] = [];
 
-  for (const trip of input.trips) {
-    if (EXCLUDED_TRIP_STATUSES.includes(trip.status)) continue;
-    const exclusion = tripExclusionReason(trip);
+  for (const raw of input.trips) {
+    if (EXCLUDED_TRIP_STATUSES.includes(raw.status)) continue;
+    const exclusion = tripExclusionReason(raw);
     if (exclusion) {
-      excludedTrips.push({ tripId: trip.id, reason: exclusion });
+      excludedTrips.push({ tripId: raw.id, reason: exclusion });
       continue;
     }
 
+    // An exceptional ambulance (TAR-03) only while the trip is locked on an ambulance available that day.
+    const exceptional = isExceptionalAmbulanceTrip(raw, (id) => allById.get(id)?.type);
+    let trip: TripInput = exceptional ? { ...raw, allowedVehicleTypes: [...raw.allowedVehicleTypes, "AMBULANCE"] } : raw;
     let lockedVehicleId = trip.lockedVehicleId;
     if (lockedVehicleId) {
       const reason = lockDropReason(lockedVehicleId, trip, availableById, skippedById, allById);
@@ -505,7 +642,15 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
           reason,
         });
         lockedVehicleId = null;
+        trip = raw;
       }
+    }
+    let tariffId: string | null = null;
+    if (trip !== raw && lockedVehicleId) {
+      const ambulance = availableById.get(lockedVehicleId)!;
+      const seated = gridForVehicle(inForce, { type: "VSL", department: ambulance.department }, status);
+      if (seated) used.set(seated.id, seated);
+      tariffId = seated?.id ?? null;
     }
 
     const service = tripServiceMinutes(trip, input.settings);
@@ -523,16 +668,21 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
       lockedVehicleId,
       ...(service.pickupServiceMin !== null ? { pickupServiceMin: service.pickupServiceMin } : {}),
       ...(service.dropoffServiceMin !== null ? { dropoffServiceMin: service.dropoffServiceMin } : {}),
+      tariffId,
+      ...tripBillingFlags(trip, areas, headOffice),
     });
   }
 
-  const tariffs = toContractTariffs(input.tariffs, input.date);
+  const tariffs = [...used.values()]
+    .sort((a, b) => VEHICLE_TYPE_ORDER[a.vehicleType] - VEHICLE_TYPE_ORDER[b.vehicleType] || a.department.localeCompare(b.department))
+    .map(toContractTariff);
   return {
     request: {
       date: input.date,
       settings: {
         ...toContractSettings(input.settings, trips.length),
         ...(input.traffic ? { traffic: toContractTraffic(input.traffic, input.date) } : {}),
+        pricing: toContractPricing(billing, input.date),
       },
       vehicles: available,
       trips,
@@ -545,7 +695,8 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
     notes,
     tariffGaps: tariffGaps(
       available.map((v) => ({ label: v.label, type: v.type, department: v.department })),
-      tariffs,
+      inForce,
+      status,
     ),
   };
 }
@@ -577,6 +728,7 @@ export const vehicleInputSelect = {
   department: true,
   costPerKm: true,
   active: true,
+  tpmrEquipped: true,
   defaultDriver: { select: driverInputSelect },
   defaultCrewMate: { select: driverInputSelect },
 } as const;
@@ -598,6 +750,10 @@ export const tripInputSelect = {
   sharingAllowed: true,
   sharingStatus: true,
   lockedVehicleId: true,
+  pickupAddress: true,
+  dropoffAddress: true,
+  tollAmount: true,
+  exceptionalAmbulanceAt: true,
 } as const;
 
 /** Every vehicle (active or not: locks may point to an inactive one) with its default crew. */
@@ -720,7 +876,7 @@ export async function loadDayVehicleInputs(prisma: PrismaClient, isoDate: string
   return applyDayCrewPlan(vehicles, context.plan, context.people);
 }
 
-/** Tariff grids that may be in force on isoDate (tariffsInForce picks one per type and department). */
+/** Tariff grids that may be in force on isoDate (tariffsInForce picks one per type, department and certification). */
 export function loadTariffInputs(prisma: PrismaClient, isoDate: string): Promise<TariffInput[]> {
   const serviceDate = fromIsoDate(isoDate);
   return prisma.tariffGrid.findMany({
@@ -728,23 +884,50 @@ export function loadTariffInputs(prisma: PrismaClient, isoDate: string): Promise
   });
 }
 
+/** Billing settings for isoDate: certification periods, head office, rules, tariff areas, holidays around the date. */
+export async function loadBillingInput(prisma: PrismaClient, isoDate: string): Promise<BillingInput> {
+  const [settings, certifications, areas, holidays] = await Promise.all([
+    getSettings(prisma),
+    prisma.companyCertification.findMany({ select: { validFrom: true, validTo: true } }),
+    prisma.tariffArea.findMany({
+      select: { kind: true, name: true, department: true, communes: true, rule: true, hubCommune: true, validFrom: true, validTo: true },
+    }),
+    prisma.publicHoliday.findMany({
+      where: { date: { gte: fromIsoDate(addDays(isoDate, -1)), lte: fromIsoDate(addDays(isoDate, 3)) } },
+      select: { date: true },
+    }),
+  ]);
+  return {
+    company: { certifications, hqDepartment: settings.hqDepartment, hqCity: settings.hqCity },
+    rules: { emptyLegRule: settings.emptyLegRule, surchargeOrder: settings.surchargeOrder, sharedPatientCount: settings.sharedPatientCount },
+    areas,
+    holidays: holidays.map((h) => toIsoDate(h.date)),
+  };
+}
+
 export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): Promise<OptimizeInput> {
   const serviceDate = fromIsoDate(isoDate);
-  const [settings, zones, vehicles, rows, tariffs] = await Promise.all([
+  const [settings, zones, vehicles, rows, tariffs, billing] = await Promise.all([
     getSettings(prisma),
     loadTrafficZones(prisma),
     loadDayVehicleInputs(prisma, isoDate),
     prisma.trip.findMany({
       where: { serviceDate, status: { notIn: [...EXCLUDED_TRIP_STATUSES] } },
-      select: { ...tripInputSelect, patient: { select: { mobility: true } }, facility: { select: { extraServiceMin: true } } },
+      select: {
+        ...tripInputSelect,
+        patient: { select: { mobility: true } },
+        facility: { select: { extraServiceMin: true, type: true } },
+      },
       orderBy: [{ appointmentMinute: "asc" }, { readyMinute: "asc" }, { id: "asc" }],
     }),
     loadTariffInputs(prisma, isoDate),
+    loadBillingInput(prisma, isoDate),
   ]);
   const trips: TripInput[] = rows.map(({ patient, facility, ...trip }) => ({
     ...trip,
     mobility: patient.mobility,
     facilityExtraServiceMin: facility?.extraServiceMin ?? 0,
+    facilityType: facility?.type ?? null,
   }));
   return {
     date: isoDate,
@@ -753,6 +936,7 @@ export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): 
     vehicles,
     trips,
     tariffs,
+    billing,
     traffic: { ...settings, zones },
   };
 }

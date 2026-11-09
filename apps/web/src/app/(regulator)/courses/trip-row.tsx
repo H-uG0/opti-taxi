@@ -19,7 +19,8 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { Td } from "@/components/ui/table";
 import { DIRECTION_LABELS, PAYER_LABELS, SHARING_STATUS_LABELS, TRIP_STATUS_LABELS, formatEuros, formatKm } from "@/lib/labels";
 import { formatMinute } from "@/lib/time";
-import { cancelTrip, recordSharingDecision, rescheduleTrip, restoreTrip } from "./actions";
+import { cancelTrip, recordSharingDecision, rescheduleTrip, restoreTrip, setTripToll } from "./actions";
+import { UnitInput } from "../vehicules/_lib/ui";
 import { submitWithoutReset } from "../patients/_components/form-submit";
 import { ActionForm, ActionMessage } from "./action-form";
 import { INITIAL_ACTION_RESULT } from "./trip-form";
@@ -69,6 +70,8 @@ export type TripRowData = {
   directKm: number | null;
   detourKm: number | null;
   estimatedRevenue: number | null;
+  /** Tolls on this patient's invoice (€), null when none. */
+  tollAmount?: number | null;
   sharingAllowed: boolean;
   sharingStatus: SharingStatus;
   sharingProposedAt: string | null;
@@ -310,6 +313,7 @@ function TripDetails({ trip }: { trip: TripRowData }) {
           ) : null}
           {trip.notes ? <Detail label="Notes">{trip.notes}</Detail> : null}
         </dl>
+        <TollForm trip={trip} />
         <LifecycleForm trip={trip} />
       </Panel>
 
@@ -493,6 +497,36 @@ function CancelFields({ trip, pending }: { trip: TripRowData; pending: boolean }
         )}
       </Button>
     </>
+  );
+}
+
+/** « Péage » of the trip: added to the patient's invoice, outside surcharges and discounts. */
+function TollForm({ trip }: { trip: TripRowData }) {
+  const inputId = useId();
+  if (trip.status === "CANCELLED" || trip.status === "NO_SHOW") return null;
+  return (
+    <ActionForm action={setTripToll} hidden={{ tripId: trip.id }}>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="space-y-1">
+          <label htmlFor={inputId} className="block text-sm font-medium text-slate-700">
+            Péage (facultatif)
+          </label>
+          <UnitInput
+            id={inputId}
+            name="toll"
+            inputMode="decimal"
+            autoComplete="off"
+            unit="€"
+            defaultValue={trip.tollAmount ? trip.tollAmount.toFixed(2).replace(".", ",") : ""}
+            className="tabular w-32"
+          />
+        </div>
+        <SubmitButton variant="secondary" size="sm" pendingLabel="Enregistrement…">
+          Enregistrer le péage
+        </SubmitButton>
+      </div>
+      <p className="text-xs text-slate-500">Part de ce patient, sur justificatif : ajoutée à sa facture, hors majorations et abattements.</p>
+    </ActionForm>
   );
 }
 

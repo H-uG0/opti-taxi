@@ -1,7 +1,19 @@
 import type { TariffGrid } from "@prisma/client";
 import { beforeAll, describe, expect, it } from "vitest";
 import { fromIsoDate } from "@/lib/time";
-import { tariffCoverageAlerts, tariffFor, tariffGaps, tariffsInForce, type TariffedVehicle } from "./tariffs";
+import {
+  certifiedOn,
+  gridForVehicle,
+  readSharedDiscounts,
+  readShortTripBands,
+  tariffCoverageAlerts,
+  tariffGaps,
+  tariffsInForce,
+  toFareGrid,
+  type CompanyTariffContext,
+  type CompanyTariffStatus,
+  type TariffedVehicle,
+} from "./tariffs";
 
 // The first Date#toISOString() of a test worker can take several seconds on a slow
 // Windows machine (4-7 s observed): pay it once here, outside the per-test timeout.
@@ -17,12 +29,35 @@ function grid(overrides: Partial<Omit<TariffGrid, "validFrom" | "validTo">> & { 
     id: `grid_${nextId++}`,
     vehicleType: "TAXI",
     department: "13",
+    certified: null,
+    zone: null,
     label: null,
     baseFare: 13,
-    pricePerKm: 1.12,
+    aggloFare: null,
+    bigCityFare: 0,
     includedKm: 0,
-    sharedDiscount2: 0.23,
-    sharedDiscount3: 0.35,
+    pricePerKm: 1.12,
+    shortTripBands: [],
+    nightRate: 0,
+    weekendRate: 0,
+    nightStartMinute: 1200,
+    nightEndMinute: 480,
+    saturdayFromMinute: 720,
+    surchargeShortTrip: true,
+    emptyLegRateShort: 0,
+    emptyLegRateLong: 0,
+    emptyLegThresholdKm: 50,
+    sharedDiscounts: [
+      { patients: 2, rate: 0.23 },
+      { patients: 3, rate: 0.35 },
+    ],
+    maxSharedPatients: 3,
+    aloneDiscount: 0,
+    aloneThresholdKm: 30,
+    billableDetourKm: [],
+    tpmrFare: 0,
+    verification: "UNVERIFIED",
+    sourceUrl: null,
     validFrom: fromIsoDate(from),
     validTo: to ? fromIsoDate(to) : null,
     notes: null,
@@ -86,6 +121,7 @@ describe("tariffsInForce", () => {
       createdAt: g.createdAt,
       vehicleType: g.vehicleType,
       department: g.department,
+      certified: g.certified,
       validFrom: g.validFrom,
       validTo: g.validTo,
       pricePerKm: g.pricePerKm,
@@ -99,7 +135,7 @@ describe("tariffsInForce", () => {
   it("requires createdAt and id: a column subset missing either one does not type-check", () => {
     // One directive per field: each line proves its own field is required, so making
     // only one of them optional again also breaks tsc (TS2578, unused directive).
-    const dated = { vehicleType: "TAXI", department: "13", validFrom: fromIsoDate("2026-11-02"), validTo: null } as const;
+    const dated = { vehicleType: "TAXI", department: "13", certified: null, validFrom: fromIsoDate("2026-11-02"), validTo: null } as const;
     const withoutCreatedAt = { ...dated, id: "grid_x" };
     const withoutId = { ...dated, createdAt: new Date("2026-11-02T08:00:00Z") };
     // Control: with both fields the same subset type-checks, so the errors below come
@@ -126,30 +162,92 @@ describe("tariffsInForce", () => {
   });
 });
 
-describe("tariffFor", () => {
+const NOT_CERTIFIED: CompanyTariffStatus = { certified: false, hqDepartment: null };
+const CERTIFIED_IN_13: CompanyTariffStatus = { certified: true, hqDepartment: "13" };
+
+describe("tariffsInForce with certification", () => {
+  it("keeps a certified and a non-certified grid of the same type and department side by side", () => {
+    const certified = grid({ from: "2025-01-01", vehicleType: "VSL", department: "*", certified: true });
+    const base = grid({ from: "2025-10-01", vehicleType: "VSL", department: "*", certified: false });
+    expect(tariffsInForce([certified, base], "2026-11-03")).toEqual(expect.arrayContaining([certified, base]));
+  });
+});
+
+describe("gridForVehicle", () => {
   const taxi13 = grid({ from: "2025-01-01" });
   const taxiAll = grid({ from: "2025-01-01", department: "*", pricePerKm: 1.1 });
-  const vslAll = grid({ from: "2025-01-01", vehicleType: "VSL", department: "*", baseFare: 13.6 });
-  const grids = [taxiAll, taxi13, vslAll];
+  const vslMajored = grid({ from: "2025-01-01", vehicleType: "VSL", department: "*", certified: true, baseFare: 15.75 });
+  const vslBase13 = grid({ from: "2025-10-01", vehicleType: "VSL", department: "13", certified: false, baseFare: 12.11 });
+  const vslBase84 = grid({ from: "2025-10-01", vehicleType: "VSL", department: "84", certified: false, baseFare: 11.34 });
+  const ambulanceMajored = grid({ from: "2025-01-01", vehicleType: "AMBULANCE", department: "*", certified: true, baseFare: 57.39 });
+  const ambulanceBase = grid({ from: "2025-10-01", vehicleType: "AMBULANCE", department: "*", certified: false, baseFare: 45.6 });
+  const grids = [taxiAll, taxi13, vslMajored, vslBase13, vslBase84, ambulanceMajored, ambulanceBase];
 
-  it("prefers the grid of the vehicle's department", () => {
-    expect(tariffFor(grids, "TAXI", "13")).toBe(taxi13);
+  it("a taxi takes the grid of its ADS department, then the catch-all, whatever the certification", () => {
+    expect(gridForVehicle(grids, { type: "TAXI", department: "13" }, CERTIFIED_IN_13)).toBe(taxi13);
+    expect(gridForVehicle(grids, { type: "TAXI", department: "05" }, NOT_CERTIFIED)).toBe(taxiAll);
   });
 
-  it("falls back to the catch-all grid", () => {
-    expect(tariffFor(grids, "TAXI", "05")).toBe(taxiAll);
-    expect(tariffFor(grids, "VSL", "13")).toBe(vslAll);
+  it("a VSL of a certified company takes the majored grid, wherever its department", () => {
+    expect(gridForVehicle(grids, { type: "VSL", department: "84" }, CERTIFIED_IN_13)).toBe(vslMajored);
   });
 
-  it("returns undefined when no grid covers the vehicle type", () => {
-    expect(tariffFor(grids, "AMBULANCE", "13")).toBeUndefined();
-    expect(tariffFor([taxi13], "TAXI", "04")).toBeUndefined();
+  it("a VSL of a non-certified company takes the base grid of the head office's department", () => {
+    expect(gridForVehicle(grids, { type: "VSL", department: "84" }, { certified: false, hqDepartment: "13" })).toBe(vslBase13);
+    // Head office not set: the vehicle's own department.
+    expect(gridForVehicle(grids, { type: "VSL", department: "84" }, NOT_CERTIFIED)).toBe(vslBase84);
+    expect(gridForVehicle(grids, { type: "VSL", department: "05" }, NOT_CERTIFIED)).toBeUndefined();
+  });
+
+  it("an ambulance takes the grid of the certification", () => {
+    expect(gridForVehicle(grids, { type: "AMBULANCE", department: "05" }, CERTIFIED_IN_13)).toBe(ambulanceMajored);
+    expect(gridForVehicle(grids, { type: "AMBULANCE", department: "05" }, NOT_CERTIFIED)).toBe(ambulanceBase);
+  });
+
+  it("a grid for any company (certified null, grids of before 2025) applies to both", () => {
+    const old = grid({ from: "2025-01-01", vehicleType: "VSL", department: "*", baseFare: 13.6 });
+    expect(gridForVehicle([old], { type: "VSL", department: "13" }, CERTIFIED_IN_13)).toBe(old);
+    expect(gridForVehicle([old], { type: "VSL", department: "13" }, NOT_CERTIFIED)).toBe(old);
+    // The grid of the exact certification wins over it.
+    expect(gridForVehicle([old, vslMajored], { type: "VSL", department: "13" }, CERTIFIED_IN_13)).toBe(vslMajored);
   });
 
   it("combines with tariffsInForce: an expired exact grid yields to the catch-all", () => {
     const expired13 = grid({ from: "2023-01-01", to: "2024-12-31" });
     const inForce = tariffsInForce([expired13, taxiAll], "2026-11-03");
-    expect(tariffFor(inForce, "TAXI", "13")).toBe(taxiAll);
+    expect(gridForVehicle(inForce, { type: "TAXI", department: "13" }, NOT_CERTIFIED)).toBe(taxiAll);
+  });
+});
+
+describe("certification periods", () => {
+  const periods: CompanyTariffContext["certifications"] = [
+    { validFrom: fromIsoDate("2025-01-01"), validTo: fromIsoDate("2025-06-30") },
+    { validFrom: fromIsoDate("2026-01-01"), validTo: null },
+  ];
+  it("covers its bounds, not the gap between periods", () => {
+    expect(certifiedOn(periods, "2024-12-31")).toBe(false);
+    expect(certifiedOn(periods, "2025-01-01")).toBe(true);
+    expect(certifiedOn(periods, "2025-06-30")).toBe(true);
+    expect(certifiedOn(periods, "2025-07-01")).toBe(false);
+    expect(certifiedOn(periods, "2030-01-01")).toBe(true);
+  });
+});
+
+describe("JSON columns", () => {
+  it("reads the bands and discounts sorted, and nothing from a malformed value", () => {
+    expect(readShortTripBands([{ upToKm: 8, amount: 7.68 }, { upToKm: 7, amount: 8.54 }])).toEqual([
+      { upToKm: 7, amount: 8.54 },
+      { upToKm: 8, amount: 7.68 },
+    ]);
+    expect(readShortTripBands("nope")).toEqual([]);
+    expect(readSharedDiscounts([{ patients: 3, rate: 0.35 }, { patients: 2, rate: 0.23 }]).map((d) => d.patients)).toEqual([2, 3]);
+    expect(readSharedDiscounts([{ patients: 1, rate: 0.5 }])).toEqual([]);
+  });
+
+  it("gives fare.ts the grid with its lists", () => {
+    const fare = toFareGrid(grid({ from: "2025-01-01", billableDetourKm: [10, 10] }));
+    expect(fare.sharedDiscounts).toHaveLength(2);
+    expect(fare.billableDetourKm).toEqual([10, 10]);
   });
 });
 
@@ -163,7 +261,7 @@ describe("tariff gaps of a planned day", () => {
 
   it("groups the vehicles no grid covers by type and department", () => {
     const inForce = [grid({ from: "2026-01-01", vehicleType: "TAXI", department: "13" })];
-    expect(tariffGaps(vehicles, inForce)).toEqual([
+    expect(tariffGaps(vehicles, inForce, NOT_CERTIFIED)).toEqual([
       { vehicleType: "VSL", department: "04", vehicles: ["VSL 2", "VSL 5"] },
       { vehicleType: "TAXI", department: "05", vehicles: ["Taxi 9"] },
     ]);
@@ -171,7 +269,14 @@ describe("tariff gaps of a planned day", () => {
 
   it("counts the « * » catch-all of the type as coverage", () => {
     const inForce = [grid({ from: "2026-01-01", vehicleType: "TAXI", department: "*" })];
-    expect(tariffGaps(vehicles, inForce).map((g) => g.vehicleType)).toEqual(["VSL"]);
+    expect(tariffGaps(vehicles, inForce, NOT_CERTIFIED).map((g) => g.vehicleType)).toEqual(["VSL"]);
+  });
+
+  it("a VSL without the grid of the company's certification is a gap", () => {
+    const inForce = [grid({ from: "2026-01-01", vehicleType: "VSL", department: "*", certified: true })];
+    const vsl = vehicles.filter((v) => v.type === "VSL");
+    expect(tariffGaps(vsl, inForce, CERTIFIED_IN_13)).toEqual([]);
+    expect(tariffGaps(vsl, inForce, NOT_CERTIFIED)).toHaveLength(1);
   });
 });
 
@@ -220,6 +325,16 @@ describe("tariffCoverageAlerts (tomorrow and the 7 following days)", () => {
       uncoveredFrom: "2026-11-12",
       resumesOn: "2026-11-14",
     });
+  });
+
+  it("a certification that ends inside the window leaves the VSL without the base grid", () => {
+    const majored = grid({ from: "2025-01-01", vehicleType: "VSL", department: "*", certified: true });
+    const company: CompanyTariffContext = {
+      certifications: [{ validFrom: fromIsoDate("2025-01-01"), validTo: fromIsoDate("2026-11-12") }],
+      hqDepartment: "13",
+    };
+    const [alert] = tariffCoverageAlerts(vsl, [majored], "2026-11-10", 7, company);
+    expect(alert).toMatchObject({ uncoveredFrom: "2026-11-13", resumesOn: null });
   });
 
   it("the « * » catch-all takes over an expiring department grid", () => {

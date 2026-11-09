@@ -806,6 +806,9 @@ function fakePrisma(routes: FakeRoute[], trips: RefreshTrip[]) {
     maintenanceDeadline: { findMany: async () => [] },
     fuelLog: { groupBy: async () => [] },
     tariffGrid: { findMany: async () => [] },
+    companyCertification: { findMany: async () => [] },
+    tariffArea: { findMany: async () => [] },
+    publicHoliday: { findMany: async () => [] },
     route: {
       findMany: async ({ where }: { where: Where }) => routes.filter((r) => matches(r, where)).map((r) => ({ ...r, stops: [...r.stops] })),
       update: async (args: { where: unknown; data: unknown }) => writes.push({ model: "route", ...args }),

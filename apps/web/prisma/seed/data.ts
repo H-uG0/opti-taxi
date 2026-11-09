@@ -462,11 +462,13 @@ type VehicleDef = {
   crewMate: DriverKey | null;
   /** Diesel unless stated. */
   energy?: EnergyType;
+  /** Fitted for a patient in their wheelchair (TPMR supplement); a demonstration assumption, V's fleet is unknown. */
+  tpmrEquipped?: boolean;
 };
 
 export const VEHICLES: readonly VehicleDef[] = [
   { label: "Taxi 1 (Marseille)", registration: "GH-218-PZ", type: "TAXI", depot: "marseille", ageSurcharge: 0.02, driver: "julien", crewMate: null },
-  { label: "VSL 1 (Marseille)", registration: "FK-547-TR", type: "VSL", depot: "marseille", ageSurcharge: 0.01, driver: "elodie", crewMate: null },
+  { label: "VSL 1 (Marseille)", tpmrEquipped: true, registration: "FK-547-TR", type: "VSL", depot: "marseille", ageSurcharge: 0.01, driver: "elodie", crewMate: null },
   // The usual crew of V: the auxiliary drives, the DEA rides beside the patient (R. 6312-10 allows either way).
   { label: "Ambulance 1 (Marseille)", registration: "GA-903-MB", type: "AMBULANCE", depot: "marseille", ageSurcharge: 0, driver: "ines", crewMate: "laurent" },
   { label: "Taxi 2 (Manosque)", registration: "FV-162-LD", type: "TAXI", depot: "manosque", ageSurcharge: 0, driver: "sophie", crewMate: null, energy: "ELECTRIC" },
@@ -479,46 +481,307 @@ export const VEHICLES: readonly VehicleDef[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Tariff grids. Amounts are indicative only; they live in the database so the
-// regulator can correct them without touching code.
+// Tariff grids: the official values verified on 9 November 2026 (memo of the
+// tariff batch, section 4). They live in the database so the regulator can
+// correct them without touching code; each says its source and how it was
+// verified. Values the memo leaves unverified are not entered (taxi « courte
+// distance » supplement, local SX1 supplement, Grenoble's ambulance « forfait
+// spécial », the rules of 1 July 2027).
 
-export const TARIFF_NOTE = "Valeurs indicatives à vérifier avec la convention en vigueur.";
+type Verification = "OFFICIAL" | "SECONDARY" | "UNVERIFIED";
 
-type TariffDef = {
+export type TariffDef = {
   vehicleType: VehicleType;
   department: string;
+  certified: boolean | null;
+  zone?: string;
   label: string;
   baseFare: number;
-  pricePerKm: number;
+  aggloFare?: number;
+  bigCityFare?: number;
   includedKm: number;
-  sharedDiscount2: number;
-  sharedDiscount3: number;
+  pricePerKm: number;
+  shortTripBands?: { upToKm: number; amount: number }[];
+  nightRate: number;
+  weekendRate: number;
+  emptyLegRateShort?: number;
+  emptyLegRateLong?: number;
+  emptyLegThresholdKm?: number;
+  sharedDiscounts: { patients: number; rate: number }[];
+  maxSharedPatients: number;
+  aloneDiscount?: number;
+  aloneThresholdKm?: number;
+  billableDetourKm?: number[];
+  tpmrFare?: number;
+  verification: Verification;
+  sourceUrl: string;
   validFrom: string;
   validTo: string | null;
   notes: string;
 };
 
-const TAP_DISCOUNTS = { sharedDiscount2: 0.23, sharedDiscount3: 0.35 };
-const CURRENT = { validFrom: "2025-01-01", validTo: null, notes: TARIFF_NOTE };
+export const TARIFF_SOURCES = {
+  taxiConvention: "https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000052060568",
+  vslAmeli: "https://www.ameli.fr/transporteur-sanitaire/exercice-professionnel/facturation/tarifs/vsl-tarifs-conventionnels",
+  ambulanceAmeli: "https://www.ameli.fr/transporteur-sanitaire/exercice-professionnel/facturation/tarifs/ambulances-tarifs-conventionnels",
+  protocol2025: "https://www.ameli.fr/sites/default/files/Documents/protocole-accord-depenses-maitrises-transporteur-sanitaire.pdf",
+  amendment11: "https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000047524277",
+  aggloCommunes: "https://www.ameli.fr/sites/default/files/Documents/5248/document/liste-communes-forfait-agglomeration_assurance-maladie.pdf",
+  aggloCommunesRtf: "https://www.ameli.fr/sites/default/files/Documents/5247/document/liste-communes-forfait-agglomeration_assurance-maladie.rtf",
+} as const;
 
-export const TARIFFS: readonly TariffDef[] = [
-  { vehicleType: "TAXI", department: "13", label: "Taxi conventionné — Bouches-du-Rhône", baseFare: 13, pricePerKm: 1.12, includedKm: 0, ...TAP_DISCOUNTS, ...CURRENT },
-  { vehicleType: "TAXI", department: "04", label: "Taxi conventionné — Alpes-de-Haute-Provence", baseFare: 13, pricePerKm: 1.17, includedKm: 0, ...TAP_DISCOUNTS, ...CURRENT },
-  { vehicleType: "TAXI", department: "05", label: "Taxi conventionné — Hautes-Alpes", baseFare: 13, pricePerKm: 1.2, includedKm: 0, ...TAP_DISCOUNTS, ...CURRENT },
-  { vehicleType: "TAXI", department: "38", label: "Taxi conventionné — Isère", baseFare: 13, pricePerKm: 1.07, includedKm: 0, ...TAP_DISCOUNTS, ...CURRENT },
-  { vehicleType: "VSL", department: "*", label: "VSL — toutes zones", baseFare: 13.6, pricePerKm: 1.0, includedKm: 0, ...TAP_DISCOUNTS, ...CURRENT },
-  { vehicleType: "AMBULANCE", department: "*", label: "Ambulance — toutes zones", baseFare: 64.5, pricePerKm: 2.4, includedKm: 3, sharedDiscount2: 0, sharedDiscount3: 0, ...CURRENT },
+const TAXI_KM_RATES: [department: string, name: string, rate: number][] = [
+  ["13", "Bouches-du-Rhône", 1.1],
+  ["84", "Vaucluse", 1.2],
+  ["04", "Alpes-de-Haute-Provence", 1.14],
+  ["05", "Hautes-Alpes", 1.18],
+  ["26", "Drôme", 1.16],
+  ["38", "Isère", 1.22],
+];
+
+const TAXI_GRIDS: TariffDef[] = TAXI_KM_RATES.map(([department, name, rate]) => ({
+  vehicleType: "TAXI",
+  department,
+  certified: null,
+  label: `Taxi conventionné — ${name}`,
+  baseFare: 13,
+  bigCityFare: 15,
+  includedKm: 4,
+  pricePerKm: rate,
+  nightRate: 0.5,
+  weekendRate: 0.5,
+  emptyLegRateShort: 0.25,
+  emptyLegRateLong: 0.5,
+  emptyLegThresholdKm: 50,
+  sharedDiscounts: [
+    { patients: 2, rate: 0.23 },
+    { patients: 3, rate: 0.35 },
+    { patients: 4, rate: 0.37 },
+  ],
+  maxSharedPatients: 8,
+  aloneDiscount: 0.05,
+  aloneThresholdKm: 30,
+  tpmrFare: 30,
+  verification: "OFFICIAL",
+  sourceUrl: TARIFF_SOURCES.taxiConvention,
+  validFrom: "2025-11-01",
+  validTo: null,
+  notes:
+    "Convention-cadre nationale des taxis conventionnés (arrêté du 29/07/2025), tarifs du 1er novembre 2025. " +
+    "Seuil de l'abattement « patient seul » non vérifié : 30 km, minimum national, en attendant la valeur de la CPAM.",
+}));
+
+const VSL_SHORT_TRIP: TariffDef["shortTripBands"] = [
+  [7, 8.54],
+  [8, 7.68],
+  [9, 7.03],
+  [10, 6.35],
+  [11, 5.22],
+  [12, 4.62],
+  [13, 4.01],
+  [14, 3.41],
+  [15, 2.8],
+  [16, 2.07],
+  [17, 1.5],
+  [18, 0.91],
+].map(([upToKm, amount]) => ({ upToKm: upToKm!, amount: amount! }));
+
+const DEPARTMENT_NAMES: Record<string, string> = {
+  "13": "Bouches-du-Rhône",
+  "04": "Alpes-de-Haute-Provence",
+  "05": "Hautes-Alpes",
+  "38": "Isère",
+  "84": "Vaucluse",
+  "26": "Drôme",
+};
+
+function vsl(
+  certified: boolean,
+  department: string,
+  baseFare: number,
+  pricePerKm: number,
+  period: { validFrom: string; validTo: string | null },
+  source: { url: string; notes: string },
+): TariffDef {
+  const zone = ["84", "26"].includes(department) ? "C" : department === "*" ? undefined : "B";
+  const place = department === "*" ? "" : ` zone ${zone} — ${DEPARTMENT_NAMES[department]}`;
+  const history = period.validTo ? ` (jusqu'au ${period.validTo.split("-").reverse().join("/")})` : "";
+  return {
+    vehicleType: "VSL",
+    department,
+    certified,
+    ...(zone ? { zone } : {}),
+    label: `VSL ${certified ? "majoré" : "socle"}${place}${history}`,
+    baseFare,
+    includedKm: 3,
+    pricePerKm,
+    shortTripBands: VSL_SHORT_TRIP,
+    nightRate: 0.5,
+    weekendRate: 0.25,
+    sharedDiscounts: certified
+      ? [
+          { patients: 2, rate: 0.15 },
+          { patients: 3, rate: 0.33 },
+        ]
+      : [
+          { patients: 2, rate: 0.23 },
+          { patients: 3, rate: 0.35 },
+        ],
+    maxSharedPatients: 3,
+    billableDetourKm: [10, 10],
+    tpmrFare: 30,
+    verification: "OFFICIAL",
+    sourceUrl: source.url,
+    ...period,
+    notes: source.notes,
+  };
+}
+
+const VSL_MAJORED = { url: TARIFF_SOURCES.vslAmeli, notes: "Avenant 11 et ameli (tarifs VSL) : forfait 15,75 €, 3 km inclus, 1,10 €/km. TVA de 10 % comprise (CA suivi TTC)." };
+const VSL_BASE = { url: TARIFF_SOURCES.protocol2025, notes: "Protocole du 24/09/2025 : tarifs de base baissés de 13 % pour les entreprises non certifiées. TVA de 10 % comprise." };
+const VSL_HISTORY = { url: TARIFF_SOURCES.amendment11, notes: "Avenant 11 (arrêté d'approbation, JO du 06/05/2023), grille remplacée." };
+
+const VSL_GRIDS: TariffDef[] = [
+  vsl(true, "*", 15.75, 1.1, { validFrom: "2025-01-01", validTo: null }, VSL_MAJORED),
+  ...["13", "04", "05", "38"].map((d) => vsl(false, d, 12.11, 0.93, { validFrom: "2025-10-01", validTo: null }, VSL_BASE)),
+  ...["84", "26"].map((d) => vsl(false, d, 11.34, 0.93, { validFrom: "2025-10-01", validTo: null }, VSL_BASE)),
+  vsl(true, "*", 15, 1.07, { validFrom: "2023-11-01", validTo: "2024-12-31" }, VSL_HISTORY),
+  ...["13", "04", "05", "38"].map((d) => vsl(false, d, 13.92, 1.07, { validFrom: "2023-11-01", validTo: "2025-09-30" }, VSL_HISTORY)),
+  ...["84", "26"].map((d) => vsl(false, d, 13.04, 1.07, { validFrom: "2023-11-01", validTo: "2025-09-30" }, VSL_HISTORY)),
+];
+
+function ambulance(
+  certified: boolean,
+  baseFare: number,
+  aggloFare: number,
+  bands: [number, number, number, number],
+  period: { validFrom: string; validTo: string | null },
+  source: { url: string; notes: string },
+): TariffDef {
+  return {
+    vehicleType: "AMBULANCE",
+    department: "*",
+    certified,
+    label: `Ambulance ${certified ? "majorée" : "socle"}${period.validTo ? ` (jusqu'au ${period.validTo.split("-").reverse().join("/")})` : ""}`,
+    baseFare,
+    aggloFare,
+    includedKm: 3,
+    pricePerKm: 2.44,
+    shortTripBands: [5, 10, 15, 19].map((upToKm, i) => ({ upToKm, amount: bands[i]! })),
+    nightRate: 0.75,
+    weekendRate: 0.5,
+    sharedDiscounts: [],
+    maxSharedPatients: 1,
+    verification: "OFFICIAL",
+    sourceUrl: source.url,
+    ...period,
+    notes: source.notes,
+  };
+}
+
+const AMBULANCE_GRIDS: TariffDef[] = [
+  ambulance(true, 57.39, 64.08, [9.75, 7.53, 5.47, 3.42], { validFrom: "2025-01-01", validTo: null }, {
+    url: TARIFF_SOURCES.ambulanceAmeli,
+    notes: "Ameli (tarifs ambulances) et avenant 11. Exonérée de TVA. Majoration du trajet court la nuit et le dimanche : question ouverte.",
+  }),
+  ambulance(false, 45.6, 50.92, [7.57, 5.95, 4.32, 2.71], { validFrom: "2025-10-01", validTo: null }, {
+    url: TARIFF_SOURCES.protocol2025,
+    notes: "Protocole du 24/09/2025 : entreprise non certifiée. Exonérée de TVA.",
+  }),
+  ambulance(true, 54.65, 61.03, [8.7, 6.84, 4.97, 3.11], { validFrom: "2023-11-07", validTo: "2024-12-31" }, {
+    url: TARIFF_SOURCES.ambulanceAmeli,
+    notes: "Avenant 11, grille remplacée.",
+  }),
+  ambulance(false, 52.41, 58.53, [8.7, 6.84, 4.97, 3.11], { validFrom: "2023-11-07", validTo: "2025-09-30" }, {
+    url: TARIFF_SOURCES.protocol2025,
+    notes: "Avenant 11, grille socle remplacée le 01/10/2025.",
+  }),
+];
+
+export const TARIFFS: readonly TariffDef[] = [...TAXI_GRIDS, ...VSL_GRIDS, ...AMBULANCE_GRIDS];
+
+/** Company billing settings of the demonstration (hypotheses: V's real status is a PO question). */
+export const COMPANY_BILLING = {
+  /** Certified (certified geolocation on every vehicle and SEFi billing) since this date. */
+  certifiedSince: "2025-01-01",
+  hqDepartment: "13",
+  hqCity: "Marseille",
+} as const;
+
+export type TariffAreaDef = {
+  kind: "BIG_CITY" | "AGGLOMERATION";
+  name: string;
+  department: string;
+  communes: string[];
+  rule: "ANY_END" | "BOTH_INSIDE" | "TO_HUB";
+  hubCommune?: string;
+  validFrom: string | null;
+  verification: Verification;
+  sourceUrl: string;
+  notes: string;
+};
+
+export const TARIFF_AREAS: readonly TariffAreaDef[] = [
   {
-    vehicleType: "TAXI",
+    kind: "BIG_CITY",
+    name: "Marseille",
     department: "13",
-    label: "Taxi conventionné — Bouches-du-Rhône (ancienne grille)",
-    baseFare: 12.5,
-    pricePerKm: 1.05,
-    includedKm: 0,
-    ...TAP_DISCOUNTS,
-    validFrom: "2023-01-01",
-    validTo: "2024-12-31",
-    notes: `${TARIFF_NOTE} Grille expirée, conservée pour l'historique.`,
+    communes: ["Marseille"],
+    rule: "ANY_END",
+    validFrom: "2025-11-01",
+    verification: "OFFICIAL",
+    sourceUrl: TARIFF_SOURCES.taxiConvention,
+    notes: "Forfait « Grande ville » de 15 € (convention taxis 2025).",
+  },
+  {
+    kind: "BIG_CITY",
+    name: "Grenoble",
+    department: "38",
+    communes: ["Grenoble"],
+    rule: "ANY_END",
+    validFrom: "2025-11-01",
+    verification: "OFFICIAL",
+    sourceUrl: TARIFF_SOURCES.taxiConvention,
+    notes:
+      "Les établissements limitrophes au forfait par extension (CHU à La Tronche et à Échirolles, AGDUC) se repèrent " +
+      "par leur FINESS, que les établissements de l'application n'ont pas encore.",
+  },
+  {
+    kind: "AGGLOMERATION",
+    name: "Agglomération de Marseille",
+    department: "13",
+    communes: ["Marseille", "Allauch", "La Penne-sur-Huveaune", "Plan-de-Cuques", "Septèmes-les-Vallons"],
+    rule: "BOTH_INSIDE",
+    validFrom: null,
+    verification: "OFFICIAL",
+    sourceUrl: TARIFF_SOURCES.aggloCommunes,
+    notes: "Forfait agglomération des ambulances : transport entièrement dans ces communes, entreprise dont le siège y est.",
+  },
+  {
+    kind: "AGGLOMERATION",
+    name: "Agglomération d'Avignon",
+    department: "84",
+    communes: [
+      "Sorgues",
+      "Le Pontet",
+      "Saint-Saturnin-lès-Avignon",
+      "Châteauneuf-de-Gadagne",
+      "Jonquerettes",
+      "Vedène",
+      "Morières-lès-Avignon",
+      "Caumont-sur-Durance",
+      "Châteaurenard (13)",
+      "Barbentane (13)",
+      "Rognonas (13)",
+      "Villeneuve-lès-Avignon (30)",
+      "Les Angles (30)",
+    ],
+    rule: "TO_HUB",
+    hubCommune: "Avignon",
+    validFrom: null,
+    verification: "OFFICIAL",
+    sourceUrl: TARIFF_SOURCES.aggloCommunesRtf,
+    notes: "Courses entre ces communes et Avignon, dans les deux sens (liste de 2003). Le cas de Montfavet n'est pas modélisé.",
   },
 ];
 

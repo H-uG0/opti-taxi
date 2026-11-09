@@ -151,6 +151,52 @@ enum EnergyType {
   OTHER
 }
 
+/// Niveau de vérification d'une valeur réglementaire (grille tarifaire, zone tarifaire).
+enum TariffVerification {
+  /// Lue sur le texte officiel (Légifrance, JO, ameli).
+  OFFICIAL
+  /// Lue sur une source secondaire (fédération, CPAM locale, éditeur).
+  SECONDARY
+  UNVERIFIED
+}
+
+/// Zone tarifaire : forfait « Grande ville » (taxi) ou forfait agglomération (ambulance).
+enum TariffAreaKind {
+  BIG_CITY
+  AGGLOMERATION
+}
+
+/// Quand un trajet relève d'une zone tarifaire.
+enum TariffAreaRule {
+  /// Prise en charge ou dépose dans l'une des communes (Grande ville).
+  ANY_END
+  /// Prise en charge et dépose dans les communes de la zone (agglomération de Marseille).
+  BOTH_INSIDE
+  /// Entre une commune de la zone et la commune centre, dans les deux sens (agglomération d'Avignon).
+  TO_HUB
+}
+
+/// Majoration « retour à vide » du taxi pour un transport lié à une hospitalisation (convention 2025) :
+/// NONE = jamais ; DEPOT = l'aller dont la dépose termine la tournée, le retour dont la prise en charge
+/// la commence (le véhicule rentre à vide à sa station, ou en vient).
+enum EmptyLegRule {
+  NONE
+  DEPOT
+}
+
+/// Retour à vide et majoration nuit / week-end sur le tarif km : multipliés ou additionnés.
+enum SurchargeOrder {
+  MULTIPLICATIVE
+  ADDITIVE
+}
+
+/// Nombre de patients d'un transport partagé pour son abattement : 1 + co-passagers distincts, ou le plus
+/// grand nombre de patients à bord en même temps.
+enum SharedPatientCount {
+  DISTINCT
+  MAX_ON_BOARD
+}
+
 enum RouteStatus {
   PROPOSED
   VALIDATED
@@ -323,6 +369,14 @@ model Trip {
   /// Annulée par une personne moins de AppSettings.lateCancellationHours avant la prise en charge prévue.
   lateCancellation   Boolean             @default(false)
 
+  /// Péages facturés sur la facture de ce patient (€), hors majorations et abattements.
+  tollAmount              Float?
+  /// Recours exceptionnel à une ambulance pour ce transport assis (protocole du 24 septembre 2025),
+  /// proposé par un régulateur, jamais automatique : facturé au tarif VSL tant que la course reste
+  /// figée sur une ambulance. Instant et compte de la proposition.
+  exceptionalAmbulanceAt   DateTime?
+  exceptionalAmbulanceById String?
+
   notes     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -335,6 +389,7 @@ model Trip {
   route              Route?        @relation(fields: [routeId], references: [id], onDelete: SetNull)
   sharingRespondedBy User?         @relation("TripSharingRespondedBy", fields: [sharingRespondedById], references: [id], onDelete: SetNull)
   cancelledBy        User?         @relation("TripCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  exceptionalAmbulanceBy User?     @relation("TripExceptionalAmbulanceBy", fields: [exceptionalAmbulanceById], references: [id], onDelete: SetNull)
   stops              RouteStop[]
 
   @@unique([recurrenceId, serviceDate, direction])
@@ -370,8 +425,11 @@ model Vehicle {
   capacity          Int         @default(2)
   /// Dépôt de départ et de retour des tournées.
   depotId           String
-  /// Département de rattachement : sélectionne la grille tarifaire.
+  /// Département de rattachement. Taxi : département de l'ADS, qui choisit sa grille tarifaire ; VSL et
+  /// ambulance : la grille dépend de la certification et du siège de l'entreprise (AppSettings).
   department        String
+  /// Équipé pour transporter un patient dans son fauteuil roulant (supplément TPMR de la grille).
+  tpmrEquipped      Boolean     @default(false)
   /// Énergie (null : non renseignée).
   energy            EnergyType?
   costPerKm         Float
@@ -596,24 +654,97 @@ model RouteStop {
   @@index([tripId])
 }
 
+/// Grille tarifaire d'un type de véhicule, datée. Une ligne par (type, département ou « * », certification,
+/// période) ; le web choisit celle de chaque véhicule (lib/domain/tariffs.ts) : taxi par le département de
+/// son ADS, VSL et ambulance par la certification de l'entreprise à la date et son siège.
 model TariffGrid {
-  id              String      @id @default(cuid())
-  vehicleType     VehicleType
-  /// Numéro de département, ou « * » pour toutes les zones.
-  department      String
-  label           String?
-  baseFare        Float
-  pricePerKm      Float
-  includedKm      Float       @default(0)
-  sharedDiscount2 Float
-  sharedDiscount3 Float
-  validFrom       DateTime    @db.Date
-  validTo         DateTime?   @db.Date
-  notes           String?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id                  String             @id @default(cuid())
+  vehicleType         VehicleType
+  /// Taxi : département de l'ADS ; VSL non certifié : département du siège ; « * » : toutes zones.
+  department          String
+  /// Grille d'une entreprise certifiée (true), non certifiée (false) ou sans objet (null : taxi).
+  certified           Boolean?
+  /// Zone VSL (A, B, C, D), pour l'affichage.
+  zone                String?
+  label               String?
+  /// Forfait départemental (taxi : prise en charge et accompagnement).
+  baseFare            Float
+  /// Ambulance : forfait agglomération, à la place du forfait départemental.
+  aggloFare           Float?
+  /// Taxi : forfait « Grande ville » ajouté au forfait.
+  bigCityFare         Float              @default(0)
+  includedKm          Float              @default(0)
+  pricePerKm          Float
+  /// Trajet court : [{ "upToKm": 7, "amount": 8.54 }, …] par km croissants ; ajouté au forfait.
+  shortTripBands      Json               @default("[]")
+  /// Majorations (fractions) : nuit, et samedi après saturdayFromMinute, dimanche et jour férié. Jamais cumulées.
+  nightRate           Float              @default(0)
+  weekendRate         Float              @default(0)
+  nightStartMinute    Int                @default(1200)
+  nightEndMinute      Int                @default(480)
+  saturdayFromMinute  Int                @default(720)
+  /// Le trajet court est majoré comme le reste (question ouverte en ambulance).
+  surchargeShortTrip  Boolean            @default(true)
+  /// Taxi : tarif km majoré pour un retour à vide (trajet lié à une hospitalisation), selon le seuil.
+  emptyLegRateShort   Float              @default(0)
+  emptyLegRateLong    Float              @default(0)
+  emptyLegThresholdKm Float              @default(50)
+  /// Abattements de partage : [{ "patients": 2, "rate": 0.23 }, …] ; la dernière entrée vaut aussi au-delà.
+  sharedDiscounts     Json               @default("[]")
+  /// Patients au plus dans un transport partagé (8 taxi, 3 VSL, 1 ambulance) : plafonne la capacité envoyée.
+  maxSharedPatients   Int                @default(8)
+  /// Taxi : abattement d'un patient seul à bord sur au moins aloneThresholdKm d'un trajet partagé.
+  aloneDiscount       Float              @default(0)
+  aloneThresholdKm    Float              @default(30)
+  /// Détour facturable à un patient partagé, par co-passager (VSL : 10 puis 10 km) ; vide : distance directe.
+  billableDetourKm    Float[]            @default([])
+  /// Supplément TPMR (patient transporté dans son fauteuil), hors majorations et abattements.
+  tpmrFare            Float              @default(0)
+  verification        TariffVerification @default(UNVERIFIED)
+  sourceUrl           String?
+  validFrom           DateTime           @db.Date
+  validTo             DateTime?          @db.Date
+  notes               String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
 
   @@index([vehicleType, department])
+}
+
+/// Période où l'entreprise est certifiée (géolocalisation certifiée sur tous ses véhicules et facturation
+/// SEFi) : ses VSL et ambulances relèvent des grilles « majorées ».
+model CompanyCertification {
+  id        String    @id @default(cuid())
+  validFrom DateTime  @db.Date
+  validTo   DateTime? @db.Date
+  note      String?
+  createdAt DateTime  @default(now())
+}
+
+/// Zone tarifaire : communes au forfait « Grande ville » (taxi) ou au forfait agglomération (ambulance).
+model TariffArea {
+  id           String             @id @default(cuid())
+  kind         TariffAreaKind
+  name         String
+  department   String
+  /// Noms des communes (« Marseille », « Plan-de-Cuques »…), comparés aux adresses des courses.
+  communes     String[]
+  rule         TariffAreaRule
+  /// TO_HUB : la commune centre.
+  hubCommune   String?
+  validFrom    DateTime?          @db.Date
+  validTo      DateTime?          @db.Date
+  verification TariffVerification @default(UNVERIFIED)
+  sourceUrl    String?
+  notes        String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+}
+
+/// Jour férié retenu pour la majoration « dimanche et jour férié » (la liste n'est fixée par aucune convention).
+model PublicHoliday {
+  date  DateTime @id @db.Date
+  label String
 }
 
 /// Paramètres globaux de l'optimiseur (ligne unique, id = 1).
@@ -662,6 +793,13 @@ model AppSettings {
   crewMinPairOverlapMin      Int      @default(240)
   /// Personnes de chaque dépôt laissées sans véhicule (réserve du jour) avant d'équiper un véhicule de réserve.
   crewReservePerDepot        Int      @default(0)
+  /// Siège de l'entreprise : département (grille VSL non certifiée) et commune (forfait agglomération des ambulances).
+  hqDepartment               String?
+  hqCity                     String?
+  /// Lecture des conventions tant que le PO ne l'a pas tranchée (Grilles tarifaires, « Règles de facturation »).
+  emptyLegRule               EmptyLegRule       @default(DEPOT)
+  surchargeOrder             SurchargeOrder     @default(MULTIPLICATIVE)
+  sharedPatientCount         SharedPatientCount @default(DISTINCT)
   updatedAt                  DateTime @updatedAt
 }
 
@@ -730,6 +868,7 @@ model User {
   completedStops   RouteStop[]       @relation("RouteStopCompletedBy")
   sharingResponses Trip[]            @relation("TripSharingRespondedBy")
   cancelledTrips   Trip[]            @relation("TripCancelledBy")
+  exceptionalAmbulanceTrips Trip[]   @relation("TripExceptionalAmbulanceBy")
   dayCrews         DayCrew[]         @relation("DayCrewUpdatedBy")
   auditEvents      AuditEvent[]
 }

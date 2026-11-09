@@ -79,4 +79,14 @@ describe("changedFields", () => {
     });
     expect(changedFields({}, { a: 1 })).toEqual({ a: { from: null, to: 1 } });
   });
+
+  it("writes a list of values joined and a list of objects as JSON (tariff bands and discounts)", () => {
+    const before = { billableDetourKm: [], sharedDiscounts: [{ patients: 2, rate: 0.23 }] };
+    const after = { billableDetourKm: [10, 10], sharedDiscounts: [{ patients: 2, rate: 0.15 }] };
+    expect(changedFields(before, after)).toEqual({
+      billableDetourKm: { from: "", to: "10,10" },
+      sharedDiscounts: { from: '[{"patients":2,"rate":0.23}]', to: '[{"patients":2,"rate":0.15}]' },
+    });
+    expect(changedFields({ s: [{ a: 1 }] }, { s: [{ a: 1 }] })).toEqual({});
+  });
 });

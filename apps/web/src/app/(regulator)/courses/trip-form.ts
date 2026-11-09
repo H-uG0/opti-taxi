@@ -273,6 +273,17 @@ export const tripIdSchema = requiredId("Course introuvable.");
 
 export const scheduleSchema = z.object({ tripId: tripIdSchema, time: minuteField });
 
+/** « Péage » of a trip: euros on this patient's invoice (French decimal comma); blank = none. */
+export const tollSchema = z.object({
+  tripId: tripIdSchema,
+  toll: z
+    .string()
+    .trim()
+    .transform((raw) => (raw === "" ? null : Number(raw.replace(/\s/g, "").replace(",", "."))))
+    .refine((value) => value === null || (Number.isFinite(value) && value >= 0 && value <= 1000), "Péage entre 0 et 1 000 €.")
+    .transform((value) => (value === null || value === 0 ? null : Math.round(value * 100) / 100)),
+});
+
 export const CANCEL_TRIP_FIELDS = ["tripId", "reason", "note", "returnTripId"] as const;
 
 /**

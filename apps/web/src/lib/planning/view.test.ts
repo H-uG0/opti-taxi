@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { tariffRow } from "@/test/tariff-fixtures";
 import type { DriverInput, SettingsInput } from "@/lib/optimizer/build-request";
 import type { RunDetails } from "@/lib/optimizer/run-details";
 import { computeDayKpis as computeDashboardDayKpis, type KpiData } from "@/lib/kpis";
@@ -184,19 +185,7 @@ function input(overrides: Partial<PlanningRawInput> = {}): PlanningRawInput {
   };
 }
 
-const taxiGrid = {
-  id: "g1",
-  vehicleType: "TAXI" as const,
-  department: "13",
-  baseFare: 13,
-  pricePerKm: 1.12,
-  includedKm: 0,
-  sharedDiscount2: 0.23,
-  sharedDiscount3: 0.35,
-  validFrom: new Date("2026-01-01T00:00:00Z"),
-  validTo: null,
-  createdAt: new Date("2026-01-01T00:00:00Z"),
-};
+const taxiGrid = tariffRow({ id: "g1", validFrom: new Date("2026-01-01T00:00:00Z"), createdAt: new Date("2026-01-01T00:00:00Z") });
 
 describe("buildPlanningView", () => {
   it("lists vehicles with a route first, then available ones; unavailable ones only as skipped", () => {

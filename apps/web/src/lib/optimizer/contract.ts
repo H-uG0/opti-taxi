@@ -32,6 +32,7 @@ export const violationCodeSchema = z.enum([
   "DETOUR",
   "SHIFT",
   "BREAK",
+  "REVENUE",
 ]);
 
 export const latLngSchema = z.strictObject({
@@ -67,6 +68,20 @@ export const trafficSettingsSchema = z
     message: "one traffic factor per band is required",
   });
 
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+/** Readings of the conventions the PO has not settled yet (contract/README.md, « Calcul du CA estimé »). */
+export const pricingSettingsSchema = z.strictObject({
+  /** Taxi empty-leg surcharge of a hospital-linked trip: NONE, or DEPOT (first pickup / last dropoff of the route). */
+  emptyLeg: z.enum(["NONE", "DEPOT"]).default("NONE"),
+  /** Empty-leg and night/weekend surcharges on the km fare: multiplied or added. */
+  emptyLegOrder: z.enum(["MULTIPLICATIVE", "ADDITIVE"]).default("MULTIPLICATIVE"),
+  /** Patients of a shared ride for its discount: 1 + distinct co-passengers, or most on board at once. */
+  patientCount: z.enum(["DISTINCT", "MAX_ON_BOARD"]).default("DISTINCT"),
+  /** Public holidays (weekend surcharge): at least the planned date and the next day. */
+  publicHolidays: z.array(isoDate).max(400).default([]),
+});
+
 export const settingsSchema = z.strictObject({
   waitBeforeAppointmentMin: z.number().int().min(0).max(180),
   waitAfterSessionMin: z.number().int().min(0).max(180),
@@ -80,6 +95,8 @@ export const settingsSchema = z.strictObject({
   /** Time on board (end of the pickup to start of the dropoff) above the direct drive allowed to a patient. */
   maxRideExtraMin: z.number().int().min(0).max(180).default(DEFAULT_MAX_RIDE_EXTRA_MIN),
   traffic: trafficSettingsSchema.nullish(),
+  /** Absent or null: the defaults (no empty-leg surcharge, multiplied, distinct co-passengers, no holiday). */
+  pricing: pricingSettingsSchema.nullish(),
 });
 
 export const breakRuleSchema = z
@@ -105,6 +122,10 @@ export const vehicleSchema = z
     shiftStartMin: dayMinute,
     shiftEndMin: dayMinute,
     break: breakRuleSchema.nullable().default(null),
+    /** Grid of the vehicle's trips, chosen by the web (lib/domain/tariffs.ts gridForVehicle); null: revenue 0. */
+    tariffId: z.string().min(1).nullable().default(null),
+    /** Fitted to carry a patient in their wheelchair (TPMR supplement of the grid). */
+    tpmrEquipped: z.boolean().default(false),
   })
   .refine((v) => v.shiftEndMin > v.shiftStartMin, {
     message: "shiftEndMin must be after shiftStartMin",
@@ -126,6 +147,18 @@ export const tripSchema = z
     /** Stop durations of this trip (vehicle type, mobility, facility); absent or null: the settings'. */
     pickupServiceMin: tripServiceMinutes.nullish(),
     dropoffServiceMin: tripServiceMinutes.nullish(),
+    /** Grid of this trip whatever the vehicle (seated trip exceptionally in an ambulance: the VSL grid). */
+    tariffId: z.string().min(1).nullable().default(null),
+    /** Picked up or dropped in a « Grande ville » area (bigCityFare added). */
+    bigCity: z.boolean().default(false),
+    /** Entirely inside the agglomeration of the company's head office (aggloFare instead of baseFare). */
+    agglomeration: z.boolean().default(false),
+    /** To or from a hospitalisation or a dialysis, chemotherapy or radiotherapy session (taxi empty leg). */
+    hospitalLinked: z.boolean().default(false),
+    /** The patient rides in their own wheelchair (TPMR supplement in a fitted vehicle). */
+    wheelchair: z.boolean().default(false),
+    /** Tolls billed on this patient's invoice (euros), outside surcharges and discounts. */
+    tollAmount: z.number().min(0).max(1000).default(0),
   })
   .refine((t) => t.direction !== "OUTBOUND" || t.appointmentMin !== null, {
     message: "OUTBOUND trip requires appointmentMin",
@@ -134,15 +167,46 @@ export const tripSchema = z
     message: "RETURN trip requires readyMin",
   });
 
-export const tariffSchema = z.strictObject({
-  vehicleType: vehicleTypeSchema,
-  department: z.string().min(1),
-  baseFare: z.number().min(0),
-  pricePerKm: z.number().min(0),
-  includedKm: z.number().min(0).default(0),
-  sharedDiscount2: z.number().min(0).max(1),
-  sharedDiscount3: z.number().min(0).max(1),
-});
+const rateValue = z.number().min(0).max(5);
+const kmValue = z.number().min(0).max(1000);
+
+/** One grid, as the web picked it for the vehicles and trips that reference its id. */
+export const tariffSchema = z
+  .strictObject({
+    id: z.string().min(1),
+    vehicleType: vehicleTypeSchema,
+    baseFare: z.number().min(0).max(1000),
+    /** Replaces baseFare for a trip inside the head office's agglomeration (ambulance). */
+    aggloFare: z.number().min(0).max(1000).nullable().default(null),
+    bigCityFare: z.number().min(0).max(1000).default(0),
+    includedKm: kmValue.default(0),
+    pricePerKm: z.number().min(0).max(50),
+    /** Added to the fare: the first band whose upToKm is at least the billed km. */
+    shortTripBands: z.array(z.strictObject({ upToKm: kmValue, amount: z.number().min(0).max(1000) })).max(50).default([]),
+    nightRate: rateValue.default(0),
+    weekendRate: rateValue.default(0),
+    nightStartMin: z.number().int().min(0).max(MINUTES_PER_DAY).default(1200),
+    nightEndMin: z.number().int().min(0).max(MINUTES_PER_DAY).default(480),
+    saturdayFromMin: z.number().int().min(0).max(MINUTES_PER_DAY).default(720),
+    surchargeShortTrip: z.boolean().default(true),
+    emptyLegRateShort: rateValue.default(0),
+    emptyLegRateLong: rateValue.default(0),
+    emptyLegThresholdKm: kmValue.default(50),
+    /** Discount by number of patients; the largest entry also covers more patients. */
+    sharedDiscounts: z.array(z.strictObject({ patients: z.number().int().min(2).max(8), rate: z.number().min(0).max(1) })).max(7).default([]),
+    maxSharedPatients: z.number().int().min(1).max(8).default(8),
+    aloneDiscount: z.number().min(0).max(1).default(0),
+    aloneThresholdKm: kmValue.default(30),
+    /** Detour billed to a shared patient: at most the sum of the first k entries (k co-passengers). */
+    billableDetourKm: z.array(kmValue).max(7).default([]),
+    tpmrFare: z.number().min(0).max(1000).default(0),
+  })
+  .refine((t) => t.shortTripBands.every((band, i) => i === 0 || band.upToKm > (t.shortTripBands[i - 1]?.upToKm ?? 0)), {
+    message: "shortTripBands must be sorted by increasing upToKm",
+  })
+  .refine((t) => new Set(t.sharedDiscounts.map((d) => d.patients)).size === t.sharedDiscounts.length, {
+    message: "one sharedDiscounts entry per number of patients",
+  });
 
 /**
  * Bounds of a request (a 120-vehicle day is about 1 000 trips), the same in
@@ -163,27 +227,50 @@ export const routePlanSchema = z.strictObject({
 });
 
 /** What both operations need: the day's settings, fleet, trips and tariffs. */
-const dayRequestSchema = z.strictObject({
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+const dayRequestFields = {
+  date: isoDate,
   settings: settingsSchema,
   vehicles: z.array(vehicleSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} véhicules au plus par calcul`),
   trips: z.array(tripSchema).max(MAX_TRIPS, `${MAX_TRIPS} courses au plus par calcul`),
   tariffs: z.array(tariffSchema).max(MAX_TARIFFS, `${MAX_TARIFFS} grilles tarifaires au plus par calcul`),
-});
+};
 
-export const optimizeRequestSchema = dayRequestSchema.extend({
-  /**
-   * The routes in place of the date, a start of the search: the plan returned
-   * never scores worse than them, once repaired to the rules of the request,
-   * under the optimizer's objective (contract/README.md, « Planning en
-   * place »). Absent or null: none.
-   */
-  initialRoutes: z.array(routePlanSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} tournées au plus en place`).nullish(),
-});
+type TariffReferences = {
+  vehicles: { tariffId?: string | null }[];
+  trips: { tariffId?: string | null }[];
+  tariffs: { id: string }[];
+};
 
-export const evaluateRequestSchema = dayRequestSchema.extend({
-  routes: z.array(routePlanSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} tournées au plus par évaluation`),
-});
+/** Tariff ids are unique and every vehicle or trip refers to one of them (same check in schemas.py). */
+function tariffReferencesOk(request: TariffReferences): boolean {
+  const ids = new Set(request.tariffs.map((t) => t.id));
+  if (ids.size !== request.tariffs.length) return false;
+  return [...request.vehicles, ...request.trips].every((item) => item.tariffId == null || ids.has(item.tariffId));
+}
+
+const TARIFF_REFERENCES = { message: "tariff ids must be unique and every tariffId must name one of them" };
+
+export const dayRequestSchema = z.strictObject(dayRequestFields).refine(tariffReferencesOk, TARIFF_REFERENCES);
+
+export const optimizeRequestSchema = z
+  .strictObject({
+    ...dayRequestFields,
+    /**
+     * The routes in place of the date, a start of the search: the plan returned
+     * never scores worse than them, once repaired to the rules of the request,
+     * under the optimizer's objective (contract/README.md, « Planning en
+     * place »). Absent or null: none.
+     */
+    initialRoutes: z.array(routePlanSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} tournées au plus en place`).nullish(),
+  })
+  .refine(tariffReferencesOk, TARIFF_REFERENCES);
+
+export const evaluateRequestSchema = z
+  .strictObject({
+    ...dayRequestFields,
+    routes: z.array(routePlanSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} tournées au plus par évaluation`),
+  })
+  .refine(tariffReferencesOk, TARIFF_REFERENCES);
 
 export const breakSlotSchema = z.strictObject({
   startMin: z.number().int(),
@@ -291,6 +378,7 @@ export type OptimizerSettings = z.infer<typeof settingsSchema>;
 export type OptimizerVehicle = z.input<typeof vehicleSchema>;
 export type OptimizerTrip = z.input<typeof tripSchema>;
 export type OptimizerTariff = z.input<typeof tariffSchema>;
+export type OptimizerPricingSettings = z.input<typeof pricingSettingsSchema>;
 /** The day part of a request (no `initialRoutes`, no `routes`): what /optimize and /evaluate share. */
 export type DayRequest = z.input<typeof dayRequestSchema>;
 export type OptimizeRequest = z.input<typeof optimizeRequestSchema>;

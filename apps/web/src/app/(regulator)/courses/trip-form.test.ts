@@ -9,6 +9,7 @@ import {
   scheduleSchema,
   sharingDecisionSchema,
   SWAPPED_COORDINATES_MESSAGE,
+  tollSchema,
   type NewTripValues,
 } from "./trip-form";
 
@@ -256,5 +257,15 @@ describe("row action schemas", () => {
     fd.set("tripId", "t1");
     fd.set("file", new Blob(["x"]));
     expect(formValues(fd, ["tripId", "file", "missing"])).toEqual({ tripId: "t1", file: undefined, missing: undefined });
+  });
+});
+
+describe("tollSchema", () => {
+  it("reads euros with a French comma, a blank or zero as no toll", () => {
+    expect(tollSchema.parse({ tripId: "trip_1", toll: "4,20" })).toEqual({ tripId: "trip_1", toll: 4.2 });
+    expect(tollSchema.parse({ tripId: "trip_1", toll: " " }).toll).toBeNull();
+    expect(tollSchema.parse({ tripId: "trip_1", toll: "0" }).toll).toBeNull();
+    expect(tollSchema.safeParse({ tripId: "trip_1", toll: "-2" }).success).toBe(false);
+    expect(tollSchema.safeParse({ tripId: "trip_1", toll: "beaucoup" }).success).toBe(false);
   });
 });

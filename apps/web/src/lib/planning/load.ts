@@ -6,6 +6,7 @@ import { VEHICLE_TYPE_HEX } from "@/components/ui/badge";
 import {
   applyDayCrewPlan,
   loadDayCrewContext,
+  loadBillingInput,
   loadTariffInputs,
   tripInputSelect,
   vehicleInputSelect,
@@ -45,7 +46,7 @@ export async function loadPlanningDay(
   isoDate: string,
 ): Promise<PlanningDayView & { timeLimitSec: number; crewChoices: CrewChoice[]; crewRules: CrewRules }> {
   const serviceDate = fromIsoDate(isoDate);
-  const [settings, defaultVehicles, crewContext, trips, routes, lastRun, planRun, tariffs] = await Promise.all([
+  const [settings, defaultVehicles, crewContext, trips, routes, lastRun, planRun, tariffs, billing] = await Promise.all([
     getSettings(db),
     db.vehicle.findMany({
       select: { ...vehicleInputSelect, registration: true, depot: { select: { lat: true, lng: true, name: true } } },
@@ -121,6 +122,7 @@ export async function loadPlanningDay(
       select: runSelect,
     }),
     loadTariffInputs(db, isoDate),
+    loadBillingInput(db, isoDate),
   ]);
 
   const details = new Map<string, RunDetails>();
@@ -150,6 +152,7 @@ export async function loadPlanningDay(
     planRun,
     details,
     tariffs,
+    billing,
     vehicleIssues: issues,
     baseColors: VEHICLE_TYPE_HEX,
   });

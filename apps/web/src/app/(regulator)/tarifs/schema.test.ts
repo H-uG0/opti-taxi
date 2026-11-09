@@ -1,19 +1,50 @@
 import { describe, expect, it } from "vitest";
 import { fromIsoDate } from "@/lib/time";
 import { fieldErrorsFromZod } from "@/lib/forms";
-import { patientFare, sharedComparison, sharedDiscount, soloFare } from "./fare";
-import { fractionToPercent, percentToFraction, tariffFormValues, tariffSchema, tariffStatus } from "./schema";
+import { tariffRow } from "@/test/tariff-fixtures";
+import {
+  fractionToPercent,
+  parseKmList,
+  parseShortTripBands,
+  percentToFraction,
+  previewFareGrid,
+  tariffFormValues,
+  tariffSchema,
+  tariffStatus,
+} from "./schema";
 
-const valid = {
-  vehicleType: "TAXI",
-  department: "13",
-  label: "Convention taxis 2025",
-  baseFare: "13",
-  pricePerKm: "1,12",
-  includedKm: "",
-  sharedDiscount2: "23",
-  sharedDiscount3: "35",
-  validFrom: "2025-05-01",
+const valid: Record<string, string> = {
+  vehicleType: "VSL",
+  department: "*",
+  certified: "true",
+  zone: "",
+  label: "VSL majoré",
+  baseFare: "15,75",
+  aggloFare: "",
+  bigCityFare: "",
+  includedKm: "3",
+  pricePerKm: "1,10",
+  shortTripBands: "7 : 8,54\n8 : 7,68",
+  nightRate: "50",
+  weekendRate: "25",
+  nightStart: "20:00",
+  nightEnd: "08:00",
+  saturdayFrom: "12:00",
+  surchargeShortTrip: "on",
+  emptyLegRateShort: "",
+  emptyLegRateLong: "",
+  emptyLegThresholdKm: "50",
+  discount2: "15",
+  discount3: "33",
+  discount4: "",
+  maxSharedPatients: "3",
+  aloneDiscount: "",
+  aloneThresholdKm: "30",
+  billableDetourKm: "10 ; 10",
+  tpmrFare: "30",
+  verification: "OFFICIAL",
+  sourceUrl: "https://www.ameli.fr/transporteur-sanitaire",
+  validFrom: "2025-01-01",
   validTo: "",
   notes: "",
 };
@@ -35,86 +66,114 @@ describe("percent <-> fraction", () => {
   });
 });
 
+describe("text lists", () => {
+  it("reads short-trip bands, one « km : € » per line, sorted", () => {
+    expect(parseShortTripBands("8 : 7,68\n≤ 7 km : 8,54 €\n\n")).toEqual([
+      { upToKm: 7, amount: 8.54 },
+      { upToKm: 8, amount: 7.68 },
+    ]);
+    expect(parseShortTripBands("")).toEqual([]);
+    expect(parseShortTripBands("7 km")).toBeNull();
+  });
+
+  it("reads billable detours", () => {
+    expect(parseKmList("10 ; 10")).toEqual([10, 10]);
+    expect(parseKmList("10;7,5")).toEqual([10, 7.5]);
+    expect(parseKmList("dix")).toBeNull();
+  });
+});
+
 describe("tariffSchema", () => {
-  it("stores discounts as fractions and dates as @db.Date", () => {
+  it("stores rates as fractions, times as minutes, lists as JSON and dates as @db.Date", () => {
     expect(tariffSchema.parse(valid)).toEqual({
-      vehicleType: "TAXI",
-      department: "13",
-      label: "Convention taxis 2025",
-      baseFare: 13,
-      pricePerKm: 1.12,
-      includedKm: 0,
-      sharedDiscount2: 0.23,
-      sharedDiscount3: 0.35,
-      validFrom: fromIsoDate("2025-05-01"),
+      vehicleType: "VSL",
+      department: "*",
+      certified: true,
+      zone: null,
+      label: "VSL majoré",
+      baseFare: 15.75,
+      aggloFare: null,
+      bigCityFare: 0,
+      includedKm: 3,
+      pricePerKm: 1.1,
+      shortTripBands: [
+        { upToKm: 7, amount: 8.54 },
+        { upToKm: 8, amount: 7.68 },
+      ],
+      nightRate: 0.5,
+      weekendRate: 0.25,
+      nightStartMinute: 1200,
+      nightEndMinute: 480,
+      saturdayFromMinute: 720,
+      surchargeShortTrip: true,
+      emptyLegRateShort: 0,
+      emptyLegRateLong: 0,
+      emptyLegThresholdKm: 50,
+      sharedDiscounts: [
+        { patients: 2, rate: 0.15 },
+        { patients: 3, rate: 0.33 },
+      ],
+      maxSharedPatients: 3,
+      aloneDiscount: 0,
+      aloneThresholdKm: 30,
+      billableDetourKm: [10, 10],
+      tpmrFare: 30,
+      verification: "OFFICIAL",
+      sourceUrl: "https://www.ameli.fr/transporteur-sanitaire",
+      validFrom: fromIsoDate("2025-01-01"),
       validTo: null,
       notes: null,
     });
   });
 
-  it("accepts the all-zones department", () => {
-    expect(tariffSchema.parse({ ...valid, department: "*" }).department).toBe("*");
+  it("reads an unchecked « majorer le trajet court » and a grid for any company", () => {
+    const parsed = tariffSchema.parse({ ...valid, certified: "", surchargeShortTrip: "" });
+    expect(parsed.certified).toBeNull();
+    expect(parsed.surchargeShortTrip).toBe(false);
   });
 
-  it("checks percent ranges and their order", () => {
-    expect(errorsOf({ ...valid, sharedDiscount2: "120" }).sharedDiscount2).toBe("Maximum : 100 %.");
-    expect(errorsOf({ ...valid, sharedDiscount2: "40", sharedDiscount3: "35" }).sharedDiscount3).toMatch(/inférieur/);
-    expect(tariffSchema.parse({ ...valid, sharedDiscount2: "35", sharedDiscount3: "35" }).sharedDiscount3).toBe(0.35);
+  it("checks rates, their order, the lists and the dates", () => {
+    expect(errorsOf({ ...valid, discount2: "120" }).discount2).toBe("Maximum : 100 %.");
+    expect(errorsOf({ ...valid, discount3: "10" }).discount3).toMatch(/inférieur/);
+    expect(errorsOf({ ...valid, shortTripBands: "7 km" }).shortTripBands).toMatch(/km : montant/);
+    expect(errorsOf({ ...valid, shortTripBands: "7 : 1\n7 : 2" }).shortTripBands).toMatch(/même distance/);
+    expect(errorsOf({ ...valid, billableDetourKm: "dix" }).billableDetourKm).toMatch(/séparés/);
+    expect(errorsOf({ ...valid, nightStart: "25:00" }).nightStart).toMatch(/HH:MM/);
+    expect(errorsOf({ ...valid, maxSharedPatients: "9" }).maxSharedPatients).toBe("Maximum : 8.");
+    expect(errorsOf({ ...valid, sourceUrl: "ameli" }).sourceUrl).toMatch(/Adresse web/);
+    expect(errorsOf({ ...valid, validTo: "2024-12-31" }).validTo).toMatch(/postérieure/);
+    expect(errorsOf({ ...valid, zone: "E" }).zone).toMatch(/A, B, C ou D/);
   });
 
-  it("requires validTo >= validFrom", () => {
-    expect(errorsOf({ ...valid, validTo: "2025-04-30" }).validTo).toMatch(/postérieure/);
-    expect(tariffSchema.parse({ ...valid, validTo: "2025-05-01" }).validTo).toEqual(fromIsoDate("2025-05-01"));
-    expect(errorsOf({ ...valid, validFrom: "" }).validFrom).toBe("Champ obligatoire.");
-  });
-
-  it("rejects negative amounts", () => {
-    expect(errorsOf({ ...valid, baseFare: "-1" }).baseFare).toMatch(/Minimum/);
-    expect(errorsOf({ ...valid, pricePerKm: "" }).pricePerKm).toBe("Champ obligatoire.");
-  });
-
-  it("round-trips through the form values, and duplicates with overrides", () => {
+  it("gives back the values of a saved grid in the form", () => {
     const parsed = tariffSchema.parse(valid);
-    expect(tariffSchema.parse(tariffFormValues(parsed))).toEqual(parsed);
-    const copy = tariffFormValues({ ...parsed, validTo: fromIsoDate("2025-12-31") }, { validFrom: "2026-01-01", validTo: "" });
-    expect(copy.validFrom).toBe("2026-01-01");
-    expect(copy.validTo).toBe("");
-    expect(copy.sharedDiscount2).toBe("23");
-    expect(copy.pricePerKm).toBe("1,12");
+    const values = tariffFormValues(parsed);
+    for (const key of Object.keys(valid)) expect([key, values[key]]).toEqual([key, key === "pricePerKm" ? "1,1" : valid[key]]);
+  });
+
+  it("starts a new version from a grid with other dates", () => {
+    const values = tariffFormValues(tariffRow(), { validFrom: "2026-11-09", validTo: "" });
+    expect(values.validFrom).toBe("2026-11-09");
+    expect(values.discount2).toBe("23");
+    expect(values.discount4).toBe("");
+  });
+});
+
+describe("previewFareGrid", () => {
+  it("previews from the amounts alone, whatever the scope or dates typed so far", () => {
+    const grid = previewFareGrid((name) => ({ ...valid, department: "", validFrom: "" })[name] ?? "");
+    expect(grid?.baseFare).toBe(15.75);
+    expect(grid?.shortTripBands).toHaveLength(2);
+    expect(previewFareGrid((name) => ({ ...valid, baseFare: "" })[name] ?? "")).toBeNull();
   });
 });
 
 describe("tariffStatus", () => {
-  const grid = { id: "g1", validFrom: fromIsoDate("2025-05-01"), validTo: fromIsoDate("2025-12-31") };
-
-  it("classifies a grid", () => {
-    expect(tariffStatus(grid, "2025-06-01", new Set(["g1"]))).toBe("IN_FORCE");
-    expect(tariffStatus(grid, "2025-06-01", new Set())).toBe("SUPERSEDED");
-    expect(tariffStatus(grid, "2025-04-01", new Set())).toBe("UPCOMING");
-    expect(tariffStatus(grid, "2026-01-01", new Set())).toBe("EXPIRED");
-  });
-});
-
-describe("fare estimate (same formula as the optimizer)", () => {
-  const grid = { baseFare: 13, pricePerKm: 1.12, includedKm: 0, sharedDiscount2: 0.23, sharedDiscount3: 0.35 };
-
-  it("computes a solo fare", () => {
-    expect(soloFare(grid, 25)).toBeCloseTo(41);
-    expect(soloFare({ ...grid, includedKm: 5 }, 25)).toBeCloseTo(35.4);
-    expect(soloFare({ ...grid, includedKm: 30 }, 25)).toBe(13);
-  });
-
-  it("applies the shared discount per patient", () => {
-    expect(sharedDiscount(grid, 1)).toBe(0);
-    expect(sharedDiscount(grid, 2)).toBe(0.23);
-    expect(sharedDiscount(grid, 4)).toBe(0.35);
-    expect(patientFare(grid, 25, 2)).toBeCloseTo(31.57);
-  });
-
-  it("compares solo and shared revenue for the vehicle", () => {
-    const two = sharedComparison(grid, 25, 2);
-    expect(two.solo).toBeCloseTo(41);
-    expect(two.vehicleTotal).toBeCloseTo(63.14);
-    expect(two.gainVsSolo).toBeCloseTo(0.54);
+  const grid = { id: "g", validFrom: fromIsoDate("2026-01-01"), validTo: fromIsoDate("2026-12-31") };
+  it("tells in force, upcoming, expired and superseded grids apart", () => {
+    expect(tariffStatus(grid, "2026-06-01", new Set(["g"]))).toBe("IN_FORCE");
+    expect(tariffStatus(grid, "2025-12-31", new Set())).toBe("UPCOMING");
+    expect(tariffStatus(grid, "2027-01-01", new Set())).toBe("EXPIRED");
+    expect(tariffStatus(grid, "2026-06-01", new Set())).toBe("SUPERSEDED");
   });
 });

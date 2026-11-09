@@ -2,7 +2,7 @@
 
 import { useActionState, useState, type ReactNode } from "react";
 import type { Qualification, VehicleType } from "@prisma/client";
-import { Field, Fieldset, FormMessage, Input, Select } from "@/components/ui/form";
+import { Checkbox, Field, Fieldset, FormMessage, Input, Select } from "@/components/ui/form";
 import { DEFAULT_CAPACITY } from "@/lib/domain/rules";
 import { ENERGY_LABELS, VEHICLE_TYPE_LABELS } from "@/lib/labels";
 import { ENERGY_TYPES } from "./fleet-schema";
@@ -258,7 +258,7 @@ function VehicleFields({
           <Field
             label="Département de rattachement"
             htmlFor="department"
-            hint="Sélectionne la grille tarifaire (ex. 13, 04, 05, 38, 2A)."
+            hint="Taxi : département de l'ADS, qui choisit sa grille tarifaire (ex. 13, 04, 05, 38)."
             error={errors.department}
             className="lg:col-span-2"
           >
@@ -281,6 +281,14 @@ function VehicleFields({
               ))}
             </datalist>
           </Field>
+          <div className="space-y-1 lg:col-span-2">
+            <Checkbox
+              name="tpmrEquipped"
+              defaultChecked={valueOf(values, "tpmrEquipped") === "on"}
+              label="Équipé TPMR (patient transporté dans son fauteuil)"
+            />
+            <p className="text-xs text-slate-500">Supplément TPMR de la grille pour un patient en fauteuil roulant.</p>
+          </div>
         </div>
       </Fieldset>
 

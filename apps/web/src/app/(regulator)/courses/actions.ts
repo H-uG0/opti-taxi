@@ -11,6 +11,7 @@ import { CANCELLATION_REASON_LABELS, isLateCancellation, NO_CANCELLATION, userCa
 import { conflictLabel, restoreBlocker, tripConflicts } from "@/lib/domain/duplicates";
 import { isSameEpisode } from "@/lib/domain/no-show";
 import { formatAddress } from "@/lib/domain/rules";
+import { formatEuros } from "@/lib/labels";
 import { getSettings } from "@/lib/domain/settings";
 import { allowGeocodeSearch, bestMatch, GEOCODE_THROTTLED_MESSAGE, geocoderEnabled, searchAddress } from "@/lib/geocode";
 import { logError, safeErrorFields } from "@/lib/log";
@@ -37,6 +38,7 @@ import {
   parseNewTrip,
   prescriptionUsableOn,
   scheduleSchema,
+  tollSchema,
   sharingDecisionSchema,
   tripIdSchema,
   type ActionResult,
@@ -580,6 +582,33 @@ export async function rescheduleTrip(_prev: ActionResult, formData: FormData): P
     message:
       `${label} La tournée de ${vehicle} ne tenait plus (${fit.reason}) : la course en a été retirée.` +
       `${aloneMessage(detached.nowAlone)}${noticeOf(refresh)}${replace}`,
+  };
+}
+
+/**
+ * « Péage » : tolls on this patient's invoice, outside surcharges and
+ * discounts (tariff conventions). Counted in the estimated revenue from the
+ * next computation of the day (optimization or route refresh).
+ */
+export async function setTripToll(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
+  const user = await requireUser("REGULATOR");
+  const parsed = tollSchema.safeParse(formValues(formData, ["tripId", "toll"]));
+  if (!parsed.success) return failure(firstErrorMessage(parsed.error));
+  const trip = await db.trip.findUnique({
+    where: { id: parsed.data.tripId },
+    select: { id: true, serviceDate: true, tollAmount: true },
+  });
+  if (!trip) return failure("Course introuvable.");
+  const toll = parsed.data.toll;
+  if (trip.tollAmount === toll) return { ok: true, message: "Péage inchangé." };
+  await db.$transaction(async (tx) => {
+    await tx.trip.update({ where: { id: trip.id }, data: { tollAmount: toll } });
+    await audit(tx, user, { ...tripEvent("trip.toll", trip), details: { tollAmount: { from: trip.tollAmount, to: toll } } });
+  });
+  revalidateTripViews();
+  return {
+    ok: true,
+    message: toll === null ? "Péage retiré." : `Péage de ${formatEuros(toll)} enregistré : compté dans le CA au prochain calcul du planning.`,
   };
 }
 

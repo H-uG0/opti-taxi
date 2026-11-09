@@ -128,6 +128,11 @@ export type TripView = {
    * "patient absent": call the patient or cancel the return (@/lib/domain/no-show).
    */
   outboundNoShow: boolean;
+  /**
+   * Seated trip a regulator put in an ambulance as an exceptional measure,
+   * still locked on it: billed at the VSL tariff (TAR-03). Absent: false.
+   */
+  exceptionalAmbulance?: boolean;
 };
 
 export type UnassignedView = {

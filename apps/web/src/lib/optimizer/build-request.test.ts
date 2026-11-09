@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { tariffRow } from "@/test/tariff-fixtures";
 import {
   applyDayCrewPlan,
   buildOptimizeRequest,
@@ -9,6 +10,8 @@ import {
   STALE_RUN_MARGIN_SEC,
   toContractSettings,
   tripServiceMinutes,
+  NO_BILLING,
+  type BillingInput,
   type DriverInput,
   type ServiceSettings,
   type OptimizeInput,
@@ -89,23 +92,8 @@ function trip(id: string, overrides: Partial<TripInput> = {}): TripInput {
   };
 }
 
-let nextTariffId = 1;
-
 function tariff(overrides: Partial<TariffInput> = {}): TariffInput {
-  return {
-    id: `tariff_${nextTariffId++}`,
-    createdAt: new Date("2025-12-01T00:00:00Z"),
-    vehicleType: "TAXI",
-    department: "13",
-    baseFare: 13,
-    pricePerKm: 1.12,
-    includedKm: 0,
-    sharedDiscount2: 0.23,
-    sharedDiscount3: 0.35,
-    validFrom: new Date("2026-01-01T00:00:00Z"),
-    validTo: null,
-    ...overrides,
-  };
+  return tariffRow(overrides);
 }
 
 function input(overrides: Partial<OptimizeInput> = {}): OptimizeInput {
@@ -519,21 +507,54 @@ describe("trips", () => {
 });
 
 describe("tariffs", () => {
-  it("sends the grids in force on the date, the most recent one per type and department", () => {
+  it("sends the grid of each vehicle, in force on the date, the most recent one per type and department", () => {
+    const taxi13 = tariff({ baseFare: 13, validFrom: new Date("2026-06-01T00:00:00Z") });
+    const vslAll = tariff({ vehicleType: "VSL", department: "*", baseFare: 9, validTo: new Date("2026-11-03T00:00:00Z") });
     const { request } = buildOptimizeRequest(
       input({
+        vehicles: [vehicle("v1"), vehicle("vsl", { type: "VSL", department: "04" })],
         tariffs: [
           tariff({ baseFare: 10, validFrom: new Date("2025-01-01T00:00:00Z"), validTo: new Date("2025-12-31T00:00:00Z") }),
           tariff({ baseFare: 12, validFrom: new Date("2026-01-01T00:00:00Z") }),
-          tariff({ baseFare: 13, validFrom: new Date("2026-06-01T00:00:00Z") }),
+          taxi13,
           tariff({ baseFare: 14, validFrom: new Date("2026-12-01T00:00:00Z") }),
-          tariff({ vehicleType: "VSL", department: "*", baseFare: 9, validTo: new Date("2026-11-03T00:00:00Z") }),
+          vslAll,
+          // In force but no vehicle uses it: not sent.
+          tariff({ vehicleType: "AMBULANCE", department: "*", baseFare: 57.39 }),
         ],
       }),
     );
+    expect(request.vehicles.map((v) => v.tariffId)).toEqual([taxi13.id, vslAll.id]);
     expect(request.tariffs).toEqual([
-      { vehicleType: "TAXI", department: "13", baseFare: 13, pricePerKm: 1.12, includedKm: 0, sharedDiscount2: 0.23, sharedDiscount3: 0.35 },
-      { vehicleType: "VSL", department: "*", baseFare: 9, pricePerKm: 1.12, includedKm: 0, sharedDiscount2: 0.23, sharedDiscount3: 0.35 },
+      {
+        id: taxi13.id,
+        vehicleType: "TAXI",
+        baseFare: 13,
+        aggloFare: null,
+        bigCityFare: 0,
+        includedKm: 0,
+        pricePerKm: 1.12,
+        shortTripBands: [],
+        nightRate: 0,
+        weekendRate: 0,
+        nightStartMin: 1200,
+        nightEndMin: 480,
+        saturdayFromMin: 720,
+        surchargeShortTrip: true,
+        emptyLegRateShort: 0,
+        emptyLegRateLong: 0,
+        emptyLegThresholdKm: 50,
+        sharedDiscounts: [
+          { patients: 2, rate: 0.23 },
+          { patients: 3, rate: 0.35 },
+        ],
+        maxSharedPatients: 3,
+        aloneDiscount: 0,
+        aloneThresholdKm: 30,
+        billableDetourKm: [],
+        tpmrFare: 0,
+      },
+      expect.objectContaining({ id: vslAll.id, vehicleType: "VSL", baseFare: 9 }),
     ]);
   });
 
@@ -560,6 +581,134 @@ describe("tariffs", () => {
     expect(buildOptimizeRequest(input({ vehicles: [vsl], tariffs: [lastDay] })).tariffGaps).toEqual([]);
     const catchAll = tariff({ vehicleType: "VSL", department: "*" });
     expect(buildOptimizeRequest(input({ vehicles: [vsl], tariffs: [catchAll] })).tariffGaps).toEqual([]);
+  });
+
+  const certified: BillingInput = {
+    ...NO_BILLING,
+    company: { certifications: [{ validFrom: new Date("2025-01-01T00:00:00Z"), validTo: null }], hqDepartment: "13", hqCity: "Marseille" },
+  };
+  const vslMajored = tariff({ vehicleType: "VSL", department: "*", certified: true, baseFare: 15.75 });
+  const vslBase13 = tariff({ vehicleType: "VSL", department: "13", certified: false, baseFare: 12.11 });
+  const ambulanceMajored = tariff({ vehicleType: "AMBULANCE", department: "*", certified: true, maxSharedPatients: 1 });
+
+  it("picks the VSL and ambulance grids of the company's certification and head office", () => {
+    const vsl = vehicle("vsl", { type: "VSL", department: "04" });
+    const amb = vehicle("amb", { type: "AMBULANCE", department: "05", defaultDriver: driver("dea"), defaultCrewMate: driver("aux") });
+    const tariffs = [vslMajored, vslBase13, ambulanceMajored];
+    const { request } = buildOptimizeRequest(input({ vehicles: [vsl, amb], tariffs, billing: certified }));
+    expect(request.vehicles.map((v) => [v.id, v.tariffId, v.capacity])).toEqual([
+      ["vsl", vslMajored.id, 2],
+      ["amb", ambulanceMajored.id, 1],
+    ]);
+    const notCertified = { ...certified, company: { ...certified.company, certifications: [] } };
+    expect(buildOptimizeRequest(input({ vehicles: [vsl], tariffs, billing: notCertified })).request.vehicles[0]?.tariffId).toBe(vslBase13.id);
+  });
+
+  it("never sends more seats than the vehicle's grid lets share", () => {
+    const taxi = vehicle("taxi", { capacity: 4 });
+    const { request } = buildOptimizeRequest(input({ vehicles: [taxi], tariffs: [tariff({ maxSharedPatients: 3 })] }));
+    expect(request.vehicles[0]?.capacity).toBe(3);
+    // Without a grid, the vehicle's own seats.
+    expect(buildOptimizeRequest(input({ vehicles: [taxi], tariffs: [] })).request.vehicles[0]?.capacity).toBe(4);
+  });
+
+  it("sends the billing rules and the public holidays of the date and the next two days", () => {
+    const billing: BillingInput = {
+      ...NO_BILLING,
+      rules: { emptyLegRule: "DEPOT", surchargeOrder: "ADDITIVE", sharedPatientCount: "MAX_ON_BOARD" },
+      holidays: ["2026-11-01", "2026-11-04", "2026-11-11"],
+    };
+    expect(buildOptimizeRequest(input({ billing })).request.settings.pricing).toEqual({
+      emptyLeg: "DEPOT",
+      emptyLegOrder: "ADDITIVE",
+      patientCount: "MAX_ON_BOARD",
+      publicHolidays: ["2026-11-04"],
+    });
+  });
+});
+
+describe("billing flags of the trips", () => {
+  const areas: BillingInput["areas"] = [
+    { kind: "BIG_CITY", name: "Marseille", department: "13", communes: ["Marseille"], rule: "ANY_END", hubCommune: null, validFrom: null, validTo: null },
+    {
+      kind: "AGGLOMERATION",
+      name: "Marseille",
+      department: "13",
+      communes: ["Marseille", "Allauch"],
+      rule: "BOTH_INSIDE",
+      hubCommune: null,
+      validFrom: null,
+      validTo: null,
+    },
+  ];
+  const billing: BillingInput = { ...NO_BILLING, company: { ...NO_BILLING.company, hqCity: "Marseille" }, areas };
+
+  it("flags « Grande ville », agglomeration, hospital-linked care, wheelchair and tolls", () => {
+    const local = trip("t1", {
+      pickupAddress: "3 chemin des Pins, 13190 Allauch",
+      dropoffAddress: "264 rue Saint-Pierre, 13005 Marseille",
+      facilityType: "DIALYSIS",
+      mobility: "WHEELCHAIR",
+      tollAmount: 4.2,
+    });
+    const far = trip("t2", { pickupAddress: "1 rue X, 04100 Manosque", dropoffAddress: "2 rue Y, 13100 Aix-en-Provence", facilityType: "HOSPITAL" });
+    const { request } = buildOptimizeRequest(input({ trips: [local, far], billing }));
+    expect(request.trips.map((t) => [t.bigCity, t.agglomeration, t.hospitalLinked, t.wheelchair, t.tollAmount])).toEqual([
+      [true, true, true, true, 4.2],
+      [false, false, false, false, 0],
+    ]);
+  });
+
+  it("no agglomeration fare for a company based elsewhere", () => {
+    const local = trip("t1", { pickupAddress: "3 chemin des Pins, 13190 Allauch", dropoffAddress: "264 rue Saint-Pierre, 13005 Marseille" });
+    const elsewhere = { ...billing, company: { ...billing.company, hqCity: "Manosque" } };
+    expect(buildOptimizeRequest(input({ trips: [local], billing: elsewhere })).request.trips[0]).toMatchObject({ bigCity: true, agglomeration: false });
+  });
+});
+
+describe("exceptional ambulance for a seated trip (TAR-03)", () => {
+  const amb = vehicle("amb", { type: "AMBULANCE", department: "05", defaultDriver: driver("dea"), defaultCrewMate: driver("aux") });
+  const vslGrid = tariff({ vehicleType: "VSL", department: "*", baseFare: 15.75 });
+  const ambGrid = tariff({ vehicleType: "AMBULANCE", department: "*", baseFare: 57.39, maxSharedPatients: 1 });
+  const proposed = new Date("2026-11-02T17:00:00Z");
+
+  it("lets the locked ambulance carry the trip at the VSL tariff", () => {
+    const seated = trip("t1", { lockedVehicleId: "amb", exceptionalAmbulanceAt: proposed });
+    const { request, droppedLocks } = buildOptimizeRequest(input({ vehicles: [vehicle("v1"), amb], trips: [seated], tariffs: [vslGrid, ambGrid] }));
+    expect(droppedLocks).toEqual([]);
+    expect(request.trips[0]).toMatchObject({ lockedVehicleId: "amb", allowedVehicleTypes: ["TAXI", "VSL", "AMBULANCE"], tariffId: vslGrid.id });
+    expect(request.tariffs.map((t) => t.id)).toContain(vslGrid.id);
+    expect(optimizeRequestSchema.safeParse(request).success).toBe(true);
+  });
+
+  it("is never automatic: without the lock on an ambulance, the trip stays seated", () => {
+    const unlocked = trip("t1", { exceptionalAmbulanceAt: proposed });
+    const onTaxi = trip("t2", { lockedVehicleId: "v1", exceptionalAmbulanceAt: proposed });
+    const notProposed = trip("t3", { lockedVehicleId: "amb" });
+    const { request, droppedLocks } = buildOptimizeRequest(
+      input({ vehicles: [vehicle("v1"), amb], trips: [unlocked, onTaxi, notProposed], tariffs: [vslGrid, ambGrid] }),
+    );
+    expect(request.trips.map((t) => t.allowedVehicleTypes)).toEqual([
+      ["TAXI", "VSL"],
+      ["TAXI", "VSL"],
+      ["TAXI", "VSL"],
+    ]);
+    expect(request.trips.every((t) => t.tariffId === null)).toBe(true);
+    expect(droppedLocks.map((d) => d.tripId)).toEqual(["t3"]);
+  });
+
+  it("drops the ambulance with its lock when the ambulance is unavailable that day", () => {
+    const off = { ...amb, defaultDriver: driver("dea", { workDays: [6] }) };
+    const seated = trip("t1", { lockedVehicleId: "amb", exceptionalAmbulanceAt: proposed });
+    const { request, droppedLocks } = buildOptimizeRequest(input({ vehicles: [vehicle("v1"), off], trips: [seated], tariffs: [vslGrid, ambGrid] }));
+    expect(droppedLocks).toHaveLength(1);
+    expect(request.trips[0]).toMatchObject({ lockedVehicleId: null, allowedVehicleTypes: ["TAXI", "VSL"], tariffId: null });
+  });
+
+  it("never applies to a trip prescribed in ambulance", () => {
+    const lying = trip("t1", { allowedVehicleTypes: ["AMBULANCE"], lockedVehicleId: "amb", exceptionalAmbulanceAt: proposed });
+    const { request } = buildOptimizeRequest(input({ vehicles: [amb], trips: [lying], tariffs: [vslGrid, ambGrid] }));
+    expect(request.trips[0]?.tariffId).toBeNull();
   });
 });
 

@@ -1,17 +1,19 @@
 "use client";
 
-import { useActionState, useState, type FormEvent } from "react";
-import { Field, Fieldset, FormMessage, Input, Select, Textarea } from "@/components/ui/form";
+import { useActionState, useState, type FormEvent, type ReactNode } from "react";
+import { Checkbox, Field, Fieldset, FormMessage, Input, Select, Textarea } from "@/components/ui/form";
+import { DEFAULT_FARE_RULES, fareEuros, NO_TRIP_FLAGS, sameRide, type FareGrid } from "@/lib/domain/fare";
 import { formatEuros, VEHICLE_TYPE_LABELS } from "@/lib/labels";
 import { ALL_ZONES, DEPARTMENT_NAMES } from "../vehicules/_lib/departments";
-import { IDLE_STATE, parseDecimal, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
+import { IDLE_STATE, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
 import { FormFooter, UnitInput } from "../vehicules/_lib/ui";
-import { patientFare, soloFare, type FareGrid } from "./fare";
-import { percentToFraction, VEHICLE_TYPES } from "./schema";
+import { CERTIFICATION_OPTIONS, previewFareGrid, VEHICLE_TYPES, VERIFICATION_LABELS, VERIFICATIONS } from "./schema";
 
 type Action = (state: FormState, formData: FormData) => Promise<FormState>;
 
 const PREVIEW_KM = 20;
+/** A Tuesday that is no public holiday: the preview's « jour de semaine ». */
+const PREVIEW_WEEKDAY = { date: "2026-11-10", holidays: new Set<string>() };
 
 export function TariffForm({ action, initial, submitLabel }: { action: Action; initial: FormValues; submitLabel: string }) {
   const [state, formAction] = useActionState(action, IDLE_STATE);
@@ -27,37 +29,105 @@ export function TariffForm({ action, initial, submitLabel }: { action: Action; i
   );
 }
 
-/** Grid typed so far, or null while an amount is missing or invalid. */
-function previewGrid(get: (name: string) => string): FareGrid | null {
-  const baseFare = parseDecimal(get("baseFare"));
-  const pricePerKm = parseDecimal(get("pricePerKm"));
-  const includedKm = parseDecimal(get("includedKm")) ?? 0;
-  const d2 = parseDecimal(get("sharedDiscount2")) ?? 0;
-  const d3 = parseDecimal(get("sharedDiscount3")) ?? 0;
-  const numbers = [baseFare, pricePerKm, includedKm, d2, d3];
-  if (baseFare === undefined || pricePerKm === undefined || numbers.some((n) => n === undefined || !Number.isFinite(n))) {
-    return null;
+/** A number input with its unit, as every amount of the form. */
+function Amount({
+  name,
+  label,
+  unit,
+  values,
+  errors,
+  hint,
+  required = false,
+}: {
+  name: string;
+  label: string;
+  unit: string;
+  values: FormValues;
+  errors: FieldErrors;
+  hint?: ReactNode;
+  required?: boolean;
+}) {
+  return (
+    <Field label={label} htmlFor={name} error={errors[name]} hint={hint}>
+      <UnitInput
+        id={name}
+        name={name}
+        required={required}
+        inputMode="decimal"
+        autoComplete="off"
+        unit={unit}
+        defaultValue={valueOf(values, name)}
+        aria-invalid={Boolean(errors[name])}
+      />
+    </Field>
+  );
+}
+
+function TimeInput({ name, label, values, errors }: { name: string; label: string; values: FormValues; errors: FieldErrors }) {
+  return (
+    <Field label={label} htmlFor={name} error={errors[name]}>
+      <Input
+        id={name}
+        name={name}
+        required
+        inputMode="numeric"
+        autoComplete="off"
+        className="tabular"
+        placeholder="HH:MM"
+        defaultValue={valueOf(values, name)}
+        aria-invalid={Boolean(errors[name])}
+      />
+    </Field>
+  );
+}
+
+function Preview({ grid }: { grid: FareGrid | null }) {
+  if (!grid) {
+    return (
+      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" aria-live="polite">
+        <p className="font-medium text-slate-800">Aperçu pour {PREVIEW_KM} km</p>
+        <p className="mt-1">Renseignez le forfait, le prix au km et les majorations.</p>
+      </div>
+    );
   }
-  return {
-    baseFare,
-    pricePerKm,
-    includedKm,
-    sharedDiscount2: percentToFraction(d2),
-    sharedDiscount3: percentToFraction(d3),
-  };
+  const fare = (patients: number, pickupMin: number) =>
+    fareEuros(grid, NO_TRIP_FLAGS, { tpmrEquipped: false }, sameRide(PREVIEW_KM, patients, pickupMin, 40), DEFAULT_FARE_RULES, PREVIEW_WEEKDAY);
+  const shared = Array.from({ length: Math.max(0, Math.min(grid.maxSharedPatients, 4) - 1) }, (_, i) => i + 2);
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" aria-live="polite">
+      <p className="font-medium text-slate-800">Aperçu pour {PREVIEW_KM} km, un mardi</p>
+      <dl className="tabular mt-1 grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5">
+        <dt>Seul, de jour</dt>
+        <dd className="text-right font-medium text-slate-900">{formatEuros(fare(1, 600))}</dd>
+        <dt>Seul, de nuit</dt>
+        <dd className="text-right font-medium text-slate-900">{formatEuros(fare(1, 1290))}</dd>
+        {shared.map((patients) => (
+          <div key={patients} className="contents">
+            <dt>
+              Partagé à {patients}
+              {patients === 4 && grid.maxSharedPatients > 4 ? " et plus" : ""}, par patient
+            </dt>
+            <dd className="text-right font-medium text-slate-900">{formatEuros(fare(patients, 600))}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
 }
 
 function TariffFields({ values, errors }: { values: FormValues; errors: FieldErrors }) {
-  const [preview, setPreview] = useState<FareGrid | null>(() => previewGrid((name) => valueOf(values, name)));
+  const [preview, setPreview] = useState<FareGrid | null>(() => previewFareGrid((name) => valueOf(values, name)));
 
   function refreshPreview(event: FormEvent<HTMLDivElement>) {
     const form = event.currentTarget.closest("form");
     if (!form) return;
     const data = new FormData(form);
-    setPreview(previewGrid((name) => {
-      const value = data.get(name);
-      return typeof value === "string" ? value : "";
-    }));
+    setPreview(
+      previewFareGrid((name) => {
+        const value = data.get(name);
+        return typeof value === "string" ? value : "";
+      }),
+    );
   }
 
   return (
@@ -65,12 +135,7 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
       <Fieldset legend="Champ d'application">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="Type de véhicule" htmlFor="vehicleType" error={errors.vehicleType}>
-            <Select
-              id="vehicleType"
-              name="vehicleType"
-              defaultValue={valueOf(values, "vehicleType")}
-              aria-invalid={Boolean(errors.vehicleType)}
-            >
+            <Select id="vehicleType" name="vehicleType" defaultValue={valueOf(values, "vehicleType")} aria-invalid={Boolean(errors.vehicleType)}>
               {VEHICLE_TYPES.map((t) => (
                 <option key={t} value={t}>
                   {VEHICLE_TYPE_LABELS[t]}
@@ -81,7 +146,7 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
           <Field
             label="Département"
             htmlFor="department"
-            hint="Numéro (13, 04, 05, 38…) ou * pour toutes les zones (repli)."
+            hint="Taxi : département de l'ADS. VSL non certifié : celui du siège. * pour toutes les zones."
             error={errors.department}
           >
             <Input
@@ -105,123 +170,172 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
             </datalist>
           </Field>
           <Field
+            label="Certification de l'entreprise"
+            htmlFor="certified"
+            hint="Géolocalisation certifiée sur tous les véhicules et facturation SEFi (VSL et ambulance)."
+            error={errors.certified}
+          >
+            <Select id="certified" name="certified" defaultValue={valueOf(values, "certified")} aria-invalid={Boolean(errors.certified)}>
+              {CERTIFICATION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Zone VSL (facultatif)" htmlFor="zone" hint="A, B, C ou D : pour l'affichage." error={errors.zone}>
+            <Input
+              id="zone"
+              name="zone"
+              maxLength={1}
+              autoComplete="off"
+              className="uppercase"
+              defaultValue={valueOf(values, "zone")}
+              aria-invalid={Boolean(errors.zone)}
+            />
+          </Field>
+          <Field
             label="Libellé (facultatif)"
             htmlFor="label"
-            hint="Ex. « Convention taxis 2025 — Bouches-du-Rhône »."
+            hint="Ex. « Taxi conventionné — Bouches-du-Rhône »."
             error={errors.label}
-            className="sm:col-span-2"
+            className="sm:col-span-2 lg:col-span-4"
           >
-            <Input
-              id="label"
-              name="label"
-              maxLength={80}
-              defaultValue={valueOf(values, "label")}
-              aria-invalid={Boolean(errors.label)}
-            />
+            <Input id="label" name="label" maxLength={80} defaultValue={valueOf(values, "label")} aria-invalid={Boolean(errors.label)} />
           </Field>
         </div>
       </Fieldset>
 
-      <Fieldset legend="Montants">
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Field
-            label="Forfait de prise en charge (€)"
-            htmlFor="baseFare"
-            error={errors.baseFare}
-            hint="Facturé une fois par patient transporté."
-          >
-            <UnitInput
-              id="baseFare"
-              name="baseFare"
-              required
-              inputMode="decimal"
-              autoComplete="off"
-              unit="€"
-              defaultValue={valueOf(values, "baseFare")}
-              aria-invalid={Boolean(errors.baseFare)}
-            />
-          </Field>
-          <Field label="Prix au kilomètre (€/km)" htmlFor="pricePerKm" error={errors.pricePerKm}>
-            <UnitInput
-              id="pricePerKm"
-              name="pricePerKm"
-              required
-              inputMode="decimal"
-              autoComplete="off"
-              unit="€/km"
-              defaultValue={valueOf(values, "pricePerKm")}
-              aria-invalid={Boolean(errors.pricePerKm)}
-            />
-          </Field>
-          <Field
-            label="Km inclus dans le forfait"
-            htmlFor="includedKm"
-            error={errors.includedKm}
-            hint="0 si chaque kilomètre est facturé."
-          >
-            <UnitInput
-              id="includedKm"
-              name="includedKm"
-              inputMode="decimal"
-              autoComplete="off"
-              unit="km"
-              defaultValue={valueOf(values, "includedKm")}
-              aria-invalid={Boolean(errors.includedKm)}
-            />
-          </Field>
-        </div>
-      </Fieldset>
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_16rem]">
+        <div className="space-y-6">
+          <Fieldset legend="Forfaits et kilomètres">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Amount name="baseFare" label="Forfait départemental" unit="€" values={values} errors={errors} required hint="Facturé une fois par patient et par trajet." />
+              <Amount name="includedKm" label="Km inclus dans le forfait" unit="km" values={values} errors={errors} hint="Taxi : 4 ; VSL et ambulance : 3." />
+              <Amount name="pricePerKm" label="Prix au kilomètre" unit="€/km" values={values} errors={errors} required />
+              <Amount name="bigCityFare" label="Forfait « Grande ville » (facultatif)" unit="€" values={values} errors={errors} hint="Taxi : ajouté au forfait (zones Grande ville)." />
+              <Amount
+                name="aggloFare"
+                label="Forfait agglomération (facultatif)"
+                unit="€"
+                values={values}
+                errors={errors}
+                hint="Ambulance : remplace le forfait dans l'agglomération du siège."
+              />
+              <Amount name="tpmrFare" label="Supplément TPMR (facultatif)" unit="€" values={values} errors={errors} hint="Patient dans son fauteuil, véhicule équipé." />
+            </div>
+          </Fieldset>
 
-      <Fieldset legend="Transport partagé">
-        <p className="text-xs text-slate-500">
-          Abattement appliqué au tarif de chaque patient quand plusieurs patients voyagent ensemble. Saisissez un
-          pourcentage (23 pour 23 %).
-        </p>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Abattement à 2 patients (%)" htmlFor="sharedDiscount2" error={errors.sharedDiscount2}>
-            <UnitInput
-              id="sharedDiscount2"
-              name="sharedDiscount2"
-              required
-              inputMode="decimal"
-              autoComplete="off"
-              unit="%"
-              defaultValue={valueOf(values, "sharedDiscount2")}
-              aria-invalid={Boolean(errors.sharedDiscount2)}
-            />
-          </Field>
-          <Field label="Abattement à 3 patients ou plus (%)" htmlFor="sharedDiscount3" error={errors.sharedDiscount3}>
-            <UnitInput
-              id="sharedDiscount3"
-              name="sharedDiscount3"
-              required
-              inputMode="decimal"
-              autoComplete="off"
-              unit="%"
-              defaultValue={valueOf(values, "sharedDiscount3")}
-              aria-invalid={Boolean(errors.sharedDiscount3)}
-            />
-          </Field>
-          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" aria-live="polite">
-            <p className="font-medium text-slate-800">Aperçu pour {PREVIEW_KM} km</p>
-            {preview ? (
-              <dl className="tabular mt-1 grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5">
-                <dt>Seul</dt>
-                <dd className="text-right font-medium text-slate-900">{formatEuros(soloFare(preview, PREVIEW_KM))}</dd>
-                <dt>Partagé à 2, par patient</dt>
-                <dd className="text-right font-medium text-slate-900">{formatEuros(patientFare(preview, PREVIEW_KM, 2))}</dd>
-                <dt>Partagé à 3, par patient</dt>
-                <dd className="text-right font-medium text-slate-900">{formatEuros(patientFare(preview, PREVIEW_KM, 3))}</dd>
-              </dl>
-            ) : (
-              <p className="mt-1">Renseignez le forfait et le prix au km.</p>
-            )}
-          </div>
-        </div>
-      </Fieldset>
+          <Fieldset legend="Trajet court">
+            <Field
+              label="Tranches (facultatif)"
+              htmlFor="shortTripBands"
+              hint="Une tranche par ligne, « km au plus : montant », ex. « 7 : 8,54 ». Ajoutée au forfait selon les km facturés."
+              error={errors.shortTripBands}
+            >
+              <Textarea
+                id="shortTripBands"
+                name="shortTripBands"
+                rows={4}
+                className="tabular"
+                defaultValue={valueOf(values, "shortTripBands")}
+                aria-invalid={Boolean(errors.shortTripBands)}
+              />
+            </Field>
+          </Fieldset>
 
-      <Fieldset legend="Validité">
+          <Fieldset legend="Majorations">
+            <p className="text-xs text-slate-500">
+              Jamais cumulées : la plus forte s&apos;applique. Nuit : plus de la moitié du temps en charge dans la plage. Week-end : prise
+              en charge le samedi à partir de l&apos;heure indiquée, le dimanche ou un jour férié.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
+              <Amount name="nightRate" label="Nuit" unit="%" values={values} errors={errors} required />
+              <TimeInput name="nightStart" label="Nuit à partir de" values={values} errors={errors} />
+              <TimeInput name="nightEnd" label="Nuit jusqu'à" values={values} errors={errors} />
+              <Amount name="weekendRate" label="Dimanche et férié" unit="%" values={values} errors={errors} required />
+              <TimeInput name="saturdayFrom" label="Samedi à partir de" values={values} errors={errors} />
+            </div>
+            <Checkbox
+              name="surchargeShortTrip"
+              defaultChecked={valueOf(values, "surchargeShortTrip") === "on"}
+              label="Majorer aussi le trajet court"
+            />
+          </Fieldset>
+
+          <Fieldset legend="Retour à vide (taxi, transport lié à une hospitalisation)">
+            <p className="text-xs text-slate-500">
+              Majoration du prix au km pour une dialyse, une chimiothérapie, une radiothérapie ou une hospitalisation dont l&apos;aller ou
+              le retour du véhicule se fait à vide. Laissez vide pour un VSL ou une ambulance.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Amount name="emptyLegRateShort" label="Sous le seuil" unit="%" values={values} errors={errors} />
+              <Amount name="emptyLegRateLong" label="À partir du seuil" unit="%" values={values} errors={errors} />
+              <Amount name="emptyLegThresholdKm" label="Seuil" unit="km" values={values} errors={errors} />
+            </div>
+          </Fieldset>
+
+          <Fieldset legend="Transport partagé">
+            <p className="text-xs text-slate-500">
+              Abattement de la facture de chaque patient selon le nombre de patients (23 pour 23 %) ; le dernier taux saisi vaut aussi
+              au-delà. Péages et TPMR n&apos;y sont pas soumis.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-4">
+              <Amount name="discount2" label="À 2 patients" unit="%" values={values} errors={errors} />
+              <Amount name="discount3" label="À 3 patients" unit="%" values={values} errors={errors} />
+              <Amount name="discount4" label="À 4 patients et plus" unit="%" values={values} errors={errors} />
+              <Field label="Patients au plus" htmlFor="maxSharedPatients" error={errors.maxSharedPatients} hint="Taxi 8, VSL 3, ambulance 1.">
+                <Input
+                  id="maxSharedPatients"
+                  name="maxSharedPatients"
+                  required
+                  inputMode="numeric"
+                  autoComplete="off"
+                  className="tabular"
+                  defaultValue={valueOf(values, "maxSharedPatients")}
+                  aria-invalid={Boolean(errors.maxSharedPatients)}
+                />
+              </Field>
+              <Amount name="aloneDiscount" label="Patient seul à bord (facultatif)" unit="%" values={values} errors={errors} hint="Taxi : 5 % au lieu du taux de partage." />
+              <Amount name="aloneThresholdKm" label="… sur au moins" unit="km" values={values} errors={errors} hint="Seuil local, 30 km au minimum." />
+              <Field
+                label="Détours facturables (facultatif)"
+                htmlFor="billableDetourKm"
+                hint="Km par prise en charge ajoutée, ex. « 10 ; 10 » en VSL. Vide : distance directe seulement."
+                error={errors.billableDetourKm}
+                className="sm:col-span-2"
+              >
+                <Input
+                  id="billableDetourKm"
+                  name="billableDetourKm"
+                  autoComplete="off"
+                  className="tabular"
+                  defaultValue={valueOf(values, "billableDetourKm")}
+                  aria-invalid={Boolean(errors.billableDetourKm)}
+                />
+              </Field>
+            </div>
+          </Fieldset>
+        </div>
+        <div className="lg:sticky lg:top-[calc(1.5rem+var(--demo-banner-h))]">
+          <Preview grid={preview} />
+        </div>
+      </div>
+
+      <Fieldset legend="Source et validité">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Field label="Vérification" htmlFor="verification" error={errors.verification}>
+            <Select id="verification" name="verification" defaultValue={valueOf(values, "verification")} aria-invalid={Boolean(errors.verification)}>
+              {VERIFICATIONS.map((v) => (
+                <option key={v} value={v}>
+                  {VERIFICATION_LABELS[v]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Source (facultatif)" htmlFor="sourceUrl" hint="Adresse du texte : Légifrance, ameli…" error={errors.sourceUrl} className="lg:col-span-3">
+            <Input id="sourceUrl" name="sourceUrl" type="url" maxLength={500} defaultValue={valueOf(values, "sourceUrl")} aria-invalid={Boolean(errors.sourceUrl)} />
+          </Field>
           <Field label="En vigueur à partir du" htmlFor="validFrom" error={errors.validFrom}>
             <Input
               id="validFrom"
@@ -233,36 +347,11 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
               aria-invalid={Boolean(errors.validFrom)}
             />
           </Field>
-          <Field
-            label="Jusqu'au (facultatif)"
-            htmlFor="validTo"
-            error={errors.validTo}
-            hint="Vide : jusqu'à la grille suivante."
-          >
-            <Input
-              id="validTo"
-              name="validTo"
-              type="date"
-              className="tabular"
-              defaultValue={valueOf(values, "validTo")}
-              aria-invalid={Boolean(errors.validTo)}
-            />
+          <Field label="Jusqu'au (facultatif)" htmlFor="validTo" error={errors.validTo} hint="Vide : jusqu'à la grille suivante.">
+            <Input id="validTo" name="validTo" type="date" className="tabular" defaultValue={valueOf(values, "validTo")} aria-invalid={Boolean(errors.validTo)} />
           </Field>
-          <Field
-            label="Notes (facultatif)"
-            htmlFor="notes"
-            hint="Source : convention, avenant, date de publication…"
-            error={errors.notes}
-            className="sm:col-span-2"
-          >
-            <Textarea
-              id="notes"
-              name="notes"
-              maxLength={500}
-              rows={2}
-              defaultValue={valueOf(values, "notes")}
-              aria-invalid={Boolean(errors.notes)}
-            />
+          <Field label="Notes (facultatif)" htmlFor="notes" hint="Convention, avenant, date de publication, point à vérifier…" error={errors.notes} className="sm:col-span-2">
+            <Textarea id="notes" name="notes" maxLength={500} rows={2} defaultValue={valueOf(values, "notes")} aria-invalid={Boolean(errors.notes)} />
           </Field>
         </div>
       </Fieldset>

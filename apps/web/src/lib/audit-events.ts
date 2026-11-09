@@ -26,6 +26,9 @@ export type AuditEntity =
   | "FuelLog"
   | "Depot"
   | "TariffGrid"
+  | "TariffArea"
+  | "CompanyCertification"
+  | "PublicHoliday"
   | "AppSettings";
 
 type DetailValue = string | number | boolean | null;
@@ -90,11 +93,13 @@ export function changedFields(
   return details;
 }
 
-/** A plain JSON value for the details: dates as "YYYY-MM-DD…" strings, arrays joined. */
+/** A plain JSON value for the details: dates as "YYYY-MM-DD…" strings, arrays of values joined, objects as JSON. */
 function detailValue(value: unknown): DetailValue {
   if (value === undefined || value === null) return null;
   if (value instanceof Date) return value.toISOString().slice(0, 10);
-  if (Array.isArray(value)) return value.map(String).join(",");
+  if (Array.isArray(value)) {
+    return value.every((item) => item === null || typeof item !== "object") ? value.map(String).join(",") : JSON.stringify(value);
+  }
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
-  return String(value);
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
 }

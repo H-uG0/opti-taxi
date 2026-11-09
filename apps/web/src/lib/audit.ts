@@ -29,7 +29,10 @@
  *   trip.cancel (the reason stays on the trip), trip.detach (taken off its
  *   route by a referential change, not cancelled), trip.restore,
  *   trip.reschedule, trip.sharing_accept, trip.sharing_refuse, trip.move,
- *   trip.lock, trip.unlock;
+ *   trip.lock, trip.unlock, trip.toll (details: old and new toll),
+ *   trip.exceptional_ambulance (a seated trip proposed in an ambulance,
+ *   details.vehicleId) and trip.exceptional_ambulance_withdrawn (the
+ *   optimizer could not serve it there);
  * - planning: plan.optimize (details.confirmed when the regulator replaced the
  *   routes in place with a plan that waited for confirmation), plan.restore
  *   (« Revenir au planning précédent »), plan.discard (a waiting plan not
@@ -51,7 +54,9 @@
  *   changed fields, old and new value), traffic.calibration_reset (the first
  *   plan computed with OSRM starts the measured traffic factors over, details:
  *   runId), tariff.create/update/delete (details: changed fields; the deleted
- *   grid);
+ *   grid), billing.update (head office and readings of the conventions),
+ *   certification.create/delete, tariff_area.create/update/delete,
+ *   holiday.create, holiday.create_legal (details.added), holiday.delete;
  * - accounts: driver.*, account.* (create, update, password_reset,
  *   password_change, password_change_failed: a wrong current password,
  *   deactivate, reactivate), session.login, session.logout,

@@ -12,12 +12,14 @@ import type {
 } from "@prisma/client";
 import {
   buildOptimizeRequest,
+  isExceptionalAmbulanceTrip,
   compareVehicles,
   effectiveTimeLimitSec,
   EXCLUDED_TRIP_STATUSES,
   isStaleRun,
   personName,
   type SettingsInput,
+  type BillingInput,
   type TariffInput,
   type TripInput,
   type VehicleInput,
@@ -140,6 +142,8 @@ export type PlanningRawInput = {
   details: ReadonlyMap<string, RunDetails>;
   /** Tariff grids that may be in force that day (loadTariffInputs): vehicles without one are flagged. */
   tariffs: TariffInput[];
+  /** Certification and head office of the company (grid of each vehicle); absent: NO_BILLING. */
+  billing?: BillingInput;
   /** Routes made impossible since their computation, overdue deadlines (route-issues.ts); none when absent. */
   vehicleIssues?: VehicleIssue[];
   baseColors: Record<VehicleType, string>;
@@ -390,6 +394,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     vehicles: input.vehicles,
     trips: input.trips,
     tariffs: input.tariffs,
+    ...(input.billing ? { billing: input.billing } : {}),
   });
   const availableById = new Map(build.request.vehicles.map((v) => [v.id, v]));
   const skippedById = new Map(build.skippedVehicles.map((s) => [s.vehicleId, s]));
@@ -520,6 +525,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
         estimatedRevenue: vehicleId ? t.estimatedRevenue : null,
         waitAtFacilityMin: vehicleId ? waitAtFacility(t) : null,
         outboundNoShow: returnsToCheck.has(t.id),
+        exceptionalAmbulance: isExceptionalAmbulanceTrip(t, (id) => vehicleById.get(id)?.type),
       };
     })
     .sort((a, b) => tripTime(a) - tripTime(b));

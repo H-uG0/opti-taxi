@@ -21,6 +21,7 @@ import {
 } from "@prisma/client";
 import { hashPassword } from "@/lib/auth/password";
 import { crewHoldsRequired, DEFAULT_CAPACITY, formatAddress, REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
+import { frenchPublicHolidays } from "@/lib/domain/holidays";
 import { generateTrips } from "@/lib/domain/trip-generation";
 import { logError } from "@/lib/log";
 import {
@@ -52,6 +53,8 @@ import {
   ONE_OFF_FACILITIES,
   PATIENTS,
   PRIVATE_CLIENTS,
+  COMPANY_BILLING,
+  TARIFF_AREAS,
   TARIFFS,
   TOWNS,
   TREATMENTS,
@@ -158,18 +161,28 @@ async function wipe(): Promise<void> {
     prisma.driver.deleteMany(),
     prisma.depot.deleteMany(),
     prisma.tariffGrid.deleteMany(),
+    prisma.tariffArea.deleteMany(),
+    prisma.companyCertification.deleteMany(),
+    prisma.publicHoliday.deleteMany(),
     prisma.trafficZone.deleteMany(),
     prisma.appSettings.deleteMany(),
     restoreAuditGuard(prisma),
   ]);
 }
 
-async function seedSettingsAndTariffs(): Promise<void> {
+async function seedSettingsAndTariffs(today: string): Promise<void> {
   // Schema defaults: arrival up to 30 min before the appointment, pickup up to 15 min after the session, etc.,
   // but longer stops for an ambulance (stretcher, stairs). Regulation number in the 04 65 71 xx xx range
-  // reserved for fiction (see fictitiousLandline).
+  // reserved for fiction (see fictitiousLandline). Head office and certification: demonstration assumptions.
   await prisma.appSettings.create({
-    data: { id: 1, regulatorPhone: "04 65 71 00 00", ambulancePickupServiceMin: 10, ambulanceDropoffServiceMin: 10 },
+    data: {
+      id: 1,
+      regulatorPhone: "04 65 71 00 00",
+      ambulancePickupServiceMin: 10,
+      ambulanceDropoffServiceMin: 10,
+      hqDepartment: COMPANY_BILLING.hqDepartment,
+      hqCity: COMPANY_BILLING.hqCity,
+    },
   });
   await prisma.tariffGrid.createMany({
     data: TARIFFS.map((tariff) => ({
@@ -177,6 +190,20 @@ async function seedSettingsAndTariffs(): Promise<void> {
       validFrom: fromIsoDate(tariff.validFrom),
       validTo: tariff.validTo ? fromIsoDate(tariff.validTo) : null,
     })),
+  });
+  await prisma.companyCertification.create({
+    data: {
+      validFrom: fromIsoDate(COMPANY_BILLING.certifiedSince),
+      note: "Hypothèse de démonstration : statut réel de V à confirmer (géolocalisation certifiée et SEFi).",
+    },
+  });
+  await prisma.tariffArea.createMany({
+    data: TARIFF_AREAS.map((area) => ({ ...area, validFrom: area.validFrom ? fromIsoDate(area.validFrom) : null })),
+  });
+  // Legal public holidays of this year and the next (no convention lists them: PO question).
+  const year = Number(today.slice(0, 4));
+  await prisma.publicHoliday.createMany({
+    data: [...frenchPublicHolidays(year), ...frenchPublicHolidays(year + 1)].map((h) => ({ date: fromIsoDate(h.date), label: h.label })),
   });
 }
 
@@ -293,6 +320,7 @@ async function seedVehicles(
         department: DEPOTS[vehicle.depot].department,
         costPerKm: costPerKmFor(vehicle.type, vehicle.energy ?? "DIESEL", vehicle.ageSurcharge),
         energy: vehicle.energy ?? "DIESEL",
+        tpmrEquipped: vehicle.tpmrEquipped ?? false,
         defaultDriverId: driver.id,
         defaultCrewMateId: crewMate?.id ?? null,
       },
@@ -1014,6 +1042,8 @@ async function printSummary(dates: Dates, refusals: string[], accounts: DriverAc
   const counts: [string, number][] = [
     ["Paramètres (AppSettings)", await prisma.appSettings.count()],
     ["Grilles tarifaires", await prisma.tariffGrid.count()],
+    ["Zones tarifaires", await prisma.tariffArea.count()],
+    ["Jours fériés", await prisma.publicHoliday.count()],
     ["Établissements", await prisma.facility.count()],
     ["Chauffeurs", await prisma.driver.count()],
     ["Véhicules", await prisma.vehicle.count()],
@@ -1100,7 +1130,7 @@ async function main(): Promise<void> {
   console.log("• Effacement des données existantes");
   await wipe();
   console.log("• Paramètres et grilles tarifaires");
-  await seedSettingsAndTariffs();
+  await seedSettingsAndTariffs(today);
   console.log("• Établissements");
   const facilities = await seedFacilities(rng, FACILITIES);
   // Own generator: the patients and trips drawn afterwards stay those of the earlier seeds.
