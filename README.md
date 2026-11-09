@@ -202,7 +202,13 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
   conteneur est limité à 8 Go de mémoire. En production il reste sur un réseau privé, sans port
   publié. Les ports de `docker-compose.yml` n'écoutent que sur la machine elle-même (127.0.0.1).
 - **Journaux serveur** : les erreurs, y compris celles que Next.js journalise lui-même, sont écrites
-  sans les arguments des requêtes Prisma (qui contiendraient adresses et notes).
+  sans les arguments des requêtes Prisma (qui contiendraient adresses et notes). Les enregistrements
+  techniques ne contiennent pas de nom de patient : un « Déplacer vers… » refusé garde l'identifiant
+  de la course dans l'erreur de l'optimisation, et le nom n'est ajouté qu'à l'affichage.
+- **Journaux du proxy** (à prévoir dans le kit de déploiement HDS, lot PROD-01) : les recherches de
+  patients et de courses passent dans l'URL (`/patients?q=Dupont`). nginx doit donc journaliser
+  l'URL sans sa query string (`$uri` et non `$request` dans `log_format`), sinon les noms
+  recherchés se retrouvent dans les journaux d'accès, hors des protections de la base.
 - **En-têtes** : Content-Security-Policy avec nonce par requête, Permissions-Policy,
   Cross-Origin-Opener-Policy, X-Frame-Options, X-Content-Type-Options, Referrer-Policy ; en production aussi HSTS (2 ans,
   sous-domaines inclus). En production, le cookie de session s'appelle `__Host-ot_session` et le

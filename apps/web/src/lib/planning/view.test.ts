@@ -262,6 +262,17 @@ describe("buildPlanningView", () => {
     expect(buildPlanningView(input({ trips: many, routes: [] })).timeLimitSec).toBe(20);
   });
 
+  it("shows a refused move with the patient's name, which the stored error does not hold", () => {
+    const failed = run({
+      status: "FAILED",
+      error: "Déplacement refusé : l'optimiseur a placé {course:c} sur Taxi 2 et non sur Taxi 1. Le planning n'a pas été modifié.",
+    });
+    const view = buildPlanningView(input({ lastRun: failed }));
+    expect(view.lastRun?.error).toBe(
+      "Déplacement refusé : l'optimiseur a placé la course de Patient C sur Taxi 2 et non sur Taxi 1. Le planning n'a pas été modifié.",
+    );
+  });
+
   it("tells a run still computing from one interrupted by a server restart", () => {
     // 240 trips: 30 s budget + 120 s margin after 17:00:00.
     const running = run({ status: "RUNNING", finishedAt: null, tripsCount: 240 });

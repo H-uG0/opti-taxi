@@ -26,6 +26,7 @@ import { returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
 import { computeDayKpis as computeDashboardDayKpis, type KpiRoute, type KpiTrip } from "@/lib/kpis";
 import { VIOLATION_LABELS } from "@/lib/labels";
 import { vehicleShade } from "./colors";
+import { resolveTripRefs } from "./move";
 import { coPassengers, computeTimeRange } from "./timeline";
 import type {
   DayKpis,
@@ -219,6 +220,7 @@ function runView(
   details: ReadonlyMap<string, RunDetails>,
   configuredSec: number,
   now: Date,
+  patientOf: (tripId: string) => string | null,
 ): RunView | null {
   if (!run) return null;
   return {
@@ -231,7 +233,8 @@ function runView(
     matrixSource: run.matrixSource,
     trafficSource: details.get(run.id)?.trafficSource ?? null,
     valid: run.valid,
-    error: run.error,
+    // A refused move names its trip by id in the stored error (move.ts): the patient's name is put in here.
+    error: run.error === null ? null : resolveTripRefs(run.error, patientOf),
     tripsCount: run.tripsCount,
     lockedCount: run.lockedCount,
     unassignedCount: run.unassignedCount,
@@ -332,6 +335,8 @@ export function dayStatusOf(activeTrips: number, routes: Array<{ status: RouteSt
 
 export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
   const now = input.now ?? new Date();
+  const patientNames = new Map(input.trips.map((t) => [t.id, personName(t.patient)]));
+  const patientOf = (tripId: string) => patientNames.get(tripId) ?? null;
   const build = buildOptimizeRequest({
     date: input.date,
     settings: input.settings,
@@ -506,8 +511,8 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     excludedTrips: build.excludedTrips,
     notes: build.notes,
     staleTrips,
-    lastRun: runView(input.lastRun, input.details, input.settings.solverTimeLimitSec, now),
-    planRun: runView(input.planRun, input.details, input.settings.solverTimeLimitSec, now),
+    lastRun: runView(input.lastRun, input.details, input.settings.solverTimeLimitSec, now, patientOf),
+    planRun: runView(input.planRun, input.details, input.settings.solverTimeLimitSec, now, patientOf),
     timeRange: computeTimeRange(rows),
     dayStarted:
       input.trips.some((t) => FIELD_STATUSES.includes(t.status)) ||

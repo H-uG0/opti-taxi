@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BuildResult } from "@/lib/optimizer/build-request";
 import type { OptimizerTrip, PlanResponse, PlanRoute } from "@/lib/optimizer/contract";
-import { movePlacementIssue, moveRequestIssue, plannedVehicleOf, type MoveTarget } from "./move";
+import { movePlacementIssue, moveRequestIssue, plannedVehicleOf, resolveTripRefs, tripRef, type MoveTarget } from "./move";
 
 const MOVE: MoveTarget = { tripId: "t1", vehicleId: "vsl_gre", vehicleLabel: "VSL Grenoble", patientName: "Jeanne Martin" };
 
@@ -77,6 +77,10 @@ const labels = new Map([
   ["taxi_mrs", "Taxi Marseille 1"],
 ]);
 
+/** The message as the regulator reads it: the trip reference resolved to the patient's name. */
+const shown = (text: string | null) =>
+  text === null ? null : resolveTripRefs(text, (id) => (id === "t1" ? "Jeanne Martin" : null));
+
 describe("moveRequestIssue", () => {
   it("accepts a trip sent to the optimizer with its new lock", () => {
     expect(moveRequestIssue(build(), MOVE)).toBeNull();
@@ -87,8 +91,8 @@ describe("moveRequestIssue", () => {
       build({ trips: [trip("t2", null)], excludedTrips: [{ tripId: "t1", reason: "Aller sans heure de rendez-vous" }] }),
       MOVE,
     );
-    expect(issue).toBe(
-      "Course de Jeanne Martin incomplète (Aller sans heure de rendez-vous) : complétez-la dans Courses avant de la déplacer.",
+    expect(shown(issue)).toBe(
+      "La course de Jeanne Martin est incomplète (Aller sans heure de rendez-vous) : complétez-la dans Courses avant de la déplacer.",
     );
   });
 
@@ -100,12 +104,16 @@ describe("moveRequestIssue", () => {
       }),
       MOVE,
     );
-    expect(issue).toBe("VSL Grenoble ne peut pas recevoir la course de Jeanne Martin : Véhicule indisponible ce jour : Chauffeur absent le mardi.");
+    expect(shown(issue)).toBe(
+      "VSL Grenoble ne peut pas recevoir la course de Jeanne Martin : Véhicule indisponible ce jour : Chauffeur absent le mardi.",
+    );
   });
 
   it("detects a trip cancelled or locked elsewhere meanwhile", () => {
-    expect(moveRequestIssue(build({ trips: [trip("t2", null)] }), MOVE)).toMatch(/n'est plus à planifier/);
-    expect(moveRequestIssue(build({ trips: [trip("t1", "taxi_mrs")] }), MOVE)).toMatch(/autre véhicule entre-temps/);
+    expect(shown(moveRequestIssue(build({ trips: [trip("t2", null)] }), MOVE))).toBe(
+      "La course de Jeanne Martin n'est plus à planifier (annulée entre-temps ?).",
+    );
+    expect(shown(moveRequestIssue(build({ trips: [trip("t1", "taxi_mrs")] }), MOVE))).toMatch(/autre véhicule entre-temps/);
   });
 });
 
@@ -124,17 +132,46 @@ describe("movePlacementIssue", () => {
       MOVE,
       labels,
     );
-    expect(issue).toBe(
+    expect(shown(issue)).toBe(
       "Déplacement refusé : VSL Grenoble ne peut pas servir la course de Jeanne Martin (Horaires inatteignables pour le véhicule figé VSL Grenoble). Le planning n'a pas été modifié.",
     );
-    expect(movePlacementIssue(plan([]), MOVE, labels)).toBe(
+    expect(shown(movePlacementIssue(plan([]), MOVE, labels))).toBe(
       "Déplacement refusé : VSL Grenoble ne peut pas servir la course de Jeanne Martin. Le planning n'a pas été modifié.",
     );
   });
 
   it("refuses a plan placing the trip on another vehicle", () => {
-    expect(movePlacementIssue(plan([route("taxi_mrs", ["t1"])]), MOVE, labels)).toMatch(
+    expect(shown(movePlacementIssue(plan([route("taxi_mrs", ["t1"])]), MOVE, labels))).toMatch(
       /placé la course de Jeanne Martin sur Taxi Marseille 1 et non sur VSL Grenoble/,
     );
+  });
+});
+
+describe("patient names and technical records (OptimizationRun.error)", () => {
+  const plan = (routes: PlanRoute[], unassigned: PlanResponse["unassigned"] = []) => ({ routes, unassigned });
+
+  it("stores the trip id, never the patient's name, whatever the refusal", () => {
+    const stored = [
+      movePlacementIssue(plan([route("taxi_mrs", ["t1"])]), MOVE, labels),
+      movePlacementIssue(plan([], [{ tripId: "t1", reason: "Horaires inatteignables." }]), MOVE, labels),
+      movePlacementIssue(plan([]), MOVE, labels),
+      moveRequestIssue(build({ trips: [trip("t2", null)] }), MOVE),
+      moveRequestIssue(build({ trips: [trip("t1", "taxi_mrs")] }), MOVE),
+      moveRequestIssue(build({ trips: [trip("t2", null)], excludedTrips: [{ tripId: "t1", reason: "Sans heure" }] }), MOVE),
+    ];
+    for (const message of stored) {
+      expect(message).not.toBeNull();
+      expect(message).not.toMatch(/Jeanne|Martin/);
+      expect(message).toContain(tripRef("t1"));
+    }
+  });
+
+  it("resolves a reference to the patient's name, or to « une course » once the trip is gone", () => {
+    expect(resolveTripRefs(`${tripRef("t1")} a été figée ailleurs.`, () => "Jeanne Martin")).toBe(
+      "La course de Jeanne Martin a été figée ailleurs.",
+    );
+    expect(resolveTripRefs(`Refusé : ${tripRef("cmabc_123")} ailleurs.`, () => null)).toBe("Refusé : une course ailleurs.");
+    // A message without reference (every other run error) is left as is.
+    expect(resolveTripRefs("aucune solution trouvée", () => "X")).toBe("aucune solution trouvée");
   });
 });

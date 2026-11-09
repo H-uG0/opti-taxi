@@ -20,7 +20,7 @@ import {
 import { formatLongDate, fromIsoDate, todayIso } from "@/lib/time";
 import { withBeforeCommit } from "./before-commit";
 import { emptyPlanIssue } from "./empty-plan";
-import { movePlacementIssue, moveRequestIssue, type MoveTarget } from "./move";
+import { movePlacementIssue, moveRequestIssue, resolveTripRefs, type MoveTarget } from "./move";
 
 export type RunOutcome =
   | { ok: true; message: string; runId: string }
@@ -129,9 +129,13 @@ export async function runOptimization(
       error: "Aucun véhicule disponible ce jour : vérifiez les chauffeurs attitrés, leurs jours de travail et les équipiers des ambulances.",
     };
   }
+  // Move messages name the trip by its id (stored as is); the regulator reads the patient's name.
+  const { move } = options;
+  const shown = (text: string) =>
+    move ? resolveTripRefs(text, (id) => (id === move.tripId ? move.patientName : null)) : text;
   if (options.move) {
     const issue = moveRequestIssue(build, options.move);
-    if (issue) return { ok: false, error: issue, moveRejected: true };
+    if (issue) return { ok: false, error: shown(issue), moveRejected: true };
   }
 
   const serviceDate = fromIsoDate(isoDate);
@@ -182,7 +186,10 @@ export async function runOptimization(
   if (options.move) {
     const labels = new Map(request.vehicles.map((v) => [v.id, v.label]));
     const issue = movePlacementIssue(plan, options.move, labels);
-    if (issue) return { ...(await fail(issue, meta)), moveRejected: true };
+    if (issue) {
+      await fail(issue, meta);
+      return { ok: false, error: shown(issue), moveRejected: true };
+    }
   }
 
   let saved: SavePlanResult;
