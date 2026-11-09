@@ -10,7 +10,16 @@ function makeStop(
   sequence: number,
   tripId: string,
   kind: StopKind,
-  trip: { direction: TripDirection; status?: TripStatus; patient: string; appointmentMinute?: number; readyMinute?: number },
+  trip: {
+    direction: TripDirection;
+    status?: TripStatus;
+    patient: string;
+    appointmentMinute?: number;
+    readyMinute?: number;
+    payer?: "CPAM" | "PRIVATE";
+    accessNotes?: string;
+    facilityNotes?: string | null;
+  },
   completedAt: string | null = null,
   /** Driver id of the account that recorded completedAt (null: a regulator, or not recorded). */
   completedByDriverId: string | null = null,
@@ -34,11 +43,12 @@ function makeStop(
       appointmentMinute: trip.appointmentMinute ?? null,
       readyMinute: trip.readyMinute ?? null,
       notes: null,
+      payer: trip.payer ?? "CPAM",
       patientId: `patient_${tripId}`,
       recurrenceId: null,
       facilityId: "facility_1",
-      patient: { firstName, lastName, phone: "06 12 34 56 78", mobility: "SEATED", accessNotes: "  " },
-      facility: { name: "Centre de dialyse du Prado", phone: "04 91 00 00 00" },
+      patient: { firstName, lastName, phone: "06 12 34 56 78", mobility: "SEATED", accessNotes: trip.accessNotes ?? "  " },
+      facility: { name: "Centre de dialyse du Prado", phone: "04 91 00 00 00", notes: trip.facilityNotes ?? null },
     },
   };
 }
@@ -58,7 +68,7 @@ function makeRoute(stops: DriverRouteStop[], overrides: Partial<DriverRoute> = {
       label: "Taxi 1",
       registration: "AB-123-CD",
       type: "TAXI",
-      depot: { name: "Dépôt Marseille", address: "1 bd du Dépôt, 13010 Marseille", lat: 43.28, lng: 5.42 },
+      depot: { name: "Dépôt Marseille", address: "1 bd du Dépôt, 13010 Marseille", lat: 43.28, lng: 5.42, notes: null },
     },
     driver: { firstName: "Karim", lastName: "Benali", breakMinutes: 45, breakWindowStartMinute: 720, breakWindowEndMinute: 840 },
     crewMate: { firstName: "Lucie", lastName: "Roux" },
@@ -221,5 +231,62 @@ describe("buildRouteView", () => {
   it("ignores blank access notes", () => {
     const view = buildRouteView(sharedRoute(), DRIVER, true);
     expect(view.stops[0]?.accessNotes).toBeNull();
+  });
+
+  it("shows the home access notes at home and the facility's instructions at the care place", () => {
+    const home = "Code 4521B, 2e étage\nAscenseur au fond de la cour";
+    const care = "Entrée des transports par le parking arrière (portail B).";
+    const leg = { ...A, accessNotes: home, facilityNotes: ` ${care} ` };
+    const back = { ...C, accessNotes: home, facilityNotes: care };
+    const view = buildRouteView(
+      makeRoute([
+        makeStop(0, "trip_a", "PICKUP", leg),
+        makeStop(1, "trip_a", "DROPOFF", leg),
+        makeStop(2, "trip_c", "PICKUP", back),
+        makeStop(3, "trip_c", "DROPOFF", back),
+      ]),
+      DRIVER,
+      true,
+    );
+    const [homePickup, careDropoff, carePickup, homeDropoff] = view.stops;
+
+    expect(homePickup).toMatchObject({ accessNotes: home, facility: null });
+    expect(careDropoff?.accessNotes).toBeNull();
+    expect(careDropoff?.facility?.notes).toBe(care);
+    expect(carePickup?.accessNotes).toBeNull();
+    expect(carePickup?.facility?.notes).toBe(care);
+    expect(homeDropoff).toMatchObject({ accessNotes: home, facility: null });
+  });
+
+  it("keeps the home access notes off a private client's free destination", () => {
+    const station = { ...A, payer: "PRIVATE" as const, accessNotes: "Interphone « Martin »" };
+    const view = buildRouteView(
+      makeRoute([makeStop(0, "trip_a", "PICKUP", station), makeStop(1, "trip_a", "DROPOFF", station)]),
+      DRIVER,
+      true,
+    );
+    expect(view.stops.map((stop) => stop.accessNotes)).toEqual(["Interphone « Martin »", null]);
+  });
+
+  it("flags the private client's fare to collect on board, not a CPAM trip", () => {
+    const view = buildRouteView(
+      makeRoute([
+        makeStop(0, "trip_a", "PICKUP", { ...A, payer: "PRIVATE" }),
+        makeStop(1, "trip_b", "PICKUP", B),
+        makeStop(2, "trip_a", "DROPOFF", { ...A, payer: "PRIVATE" }),
+        makeStop(3, "trip_b", "DROPOFF", B),
+      ]),
+      DRIVER,
+      true,
+    );
+    expect(view.stops.map((stop) => stop.payOnBoard)).toEqual([true, false, true, false]);
+  });
+
+  it("carries the depot's access notes, trimmed, for the departure and the return", () => {
+    const depot = { name: "Dépôt Gap", address: "5 rue des Alpes, 05000 Gap", lat: 44.55, lng: 6.07 };
+    const withNotes = makeRoute([], { vehicle: { ...makeRoute([]).vehicle, depot: { ...depot, notes: " Badge portail : 0425 \n" } } });
+    expect(buildRouteView(withNotes, DRIVER, true).vehicle.depot.notes).toBe("Badge portail : 0425");
+    const blank = makeRoute([], { vehicle: { ...makeRoute([]).vehicle, depot: { ...depot, notes: "   " } } });
+    expect(buildRouteView(blank, DRIVER, true).vehicle.depot.notes).toBeNull();
   });
 });

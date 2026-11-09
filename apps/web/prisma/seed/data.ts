@@ -223,6 +223,8 @@ type DepotDef = {
   address: string;
   postalCode: string;
   department: string;
+  /** Access to the depot, shown to the crews at the departure and the return (fictitious). */
+  notes: string | null;
 };
 
 export const DEPOTS = {
@@ -234,6 +236,7 @@ export const DEPOTS = {
     address: "27 rue des Cigales",
     postalCode: "13012",
     department: "13",
+    notes: "Portail coulissant : badge ou code 2580. Clés des véhicules dans le boîtier à côté du bureau.",
   },
   manosque: {
     label: "Manosque",
@@ -243,6 +246,7 @@ export const DEPOTS = {
     address: "8 avenue de la Durance",
     postalCode: "04100",
     department: "04",
+    notes: "Stationnement des VSL sous l'auvent, côté atelier. Bureau ouvert de 6 h 30 à 19 h.",
   },
   sisteron: {
     label: "Sisteron",
@@ -252,6 +256,7 @@ export const DEPOTS = {
     address: "14 route de Gap",
     postalCode: "04200",
     department: "04",
+    notes: null,
   },
   gap: {
     label: "Gap",
@@ -261,6 +266,7 @@ export const DEPOTS = {
     address: "5 rue des Alpes",
     postalCode: "05000",
     department: "05",
+    notes: "Entrée par la rue arrière en hiver (pente verglacée côté rue des Alpes).",
   },
 } as const satisfies Record<string, DepotDef>;
 
@@ -439,7 +445,7 @@ export const PATIENTS: readonly PatientSpec[] = [
   { area: "marseille5", mobility: "LYING", sharing: "NONE", treatment: "DIALYSIS", facility: "dialysisMarseille", weekdays: MWF, appointment: "13:00", accessNotes: "Brancard : ascenseur assez large, 2e étage." },
   { area: "marseille4", mobility: "SEATED", sharing: "BOTH", treatment: "DIALYSIS", facility: "dialysisMarseille", weekdays: MWF, appointment: "13:00", active: false, accessNotes: "Hospitalisé : transports suspendus jusqu'à nouvel ordre." },
   { area: "marseille6", mobility: "LYING", sharing: "NONE", treatment: "DIALYSIS", facility: "dialysisMarseille", weekdays: TTS, appointment: "07:30" },
-  { area: "marseille10", mobility: "WHEELCHAIR", sharing: "NONE", treatment: "DIALYSIS", facility: "dialysisMarseille", weekdays: TTS, appointment: "07:30", accessNotes: "Accompagner jusqu'au fauteuil de dialyse." },
+  { area: "marseille10", mobility: "WHEELCHAIR", sharing: "NONE", treatment: "DIALYSIS", facility: "dialysisMarseille", weekdays: TTS, appointment: "07:30", accessNotes: "Rez-de-chaussée sans marche : accompagner de la porte jusqu'au véhicule." },
   { area: "marseille13", mobility: "SEATED", sharing: "BOTH", treatment: "DIALYSIS", facility: "dialysisMarseille", weekdays: TTS, appointment: "13:00" },
   { area: "marseille13", mobility: "SEATED", sharing: "BOTH", treatment: "DIALYSIS", facility: "dialysisMarseille", weekdays: TTS, appointment: "13:00" },
   // Dialysis — Aix-en-Provence

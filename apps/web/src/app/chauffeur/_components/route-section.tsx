@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChevronDown, Coffee, Flag, Warehouse } from "lucide-react";
+import { ChevronDown, Coffee, Flag, Info, Warehouse } from "lucide-react";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { cn } from "@/components/ui/cn";
 import { formatKm, STOP_KIND_LABELS } from "@/lib/labels";
@@ -104,15 +104,43 @@ function NextStopLink({ stop }: { stop: StopView }) {
   );
 }
 
-function Marker({ icon, minute, children, className }: { icon: ReactNode; minute: number; children: ReactNode; className?: string }) {
+function Marker({
+  icon,
+  minute,
+  children,
+  notes,
+  className,
+}: {
+  icon: ReactNode;
+  minute: number;
+  children: ReactNode;
+  /** Access to the depot (gate, keys, parking), under the line. */
+  notes?: string | null;
+  className?: string;
+}) {
   return (
-    <li className={cn("flex min-h-12 items-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white/70 px-4 py-2", className)}>
-      <span aria-hidden className="shrink-0 text-slate-500">
-        {icon}
-      </span>
-      <span className="tabular text-base font-semibold text-slate-800">{formatMinute(minute)}</span>
-      <span className="min-w-0 flex-1 text-sm text-slate-700">{children}</span>
+    <li className={cn("rounded-2xl border border-dashed border-slate-300 bg-white/70 px-4 py-2", className)}>
+      <div className="flex min-h-8 items-center gap-3">
+        <span aria-hidden className="shrink-0 text-slate-500">
+          {icon}
+        </span>
+        <span className="tabular text-base font-semibold text-slate-800">{formatMinute(minute)}</span>
+        <span className="min-w-0 flex-1 text-sm text-slate-700">{children}</span>
+      </div>
+      {notes ? <DepotNotes notes={notes} className="mt-1.5" /> : null}
     </li>
+  );
+}
+
+function DepotNotes({ notes, className }: { notes: string; className?: string }) {
+  return (
+    <p className={cn("flex items-start gap-2 text-sm whitespace-pre-line text-slate-700", className)}>
+      <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-slate-500" />
+      <span>
+        <span className="font-semibold">Accès au dépôt : </span>
+        {notes}
+      </span>
+    </p>
   );
 }
 
@@ -121,7 +149,7 @@ function ReturnMarker({ route, finished }: { route: RouteView; finished: boolean
   const { vehicle } = route;
   if (!finished) {
     return (
-      <Marker icon={<Warehouse className="size-5" />} minute={route.endMinute}>
+      <Marker icon={<Warehouse className="size-5" />} minute={route.endMinute} notes={vehicle.depot.notes}>
         Retour au dépôt · {vehicle.depot.name}
       </Marker>
     );
@@ -136,6 +164,7 @@ function ReturnMarker({ route, finished }: { route: RouteView; finished: boolean
         <span className="font-semibold">{vehicle.depot.name}</span> · {vehicle.depot.address} · prévu à{" "}
         <span className="tabular font-semibold">{formatMinute(route.endMinute)}</span>
       </p>
+      {vehicle.depot.notes ? <DepotNotes notes={vehicle.depot.notes} /> : null}
       <NavLinks lat={vehicle.depot.lat} lng={vehicle.depot.lng} destination={vehicle.depot.address} />
     </li>
   );
@@ -154,7 +183,7 @@ export function RouteSection({ route, regulator }: { route: RouteView; regulator
           switch (item.type) {
             case "depart":
               return (
-                <Marker key="depart" icon={<Warehouse className="size-5" />} minute={item.minute}>
+                <Marker key="depart" icon={<Warehouse className="size-5" />} minute={item.minute} notes={route.vehicle.depot.notes}>
                   Départ du dépôt · {route.vehicle.depot.name}
                 </Marker>
               );

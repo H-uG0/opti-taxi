@@ -94,7 +94,7 @@ export function FacilityForm({
           label="Notes"
           htmlFor="notes"
           error={errors.notes}
-          hint="Entrée à utiliser, stationnement, service à l'étage…"
+          hint="Entrée à utiliser, stationnement, service à l'étage… visibles par le chauffeur à la dépose et à la prise en charge"
         >
           <Textarea
             id="notes"

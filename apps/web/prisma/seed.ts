@@ -184,6 +184,7 @@ async function seedDepots(): Promise<Map<DepotKey, string>> {
         address: formatAddress({ address: def.address, postalCode: def.postalCode, city: TOWNS[def.town].name }),
         lat: location.lat,
         lng: location.lng,
+        notes: def.notes,
       },
     });
     depots.set(key, created.id);
@@ -513,7 +514,7 @@ async function seedOneOffTrips(
         phone: fictitiousMobile(rng),
         ...home,
         mobility: "SEATED",
-        accessNotes: "Client privé (hors CPAM) : règlement à bord.",
+        // Paying on board follows from the payer (PRIVATE): the roadmap says it, not the access notes.
       },
     });
     const sharingAllowed = sharingAllowedFor(null, client.direction, null, "PRIVATE");

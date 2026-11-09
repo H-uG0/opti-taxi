@@ -36,7 +36,8 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
           label: true,
           registration: true,
           type: true,
-          depot: { select: { name: true, address: true, lat: true, lng: true } },
+          // Notes: access to the depot (gate, keys, parking), shown at the departure and the return.
+          depot: { select: { name: true, address: true, lat: true, lng: true, notes: true } },
         },
       },
       driver: {
@@ -65,6 +66,8 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
               appointmentMinute: true,
               readyMinute: true,
               notes: true,
+              // A private client pays on board (no CPAM billing).
+              payer: true,
               // Server-side only: pair the return leg with its outbound leg (never sent to the client).
               patientId: true,
               recurrenceId: true,
@@ -72,7 +75,8 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
               patient: {
                 select: { firstName: true, lastName: true, phone: true, mobility: true, accessNotes: true },
               },
-              facility: { select: { name: true, phone: true } },
+              // Notes: entrance, parking, floor of the care place, shown on its stops.
+              facility: { select: { name: true, phone: true, notes: true } },
             },
           },
         },

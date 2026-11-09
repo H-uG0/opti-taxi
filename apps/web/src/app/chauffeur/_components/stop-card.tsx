@@ -8,6 +8,7 @@ import {
   ChevronDown,
   CircleCheck,
   CircleSlash,
+  Euro,
   Info,
   MapPin,
   MessageSquareText,
@@ -86,6 +87,19 @@ function Line({ icon, children, className }: { icon: ReactNode; children: ReactN
   );
 }
 
+/** Instructions typed by the regulation (home access, facility entrance): kept line by line, as typed. */
+function Instructions({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-950">
+      <Info aria-hidden className="mt-0.5 size-5 shrink-0" />
+      <p className="text-base whitespace-pre-line">
+        <span className="font-semibold">{label} : </span>
+        {children}
+      </p>
+    </div>
+  );
+}
+
 /** Details shared by open and collapsed cards. */
 function StopDetails({ stop }: { stop: StopView }) {
   return (
@@ -107,15 +121,9 @@ function StopDetails({ stop }: { stop: StopView }) {
         </Line>
       ) : null}
 
-      {stop.accessNotes ? (
-        <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-950">
-          <Info aria-hidden className="mt-0.5 size-5 shrink-0" />
-          <p className="text-base">
-            <span className="font-semibold">Accès : </span>
-            {stop.accessNotes}
-          </p>
-        </div>
-      ) : null}
+      {stop.accessNotes ? <Instructions label="Accès domicile">{stop.accessNotes}</Instructions> : null}
+
+      {stop.facility?.notes ? <Instructions label="Consignes de l'établissement">{stop.facility.notes}</Instructions> : null}
 
       {stop.tripNotes ? (
         <Line icon={<MessageSquareText className="size-5 text-slate-500" />}>
@@ -194,6 +202,12 @@ function OpenStopCard({ stop, total, regulator }: { stop: StopView; total: numbe
             <Pill className="bg-violet-50 text-violet-900 ring-violet-200">
               <Users aria-hidden className="size-4" />
               Partagé
+            </Pill>
+          ) : null}
+          {stop.payOnBoard ? (
+            <Pill className="bg-emerald-50 text-emerald-900 ring-emerald-200">
+              <Euro aria-hidden className="size-4" />
+              Client privé : règlement à bord
             </Pill>
           ) : null}
         </div>

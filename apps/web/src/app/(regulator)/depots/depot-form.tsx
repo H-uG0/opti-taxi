@@ -134,7 +134,7 @@ function DepotFields({ values, errors }: { values: FormValues; errors: FieldErro
           <Field
             label="Notes"
             htmlFor="notes"
-            hint="Facultatif : accès, parking, horaires d'ouverture…"
+            hint="Facultatif : accès, parking, horaires d'ouverture… visibles par les équipages au départ et au retour"
             error={errors.notes}
             className="sm:col-span-2 lg:col-span-4"
           >

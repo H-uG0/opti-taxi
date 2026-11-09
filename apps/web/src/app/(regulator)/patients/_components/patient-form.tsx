@@ -115,7 +115,7 @@ export function PatientForm({
           label="Notes d'accès"
           htmlFor="accessNotes"
           error={errors.accessNotes}
-          hint="Codes d'accès, étage, ascenseur, interphone… visibles par le chauffeur"
+          hint="Codes d'accès, étage, ascenseur, interphone… visibles par le chauffeur aux arrêts du domicile"
         >
           <Textarea
             id="accessNotes"

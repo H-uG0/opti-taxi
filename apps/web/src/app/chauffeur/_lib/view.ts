@@ -48,10 +48,13 @@ export type StopView = {
   phone: string | null;
   phoneHref: string | null;
   mobility: Mobility;
+  /** The patient's home access notes (code, floor, lift), on the stops at home only. */
   accessNotes: string | null;
   tripNotes: string | null;
-  /** Facility of a facility stop (outbound dropoff, return pickup). */
-  facility: { name: string; phone: string | null; phoneHref: string | null } | null;
+  /** Facility of a facility stop (outbound dropoff, return pickup), with its instructions (entrance, parking, floor). */
+  facility: { name: string; phone: string | null; phoneHref: string | null; notes: string | null } | null;
+  /** Private client (no CPAM billing): the crew collects the fare on board. */
+  payOnBoard: boolean;
   keyTime: { label: string; minute: number } | null;
   /** Other patients on board at the same time as this one (shared transport). */
   sharedWith: string[];
@@ -72,7 +75,8 @@ export type RouteView = {
     label: string;
     registration: string;
     type: VehicleType;
-    depot: { name: string; address: string; lat: number; lng: number };
+    /** notes: access to the depot (gate, keys, parking), shown at the departure and the return. */
+    depot: { name: string; address: string; lat: number; lng: number; notes: string | null };
   };
   startMinute: number;
   endMinute: number;
@@ -139,7 +143,9 @@ export function buildRouteView(
     .sort((a, b) => a.sequence - b.sequence)
     .map((stop, index) => {
       const { trip } = stop;
-      const facilityStop = isFacilityStop(stop.kind, trip.direction) && trip.facility !== null;
+      // Outbound dropoff or return pickup: the care place (or a private client's free address), never the home.
+      const careStop = isFacilityStop(stop.kind, trip.direction);
+      const facilityStop = careStop && trip.facility !== null;
       const state = stopState({ kind: stop.kind, completedAt: stop.completedAt, tripStatus: trip.status });
       return {
         id: stop.id,
@@ -161,12 +167,18 @@ export function buildRouteView(
         phone: trip.patient.phone,
         phoneHref: telHref(trip.patient.phone),
         mobility: trip.patient.mobility,
-        accessNotes: trip.patient.accessNotes?.trim() || null,
+        accessNotes: careStop ? null : trip.patient.accessNotes?.trim() || null,
         tripNotes: trip.notes?.trim() || null,
         facility:
           facilityStop && trip.facility
-            ? { name: trip.facility.name, phone: trip.facility.phone, phoneHref: telHref(trip.facility.phone) }
+            ? {
+                name: trip.facility.name,
+                phone: trip.facility.phone,
+                phoneHref: telHref(trip.facility.phone),
+                notes: trip.facility.notes?.trim() || null,
+              }
             : null,
+        payOnBoard: trip.payer === "PRIVATE",
         keyTime: stopKeyTime({
           kind: stop.kind,
           direction: trip.direction,
@@ -204,7 +216,7 @@ export function buildRouteView(
   return {
     id: route.id,
     status: route.status,
-    vehicle: route.vehicle,
+    vehicle: { ...route.vehicle, depot: { ...route.vehicle.depot, notes: route.vehicle.depot.notes?.trim() || null } },
     startMinute: route.startMinute,
     endMinute: route.endMinute,
     distanceKm: route.distanceKm,
