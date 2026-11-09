@@ -235,6 +235,34 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
         </div>
       </Fieldset>
 
+      <Fieldset legend="Remplacement du planning en place">
+        <Explanation>
+          Un nouveau calcul (« Réoptimiser », « Déplacer vers… ») remplace toutes les tournées du jour. Il n&apos;est
+          enregistré d&apos;office que s&apos;il ne comporte pas plus de violations de contraintes que le planning en
+          place, et dans les limites ci-dessous ; sinon le planning affiche le comparatif et vous choisissez de remplacer
+          ou de garder les tournées actuelles. Un déplacement qui laisserait d&apos;autres courses sans véhicule est
+          toujours refusé.
+        </Explanation>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Courses servies en moins acceptées"
+            htmlFor="replanMaxServedLoss"
+            error={errors.replanMaxServedLoss}
+            hint="0 par défaut : un calcul qui sert moins de courses que le planning en place demande toujours votre accord."
+          >
+            <NumberInput name="replanMaxServedLoss" unit="courses" integer values={values} errors={errors} />
+          </Field>
+          <Field
+            label="Baisse de marge acceptée (% du CA en place)"
+            htmlFor="replanMaxMarginLoss"
+            error={errors.replanMaxMarginLoss}
+            hint="10 % par défaut : au-delà, la baisse de marge estimée par rapport au planning en place demande votre accord."
+          >
+            <NumberInput name="replanMaxMarginLoss" unit="%" values={values} errors={errors} />
+          </Field>
+        </div>
+      </Fieldset>
+
       <Fieldset legend="Régulation">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field

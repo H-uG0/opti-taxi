@@ -1,5 +1,7 @@
-import { TriangleAlert, Clock, LoaderCircle, CircleX } from "lucide-react";
-import { formatInstant, formatSeconds, pluralize } from "@/lib/planning/format";
+import type { ReactNode } from "react";
+import { TriangleAlert, Clock, Info, LoaderCircle, CircleX } from "lucide-react";
+import { formatEurosRounded, formatInstant, formatSeconds, pluralize } from "@/lib/planning/format";
+import { NOT_KEPT_PREFIX } from "@/lib/planning/plan-compare";
 import type { RunView } from "@/lib/planning/types";
 
 const MATRIX_LABELS: Record<string, string> = {
@@ -7,10 +9,32 @@ const MATRIX_LABELS: Record<string, string> = {
   haversine: "estimation à vol d'oiseau",
 };
 
-/** Last optimization: when, how long, distance source, warnings, and the error of a failed attempt. */
-export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planRun: RunView | null }) {
+const PLAN_RUN_LABEL: Record<NonNullable<RunView["kind"]>, string> = {
+  optimize: "Dernier calcul",
+  move: "Dernier calcul (déplacement)",
+  restore: "Planning précédent rétabli",
+};
+
+/**
+ * Last optimization: when, how long, distance source, warnings, and the error
+ * of a failed attempt. `restore` (« Revenir au planning précédent ») shows in
+ * the card of the plan in place. A run waiting for confirmation is shown by
+ * PendingPlanBanner.
+ */
+export function RunBanner({
+  lastRun,
+  planRun,
+  restore,
+}: {
+  lastRun: RunView | null;
+  planRun: RunView | null;
+  restore?: ReactNode;
+}) {
   if (!lastRun && !planRun) return null;
-  const failed = lastRun && lastRun.status === "FAILED" ? lastRun : null;
+  const failedRun = lastRun && lastRun.status === "FAILED" ? lastRun : null;
+  // A plan the regulator chose not to keep (or that could no longer be saved) is not a failure.
+  const notKept = failedRun?.error?.startsWith(NOT_KEPT_PREFIX) ? failedRun : null;
+  const failed = notKept ? null : failedRun;
   // A RUNNING run past its budget was interrupted (server restart): do not promise a result.
   const running = lastRun && lastRun.status === "RUNNING" && !lastRun.interrupted ? lastRun : null;
   const interrupted = lastRun && lastRun.status === "RUNNING" && lastRun.interrupted ? lastRun : null;
@@ -47,12 +71,23 @@ export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planR
         </div>
       ) : null}
 
+      {notKept ? (
+        <p role="status" className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">
+          <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-slate-400" />
+          <span className="min-w-0 break-words">
+            Calcul du {formatInstant(notKept.startedAt)}
+            {notKept.requestedBy ? ` (${notKept.requestedBy})` : ""} non retenu
+            {notKept.error ? ` : ${notKept.error.slice(NOT_KEPT_PREFIX.length).replace(/^\s*:\s*/, "")}` : "."}
+          </span>
+        </p>
+      ) : null}
+
       {planRun ? (
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 shadow-xs">
           <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <Clock aria-hidden className="size-4 shrink-0 text-slate-400" />
             <span>
-              Dernier calcul le <span className="tabular">{formatInstant(planRun.startedAt)}</span>
+              {PLAN_RUN_LABEL[planRun.kind ?? "optimize"]} le <span className="tabular">{formatInstant(planRun.startedAt)}</span>
               {planRun.requestedBy ? ` par ${planRun.requestedBy}` : ""}
             </span>
             <span aria-hidden className="text-slate-300">
@@ -82,6 +117,15 @@ export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planR
               </>
             ) : null}
           </p>
+          {restore && planRun.previous ? (
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 pl-6 text-slate-600">
+              <span>
+                Planning remplacé par ce calcul : {pluralize(planRun.previous.served, "course servie", "courses servies")},
+                marge {formatEurosRounded(planRun.previous.margin)}.
+              </span>
+              {restore}
+            </div>
+          ) : null}
           {planRun.matrixSource === "haversine" ? (
             <p className="mt-1.5 flex items-start gap-2 text-amber-800">
               <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />

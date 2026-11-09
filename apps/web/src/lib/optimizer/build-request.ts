@@ -25,6 +25,7 @@ import { getSettings } from "@/lib/domain/settings";
 import { loadTrafficZones, toContractTraffic, type TrafficInput } from "@/lib/domain/traffic";
 import { tariffGaps, tariffsInForce, type TariffGap } from "@/lib/domain/tariffs";
 import { complianceAlerts, COMPLIANCE_KINDS } from "@/lib/fleet/maintenance";
+import type { ReplaceThresholds } from "@/lib/planning/plan-compare";
 import { resolveDayCrews, type DayCrewInput, type DayCrewPlan, type StaffPerson } from "@/lib/staff/day-crews";
 import { fromIsoDate, isoWeekday, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
 import type {
@@ -141,6 +142,8 @@ export type TariffInput = Pick<
 export type OptimizeInput = {
   date: string;
   settings: SettingsInput;
+  /** When a new plan may replace the routes in place without confirmation (AppSettings); defaults when absent. */
+  replan?: ReplaceThresholds;
   vehicles: VehicleInput[];
   trips: TripInput[];
   tariffs: TariffInput[];
@@ -641,5 +644,13 @@ export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): 
     }),
     loadTariffInputs(prisma, isoDate),
   ]);
-  return { date: isoDate, settings, vehicles, trips, tariffs, traffic: { ...settings, zones } };
+  return {
+    date: isoDate,
+    settings,
+    replan: { maxServedLoss: settings.replanMaxServedLoss, maxMarginLoss: settings.replanMaxMarginLoss },
+    vehicles,
+    trips,
+    tariffs,
+    traffic: { ...settings, zones },
+  };
 }

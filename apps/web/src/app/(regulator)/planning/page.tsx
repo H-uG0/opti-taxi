@@ -18,6 +18,7 @@ import { loadDayVersion } from "@/lib/planning/version";
 import { formatLongDate, isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
 import { DateNav } from "./date-nav";
 import { OptimizerStatus, OptimizerStatusPending } from "./optimizer-status";
+import { PendingPlanBanner, RestorePlanButton } from "./pending-plan";
 import { PlanningActivityBanner, PlanningActivityProvider } from "./planning-activity";
 import { PlanningBoard } from "./planning-board";
 import { PlanningToolbar } from "./planning-toolbar";
@@ -131,7 +132,21 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
         <Suspense fallback={<OptimizerStatusPending />}>
           <OptimizerStatus />
         </Suspense>
-        <RunBanner lastRun={view.lastRun} planRun={view.planRun} />
+        {view.lastRun?.pending && !past ? <PendingPlanBanner run={{ ...view.lastRun, pending: view.lastRun.pending }} /> : null}
+        <RunBanner
+          lastRun={view.lastRun}
+          planRun={view.planRun}
+          restore={
+            view.planRun?.previous && hasRoutes && !past && view.dayStatus === "PROPOSED" && !view.dayStarted ? (
+              <RestorePlanButton
+                date={date}
+                version={shownVersion.version}
+                previous={view.planRun.previous}
+                blocked={runningReason}
+              />
+            ) : null
+          }
+        />
         {view.dayStatus !== "EMPTY" && !past ? <TariffGapBanner gaps={view.tariffGaps} date={date} /> : null}
 
         {view.dayStatus === "EMPTY" ? (

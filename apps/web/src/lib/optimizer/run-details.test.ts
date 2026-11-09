@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { planResponseSchema, type PlanResponse } from "./contract";
-import { readRunDetails, runDetailsJson, type StoredRun } from "./run-details";
+import { readPendingPlan, readRunDetails, runDetailsJson, withoutPending, type StoredRun } from "./run-details";
 
 const fixtures = path.resolve(__dirname, "../../../../../contract/fixtures");
 const fixture: PlanResponse = planResponseSchema.parse(
@@ -66,5 +66,33 @@ describe("run details column", () => {
     expect(readRunDetails(storedRun({ violations: "?" }, null))).toBeNull();
     expect(readRunDetails(storedRun(null, { details: { violations: "?" } }))).toBeNull();
     expect(readRunDetails(storedRun([1, 2], [1, 2]))).toBeNull();
+  });
+});
+
+describe("replanning guard details", () => {
+  const comparison = {
+    current: { served: 300, violations: 0, revenue: 10_000, margin: 4_800, km: 1_790 },
+    next: { served: 280, violations: 2, revenue: 9_500, margin: 4_100, km: 1_850 },
+    lostTripIds: ["t9"],
+  };
+  const previous = {
+    runId: "run_0",
+    figures: comparison.current,
+    routes: [{ vehicleId: "v1", stops: [{ tripId: "t1", kind: "PICKUP" as const }, { tripId: "t1", kind: "DROPOFF" as const }] }],
+  };
+  const pending = { response, requestHash: "h", basedOnVersion: "v1", move: null };
+
+  it("keeps the kind, comparison, previous routes and question through the database", () => {
+    const details = throughDatabase(runDetailsJson(response, { kind: "move", comparison, previous, question: "Remplacer ?" }));
+    expect(readRunDetails({ id: "run_1", details, kpis: null })).toEqual({ ...expected, kind: "move", comparison, previous, question: "Remplacer ?" });
+  });
+
+  it("reads the plan waiting for confirmation, and drops it once handled (the comparison stays)", () => {
+    const details = throughDatabase(runDetailsJson(response, { comparison, pending }));
+    expect(readPendingPlan(details)).toEqual(pending);
+    const handled = throughDatabase(withoutPending(details));
+    expect(readPendingPlan(handled)).toBeNull();
+    expect(readRunDetails({ id: "run_1", details: handled, kpis: null })?.comparison).toEqual(comparison);
+    expect(readPendingPlan(null)).toBeNull();
   });
 });

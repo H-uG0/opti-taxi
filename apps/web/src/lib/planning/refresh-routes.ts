@@ -15,6 +15,10 @@
  * the last one done, the route's end, break and totals take the new values
  * (see routeRefresh).
  *
+ * The evaluation's violations (every route of the day is evaluated) replace
+ * those stored on the day's plan run, so the page and the validation read the
+ * violations of the plan as it now is, when nothing else changed meanwhile.
+ *
  * Never written here: route status (a VALIDATED route stays VALIDATED), crew,
  * RouteStop.completedAt, stop positions (detach.ts renumbers them), trip
  * status, and the routes of other dates.
@@ -42,6 +46,7 @@ import {
 } from "@/lib/optimizer/persist";
 import { logError } from "@/lib/log";
 import { fromIsoDate, toIsoDate } from "@/lib/time";
+import { loadPlanVersion } from "./version";
 
 /** Same budget as savePlan: the write locks the routes, a re-optimization in flight may hold them. */
 const REFRESH_TX_OPTIONS = { maxWait: 15_000, timeout: 60_000 } as const;
@@ -577,6 +582,33 @@ const storedRouteSelect = {
   },
 } satisfies Prisma.RouteSelect;
 
+/**
+ * The evaluation's violations become those of the day's plan (its latest
+ * successful run: details.violations, valid), which the planning page and
+ * validateDay read. Only when nothing of the day changed between the read the
+ * evaluation was built from and this write (same plan version).
+ */
+async function storeEvaluatedViolations(
+  tx: Prisma.TransactionClient,
+  isoDate: string,
+  response: Pick<PlanResponse, "validation">,
+  now: Date,
+): Promise<void> {
+  const run = await tx.optimizationRun.findFirst({
+    where: { serviceDate: fromIsoDate(isoDate), status: "SUCCESS" },
+    orderBy: { startedAt: "desc" },
+    select: { id: true, details: true },
+  });
+  if (!run || !run.details || typeof run.details !== "object" || Array.isArray(run.details)) return;
+  await tx.optimizationRun.update({
+    where: { id: run.id },
+    data: {
+      valid: response.validation.valid,
+      details: { ...run.details, violations: response.validation.violations, evaluatedAt: now.toISOString() },
+    },
+  });
+}
+
 /** Writes the plan under row locks; returns the routes actually rewritten. */
 async function writeRefresh(
   tx: Prisma.TransactionClient,
@@ -584,6 +616,7 @@ async function writeRefresh(
   response: PlanResponse,
   vehicles: readonly RefreshVehicle[],
   now: Date,
+  evaluated: { isoDate: string; version: string },
 ): Promise<RouteRefresh[]> {
   // Same lock as savePlan: a re-optimization or a validation in flight is
   // waited for, and a route it replaced is no longer found. The stops are
@@ -593,6 +626,8 @@ async function writeRefresh(
   await tx.$queryRaw`SELECT "id" FROM "Route" WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`;
   await tx.$queryRaw`SELECT "id" FROM "RouteStop" WHERE "routeId" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`;
   const current = await tx.route.findMany({ where: { id: { in: ids } }, select: storedRouteSelect });
+  // Read before this transaction's own writes: did anything of the day change since the evaluation's read?
+  const dayUnchanged = (await loadPlanVersion(tx, evaluated.isoDate)) === evaluated.version;
   const before = new Map(snapshot.map((route) => [route.id, route]));
   // The evaluation describes the stops read before the call: a route changed since is left alone.
   const unchanged = current.filter((route) => {
@@ -623,11 +658,14 @@ async function writeRefresh(
       data: trip.data,
     });
   }
+  if (dayUnchanged) await storeEvaluatedViolations(tx, evaluated.isoDate, response, now);
   return plan.routes;
 }
 
 async function refreshDay(deps: RefreshDeps, isoDate: string, routeIds: ReadonlySet<string>): Promise<RefreshOutcome> {
   const { prisma } = deps;
+  // Read first: a change made after it makes the write see another version (the violations are then not stored).
+  const version = await loadPlanVersion(prisma, isoDate);
   const [input, dayRoutes] = await Promise.all([
     loadOptimizeInput(prisma, isoDate),
     prisma.route.findMany({ where: { serviceDate: fromIsoDate(isoDate) }, select: storedRouteSelect }),
@@ -646,7 +684,7 @@ async function refreshDay(deps: RefreshDeps, isoDate: string, routeIds: Readonly
   }
 
   const written = await prisma.$transaction(
-    (tx) => writeRefresh(tx, snapshot, result.data, request.vehicles, deps.now ?? new Date()),
+    (tx) => writeRefresh(tx, snapshot, result.data, request.vehicles, deps.now ?? new Date(), { isoDate, version }),
     REFRESH_TX_OPTIONS,
   );
   const writtenIds = new Set(written.map((route) => route.routeId));

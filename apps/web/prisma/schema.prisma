@@ -139,6 +139,8 @@ enum OptimizationRunStatus {
   RUNNING
   SUCCESS
   FAILED
+  /// Calcul terminé mais moins bon que le planning en place (ou invalide) : il attend que le régulateur le confirme.
+  AWAITING_CONFIRMATION
 }
 
 enum UserRole {
@@ -582,6 +584,10 @@ model AppSettings {
   eveningPeakEndMinute       Int      @default(1140)
   /// Dernière modification du réglage du trafic : seuls les plannings calculés depuis servent à calibrer les facteurs.
   trafficChangedAt           DateTime?
+  /// Courses servies en moins qu'un nouveau calcul peut avoir sans demander de confirmation avant de remplacer le planning.
+  replanMaxServedLoss        Int      @default(0)
+  /// Baisse de marge acceptée sans confirmation, en fraction du CA du planning en place (0.1 = 10 %).
+  replanMaxMarginLoss        Float    @default(0.1)
   updatedAt                  DateTime @updatedAt
 }
 

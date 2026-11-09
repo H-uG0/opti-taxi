@@ -6,6 +6,7 @@
 import { z } from "zod";
 import type { AppSettings } from "@prisma/client";
 import { formatDecimalInput, numberField, type FormValues } from "@/lib/forms";
+import { fractionToPercent, percentToFraction } from "../tarifs/schema";
 
 /** Décret 2025-202 (transport partagé): art. R. 322-11-5 (détours) and R. 322-11-6 (attente). */
 export const DECREE_LIMITS = {
@@ -70,6 +71,10 @@ export const settingsSchema = z
     dropoffServiceMin: numberField({ integer: true, min: 0, max: 60, unit: "min" }),
     unassignedPenalty: numberField({ min: 0, max: 1_000_000, unit: "€" }),
     solverTimeLimitSec: numberField({ integer: true, min: 1, max: MAX_SOLVER_TIME_LIMIT_SEC, unit: "s" }),
+    // Replacing the routes in place (lib/planning/plan-compare.ts): beyond these, the regulator confirms.
+    replanMaxServedLoss: numberField({ integer: true, min: 0, max: 1000, unit: "courses" }),
+    // Typed in %, stored as a fraction of the revenue in place.
+    replanMaxMarginLoss: numberField({ min: 0, max: 100, unit: "%" }).transform(percentToFraction),
     // Blank: no number, the drivers' roadmap shows no call link.
     regulatorPhone: z
       .string()
@@ -109,13 +114,15 @@ export const SETTINGS_FIELDS = [
   "dropoffServiceMin",
   "unassignedPenalty",
   "solverTimeLimitSec",
+  "replanMaxServedLoss",
 ] as const satisfies readonly (keyof SettingsInput & keyof AppSettings)[];
 
 export function settingsFormValues(
-  settings: Pick<AppSettings, (typeof SETTINGS_FIELDS)[number] | "regulatorPhone">,
+  settings: Pick<AppSettings, (typeof SETTINGS_FIELDS)[number] | "regulatorPhone" | "replanMaxMarginLoss">,
 ): FormValues {
   return {
     ...Object.fromEntries(SETTINGS_FIELDS.map((field) => [field, formatDecimalInput(settings[field])])),
+    replanMaxMarginLoss: formatDecimalInput(fractionToPercent(settings.replanMaxMarginLoss)),
     regulatorPhone: settings.regulatorPhone ?? "",
   };
 }

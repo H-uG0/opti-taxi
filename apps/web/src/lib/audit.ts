@@ -25,7 +25,10 @@
  *   trip.cancel, trip.detach (taken off its route by a referential change, not
  *   cancelled), trip.restore, trip.reschedule, trip.sharing_accept,
  *   trip.sharing_refuse, trip.move, trip.lock, trip.unlock;
- * - planning: plan.optimize, plan.validate, plan.reopen;
+ * - planning: plan.optimize (details.confirmed when the regulator replaced the
+ *   routes in place with a plan that waited for confirmation), plan.restore
+ *   (« Revenir au planning précédent »), plan.discard (a waiting plan not
+ *   kept), plan.validate, plan.reopen;
  * - field, on the Trip (stops are deleted by re-optimizations): stop.pickup,
  *   stop.dropoff, stop.no_show, stop.undo_pickup, stop.undo_dropoff;
  * - staff and crews: day_crew.save, day_crew.reset (serviceDate),

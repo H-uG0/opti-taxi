@@ -355,16 +355,32 @@ describe("contract fixtures", () => {
     });
   });
 
-  it("saves the run with exactly the optimizer KPIs and the details in their own column", async () => {
-    type RunWrite = { where: unknown; data: Record<string, unknown> };
+  type RunWrite = { where: unknown; data: Record<string, unknown> };
+  type InPlaceRoute = {
+    vehicleId: string;
+    revenue: number;
+    margin: number;
+    distanceKm: number;
+    optimizationRunId: string | null;
+    stops: { tripId: string; kind: "PICKUP" | "DROPOFF"; sequence: number }[];
+  };
+
+  /**
+   * Just enough of a transaction client for savePlan: nothing locked, nothing
+   * started; `inPlace` are the routes already saved for the date, serving
+   * `servedInPlace`, with `violationsInPlace` on their run.
+   */
+  function fakeClient(inPlace: InPlaceRoute[] = [], servedInPlace: string[] = [], violationsInPlace = 0) {
     const runWrites: RunWrite[] = [];
+    const deleted: unknown[] = [];
     let createdRoutes = 0;
-    // Just enough of a transaction client for savePlan: nothing locked, nothing started.
     const tx = {
       $queryRaw: async () => [],
+      $executeRaw: async () => 1,
       trip: {
         count: async () => 0,
-        findMany: async () => request.trips.map((t) => current(t.id)),
+        findMany: async (args: { where: { routeId?: unknown } }) =>
+          args.where.routeId ? servedInPlace.map((id) => ({ id })) : request.trips.map((t) => current(t.id)),
         update: async () => ({}),
         updateMany: async () => ({ count: 0 }),
       },
@@ -373,10 +389,31 @@ describe("contract fixtures", () => {
           request.vehicles.map((v) => ({ id: v.id, type: v.type, defaultDriverId: `drv_${v.id}`, defaultCrewMateId: null })),
       },
       route: {
-        deleteMany: async () => ({ count: 0 }),
+        findMany: async () => inPlace,
+        deleteMany: async (args: unknown) => {
+          deleted.push(args);
+          return { count: inPlace.length };
+        },
         create: async () => ({ id: `route_${++createdRoutes}` }),
       },
       optimizationRun: {
+        findFirst: async () =>
+          inPlace.length > 0
+            ? {
+                id: "run_0",
+                valid: violationsInPlace === 0,
+                kpis: null,
+                details: {
+                  ...runDetailsJson(response),
+                  violations: Array.from({ length: violationsInPlace }, () => ({
+                    code: "TIME_WINDOW",
+                    message: "Retard",
+                    tripId: null,
+                    vehicleId: null,
+                  })),
+                },
+              }
+            : null,
         update: async (args: RunWrite) => {
           runWrites.push(args);
           return {};
@@ -384,6 +421,11 @@ describe("contract fixtures", () => {
       },
     };
     const prisma = { $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx) } as unknown as PrismaClient;
+    return { prisma, runWrites, deleted };
+  }
+
+  it("saves the run with exactly the optimizer KPIs and the details in their own column", async () => {
+    const { prisma, runWrites } = fakeClient();
 
     await savePlan(prisma, { runId: "run_1", isoDate: request.date, request, response, now: NOW });
 
@@ -392,7 +434,10 @@ describe("contract fixtures", () => {
     expect(write?.where).toEqual({ id: "run_1" });
     expect(write?.data).toMatchObject({ status: "SUCCESS", error: null, ...summarizeRun(request, response) });
     expect(write?.data.kpis).toStrictEqual(response.kpis);
-    expect(write?.data.details).toStrictEqual(runDetailsJson(response));
+    // No routes in place: nothing to compare with, nothing to keep.
+    expect(write?.data.details).toMatchObject(runDetailsJson(response));
+    expect(write?.data.details).toMatchObject({ comparison: { current: null, lostTripIds: [] } });
+    expect(write?.data.details).not.toHaveProperty("previous");
 
     const stored = JSON.parse(JSON.stringify({ id: "run_1", kpis: write?.data.kpis, details: write?.data.details }));
     expect(readRunDetails(stored)).toEqual({
@@ -402,6 +447,67 @@ describe("contract fixtures", () => {
       warnings: response.meta.warnings,
       unassigned: response.unassigned,
       trafficSource: response.meta.trafficSource,
+      comparison: expect.objectContaining({ current: null }),
     });
+  });
+
+  const inPlaceRoute: InPlaceRoute = {
+    vehicleId: "veh_old",
+    revenue: 500,
+    margin: 200,
+    distanceKm: 120,
+    optimizationRunId: "run_0",
+    stops: [
+      { tripId: "old_trip", kind: "DROPOFF", sequence: 1 },
+      { tripId: "old_trip", kind: "PICKUP", sequence: 0 },
+    ],
+  };
+
+  it("compares the new plan with the routes in place and keeps their stop sequences", async () => {
+    const { prisma, runWrites } = fakeClient([inPlaceRoute], ["old_trip"], 1);
+    const checks: unknown[] = [];
+    const saved = await savePlan(prisma, {
+      runId: "run_1",
+      isoDate: request.date,
+      request,
+      response,
+      kind: "optimize",
+      check: (context) => {
+        checks.push(context.comparison);
+      },
+      now: NOW,
+    });
+    expect(checks).toEqual([saved.comparison]);
+    expect(saved.comparison.current).toEqual({ served: 1, violations: 1, revenue: 500, margin: 200, km: 120 });
+    expect(saved.comparison.next.violations).toBe(response.validation.violations.length);
+    // The trip of the old plan is not part of the new request: lost.
+    expect(saved.comparison.lostTripIds).toEqual(["old_trip"]);
+    expect(runWrites[0]?.data.details).toMatchObject({
+      kind: "optimize",
+      previous: {
+        runId: "run_0",
+        figures: { served: 1 },
+        routes: [{ vehicleId: "veh_old", stops: [{ tripId: "old_trip", kind: "PICKUP" }, { tripId: "old_trip", kind: "DROPOFF" }] }],
+      },
+    });
+  });
+
+  it("writes nothing when the guard refuses the new plan", async () => {
+    const { prisma, runWrites, deleted } = fakeClient([inPlaceRoute], ["old_trip"]);
+    const refusal = new Error("moins bon");
+    await expect(
+      savePlan(prisma, {
+        runId: "run_1",
+        isoDate: request.date,
+        request,
+        response,
+        check: () => {
+          throw refusal;
+        },
+        now: NOW,
+      }),
+    ).rejects.toBe(refusal);
+    expect(deleted).toEqual([]);
+    expect(runWrites).toEqual([]);
   });
 });

@@ -30,12 +30,15 @@ const STORED = {
   dropoffServiceMin: 5,
   unassignedPenalty: 10000,
   solverTimeLimitSec: 10,
+  replanMaxServedLoss: 0,
+  replanMaxMarginLoss: 0.1,
   regulatorPhone: "04 65 71 00 00",
 };
 
 function form(overrides: Record<string, string> = {}): FormData {
   const fd = new FormData();
-  const values = { ...STORED, regulatorPhone: "04 65 71 00 00", ...overrides };
+  // The margin loss tolerance is typed in % in the form, stored as a fraction.
+  const values = { ...STORED, replanMaxMarginLoss: STORED.replanMaxMarginLoss * 100, regulatorPhone: "04 65 71 00 00", ...overrides };
   for (const [key, value] of Object.entries(values)) if (key !== "id") fd.set(key, String(value));
   return fd;
 }

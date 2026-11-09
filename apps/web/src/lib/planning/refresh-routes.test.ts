@@ -777,6 +777,8 @@ type Where = { id?: string | { in: string[] }; serviceDate?: Date };
 function fakePrisma(routes: FakeRoute[], trips: RefreshTrip[]) {
   const writes: { model: string; where: unknown; data: unknown }[] = [];
   const locks: string[] = [];
+  // Plan version of the day (lib/planning/version.ts): bumped by a test to simulate a concurrent change.
+  const version = { changes: 0 };
   const matches = (route: FakeRoute, where: Where) =>
     (where.serviceDate === undefined || route.serviceDate.getTime() === where.serviceDate.getTime()) &&
     (where.id === undefined || (typeof where.id === "string" ? route.id === where.id : where.id.in.includes(route.id)));
@@ -804,13 +806,20 @@ function fakePrisma(routes: FakeRoute[], trips: RefreshTrip[]) {
         return { count: 1 };
       },
     },
+    // The day's plan run, whose violations an evaluation replaces.
+    optimizationRun: {
+      findFirst: async () => ({ id: "run_plan", details: { solverStatus: "ROUTING_SUCCESS", violations: [], warnings: [], unassigned: [] } }),
+      update: async (args: { where: unknown; data: unknown }) => writes.push({ model: "optimizationRun", ...args }),
+    },
     $queryRaw: async (strings: TemplateStringsArray) => {
-      locks.push(/FROM "(\w+)"/.exec(strings.join("?"))?.[1] ?? "?");
+      const sql = strings.join("?");
+      if (sql.includes("count(*)")) return [{ routes: version.changes, routesAt: null, stops: 0, trips: 0, tripsAt: null }];
+      locks.push(/FROM "(\w+)"/.exec(sql)?.[1] ?? "?");
       return [];
     },
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(client),
   };
-  return { prisma: client as unknown as PrismaClient, writes, locks };
+  return { prisma: client as unknown as PrismaClient, writes, locks, version };
 }
 
 describe("refreshRoutes", () => {
@@ -891,7 +900,19 @@ describe("refreshRoutes", () => {
       ["routeStop", { id: "r1-B-PICKUP" }],
       ["routeStop", { id: "r1-B-DROPOFF" }],
       ["trip", { id: "B", routeId: "r1", sharingStatus: "PROPOSED", status: { notIn: ["CANCELLED", "NO_SHOW"] } }],
+      // The evaluation's violations become those of the day's plan (read by the page and validateDay).
+      ["optimizationRun", { id: "run_plan" }],
     ]);
+    expect(writes[4]?.data).toEqual({
+      valid: false,
+      details: {
+        solverStatus: "ROUTING_SUCCESS",
+        violations: [{ code: "TIME_WINDOW", message: "retard", tripId: "B", vehicleId: "veh_1" }],
+        warnings: [],
+        unassigned: [],
+        evaluatedAt: NOW.toISOString(),
+      },
+    });
     const routeWrite = writes[0]?.data as Record<string, unknown>;
     expect(Object.keys(routeWrite).sort()).toEqual(
       ["breakEndMinute", "breakStartMinute", "cost", "distanceKm", "emptyKm", "endMinute", "margin", "revenue", "startMinute"],
@@ -913,10 +934,22 @@ describe("refreshRoutes", () => {
       ["route", { id: "r1" }],
       ["routeStop", { id: "r1-B-DROPOFF" }],
       ["trip", { id: "B", routeId: "r1", sharingStatus: "NOT_PROPOSED", status: { notIn: ["CANCELLED", "NO_SHOW"] } }],
+      ["optimizationRun", { id: "run_plan" }],
     ]);
     expect(writes[0]?.data).toMatchObject({ startMinute: 400 });
     expect(writes[2]?.data).not.toHaveProperty("plannedPickupMinute");
     expect(writes[2]?.data).toMatchObject({ plannedDropoffMinute: 440 });
+  });
+
+  it("does not store the violations when the day changed between the evaluation and the write", async () => {
+    const { prisma, writes, version } = fakePrisma([r1], [refreshTrip("B", "r1")]);
+    const evaluate = async (): Promise<EvaluateResult> => {
+      // Another trip of the day was cancelled meanwhile: the evaluation no longer describes the day.
+      version.changes += 1;
+      return { ok: true, data: response([planRoute("veh_1", [["B", "PICKUP"], ["B", "DROPOFF"]])], [tripResult("B")]) };
+    };
+    expect(await refreshRoutes({ prisma, evaluate, now: NOW }, ["r1"])).toEqual(outcome({ refreshed: 1 }));
+    expect(writes.map((w) => w.model)).not.toContain("optimizationRun");
   });
 
   it("leaves a route whose stops changed between the evaluation and the write", async () => {

@@ -51,6 +51,15 @@ export function planVersionToken(parts: PlanVersionParts): string {
   );
 }
 
+/**
+ * Fingerprint of an optimizer request: a plan computed for it may be saved
+ * later (« Remplacer quand même ») only if the day's data still builds the
+ * same request (trips, locks, vehicles, crews, tariffs, settings).
+ */
+export function requestHash(request: unknown): string {
+  return createHash("sha256").update(JSON.stringify(request)).digest("base64url");
+}
+
 export function runToken(run: Pick<LatestRun, "id" | "status"> | null): string | null {
   return run ? token(`${run.id}|${run.status}`) : null;
 }

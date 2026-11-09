@@ -13,11 +13,16 @@ import { lockPlanningDay } from "@/lib/planning/day-lock";
 import { loadPlanningDay } from "@/lib/planning/load";
 import { LOCKED, lockAction, notLockedOn } from "@/lib/planning/lock";
 import {
+  confirmPendingRun,
+  discardPendingRun,
+  dropPendingRuns,
   OPTIMIZATION_IN_PROGRESS_ERROR,
   optimizationInProgress,
   PLANNING_TX_OPTIONS,
   replanBlocker,
+  restorePreviousPlan,
   runOptimization,
+  type RunOutcome,
 } from "@/lib/planning/run-optimization";
 import { validationIssues, validationQuestion } from "@/lib/planning/validation";
 import { loadPlanVersion, STALE_PLAN_ERROR } from "@/lib/planning/version";
@@ -66,6 +71,12 @@ async function guarded(action: string, body: () => Promise<PlanningActionResult>
   }
 }
 
+/** The action's answer to a computation's outcome. */
+function toResult(outcome: RunOutcome): PlanningActionResult {
+  if (outcome.ok) return { ok: true, message: outcome.message };
+  return outcome.needsConfirmation ? { ok: false, error: outcome.error, needsConfirmation: true } : { ok: false, error: outcome.error };
+}
+
 /** Locks only matter for the next optimization: none on a past date. */
 function pastDateError(isoDate: string): PlanningActionResult | null {
   return isoDate < todayIso() ? { ok: false, error: `Le ${formatLongDate(isoDate)} est passé : son planning n'est plus modifiable.` } : null;
@@ -80,7 +91,7 @@ export async function optimizeDay(date: string): Promise<PlanningActionResult> {
 
     const outcome = await runOptimization(parsed.data, user);
     refreshPages();
-    return outcome.ok ? { ok: true, message: outcome.message } : { ok: false, error: outcome.error };
+    return toResult(outcome);
   });
 }
 
@@ -151,8 +162,9 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
     const outcome = await runOptimization(isoDate, user, {
       move: { tripId: trip.id, vehicleId: target.id, vehicleLabel: target.label, patientName: who },
     });
-    if (!outcome.ok && outcome.moveRejected) {
+    if (!outcome.ok && (outcome.moveRejected || outcome.needsConfirmation)) {
       // Undo the lock this move set (unless it was changed meanwhile) so the next optimization does not keep the trip unassigned.
+      // A plan waiting for confirmation sets it again when confirmed (confirmPendingRun).
       // The undo is a change of its own, traced as the lock or unlock it amounts to.
       if (moved) {
         const previousLock = trip.lockedVehicleId;
@@ -165,13 +177,62 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
         }, PLANNING_TX_OPTIONS);
       }
       refreshPages();
-      return { ok: false, error: outcome.error };
+      return toResult(outcome);
     }
     refreshPages();
     if (!outcome.ok) {
       return { ok: false, error: `Course de ${who} figée sur ${target.label}, mais le planning n'a pas été recalculé : ${outcome.error}` };
     }
     return { ok: true, message: `Course de ${who} déplacée et figée sur ${target.label}. ${outcome.message}` };
+  });
+}
+
+/**
+ * « Remplacer quand même » : saves the plan computed by run `runId`, which
+ * waited because it serves fewer trips, breaks more rules or loses margin
+ * compared with the routes in place (lib/planning/plan-compare.ts).
+ */
+export async function confirmPlan(runId: string): Promise<PlanningActionResult> {
+  const user = await requireUser("REGULATOR");
+  return guarded("confirmPlan", async () => {
+    const id = idSchema.safeParse(runId);
+    if (!id.success) return { ok: false, error: "Calcul introuvable : rechargez la page." };
+    const outcome = await confirmPendingRun(id.data, user);
+    refreshPages();
+    return toResult(outcome);
+  });
+}
+
+/** « Garder le planning actuel » : the plan waiting for confirmation is dropped. */
+export async function discardPlan(runId: string): Promise<PlanningActionResult> {
+  const user = await requireUser("REGULATOR");
+  return guarded("discardPlan", async () => {
+    const id = idSchema.safeParse(runId);
+    if (!id.success) return { ok: false, error: "Calcul introuvable : rechargez la page." };
+    const dropped = await discardPendingRun(id.data, (tx, isoDate) =>
+      audit(tx, user, { action: "plan.discard", entity: "OptimizationRun", entityId: id.data, serviceDate: isoDate }),
+    );
+    refreshPages();
+    return dropped
+      ? { ok: true, message: "Calcul écarté : le planning en place est conservé." }
+      : { ok: false, error: "Ce calcul n'attend plus de confirmation (déjà traité ou remplacé par un autre) : rechargez la page." };
+  });
+}
+
+/**
+ * « Revenir au planning précédent » : the routes replaced by the last
+ * computation come back, re-timed with today's data (/evaluate), while the
+ * day can still be re-planned. Refused on a stale page.
+ */
+export async function restorePlan(date: string, shownVersion: string): Promise<PlanningActionResult> {
+  const user = await requireUser("REGULATOR");
+  return guarded("restorePlan", async () => {
+    const parsed = dateSchema.safeParse(date);
+    if (!parsed.success) return INVALID_DATE;
+    if (typeof shownVersion !== "string" || (await loadPlanVersion(db, parsed.data)) !== shownVersion) return STALE_PLAN;
+    const outcome = await restorePreviousPlan(parsed.data, user);
+    refreshPages();
+    return toResult(outcome);
   });
 }
 
@@ -292,6 +353,8 @@ export async function validateDay(date: string, confirmed: boolean, shownVersion
         data: { status: "VALIDATED", validatedAt: new Date() },
       });
       if (count > 0) await audit(tx, user, { action: "plan.validate", entity: "Route", entityId: null, serviceDate: isoDate });
+      // A computation still waiting for confirmation could no longer replace a validated plan.
+      await dropPendingRuns(tx, serviceDate, "le planning a été validé.");
       return "validated" as const;
     }, PLANNING_TX_OPTIONS);
     if (outcome === "running") return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };

@@ -12,6 +12,8 @@ const defaults = {
   dropoffServiceMin: "5",
   unassignedPenalty: "10 000",
   solverTimeLimitSec: "10",
+  replanMaxServedLoss: "0",
+  replanMaxMarginLoss: "10",
   regulatorPhone: "",
 };
 
@@ -33,8 +35,17 @@ describe("settingsSchema", () => {
       dropoffServiceMin: 5,
       unassignedPenalty: 10000,
       solverTimeLimitSec: 10,
+      replanMaxServedLoss: 0,
+      replanMaxMarginLoss: 0.1,
       regulatorPhone: null,
     });
+  });
+
+  it("takes the margin loss tolerance in % and stores it as a fraction of the revenue", () => {
+    expect(settingsSchema.parse({ ...defaults, replanMaxMarginLoss: "2,5" }).replanMaxMarginLoss).toBe(0.025);
+    expect(errorsOf({ ...defaults, replanMaxMarginLoss: "120" }).replanMaxMarginLoss).toMatch(/Maximum/);
+    expect(errorsOf({ ...defaults, replanMaxServedLoss: "1,5" }).replanMaxServedLoss).toBe("Nombre entier attendu.");
+    expect(settingsFormValues(settingsSchema.parse(defaults)).replanMaxMarginLoss).toBe("10");
   });
 
   it("enforces waitBefore + waitAfter <= maxTotalWait", () => {

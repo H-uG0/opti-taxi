@@ -229,6 +229,7 @@ function runView(
   patientOf: (tripId: string) => string | null,
 ): RunView | null {
   if (!run) return null;
+  const found = details.get(run.id);
   return {
     id: run.id,
     status: run.status,
@@ -249,6 +250,13 @@ function runView(
     timeLimitSec: effectiveTimeLimitSec(configuredSec, run.tripsCount),
     // Same rule as the stale-run cleanup of runOptimization (run-optimization.ts).
     interrupted: run.status === "RUNNING" && isStaleRun(run, configuredSec, now),
+    kind: found?.kind ?? null,
+    pending:
+      run.status === "AWAITING_CONFIRMATION" && found?.comparison && found.question
+        ? { question: resolveTripRefs(found.question, patientOf), comparison: found.comparison }
+        : null,
+    previous: found?.previous && found.previous.routes.length > 0 ? found.previous.figures : null,
+    evaluatedAt: found?.evaluatedAt ?? null,
   };
 }
 

@@ -255,6 +255,50 @@ describe("buildPlanningView", () => {
     expect(view.trips.some((t) => t.id === "a")).toBe(true);
   });
 
+  it("shows a plan waiting for confirmation with its question (patients named) and the routes a run replaced", () => {
+    const comparison = {
+      current: { served: 2, violations: 0, revenue: 150, margin: 60, km: 100 },
+      next: { served: 1, violations: 0, revenue: 80, margin: 30, km: 60 },
+      lostTripIds: ["b"],
+    };
+    const pendingRun = run({ id: "run2", status: "AWAITING_CONFIRMATION" });
+    const details = new Map<string, RunDetails>([
+      [
+        "run2",
+        {
+          runId: "run2",
+          solverStatus: "OK",
+          violations: [],
+          warnings: [],
+          unassigned: [],
+          kind: "move",
+          comparison,
+          question: "Déplacement de {course:a} vers Taxi 2 : ce calcul sert 1 course contre 2 dans le planning actuel : remplacer quand même ?",
+        },
+      ],
+      [
+        "run1",
+        {
+          runId: "run1",
+          solverStatus: "OK",
+          violations: [],
+          warnings: [],
+          unassigned: [],
+          kind: "restore",
+          previous: { runId: "run0", figures: comparison.current, routes: [{ vehicleId: "v1", stops: [] }] },
+        },
+      ],
+    ]);
+    const view = buildPlanningView(input({ lastRun: pendingRun, details }));
+    expect(view.lastRun?.pending).toEqual({
+      question: expect.stringMatching(/^Déplacement de la course de \S+ \S+ vers Taxi 2 : ce calcul sert 1 course contre 2/),
+      comparison,
+    });
+    expect(view.lastRun?.kind).toBe("move");
+    expect(view.planRun).toMatchObject({ kind: "restore", previous: comparison.current, pending: null });
+    expect(buildPlanningView(input()).planRun?.previous).toBeNull();
+  });
+
   it("flags the available vehicles no tariff grid covers that day", () => {
     expect(buildPlanningView(input()).tariffGaps).toEqual([]);
     // Taxi 3 does not work that day: only the available vehicles count.
