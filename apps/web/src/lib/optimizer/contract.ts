@@ -152,14 +152,6 @@ export const MAX_VEHICLES = 300;
 export const MAX_TRIPS = 3000;
 export const MAX_TARIFFS = 500;
 
-export const optimizeRequestSchema = z.strictObject({
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  settings: settingsSchema,
-  vehicles: z.array(vehicleSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} véhicules au plus par calcul`),
-  trips: z.array(tripSchema).max(MAX_TRIPS, `${MAX_TRIPS} courses au plus par calcul`),
-  tariffs: z.array(tariffSchema).max(MAX_TARIFFS, `${MAX_TARIFFS} grilles tarifaires au plus par calcul`),
-});
-
 export const stopRefSchema = z.strictObject({
   tripId: z.string(),
   kind: stopKindSchema,
@@ -170,7 +162,25 @@ export const routePlanSchema = z.strictObject({
   stops: z.array(stopRefSchema).max(2 * MAX_TRIPS),
 });
 
-export const evaluateRequestSchema = optimizeRequestSchema.extend({
+/** What both operations need: the day's settings, fleet, trips and tariffs. */
+const dayRequestSchema = z.strictObject({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  settings: settingsSchema,
+  vehicles: z.array(vehicleSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} véhicules au plus par calcul`),
+  trips: z.array(tripSchema).max(MAX_TRIPS, `${MAX_TRIPS} courses au plus par calcul`),
+  tariffs: z.array(tariffSchema).max(MAX_TARIFFS, `${MAX_TARIFFS} grilles tarifaires au plus par calcul`),
+});
+
+export const optimizeRequestSchema = dayRequestSchema.extend({
+  /**
+   * The routes in place of the date, a start of the search: the plan returned
+   * is never worse than them once repaired to the rules of the request
+   * (contract/README.md, « Planning en place »). Absent or null: none.
+   */
+  initialRoutes: z.array(routePlanSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} tournées au plus en place`).nullish(),
+});
+
+export const evaluateRequestSchema = dayRequestSchema.extend({
   routes: z.array(routePlanSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} tournées au plus par évaluation`),
 });
 

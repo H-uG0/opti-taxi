@@ -8,12 +8,12 @@ from dataclasses import dataclass
 from app.matrix import TravelMatrix
 from app.model import TripWindows, derive_windows
 from app.pricing import TariffBook
-from app.schemas import LatLng, OptimizeRequest, Trip, Vehicle
+from app.schemas import DayRequest, LatLng, Trip, Vehicle
 
 
 @dataclass(frozen=True)
 class PlanContext:
-    request: OptimizeRequest
+    request: DayRequest
     matrix: TravelMatrix
     windows: dict[str, TripWindows]
     tariffs: TariffBook
@@ -25,7 +25,7 @@ class PlanContext:
         return self.matrix.km(trip.pickup, trip.dropoff)
 
 
-def request_points(request: OptimizeRequest) -> Iterator[LatLng]:
+def request_points(request: DayRequest) -> Iterator[LatLng]:
     """Every coordinate the matrix must cover: depots, pickups and dropoffs."""
     for vehicle in request.vehicles:
         yield vehicle.depot
@@ -34,7 +34,7 @@ def request_points(request: OptimizeRequest) -> Iterator[LatLng]:
         yield trip.dropoff
 
 
-def make_context(request: OptimizeRequest, matrix: TravelMatrix) -> PlanContext:
+def make_context(request: DayRequest, matrix: TravelMatrix) -> PlanContext:
     return PlanContext(
         request=request,
         matrix=matrix,

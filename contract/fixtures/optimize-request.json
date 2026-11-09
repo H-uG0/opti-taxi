@@ -194,5 +194,23 @@
       "sharedDiscount2": 0,
       "sharedDiscount3": 0
     }
+  ],
+  "initialRoutes": [
+    {
+      "vehicleId": "veh_taxi_1",
+      "stops": [
+        { "tripId": "trip_1", "kind": "PICKUP" },
+        { "tripId": "trip_1", "kind": "DROPOFF" },
+        { "tripId": "trip_2", "kind": "PICKUP" },
+        { "tripId": "trip_2", "kind": "DROPOFF" }
+      ]
+    },
+    {
+      "vehicleId": "veh_amb_1",
+      "stops": [
+        { "tripId": "trip_5", "kind": "PICKUP" },
+        { "tripId": "trip_5", "kind": "DROPOFF" }
+      ]
+    }
   ]
 }

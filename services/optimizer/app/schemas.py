@@ -182,14 +182,6 @@ class Tariff(ContractModel):
     shared_discount3: float = Field(ge=0, le=1)
 
 
-class OptimizeRequest(ContractModel):
-    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
-    settings: Settings
-    vehicles: list[Vehicle] = Field(max_length=MAX_VEHICLES)
-    trips: list[Trip] = Field(max_length=MAX_TRIPS)
-    tariffs: list[Tariff] = Field(max_length=MAX_TARIFFS)
-
-
 class StopRef(ContractModel):
     trip_id: str
     kind: StopKind
@@ -200,7 +192,23 @@ class RoutePlan(ContractModel):
     stops: list[StopRef] = Field(max_length=2 * MAX_TRIPS)
 
 
-class EvaluateRequest(OptimizeRequest):
+class DayRequest(ContractModel):
+    """What both operations need: the day's settings, fleet, trips and tariffs."""
+
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    settings: Settings
+    vehicles: list[Vehicle] = Field(max_length=MAX_VEHICLES)
+    trips: list[Trip] = Field(max_length=MAX_TRIPS)
+    tariffs: list[Tariff] = Field(max_length=MAX_TARIFFS)
+
+
+class OptimizeRequest(DayRequest):
+    initial_routes: list[RoutePlan] | None = Field(default=None, max_length=MAX_VEHICLES)
+    """The plan in place of the date, a start of the search: the plan returned is never worse than
+    it once repaired to the rules of the request (contract/README.md, « Planning en place »)."""
+
+
+class EvaluateRequest(DayRequest):
     routes: list[RoutePlan] = Field(max_length=MAX_VEHICLES)
 
 

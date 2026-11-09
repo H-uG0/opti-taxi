@@ -93,9 +93,37 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
     "includedKm": 0,                    // km compris dans le forfait
     "sharedDiscount2": 0.23,            // abattement à 2 patients partagés
     "sharedDiscount3": 0.35             // abattement à 3 patients ou plus
+  }],
+  "initialRoutes": [{                   // facultatif, absent ou null = aucun : le planning en place (voir plus bas)
+    "vehicleId": "veh_taxi_1",
+    "stops": [{ "tripId": "trip_1", "kind": "PICKUP" }, { "tripId": "trip_1", "kind": "DROPOFF" }]
   }]
 }
 ```
+
+### Planning en place (`initialRoutes`)
+
+Quand la date a déjà des tournées, le web les envoie (`routesInPlace`,
+`apps/web/src/lib/planning/plan-compare.ts`) : la suite des arrêts de chaque tournée, dans l'ordre,
+limitée aux véhicules et aux courses de la requête, une course prise puis déposée sur une même
+tournée (même forme que `routes` de `/evaluate`, au plus 300 tournées). L'optimizer :
+
+1. le **répare** selon les règles de la requête : il ignore un véhicule ou une course inconnus, une
+   course d'un type de véhicule non autorisé ou figée sur un autre véhicule, une dépose avant sa
+   prise en charge, une course déjà vue sur une autre tournée ; il retire de chaque tournée les
+   courses en trop pour les places ou à bord d'un transport exclusif, celles qui dépassent leur
+   détour, leur temps à bord ou leur attente au lieu de soins, puis, tant que la tournée n'est pas à
+   l'heure, la course du premier arrêt en retard (la dernière si la tournée finit après l'horaire
+   ou dure plus de 6 h sans pause) ; il place la pause ; il réinsère enfin là où elles tiennent les
+   courses retirées et celles que le planning ne servait pas ;
+2. s'en sert comme **point de départ** de la recherche, avec ses propres départs ;
+3. ne renvoie **jamais un planning moins bon** que ce planning réparé : moins de courses non
+   affectées, puis moins de patients dont l'aller et le retour ne sont pas servis tous les deux
+   (pénalité de non-affectation chacun), puis meilleure marge (abattement de partage compris).
+
+Réoptimiser une date où rien n'a changé rend donc un planning au moins aussi bon que celui en
+place. Le champ n'entre pas dans l'empreinte de la requête qu'enregistre le web pour un calcul en
+attente de confirmation (`requestHash`) : la version du planning en place le couvre déjà.
 
 ### Budget de calcul envoyé par le web (`settings.timeLimitSec`)
 
@@ -164,11 +192,12 @@ Temps à bord : de la fin de la prise en charge (`departureMin`) au début de la
 
 ## EvaluateRequest
 
-`OptimizeRequest` + le planning à évaluer, arrêt par arrêt (sans horaires : l'optimizer les recalcule au plus tôt) :
+Les champs de `OptimizeRequest` (sauf `initialRoutes`, refusé ici) + le planning à évaluer, arrêt par
+arrêt (sans horaires : l'optimizer les recalcule au plus tôt) :
 
 ```jsonc
 {
-  "...": "tous les champs de OptimizeRequest",
+  "...": "tous les champs de OptimizeRequest sauf initialRoutes",
   "routes": [{
     "vehicleId": "veh_taxi_1",
     "stops": [{ "tripId": "trip_1", "kind": "PICKUP" }, { "tripId": "trip_1", "kind": "DROPOFF" }]

@@ -21,7 +21,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 
-from app.schemas import MINUTES_PER_DAY, BreakRule, OptimizeRequest, Settings, StopKind, Trip, Vehicle
+from app.schemas import MINUTES_PER_DAY, BreakRule, DayRequest, Settings, StopKind, Trip, Vehicle
 
 HORIZON_MIN = 2 * MINUTES_PER_DAY
 """Latest minute of the planning horizon (the contract allows times up to the next midnight)."""
@@ -87,7 +87,7 @@ def same_day_pairs(trips: Sequence[Trip]) -> list[tuple[Trip, Trip]]:
     return pairs
 
 
-def derive_windows(request: OptimizeRequest) -> dict[str, TripWindows]:
+def derive_windows(request: DayRequest) -> dict[str, TripWindows]:
     """Service time windows of every trip, keyed by trip id."""
     settings = request.settings
     total = settings.max_total_wait_min

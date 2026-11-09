@@ -23,7 +23,7 @@ import {
   type OptimizeInput,
 } from "@/lib/optimizer/build-request";
 import { evaluate, optimize, type OptimizerResult } from "@/lib/optimizer/client";
-import type { OptimizeRequest, PlanResponse } from "@/lib/optimizer/contract";
+import type { OptimizeRequest, PlanResponse, RoutePlan } from "@/lib/optimizer/contract";
 import {
   FIELD_TRIP_STATUSES,
   PlanBlockedError,
@@ -61,6 +61,7 @@ import {
   NOT_KEPT_PREFIX,
   replaceConcerns,
   restorableRoutes,
+  routesInPlace,
   type PlanComparison,
 } from "./plan-compare";
 import { loadPlanVersion, requestHash } from "./version";
@@ -295,6 +296,27 @@ async function prepareRequest(
     };
   }
   return { ok: true, input, build };
+}
+
+/**
+ * The routes in place of isoDate as the optimizer's start (routesInPlace): a
+ * re-optimization never returns a plan worse than them under the same rules,
+ * so recomputing a day where nothing changed asks no « Remplacer quand
+ * même ? ». Not part of the request's hash (lib/planning/version.ts): the plan
+ * version guards the routes in place. A failure to read them is logged and
+ * the computation starts from scratch.
+ */
+async function loadRoutesInPlace(isoDate: string, request: OptimizeRequest): Promise<RoutePlan[] | null> {
+  try {
+    const routes = await db.route.findMany({
+      where: { serviceDate: fromIsoDate(isoDate) },
+      select: { vehicleId: true, stops: { select: { tripId: true, kind: true, sequence: true } } },
+    });
+    return routesInPlace(routes, request);
+  } catch (error) {
+    logError("[planning] reading the routes in place before the optimization failed", error, { serviceDate: isoDate });
+    return null;
+  }
 }
 
 /**
@@ -571,7 +593,10 @@ export async function runOptimization(isoDate: string, user: Actor, options: Run
 
   const runId = await startRun(isoDate, user, build.request, input.settings.solverTimeLimitSec);
   if (!runId) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
-  const result: OptimizerResult<PlanResponse> = await optimize(build.request);
+  const initialRoutes = await loadRoutesInPlace(isoDate, build.request);
+  const result: OptimizerResult<PlanResponse> = await optimize(
+    initialRoutes ? { ...build.request, initialRoutes } : build.request,
+  );
   if (!result.ok) return failRun(runId, result.error);
   return finishRun({
     kind: move ? "move" : "optimize",

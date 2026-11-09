@@ -18,6 +18,16 @@ def load(name: str) -> dict:
 def test_optimize_request_fixture() -> None:
     request = OptimizeRequest.model_validate(load("optimize-request.json"))
     assert request.trips
+    assert request.initial_routes and request.initial_routes[0].stops
+
+
+def test_initial_routes_are_optional_and_not_part_of_evaluate() -> None:
+    raw = load("optimize-request.json")
+    in_place = raw.pop("initialRoutes")
+    assert OptimizeRequest.model_validate(raw).initial_routes is None
+    assert OptimizeRequest.model_validate({**raw, "initialRoutes": None}).initial_routes is None
+    with pytest.raises(ValidationError):
+        EvaluateRequest.model_validate({**load("evaluate-request.json"), "initialRoutes": in_place})
 
 
 def test_evaluate_request_fixture() -> None:

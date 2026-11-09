@@ -117,14 +117,42 @@ def _locate_trips(schedules: Sequence[RouteSchedule]) -> dict[str, _TripPlacemen
     return placements
 
 
-def build_response(ctx: PlanContext, outcome: PlanOutcome, started_at: float) -> PlanResponse:
-    """PlanResponse of the given sequences; `started_at` is a time.perf_counter() value."""
+def _schedules(ctx: PlanContext, sequences: Mapping[str, Sequence[StopRef]]) -> list[RouteSchedule]:
+    """Timed routes of the vehicles with stops, in the request's vehicle order."""
     schedules: list[RouteSchedule] = []
     for vehicle in ctx.request.vehicles:
-        refs = outcome.sequences.get(vehicle.id, ())
+        refs = sequences.get(vehicle.id, ())
         if refs:
             schedules.append(schedule_route(vehicle, [planned_stop(ctx, ref) for ref in refs], ctx.matrix))
+    return schedules
 
+
+def _route_cost(schedule: RouteSchedule) -> float:
+    """km x costPerKm + hours x costPerHour of a timed route."""
+    vehicle = schedule.vehicle
+    return schedule.distance_km * vehicle.cost_per_km + schedule.duration_min / 60 * vehicle.cost_per_hour
+
+
+def plan_margin(ctx: PlanContext, sequences: Mapping[str, Sequence[StopRef]]) -> tuple[float, set[str]]:
+    """Margin of the sequences as build_response reports it (revenue with the sharing discount,
+    minus the cost of the routes, unrounded) and the trips they serve, without the validation:
+    how the solver compares two finished plans."""
+    schedules = _schedules(ctx, sequences)
+    served: set[str] = set()
+    revenue = 0.0
+    for trip_id, placement in _locate_trips(schedules).items():
+        if not placement.complete:
+            continue
+        assert placement.pickup is not None
+        served.add(trip_id)
+        tariff = ctx.tariffs.for_vehicle(schedules[placement.pickup[0]].vehicle)
+        revenue += trip_revenue(tariff, ctx.direct_km(ctx.trips[trip_id]), 1 + len(placement.co_passengers))
+    return revenue - sum(_route_cost(schedule) for schedule in schedules), served
+
+
+def build_response(ctx: PlanContext, outcome: PlanOutcome, started_at: float) -> PlanResponse:
+    """PlanResponse of the given sequences; `started_at` is a time.perf_counter() value."""
+    schedules = _schedules(ctx, outcome.sequences)
     placements = _locate_trips(schedules)
     trip_results: list[TripResult] = []
     route_revenue = [0.0] * len(schedules)
@@ -206,7 +234,7 @@ def _route_model(schedule: RouteSchedule, revenue: float) -> Route:
     vehicle = schedule.vehicle
     distance = round(schedule.distance_km, KM_DIGITS)
     empty = round(schedule.empty_km, KM_DIGITS)
-    cost = schedule.distance_km * vehicle.cost_per_km + schedule.duration_min / 60 * vehicle.cost_per_hour
+    cost = _route_cost(schedule)
     slot = schedule.break_slot
     return Route(
         vehicle_id=vehicle.id,

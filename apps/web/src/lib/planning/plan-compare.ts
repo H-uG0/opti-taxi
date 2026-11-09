@@ -271,3 +271,25 @@ export function restorableRoutes(
   }
   return routes;
 }
+
+/**
+ * The routes in place of a date as the start of its re-optimization (contract
+ * `initialRoutes`): their stop sequences in order, on the vehicles and trips
+ * of the request (restorableRoutes). The optimizer repairs them to the rules
+ * of the request and never returns a worse plan; null when there are none.
+ */
+export function routesInPlace(
+  routes: ReadonlyArray<Pick<RouteFigures, "vehicleId" | "stops">>,
+  request: { vehicles: ReadonlyArray<{ id: string }>; trips: ReadonlyArray<{ id: string }> },
+): { vehicleId: string; stops: { tripId: string; kind: StopKind }[] }[] | null {
+  const ordered = routes.map((route) => ({
+    vehicleId: route.vehicleId,
+    stops: [...route.stops].sort((a, b) => a.sequence - b.sequence).map(({ tripId, kind }) => ({ tripId, kind })),
+  }));
+  const kept = restorableRoutes(
+    { routes: ordered },
+    new Set(request.vehicles.map((v) => v.id)),
+    new Set(request.trips.map((t) => t.id)),
+  );
+  return kept.length > 0 ? kept : null;
+}

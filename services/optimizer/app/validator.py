@@ -29,8 +29,8 @@ from dataclasses import dataclass
 from app.labels import hhmm, km_text, types_text, vehicle_name
 from app.matrix import TravelMatrix
 from app.schemas import (
+    DayRequest,
     LatLng,
-    OptimizeRequest,
     Route,
     RoutePlan,
     Settings,
@@ -100,7 +100,7 @@ def _duration_text(minutes: int) -> str:
 
 
 def check_plan_references(
-    request: OptimizeRequest, plans: Sequence[RoutePlan]
+    request: DayRequest, plans: Sequence[RoutePlan]
 ) -> tuple[dict[str, list[StopRef]], list[Violation], list[str]]:
     """Clean a submitted plan before scheduling it.
 
@@ -152,7 +152,7 @@ def check_plan_references(
 # --------------------------------------------------------------------------- produced routes
 
 
-def validate(request: OptimizeRequest, routes: Sequence[Route], matrix: TravelMatrix) -> list[Violation]:
+def validate(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix) -> list[Violation]:
     """Every hard-rule violation of the produced routes (empty list = valid plan)."""
     trips = {trip.id: trip for trip in request.trips}
     vehicles = {vehicle.id: vehicle for vehicle in request.vehicles}

@@ -132,12 +132,14 @@ def optimize_request(raw: Json) -> OptimizeRequest:
 
 
 def evaluate_request(raw: Json, routes: dict[str, list[tuple[str, str]]]) -> EvaluateRequest:
-    """`routes`: vehicle id -> [(trip id, "PICKUP" | "DROPOFF"), ...]."""
+    """`routes`: vehicle id -> [(trip id, "PICKUP" | "DROPOFF"), ...]; the routes in place of an
+    optimize request (`initialRoutes`) are not part of an evaluation."""
     plans = [
         {"vehicleId": vehicle_id, "stops": [{"tripId": t, "kind": k} for t, k in stops]}
         for vehicle_id, stops in routes.items()
     ]
-    return EvaluateRequest.model_validate({**raw, "routes": plans})
+    day = {key: value for key, value in raw.items() if key != "initialRoutes"}
+    return EvaluateRequest.model_validate({**day, "routes": plans})
 
 
 def offset(point: Point, north_km: float, east_km: float) -> Point:

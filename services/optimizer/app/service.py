@@ -26,7 +26,7 @@ def optimize(request: OptimizeRequest) -> PlanResponse:
     ctx = make_context(request, with_traffic(matrix, request.settings.traffic))
     warnings.extend(ctx.tariffs.missing_warnings(request.vehicles))
     solve_started = time.perf_counter()
-    outcome = solve(ctx)
+    outcome = solve(ctx, request.initial_routes or ())
     solve_ms = round((time.perf_counter() - solve_started) * 1000)
     warnings.extend(outcome.warnings)
     response = build_response(

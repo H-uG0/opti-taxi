@@ -10,6 +10,15 @@ describe("optimizer contract fixtures", () => {
   it("accepts optimize-request.json", () => {
     const parsed = optimizeRequestSchema.parse(load("optimize-request.json"));
     expect(parsed.trips.length).toBeGreaterThan(0);
+    expect(parsed.initialRoutes?.[0]?.stops.length).toBeGreaterThan(0);
+  });
+
+  it("takes the routes in place on /optimize only, and as an optional field", () => {
+    const { initialRoutes, ...request } = load("optimize-request.json") as Record<string, unknown>;
+    expect(optimizeRequestSchema.safeParse(request).success).toBe(true);
+    expect(optimizeRequestSchema.safeParse({ ...request, initialRoutes: null }).success).toBe(true);
+    const evaluate = load("evaluate-request.json") as Record<string, unknown>;
+    expect(evaluateRequestSchema.safeParse({ ...evaluate, initialRoutes }).success).toBe(false);
   });
 
   it("accepts evaluate-request.json", () => {

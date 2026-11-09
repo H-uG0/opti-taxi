@@ -7,7 +7,7 @@ import { tripRef, type MoveTarget } from "./move";
 // the patient's name. Swapping the stored and the shown message fails here.
 const fake = vi.hoisted(() => ({
   db: {
-    route: { count: vi.fn() },
+    route: { count: vi.fn(), findMany: vi.fn() },
     routeStop: { count: vi.fn() },
     optimizationRun: {
       findMany: vi.fn(),
@@ -134,6 +134,7 @@ function input(locks: Record<string, string | null> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   fake.loadInput.mockResolvedValue(input());
+  fake.db.route.findMany.mockResolvedValue([]);
   fake.db.trip.updateMany.mockResolvedValue({ count: 1 });
   fake.db.trip.findMany.mockResolvedValue([]);
   fake.db.route.count.mockResolvedValue(0);
@@ -212,6 +213,52 @@ describe("trips completed before the computation", () => {
   it("never completes a past day", async () => {
     await runOptimization("2020-01-06", REGULATOR);
     expect(fake.completeTrips).not.toHaveBeenCalled();
+  });
+});
+
+describe("the routes in place as the optimizer's start", () => {
+  it("sends the routes in place, stops in order, on the vehicles and trips of the request", async () => {
+    fake.db.route.findMany.mockResolvedValue([
+      {
+        vehicleId: "taxi_mrs",
+        stops: [
+          { tripId: "t2", kind: "DROPOFF", sequence: 2 },
+          { tripId: "t2", kind: "PICKUP", sequence: 1 },
+          { tripId: "gone", kind: "PICKUP", sequence: 3 },
+          { tripId: "gone", kind: "DROPOFF", sequence: 4 },
+        ],
+      },
+      {
+        vehicleId: "vehicle_off_today",
+        stops: [
+          { tripId: "t1", kind: "PICKUP", sequence: 1 },
+          { tripId: "t1", kind: "DROPOFF", sequence: 2 },
+        ],
+      },
+    ]);
+    fake.savePlan.mockResolvedValue({ routes: 1, served: 1, unassigned: 1 });
+
+    await runOptimization(DATE, REGULATOR);
+
+    const sent = fake.optimize.mock.calls[0]![0] as { initialRoutes?: unknown; trips: unknown[] };
+    expect(sent.initialRoutes).toEqual([
+      { vehicleId: "taxi_mrs", stops: [{ tripId: "t2", kind: "PICKUP" }, { tripId: "t2", kind: "DROPOFF" }] },
+    ]);
+    expect(sent.trips).toEqual(build().request.trips);
+    // The plan is saved with the request the day's data builds, without the routes in place.
+    const saved = fake.savePlan.mock.calls[0]![1] as { request: Record<string, unknown> };
+    expect(saved.request).not.toHaveProperty("initialRoutes");
+  });
+
+  it("starts from scratch when the date has no routes, or when reading them fails", async () => {
+    fake.savePlan.mockResolvedValue({ routes: 1, served: 1, unassigned: 1 });
+    await runOptimization(DATE, REGULATOR);
+    expect(fake.optimize.mock.calls[0]![0]).not.toHaveProperty("initialRoutes");
+
+    fake.db.route.findMany.mockRejectedValue(new Error("database time-out"));
+    const outcome = await runOptimization(DATE, REGULATOR);
+    expect(fake.optimize.mock.calls[1]![0]).not.toHaveProperty("initialRoutes");
+    expect(outcome.ok).toBe(true);
   });
 });
 

@@ -7,6 +7,7 @@ import {
   planFigures,
   replaceConcerns,
   restorableRoutes,
+  routesInPlace,
   snapshotOf,
   type PlanFigures,
   type TodayCrew,
@@ -187,5 +188,33 @@ describe("snapshot and restoration", () => {
       ],
     };
     expect(restorableRoutes(odd, new Set(["v1", "v2", "v3"]), new Set(["a", "b"]))).toEqual([odd.routes[1]]);
+  });
+});
+
+describe("routesInPlace (start of a re-optimization)", () => {
+  const request = { vehicles: [{ id: "v1" }, { id: "v2" }], trips: [{ id: "a" }, { id: "b" }] };
+
+  it("sends the stop sequences in their order, on the vehicles and trips of the request", () => {
+    const routes = [
+      {
+        vehicleId: "v1",
+        stops: [
+          { tripId: "a", kind: "DROPOFF" as const, sequence: 3 },
+          { tripId: "a", kind: "PICKUP" as const, sequence: 0 },
+          { tripId: "cancelled", kind: "PICKUP" as const, sequence: 1 },
+          { tripId: "cancelled", kind: "DROPOFF" as const, sequence: 2 },
+        ],
+      },
+      { vehicleId: "off_today", stops: [{ tripId: "b", kind: "PICKUP" as const, sequence: 0 }, { tripId: "b", kind: "DROPOFF" as const, sequence: 1 }] },
+    ];
+    expect(routesInPlace(routes, request)).toEqual([
+      { vehicleId: "v1", stops: [{ tripId: "a", kind: "PICKUP" }, { tripId: "a", kind: "DROPOFF" }] },
+    ]);
+  });
+
+  it("is null when nothing of the routes in place is still to plan", () => {
+    expect(routesInPlace([], request)).toBeNull();
+    expect(routesInPlace([{ vehicleId: "v2", stops: [] }], request)).toBeNull();
+    expect(routesInPlace([{ vehicleId: "v1", stops: [{ tripId: "x", kind: "PICKUP", sequence: 0 }] }], request)).toBeNull();
   });
 });

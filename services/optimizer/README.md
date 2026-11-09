@@ -47,6 +47,14 @@ Banc de charge, lancé à la main (une journée fictive à l'échelle de V, un `
 .venv/Scripts/python.exe -m tests.bench_fleet --vehicles 120 --trips 300 --budget 38
 ```
 
+Banc de qualité de la recherche (requêtes de journées enregistrées, ou journées fictives
+`busy:<graine>` / `generated:<graine>` ; par journée : courses servies, patients à moitié servis,
+marge, score de l'objectif, violations ; `--warm` envoie un planning comme planning en place) :
+
+```bash
+.venv/Scripts/python.exe -m tests.bench_days req-2026-11-10.json busy:11 generated:7 --budget 10
+```
+
 Docker (image `python:3.12-slim`, utilisateur non root, port 8100) :
 
 ```bash
@@ -116,10 +124,15 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   pèse toute la capacité du véhicule, personne d'autre ne peut monter tant qu'il est à bord.
 - Horaires : dimension temps en minutes (temps d'arrêt inclus, attente autorisée), fenêtres des
   arrêts, horaires de service du véhicule.
-- Temps à bord : limite « prise en charge → dépose » sur la dimension temps
-  (`SetPickupToDeliveryLimitFunctionForPair`) : temps d'arrêt de la prise en charge + trajet
-  direct + `maxRideExtraMin`. Les filtres d'OR-Tools la vérifient sur les horaires qu'ils
-  choisissent, pas `ReadAssignmentFromRoutes` : les étapes en Python la vérifient elles-mêmes.
+- Temps à bord (trajet direct + `maxRideExtraMin`) et attente à bord devant le lieu de soins :
+  vérifiés par les étapes en Python (insertion, réparations) et par la vérification finale sur les
+  horaires que calcule `schedule.py`, pas par le modèle OR-Tools. Jusqu'au lot OPT-08, le temps à
+  bord était aussi une limite « prise en charge → dépose » sur la dimension temps
+  (`SetPickupToDeliveryLimitFunctionForPair`) : sur cette dimension, dont la marge est l'attente,
+  les filtres d'OR-Tools la vérifient à un coût tel que la première solution d'une journée chargée
+  prenait 14 s au lieu de 1 s (`busy_day(seed=13)` : 118 courses servies au lieu de 128 à 10 s),
+  et elle bridait la recherche locale (12/11 de la démo : marge −744 € au lieu de −444 €, même
+  nombre de courses). La règle reste entière : aucun planning renvoyé ne la dépasse.
 - Détour : limite « prise en charge → dépose » sur la dimension distance (mètres,
   `SetPickupToDeliveryLimitFunctionForPair`) ; pour une course partageable,
   `trajet réel ≤ direct + min(détour par co-passager, détour maximal)`. Un trajet partagé compte au
@@ -132,7 +145,7 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   (cumul de places forcé à 0) ; un seul est visité. Le trajet jusqu'au lieu de pause est compté.
   Si l'horaire du véhicule laisse toujours la pause avant le départ ou après le retour, aucun nœud
   n'est créé.
-- Toutes ces règles passent par des primitives du routage (dimensions, limite prise en charge →
+- Les règles du modèle passent par des primitives du routage (dimensions, limite prise en charge →
   dépose, domaine des véhicules, disjonctions) que les filtres d'OR-Tools vérifient à chaque
   insertion et à chaque mouvement. Une contrainte posée sur les cumuls par `solver.Add()` n'est
   vérifiée qu'après coup par propagation : écrits ainsi, le détour et les précédences rendaient la
@@ -155,20 +168,28 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   (32 Mo à 2 000 nœuds, jusqu'à 60 clés sur le banc) : aucun coût propre à un véhicule ne doit
   revenir dans un évaluateur d'arc (préférences du lot 6, énergie du lot 5).
 - Recherche (tout est compté dans `timeLimitSec`, **construction du modèle comprise**, matrice en
-  plus : à 120 véhicules, construire le modèle prend 13 s pour 300 voyages, 28 s pour 480) :
-  1. départ construit en Python, **en premier** : les pauses seules (au dépôt), puis toutes les
-     courses par l'insertion avec regret de l'étape 4. Il respecte les pauses dès le début et sert
-     de filet : les étapes suivantes ne le remplacent que par mieux. Le modèle OR-Tools le confirme
-     aussitôt (`ReadAssignmentFromRoutes`, 0,1 s), avant tout calcul : après un calcul qui a épuisé
-     sa limite de temps, cette confirmation échoue. Il peut dépasser le budget de 5 s au plus ;
+  plus : à 120 véhicules, construire le modèle prend 9 s pour 300 voyages, 18 s pour 480) :
+  1. départs construits en Python, **en premier**, chacun confirmé aussitôt par le modèle OR-Tools
+     (`ReadAssignmentFromRoutes`, 0,1 s), avant tout calcul : après un calcul qui a épuisé sa
+     limite de temps, cette confirmation échoue. Ils peuvent dépasser le budget de 5 s au plus :
+     a. le **planning en place** réparé, quand le web l'envoie (`initialRoutes`, voir « Planning en
+        place » ci-dessous) ;
+     b. l'insertion depuis les pauses : les pauses seules (au dépôt), puis toutes les courses par
+        l'insertion avec regret de l'étape 4 (le retour d'un aller servi, puis l'aller d'un retour
+        servi, d'abord) ;
+     c. quand une recherche locale suivra (étape 2 lancée), la même insertion **par regret seul**,
+        sans faire passer d'abord l'autre trajet d'un patient servi : les deux ordres mènent la
+        recherche à des plannings différents, chacun meilleur sur deux des quatre journées de la
+        démonstration (journal, OPT-08) ;
   2. première solution `PARALLEL_CHEAPEST_INSERTION`, **menée à son terme**, quitte à dépasser le
      budget de 5 s au plus (interrompue, elle laisse la plupart des courses de côté : aucune des
      160 courses de la journée chargée avec un budget de 1 s). Son temps croît comme le cube du
      nombre de nœuds (environ 8·10⁻⁹ × nœuds³ s sur la machine de développement) : 0,9 s pour la
      journée chargée (476 nœuds), 60 s pour 120 véhicules et 300 voyages (2 000 nœuds). **Quand
      cette loi prédit qu'elle ne peut pas finir dans le temps qui reste** (plus la marge de 5 s),
-     elle n'est pas lancée : le planning est le départ Python, renvoyé aussitôt, sans recherche
-     locale (elle ne gagnait que 1 % de km en 10 min à cette taille ; `solverStatus` = `INSERTION`) ;
+     elle n'est pas lancée : le planning est le moins coûteux des départs Python, renvoyé aussitôt,
+     sans recherche locale (elle ne gagnait que 1 % de km en 10 min à cette taille ;
+     `solverStatus` = `INSERTION`) ;
   3. réparation des pauses : un véhicule resté sans pause la reçoit à la position vide la moins
      coûteuse ; si aucune n'est possible, on retire la course la moins chère dont le retrait
      suffit, sinon celle qui traverse le plus la fenêtre de pause, et on recommence ;
@@ -179,12 +200,14 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
      meilleur et le deuxième meilleur véhicule diffèrent le plus. Si une course ne tient qu'en
      déplaçant la pause du véhicule, la pause est retirée puis replacée (autre lieu, autre position
      vide) ;
-  5. le moins coûteux des deux départs (objectif OR-Tools) est gardé. Sur les journées du jeu de
-     démonstration, le départ Python sert plus de courses (56 sur 56 le 05/11 contre 55) ; sur la
-     journée chargée de 160 courses, moins (118 contre 129) ; à 120 véhicules, autant quand la
-     première solution a le temps de finir (297 sur 297), et il est moins coûteux ;
-  6. `GUIDED_LOCAL_SEARCH` sur le reste du budget, à partir de ce planning où toutes les pauses
-     sont prises.
+  5. `GUIDED_LOCAL_SEARCH` **depuis chaque départ** (1 à 4, doublons écartés) pendant un temps
+     court (la moitié du temps restant, partagée), puis depuis le meilleur planning trouvé jusqu'à
+     la fin du budget. La recherche locale replace rarement une course que son départ a laissée de
+     côté : c'est le départ qui décide où elle aboutit, et le départ le moins coûteux n'est pas
+     celui qui aboutit le mieux (le 10/11 de la démonstration : la première solution, 57 courses,
+     était moins coûteuse que l'insertion, 56, et restait à 57 ; depuis l'une ou l'autre insertion,
+     la recherche atteint 59 courses en une seconde environ). Avant OPT-08, seul le départ le moins
+     coûteux était cherché. Moins de 0,5 s par départ : le moins coûteux seul.
 
   Étapes 1, 3 et 4 : vérifications exactes en Python (horaires au plus tôt et au plus tard,
   places, patient non partageable seul à bord, véhicule vide pendant la pause, détours, durée de
@@ -210,13 +233,26 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   faire place, puis est réinsérée là où elle tient. La recherche locale
   d'OR-Tools ne fait pas cet échange : sur la journée chargée, la pénalité seule ne réduisait pas le
   nombre de patients à moitié servis.
+- **Planning en place** (`initialRoutes`, contrat). Quand la date a déjà des tournées, le web les
+  envoie ; l'optimizer les répare selon les règles de la requête (`_DayModel._from_plan` : courses
+  d'un véhicule inconnu ou d'un type non autorisé, dépose avant prise en charge, places, transport
+  exclusif, détour, temps et attente à bord, horaires, 6 h sans pause : la course fautive sort ;
+  pause placée ; courses sorties ou non servies réinsérées), s'en sert comme départ (étape 1.a), et,
+  après la vérification finale, compare le planning de la recherche à ce planning réparé (passé
+  par la même vérification) : le meilleur au sens de l'objectif (`_DayModel.plan_score` : courses
+  non affectées, patients dont l'aller et le retour ne sont pas tous deux servis, puis marge
+  recalculée comme la réponse, abattement de partage compris) est renvoyé. Réoptimiser une date
+  où rien n'a changé rend donc un planning au moins aussi bon que celui en place
+  (`test_reoptimizing_a_planned_day_without_change_is_at_least_as_good`), et le web ne pose plus
+  « Remplacer quand même ? » dans ce cas. Réparer le planning en place prend quelques
+  millisecondes à 60 courses.
 - **Première solution coupée par sa limite** (grande flotte : à 120 véhicules et 300 voyages, aucune
-  course placée en 33 s) : l'étape 5 garde le départ Python, moins coûteux. Avant que ce départ
-  passe en premier, la réponse était un planning vide.
+  course placée en 33 s) : le départ Python, moins coûteux, l'emporte. Avant que ce départ passe en
+  premier, la réponse était un planning vide.
 - **Première solution introuvable** (`ROUTING_FAIL_TIMEOUT` : la limite de temps tombe avant que
   l'heuristique produise quoi que ce soit, sur une machine surchargée) : au lieu de répondre
-  `NO_SOLUTION`, la recherche locale part du départ Python (ou des pauses seules, toujours
-  faisable, si OR-Tools l'a refusé) pour le reste du budget, au moins 5 s.
+  `NO_SOLUTION`, la recherche locale part du moins coûteux des départs Python (ou des pauses
+  seules, toujours faisable, si OR-Tools les a tous refusés) pour le reste du budget, au moins 5 s.
 - Dans ces deux cas, s'il reste des courses non placées, un avertissement (« Construction initiale
   des tournées interrompue… planning construit par une méthode de secours… ») le signale dans
   `meta.warnings`.
@@ -268,6 +304,22 @@ les horaires (minutes entières, calcul exact).
   | 03/11 (64 courses) | 57 → 63 | 61 → 63 ou 64 (selon la charge) | 61 → 64 | 61 → 64 |
   | 04/11 (60 courses) | 54 → 60 | 58 → 60 | 59 → 60 | 59 → 60 |
   | 05/11 (56 courses) | 50 → 56 | 54 → 56 | 55 → 56 | 55 → 56 |
+
+  Qualité de la recherche (OPT-08, 9 novembre ; requêtes de la démo en ligne, 10 s, courses servies
+  / patients à moitié servis / marge) : avant le lot conformité (7a172cf, anciennes règles), après
+  lui (97d94a2), et depuis OPT-08 (départs multiples, temps à bord hors du modèle) :
+
+  | Journée | 7a172cf | 97d94a2 | OPT-08 |
+  | --- | --- | --- | --- |
+  | 10/11 (60 courses) | 58 / 2 / −132 € | 57 / 3 / −520 € | 59 / 1 / −264 € |
+  | 11/11 (60 courses) | 55 / 1 / −134 € | 55 / 1 / −163 € | 55 / 1 / −46 € |
+  | 12/11 (54 courses) | 52 / 2 / −785 € | 52 / 2 / −744 € | 52 / 2 / −444 € |
+  | 13/11 (56 courses) | 55 / 1 / −344 € | 56 / 0 / −513 € | 56 / 0 / −421 à −494 € (selon la charge) |
+
+  Les plannings de 7a172cf ne respectent pas tous les nouvelles règles : réévalués (`/evaluate`), le
+  11/11 a 3 `RIDE_TIME` et un `TOTAL_WAIT`, le 13/11 un `RIDE_TIME` et un `TOTAL_WAIT`, le 10/11 un
+  `TOTAL_WAIT` ; réparés par le planning en place, ils donnent 58 / 2 / −145 €, 55 / 1 / −131 €,
+  52 / 2 / −797 € et 55 / 1 / −479 €. Banc et détails : journal des améliorations, lot OPT-08.
 
   Journée chargée de référence (`busy_day()` des tests : 160 courses, 16 véhicules dont 14 avec
   pause) :
@@ -336,6 +388,10 @@ les horaires (minutes entières, calcul exact).
   | 300 (38 s) | 2 000 (1 286) | 13 s → 9 s | 0 course servie, réponse en 60 s | 297 sur 297, en 49 s | 297 sur 297, en 15 s | 1,9 Go → 0,32 Go |
   | 480 (60 s) | 2 884 (1 812) | 27 s → 18 s | 0 course servie, réponse en 102 s | 474 sur 476, en 74 s | 473 sur 476, en 31 s | 4,0 Go → 0,56 Go |
 
+  Depuis OPT-08 (temps à bord hors du modèle OR-Tools, départs multiples), mêmes plannings en
+  14,2 s (300 voyages), 30,5 s (480) et 15,6 s (300, tirage 5) : à cette taille, la première
+  solution est sautée et une seule insertion est construite (la seconde, par regret seul, ne sert
+  qu'à une recherche locale).
   Mesures du 9 novembre sur la machine de développement (8 cœurs, un calcul à la fois). Avec les
   règles d'avant le 9/11 (sans attente à bord, temps à bord ni limite de 6 h), le code du 9/11 rend
   exactement le même planning (mêmes courses, km et CA) en 14 s et 29 s : le gain vient du coût au
