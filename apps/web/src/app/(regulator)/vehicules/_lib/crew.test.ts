@@ -108,7 +108,7 @@ describe("crewQualificationErrors", () => {
   it("refuses an ambulance crew without any DEA, on the crew mate field", () => {
     expect(crewQualificationErrors("AMBULANCE", member("Inès", ["AUXILIARY"]), member("Paul", ["AUXILIARY", "TAXI_CARD"]))).toEqual({
       defaultCrewMateId:
-        "Il faut au moins un Ambulancier DE dans l'équipage d'ambulance, au volant ou auprès du patient : ni Inès Roux ni Paul Roux ne l'est.",
+        "Il faut au moins un ambulancier DE dans l'équipage d'ambulance, au volant ou auprès du patient : ni Inès Roux ni Paul Roux ne l'est.",
     });
   });
 
@@ -125,7 +125,7 @@ describe("qualificationScope", () => {
   it("says what each qualification allows, the DEA rule included", () => {
     expect(qualificationScope("TAXI_CARD")).toBe("Conduite : taxi");
     expect(qualificationScope("AUXILIARY")).toBe(
-      "Conduite : VSL, ambulance · Équipier : ambulance · En ambulance, avec un Ambulancier DE",
+      "Conduite : VSL, ambulance · Équipier : ambulance · En ambulance, avec un ambulancier DE",
     );
     expect(qualificationScope("DEA")).toBe("Conduite : VSL, ambulance · Équipier : ambulance · Au moins un dans chaque équipage d'ambulance");
   });

@@ -4,6 +4,7 @@
  * No server-only import: used by the server page and the unit tests.
  */
 import type { StopKind, TripDirection, TripStatus } from "@prisma/client";
+import { isStopClosed, stopState } from "@/lib/domain/stops";
 import { addDays, isIsoDate, minuteOfDay } from "@/lib/time";
 
 /**
@@ -26,18 +27,8 @@ export function isReadableRoadmapDate(date: string | null | undefined, today: st
 // leg): shared with the regulator screens, see @/lib/domain/no-show.
 export { isSameEpisode, returnTripsAfterOutboundNoShow, type LegKey } from "@/lib/domain/no-show";
 
-/** What the driver sees on a stop. */
-export type StopState =
-  /** Still to do. */
-  | "pending"
-  /** Pickup or dropoff recorded by the crew (completedAt set). */
-  | "done"
-  /** Pickup of a patient declared absent. */
-  | "no_show"
-  /** Dropoff of an absent patient: nothing to do there. */
-  | "skipped"
-  /** Trip cancelled by the regulator after the route was planned. */
-  | "cancelled";
+// State of a stop: shared with the regulator screens, see @/lib/domain/stops.
+export { isStopClosed, stopState, type StopState } from "@/lib/domain/stops";
 
 /** The fields of a stop the roadmap rules look at. */
 export type StopLike = {
@@ -51,17 +42,6 @@ export type StopLike = {
 
 /** Trips whose patient is not in the vehicle (no ride, no co-passenger). */
 const NOT_RIDING: readonly TripStatus[] = ["NO_SHOW", "CANCELLED"];
-
-export function stopState(stop: Pick<StopLike, "kind" | "completedAt" | "tripStatus">): StopState {
-  if (stop.tripStatus === "CANCELLED") return "cancelled";
-  if (stop.tripStatus === "NO_SHOW") return stop.kind === "PICKUP" ? "no_show" : "skipped";
-  return stop.completedAt ? "done" : "pending";
-}
-
-/** True once nothing is left to do on the stop (done, absent, skipped or cancelled). */
-export function isStopClosed(stop: Pick<StopLike, "kind" | "completedAt" | "tripStatus">): boolean {
-  return stopState(stop) !== "pending";
-}
 
 function bySequence<T extends { sequence: number }>(stops: readonly T[]): T[] {
   return [...stops].sort((a, b) => a.sequence - b.sequence);

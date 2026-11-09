@@ -127,7 +127,7 @@ describe("crew qualifications", () => {
     expect(crewQualificationErrors("AMBULANCE", taxiDriver, dea).defaultDriverId).toMatch(
       /une ambulance \(Auxiliaire ambulancier ou Ambulancier DE\)/,
     );
-    expect(crewQualificationErrors("AMBULANCE", auxiliary, auxiliary).defaultCrewMateId).toMatch(/au moins un Ambulancier DE/);
+    expect(crewQualificationErrors("AMBULANCE", auxiliary, auxiliary).defaultCrewMateId).toMatch(/au moins un ambulancier DE/);
     expect(crewQualificationErrors("AMBULANCE", dea, taxiDriver).defaultCrewMateId).toBe(
       "Marc Durand n'a pas la qualification requise pour être équipier d'ambulance (Auxiliaire ambulancier ou Ambulancier DE).",
     );

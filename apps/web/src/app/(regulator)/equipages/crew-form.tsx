@@ -2,7 +2,7 @@
 
 import { useActionState, useState, type ChangeEvent } from "react";
 import type { VehicleType } from "@prisma/client";
-import { Undo2 } from "lucide-react";
+import { Pin, Undo2 } from "lucide-react";
 import { Badge, VehicleTypeBadge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FormMessage, Select } from "@/components/ui/form";
@@ -11,11 +11,14 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { IDLE_STATE, valueOf, type FieldErrors, type FormValues } from "@/lib/forms";
 import { formatInstant } from "@/lib/planning/format";
 import { shiftText, type CrewIssue, type Seat } from "@/lib/staff/day-crews";
+import { formatShortDate } from "@/lib/time";
 import { saveDayCrews } from "./actions";
 import {
   crewMateField,
   driverField,
+  FIX_INTENT,
   ORIGIN_LABELS,
+  PARK_VALUE,
   shownCrewMateField,
   shownDriverField,
   UNFIX_INTENT,
@@ -52,6 +55,12 @@ export type CrewRow = {
   proposedSeats: Seat[];
   /** Fixed crew: version (DayCrew.updatedAt, ISO) and author; null for a proposal. */
   fixed: { version: string; by: string | null } | null;
+  /**
+   * Version of the vehicle's DayCrew row, even when the vehicle is out of
+   * service that day (its old row is not offered, but « Revenir aux
+   * propositions » removes it too); null without a row.
+   */
+  savedVersion: string | null;
   /** Working hours of the crew of the day. */
   shift: { start: number; end: number } | null;
   issues: CrewIssue[];
@@ -135,7 +144,8 @@ function CrewFormBody({
   errors: FieldErrors;
   message: { tone: "error" | "success"; text: string } | null;
 }) {
-  const shownValue = (row: CrewRow, seat: Seat) => (seat === "driver" ? row.driverId : row.crewMateId) ?? "";
+  const shownValue = (row: CrewRow, seat: Seat) =>
+    seat === "driver" && row.origin === "parked" ? PARK_VALUE : ((seat === "driver" ? row.driverId : row.crewMateId) ?? "");
   // Rows whose selects differ from the crew shown: only they are written.
   const [dirty, setDirty] = useState<Set<string>>(
     () =>
@@ -153,21 +163,49 @@ function CrewFormBody({
       ),
   );
 
+  // Rows whose driver select says « Laisser au dépôt »: their crew mate select is off (nobody on board).
+  const [parkedRows, setParkedRows] = useState<Set<string>>(
+    () =>
+      new Set(
+        rows
+          .filter((row) => (echoed ? valueOf(echoed, driverField(row.vehicleId)) : shownValue(row, "driver")) === PARK_VALUE)
+          .map((row) => row.vehicleId),
+      ),
+  );
+
+  const toggle = (set: Set<string>, id: string, on: boolean) => {
+    if (set.has(id) === on) return set;
+    const next = new Set(set);
+    if (on) next.add(id);
+    else next.delete(id);
+    return next;
+  };
+
   const onSeatChange = (row: CrewRow) => (event: ChangeEvent<HTMLSelectElement>) => {
     const form = event.currentTarget.form;
     if (!form) return;
     const current = (field: string) => (form.elements.namedItem(field) as HTMLSelectElement | null)?.value ?? "";
+    const park = current(driverField(row.vehicleId)) === PARK_VALUE;
     const changed =
       current(driverField(row.vehicleId)) !== shownValue(row, "driver") ||
-      (row.type === "AMBULANCE" && current(crewMateField(row.vehicleId)) !== shownValue(row, "crewMate"));
-    setDirty((previous) => {
-      if (previous.has(row.vehicleId) === changed) return previous;
-      const next = new Set(previous);
-      if (changed) next.add(row.vehicleId);
-      else next.delete(row.vehicleId);
-      return next;
-    });
+      (row.type === "AMBULANCE" && !park && current(crewMateField(row.vehicleId)) !== shownValue(row, "crewMate"));
+    setDirty((previous) => toggle(previous, row.vehicleId, changed));
+    setParkedRows((previous) => toggle(previous, row.vehicleId, park));
   };
+
+  const fixedRows = rows.filter((row) => row.fixed !== null);
+  const authors = [...new Set(fixedRows.map((row) => row.fixed?.by).filter((by): by is string => Boolean(by)))];
+  const many = fixedRows.length > 1;
+  const by = authors.length > 0 ? ` (par ${authors.join(", ")})` : "";
+  const resetQuestion = [
+    `Revenir aux propositions automatiques pour tout le ${formatShortDate(date)} ?`,
+    `${many ? `Les ${fixedRows.length} équipages fixés` : "L'équipage fixé"}${by} ${many ? "seront oubliés" : "sera oublié"}.`,
+    dirty.size > 0 ? "Vos modifications non enregistrées seront perdues." : "",
+    "Un équipage qu'un collègue a fixé ou modifié depuis l'affichage de la page est gardé.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const canFix = (row: CrewRow) => !row.unavailable && row.blocked === null && row.proposedSeats.length > 0;
 
   return (
     <form action={action} className="space-y-4">
@@ -212,6 +250,7 @@ function CrewFormBody({
                   </Td>
                   {row.unavailable ? (
                     <Td colSpan={3} className="text-sm text-slate-500">
+                      <input type="hidden" name={versionField(row.vehicleId)} value={row.savedVersion ?? ""} />
                       Véhicule indisponible ce jour : pas d&apos;équipage.{" "}
                       <a href={`/vehicules/${row.vehicleId}`} className="underline">
                         Voir la fiche
@@ -221,7 +260,7 @@ function CrewFormBody({
                     <>
                       <Td className="min-w-48">
                         <input type="hidden" name={shownDriverField(row.vehicleId)} value={shownValue(row, "driver")} />
-                        <input type="hidden" name={versionField(row.vehicleId)} value={row.fixed?.version ?? ""} />
+                        <input type="hidden" name={versionField(row.vehicleId)} value={row.savedVersion ?? ""} />
                         <Select
                           name={driverField(row.vehicleId)}
                           defaultValue={driverValue}
@@ -229,7 +268,14 @@ function CrewFormBody({
                           aria-label={`Chauffeur de ${row.label}`}
                           aria-invalid={Boolean(driverError)}
                         >
-                          <option value="">— Personne (reste au dépôt) —</option>
+                          {row.origin === "parked" ? (
+                            <option value={PARK_VALUE}>— Laissé au dépôt ce jour —</option>
+                          ) : (
+                            <>
+                              <option value="">— Aucun chauffeur —</option>
+                              <option value={PARK_VALUE}>Laisser au dépôt ce jour</option>
+                            </>
+                          )}
                           {people.map((p) => (
                             <option key={p.id} value={p.id}>
                               {optionLabel(p, row, "driver")}
@@ -246,6 +292,8 @@ function CrewFormBody({
                               name={crewMateField(row.vehicleId)}
                               defaultValue={mateValue}
                               onChange={onSeatChange(row)}
+                              // Left at the depot: nobody on board.
+                              disabled={parkedRows.has(row.vehicleId)}
                               aria-label={`Équipier de ${row.label}`}
                               aria-invalid={Boolean(mateError)}
                             >
@@ -280,6 +328,22 @@ function CrewFormBody({
                         ) : null}
                         {isDirty ? <Badge tone="warning">Modifié</Badge> : null}
                       </span>
+                      {canFix(row) ? (
+                        <Button
+                          type="submit"
+                          name="intent"
+                          value={`${FIX_INTENT}${row.vehicleId}`}
+                          variant="ghost"
+                          size="sm"
+                          className="-ml-2.5 text-xs whitespace-nowrap"
+                          // Submitting it would drop the other rows' changes: save them first.
+                          disabled={dirty.size > 0}
+                          title="Garder ce remplaçant même si les absences ou les équipages fixés changent"
+                        >
+                          <Pin aria-hidden className="size-3.5" />
+                          Fixer cette proposition
+                        </Button>
+                      ) : null}
                       {row.fixed && !row.unavailable ? (
                         <>
                           <span className="max-w-40 text-xs text-slate-500">
@@ -292,13 +356,9 @@ function CrewFormBody({
                             variant="ghost"
                             size="sm"
                             className="-ml-2.5 text-xs whitespace-nowrap"
-                            // Submitting it would drop the other rows' changes: save them first.
+                            // Submitting it would drop the other rows' changes: save them first (said in the footer).
                             disabled={dirty.size > 0}
-                            title={
-                              dirty.size > 0
-                                ? "Enregistrez d'abord vos modifications"
-                                : "Oublier l'équipage fixé de ce véhicule : il reprend la proposition automatique"
-                            }
+                            title="Oublier l'équipage fixé de ce véhicule : il reprend la proposition automatique"
                           >
                             <Undo2 aria-hidden className="size-3.5" />
                             Revenir à la proposition
@@ -326,13 +386,29 @@ function CrewFormBody({
           </TBody>
         </Table>
         <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-200 pt-4">
-          <p className="mr-auto max-w-2xl text-xs text-slate-500">
-            Seules les lignes modifiées sont enregistrées et deviennent des équipages fixés : l&apos;optimisation les utilise
-            tels quels, et propose un remplaçant si une personne fixée devient absente. Les autres lignes restent des
-            propositions qui suivent les absences.
-          </p>
+          <div className="mr-auto max-w-2xl space-y-1 text-xs text-slate-500">
+            <p>
+              Seules les lignes modifiées sont enregistrées et deviennent des équipages fixés : l&apos;optimisation les
+              utilise tels quels, et propose un remplaçant si une personne fixée devient absente. Les autres lignes restent
+              des propositions qui suivent les absences ; « Fixer cette proposition » garde un remplaçant proposé.
+            </p>
+            {dirty.size > 0 && (fixedRows.length > 0 || rows.some(canFix)) ? (
+              <p className="font-medium text-amber-800">
+                Modifications en cours : enregistrez-les (ou rechargez la page pour les abandonner) avant « Revenir à la
+                proposition » ou « Fixer cette proposition ».
+              </p>
+            ) : null}
+          </div>
           {hasSavedCrews ? (
-            <Button type="submit" name="intent" value="reset" variant="secondary">
+            <Button
+              type="submit"
+              name="intent"
+              value="reset"
+              variant="secondary"
+              onClick={(event) => {
+                if (!window.confirm(resetQuestion)) event.preventDefault();
+              }}
+            >
               Revenir aux propositions (tout le jour)
             </Button>
           ) : null}

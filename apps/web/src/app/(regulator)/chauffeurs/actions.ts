@@ -184,10 +184,10 @@ export async function setDriverActive(driverId: string, active: boolean): Promis
   const parts = ["Chauffeur désactivé."];
   if (detached > 0) parts.push(`Retiré de l'équipage par défaut de ${detached} véhicule${detached > 1 ? "s" : ""}.`);
   if (accountDisabled) parts.push(`Son compte d'accès est désactivé : il ne peut plus se connecter. ${OPEN_SESSION_NOTE}`);
-  // Planned routes keep their crew; fixed crews get a replacement for the seat.
+  // Planned routes keep their crew (said only when there are some); fixed crews have the seat to replace.
   const impact = await loadStaffImpact(db, [driver.id], todayIso(), null);
   const notice = staffImpactNotice(impact, "person");
-  if (notice) parts.push(`Les tournées déjà calculées ne changent pas.${notice}`);
+  if (notice) parts.push(`${impact.days.length > 0 ? "Ses tournées existantes gardent leur équipage." : ""}${notice}`.trim());
   return successState(parts.join(" "));
 }
 

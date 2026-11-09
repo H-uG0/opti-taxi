@@ -6,7 +6,7 @@ import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { loadDayVehicleInputs, personName, resolveVehicleAvailability } from "@/lib/optimizer/build-request";
+import { loadCrewRules, loadDayVehicleInputs, personName, resolveVehicleAvailability } from "@/lib/optimizer/build-request";
 import { logError } from "@/lib/log";
 import { DATABASE_ERROR, PLAN_CHANGED_ERROR, planningErrorMessage, UNEXPECTED_ERROR } from "@/lib/planning/action-errors";
 import { lockPlanningDay } from "@/lib/planning/day-lock";
@@ -39,6 +39,11 @@ export type PlanningActionResult =
       needsConfirmation?: boolean;
       /** The page shows a plan that changed since: offer to reload it. */
       stale?: boolean;
+      /**
+       * Problems the form shows next to its fields (« Changer l'équipage »:
+       * "driver", "crewMate", "form"); the banner then stays quiet.
+       */
+      fieldErrors?: Partial<Record<string, string>>;
     };
 
 const dateSchema = z.string().refine((value) => isIsoDate(value));
@@ -408,16 +413,54 @@ export async function reopenDay(date: string): Promise<PlanningActionResult> {
 
 const optionalIdSchema = z.union([z.literal(""), idSchema]).transform((value) => (value === "" ? null : value));
 
+/** What « Changer l'équipage » did, said to the regulator. */
+function routeCrewChangedText(outcome: {
+  label: string;
+  added: (string | null)[];
+  withoutAccount: (string | null)[];
+  removed: (string | null)[];
+  released: string[];
+  notes: string[];
+}): string {
+  const list = (names: readonly (string | null)[]) => names.filter((n): n is string => n !== null).join(" et ");
+  const effects: string[] = [];
+  if (outcome.added.length > 0) {
+    const many = outcome.added.length > 1;
+    effects.push(`${list(outcome.added)} ${many ? "voient" : "voit"} la tournée sur ${many ? "leur" : "sa"} feuille de route dès maintenant`);
+  }
+  if (outcome.removed.length > 0) effects.push(`${list(outcome.removed)} n'y ${outcome.removed.length > 1 ? "ont" : "a"} plus accès`);
+  const parts = [
+    effects.length > 0 ? `Équipage de ${outcome.label} changé : ${effects.join(", ")}.` : `Équipage de ${outcome.label} changé.`,
+  ];
+  if (outcome.withoutAccount.length > 0) {
+    const many = outcome.withoutAccount.length > 1;
+    parts.push(
+      `${list(outcome.withoutAccount)} n'${many ? "ont" : "a"} pas de compte actif : transmettez-${many ? "leur" : "lui"} la tournée (Chauffeurs, fiche).`,
+    );
+  }
+  if (outcome.released.length > 0) {
+    parts.push(
+      outcome.released.length > 1
+        ? `Les équipages fixés de ${list(outcome.released)} reviennent à la proposition automatique (page Équipages).`
+        : `L'équipage fixé de ${list(outcome.released)} revient à la proposition automatique (page Équipages).`,
+    );
+  }
+  parts.push(...outcome.notes);
+  return parts.join(" ");
+}
+
 /**
  * « Changer l'équipage » of a route on a validated or started day (vehicle
  * panel): a sick driver is replaced without re-optimizing the day. Only the
  * route's driver and crew mate change (lib/staff/route-crew.ts checks the
  * people put on it), never its stops; the crew of the day of that vehicle is
  * fixed to the same people (Équipages and « À traiter » show the route's
- * crew), and a fixed crew of another vehicle without a route that held one of
- * them goes back to the proposal. The replacement sees the roadmap at once,
- * the person replaced no longer does. Under the planning lock of the date, on
- * the version the regulator saw.
+ * crew), and the fixed crew of any other vehicle that held one of them goes
+ * back to the proposal (a person is on one crew of the day; a vehicle with a
+ * route keeps its route crew), which the result message names. The
+ * replacement sees the roadmap at once if they have an active account, the
+ * person replaced no longer does. Under the planning lock of the date, on the
+ * version the regulator saw.
  */
 export async function changeRouteCrew(
   routeId: string,
@@ -450,7 +493,7 @@ export async function changeRouteCrew(
     const outcome = await db.$transaction(async (tx) => {
       await lockPlanningDay(tx, isoDate);
       if ((await loadPlanVersion(tx, isoDate)) !== shownVersion) return { kind: "stale" as const };
-      const [route, people, absences, incompatibilities, otherRoutes] = await Promise.all([
+      const [route, people, absences, incompatibilities, otherRoutes, rules] = await Promise.all([
         tx.route.findUnique({
           where: { id: args.data.routeId },
           select: {
@@ -486,6 +529,7 @@ export async function changeRouteCrew(
           where: { serviceDate, id: { not: args.data.routeId } },
           select: { driverId: true, crewMateId: true, vehicle: { select: { label: true } } },
         }),
+        loadCrewRules(tx),
       ]);
       if (!route) return { kind: "stale" as const };
       const byId = new Map(people.map((p) => [p.id, p]));
@@ -501,9 +545,10 @@ export async function changeRouteCrew(
         absences: absences.map((a) => ({ ...a, startDate: toIsoDate(a.startDate), endDate: toIsoDate(a.endDate) })),
         incompatibilities,
         otherRoutes: otherRoutes.map((r) => ({ vehicleLabel: r.vehicle.label, driverId: r.driverId, crewMateId: r.crewMateId })),
+        rules,
       });
       const problems = Object.values(check.errors);
-      if (problems.length > 0) return { kind: "refused" as const, error: problems.join(" ") };
+      if (problems.length > 0) return { kind: "refused" as const, error: problems.join(" "), fieldErrors: check.errors };
 
       // Conditional on the crew read above: two regulators changing it at once write it once.
       const { count } = await tx.route.updateMany({
@@ -511,7 +556,8 @@ export async function changeRouteCrew(
         data: next,
       });
       if (count === 0) return { kind: "stale" as const };
-      // The fixed crews of other vehicles (no route that day) holding the new people go back to the proposal.
+      // The fixed crews of other vehicles holding the new people go back to the proposal: a person is on one crew
+      // of the day. Clearing only their seat would read as « left empty by the regulator » on that crew.
       const newPeople = [next.driverId, next.crewMateId].filter((id): id is string => id !== null);
       const released = await tx.dayCrew.findMany({
         where: {
@@ -519,7 +565,7 @@ export async function changeRouteCrew(
           vehicleId: { not: route.vehicleId },
           OR: [{ driverId: { in: newPeople } }, { crewMateId: { in: newPeople } }],
         },
-        select: { id: true, vehicleId: true },
+        select: { id: true, vehicleId: true, vehicle: { select: { label: true } } },
       });
       if (released.length > 0) await tx.dayCrew.deleteMany({ where: { id: { in: released.map((r) => r.id) } } });
       const dayCrew = await tx.dayCrew.upsert({
@@ -559,27 +605,30 @@ export async function changeRouteCrew(
         const person = id ? byId.get(id) : undefined;
         return person ? personName(person) : null;
       };
-      const added = newPeople.filter((id) => id !== route.driverId && id !== route.crewMateId).map(name);
+      const addedIds = newPeople.filter((id) => id !== route.driverId && id !== route.crewMateId);
+      // The roadmap is read with a driver account: someone without an active one has to be told the route.
+      const accounts = await tx.user.findMany({
+        where: { driverId: { in: addedIds }, role: "DRIVER", active: true },
+        select: { driverId: true },
+      });
+      const withAccount = new Set(accounts.map((a) => a.driverId));
       const removed = [route.driverId, route.crewMateId]
         .filter((id): id is string => id !== null && !newPeople.includes(id))
         .map(name);
-      return { kind: "changed" as const, label: route.vehicle.label, added, removed, notes: check.notes };
+      return {
+        kind: "changed" as const,
+        label: route.vehicle.label,
+        added: addedIds.filter((id) => withAccount.has(id)).map(name),
+        withoutAccount: addedIds.filter((id) => !withAccount.has(id)).map(name),
+        removed,
+        released: released.map((r) => r.vehicle.label),
+        notes: check.notes,
+      };
     }, PLANNING_TX_OPTIONS);
 
     if (outcome.kind === "stale") return STALE_PLAN;
-    if (outcome.kind === "refused") return { ok: false, error: outcome.error };
+    if (outcome.kind === "refused") return { ok: false, error: outcome.error, fieldErrors: outcome.fieldErrors };
     refreshPages();
-    const list = (names: (string | null)[]) => names.filter((n): n is string => n !== null).join(" et ");
-    const effects: string[] = [];
-    if (outcome.added.length > 0) {
-      const many = outcome.added.length > 1;
-      effects.push(`${list(outcome.added)} ${many ? "voient" : "voit"} la tournée sur ${many ? "leur" : "sa"} feuille de route dès maintenant`);
-    }
-    if (outcome.removed.length > 0) effects.push(`${list(outcome.removed)} n'y ${outcome.removed.length > 1 ? "ont" : "a"} plus accès`);
-    const parts = [
-      effects.length > 0 ? `Équipage de ${outcome.label} changé : ${effects.join(", ")}.` : `Équipage de ${outcome.label} changé.`,
-    ];
-    parts.push(...outcome.notes);
-    return { ok: true, message: parts.join(" ") };
+    return { ok: true, message: routeCrewChangedText(outcome) };
   });
 }

@@ -78,6 +78,13 @@ export const QUALIFICATION_LABELS = {
   DEA: "Ambulancier DE",
 } as const;
 
+/** The person holding it, inside a sentence (« au moins un ambulancier DE »); the labels above are for badges and lists. */
+export const QUALIFICATION_NOUNS = {
+  TAXI_CARD: "titulaire de la carte professionnelle taxi",
+  AUXILIARY: "auxiliaire ambulancier",
+  DEA: "ambulancier DE",
+} as const;
+
 /** Motifs d'indisponibilité d'une personne (StaffAbsence.kind). */
 export const ABSENCE_KIND_LABELS = {
   LEAVE: "Congé",

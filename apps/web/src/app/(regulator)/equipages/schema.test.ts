@@ -1,15 +1,22 @@
 import { describe, expect, it } from "vitest";
-import type { DayCrewView } from "@/lib/staff/day-crews";
+import { resolveDayCrews, type DayCrewInput, type DayCrewView, type StaffPerson } from "@/lib/staff/day-crews";
 import {
+  asShown,
+  brokenFixedCrews,
   changedRows,
   concurrentChangeErrors,
   crewFormErrors,
   crewOrigin,
+  fixIntentVehicle,
   mergeFixedCrews,
   ORIGIN_LABELS,
+  PARK_VALUE,
   readCrewForm,
+  shownVersions,
+  takenFromFixedErrors,
   unavailableChoiceErrors,
   unfixIntentVehicle,
+  type CrewFormRow,
 } from "./schema";
 
 const VEHICLES = [
@@ -50,17 +57,47 @@ describe("readCrewForm", () => {
     );
     expect(errors).toEqual({});
     expect(rows).toEqual([
-      { vehicleId: "taxi", driverId: "d1", crewMateId: null, shown: { driverId: "d1", crewMateId: null }, version: "" },
+      {
+        vehicleId: "taxi",
+        driverId: "d1",
+        crewMateId: null,
+        park: false,
+        shown: { driverId: "d1", crewMateId: null, park: false },
+        version: "",
+      },
       {
         vehicleId: "amb",
         driverId: null,
         crewMateId: "m1",
-        shown: { driverId: "d2", crewMateId: "m1" },
+        park: false,
+        shown: { driverId: "d2", crewMateId: "m1", park: false },
         version: "2026-11-09T13:32:05.120Z",
       },
     ]);
     // Only the ambulance changed (its driver was removed): the taxi stays a proposal.
     expect(changedRows(rows).map((row) => row.vehicleId)).toEqual(["amb"]);
+  });
+
+  it("reads « Laisser au dépôt » as a change, even on a row that already shows nobody", () => {
+    const { rows } = readCrewForm(
+      {
+        // Nobody available: choosing « Laisser au dépôt » keeps it there on purpose.
+        "driver:taxi": PARK_VALUE,
+        "was-driver:taxi": "",
+        // Left at the depot already, crew mate select ignored.
+        "driver:amb": PARK_VALUE,
+        "mate:amb": "m1",
+        "was-driver:amb": PARK_VALUE,
+      },
+      VEHICLES,
+    );
+    expect(rows.map((row) => [row.vehicleId, row.driverId, row.crewMateId, row.park, row.shown.park])).toEqual([
+      ["taxi", null, null, true, false],
+      ["amb", null, null, true, true],
+    ]);
+    expect(changedRows(rows).map((row) => row.vehicleId)).toEqual(["taxi"]);
+    // « — Aucun chauffeur — » on a row showing nobody is no change.
+    expect(changedRows(readCrewForm({ "driver:taxi": "", "was-driver:taxi": "" }, VEHICLES).rows)).toEqual([]);
   });
 
   it("reports a malformed id or version on its field", () => {
@@ -72,11 +109,12 @@ describe("readCrewForm", () => {
 });
 
 describe("concurrency on the fixed crews", () => {
-  const row = (vehicleId: string, version: string) => ({
+  const row = (vehicleId: string, version: string): CrewFormRow => ({
     vehicleId,
     driverId: "d9",
     crewMateId: null,
-    shown: { driverId: "d1", crewMateId: null },
+    park: false,
+    shown: { driverId: "d1", crewMateId: null, park: false },
     version,
   });
   const at = new Date("2026-11-09T13:32:05.120Z");
@@ -125,10 +163,22 @@ describe("concurrency on the fixed crews", () => {
     expect(unavailableChoiceErrors([amb], people, [], "2026-11-09")).toEqual({ "mate:amb": "Léa Faure est désactivé" });
   });
 
-  it("reads the vehicle of a « Revenir à la proposition » button", () => {
+  it("reads the vehicle of a « Revenir à la proposition » or « Fixer cette proposition » button", () => {
     expect(unfixIntentVehicle("unfix:veh_12")).toBe("veh_12");
     expect(unfixIntentVehicle("unfix:../x")).toBeNull();
     expect(unfixIntentVehicle("save")).toBeNull();
+    expect(fixIntentVehicle("fix:veh_12")).toBe("veh_12");
+    expect(fixIntentVehicle("unfix:veh_12")).toBeNull();
+  });
+
+  it("fixes a proposal as it was shown, with the version it showed", () => {
+    const shown = { ...row("taxi", "2026-11-09T13:32:05.120Z"), shown: { driverId: "rep", crewMateId: null, park: false } };
+    expect(asShown(shown)).toMatchObject({ vehicleId: "taxi", driverId: "rep", crewMateId: null, park: false, version: "2026-11-09T13:32:05.120Z" });
+  });
+
+  it("reads the versions a page showed, for « Revenir aux propositions »", () => {
+    const values = { "version:taxi": "2026-11-09T13:32:05.120Z", "version:amb": "", "version:old": "hier" };
+    expect(shownVersions(values, ["taxi", "amb", "old"])).toEqual([{ vehicleId: "taxi", updatedAt: new Date("2026-11-09T13:32:05.120Z") }]);
   });
 });
 
@@ -164,6 +214,98 @@ describe("crewFormErrors", () => {
     expect(crewFormErrors({ crews: [off] })).toEqual({});
     const mateOnly = crew({ vehicleId: "amb", driverId: null, crewMateId: "m1", issues: [] });
     expect(crewFormErrors({ crews: [mateOnly] })).toEqual({ "driver:amb": "Choisissez aussi un chauffeur, ou retirez l'équipier." });
+  });
+
+  it("says so for a crew mate without driver on a resolved plan too", () => {
+    const resolved = resolveDayCrews({
+      ...INPUT,
+      saved: [{ vehicleId: "amb", driverId: null, crewMateId: "aux" }],
+    });
+    expect(crewFormErrors(resolved, new Set(["amb"]))).toEqual({ "driver:amb": "Choisissez aussi un chauffeur, ou retirez l'équipier." });
+  });
+});
+
+const staff = (id: string, qualifications: StaffPerson["qualifications"]): StaffPerson => ({
+  id,
+  firstName: id,
+  lastName: id.toUpperCase(),
+  active: true,
+  workDays: [1, 2, 3, 4, 5],
+  qualifications,
+  depotId: "dep",
+  shiftStartMinute: 360,
+  shiftEndMinute: 1140,
+});
+
+const INPUT: DayCrewInput = {
+  date: "2026-11-09",
+  vehicles: [
+    { id: "taxiA", label: "Taxi A", type: "TAXI", active: true, depotId: "dep", defaultDriverId: "a", defaultCrewMateId: null },
+    { id: "taxiB", label: "Taxi B", type: "TAXI", active: true, depotId: "dep", defaultDriverId: "b", defaultCrewMateId: null },
+    { id: "amb", label: "Amb", type: "AMBULANCE", active: true, depotId: "dep", defaultDriverId: null, defaultCrewMateId: null },
+  ],
+  people: [staff("a", ["TAXI_CARD"]), staff("b", ["TAXI_CARD"]), staff("x", ["TAXI_CARD"]), staff("aux", ["AUXILIARY"])],
+  absences: [],
+  incompatibilities: [],
+  saved: [],
+};
+
+describe("a change taking a person from another fixed crew", () => {
+  const people = new Map(INPUT.people.map((p) => [p.id, p]));
+  const labels = new Map(INPUT.vehicles.map((v) => [v.id, v.label]));
+  const change = (vehicleId: string, driverId: string, shownDriver: string): CrewFormRow => ({
+    vehicleId,
+    driverId,
+    crewMateId: null,
+    park: false,
+    shown: { driverId: shownDriver, crewMateId: null, park: false },
+    version: "",
+  });
+
+  /** The errors saveDayCrews checks, for `changed` over the fixed crews `saved`. */
+  function check(saved: DayCrewInput["saved"], changed: CrewFormRow[]) {
+    const before = resolveDayCrews({ ...INPUT, saved });
+    const after = resolveDayCrews({ ...INPUT, saved: mergeFixedCrews(saved, changed) });
+    const ids = new Set(changed.map((row) => row.vehicleId));
+    return {
+      errors: { ...crewFormErrors(after, ids), ...takenFromFixedErrors(changed, before, people, labels) },
+      broken: brokenFixedCrews(before, after, ids),
+    };
+  }
+
+  const message =
+    "x X fait déjà partie de l'équipage fixé de Taxi B ce jour : revenez d'abord à la proposition sur Taxi B, ou choisissez quelqu'un d'autre.";
+
+  it("refuses it on the changed row when that row comes first in display order", () => {
+    // Taxi A (changed) comes before Taxi B (fixed with x): the crews of the day would give x to Taxi A.
+    const { errors, broken } = check([{ vehicleId: "taxiB", driverId: "x", crewMateId: null }], [change("taxiA", "x", "a")]);
+    expect(errors).toEqual({ "driver:taxiA": message });
+    expect(broken).toEqual([{ vehicleId: "taxiB", message: "x X est déjà affecté à Taxi A ce jour" }]);
+  });
+
+  it("refuses it with the same message when the changed row comes later", () => {
+    // Taxi A (fixed with x) comes first: the changed Taxi B gets « déjà affecté », replaced by the same message.
+    const { errors, broken } = check([{ vehicleId: "taxiA", driverId: "x", crewMateId: null }], [change("taxiB", "x", "b")]);
+    expect(errors).toEqual({
+      "driver:taxiB":
+        "x X fait déjà partie de l'équipage fixé de Taxi A ce jour : revenez d'abord à la proposition sur Taxi A, ou choisissez quelqu'un d'autre.",
+    });
+    expect(broken).toEqual([]);
+  });
+
+  it("accepts taking a person who is only a proposal elsewhere, or moving people between two changed rows", () => {
+    // b is Taxi B's default driver (a proposal): fixing b on Taxi A leaves Taxi B to the proposals.
+    expect(check([], [change("taxiA", "b", "a")])).toEqual({ errors: {}, broken: [] });
+    // Both rows changed: a swap.
+    expect(
+      check(
+        [
+          { vehicleId: "taxiA", driverId: "a", crewMateId: null },
+          { vehicleId: "taxiB", driverId: "b", crewMateId: null },
+        ],
+        [change("taxiA", "b", "a"), change("taxiB", "a", "b")],
+      ),
+    ).toEqual({ errors: {}, broken: [] });
   });
 });
 

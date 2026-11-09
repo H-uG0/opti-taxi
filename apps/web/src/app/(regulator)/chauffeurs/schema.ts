@@ -12,6 +12,7 @@ import {
   crewOneOfRequirement,
   driverRequirement,
   hasRequiredQualification,
+  qualificationNoun,
   qualificationRequirement,
 } from "../vehicules/_lib/crew";
 import {
@@ -217,7 +218,7 @@ export function assignmentConflicts(
     }
     const oneOf = crewOneOfRequirement(vehicle.type);
     if (oneOf && vehicle.partner && !crewHoldsRequired(vehicle.type, [qualifications, vehicle.partner])) {
-      conflicts.push(`${role} par défaut de « ${vehicle.label} » (l'équipage doit compter un ${qualificationRequirement(oneOf)})`);
+      conflicts.push(`${role} par défaut de « ${vehicle.label} » (l'équipage doit compter un ${qualificationNoun(oneOf)})`);
     }
   };
   for (const vehicle of asDriver) check(vehicle, driverRequirement(vehicle.type), "chauffeur");

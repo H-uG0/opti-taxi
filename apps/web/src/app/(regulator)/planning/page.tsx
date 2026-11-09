@@ -240,6 +240,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
               lockBlocked={past ? "Date passée : les verrous ne servent plus." : null}
               initialTripId={initialTripId}
               crewChoices={view.crewChoices}
+              crewRules={view.crewRules}
               crewChangeMode={past ? "none" : dayLocked ? "route" : "equipages"}
               crewChangeBlocked={runningReason}
               version={shownVersion.version}

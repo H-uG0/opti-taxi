@@ -7,7 +7,7 @@
  */
 import type { Qualification, VehicleType } from "@prisma/client";
 import { CREW_REQUIRED_ONE_OF, crewHoldsRequired, REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
-import { QUALIFICATION_LABELS } from "@/lib/labels";
+import { QUALIFICATION_LABELS, QUALIFICATION_NOUNS } from "@/lib/labels";
 
 export const VEHICLE_TYPE_WITH_ARTICLE: Record<VehicleType, string> = {
   TAXI: "un taxi",
@@ -33,9 +33,14 @@ export function hasRequiredQualification(
   return required.some((q) => qualifications.includes(q));
 }
 
-/** ["AUXILIARY", "DEA"] -> "Auxiliaire ambulancier ou Ambulancier DE". */
+/** ["AUXILIARY", "DEA"] -> "Auxiliaire ambulancier ou Ambulancier DE" (a list of qualifications). */
 export function qualificationRequirement(required: readonly Qualification[]): string {
   return required.map((q) => QUALIFICATION_LABELS[q]).join(" ou ");
+}
+
+/** ["DEA"] -> "ambulancier DE": the people holding them, inside a sentence (« au moins un ambulancier DE »). */
+export function qualificationNoun(required: readonly Qualification[]): string {
+  return required.map((q) => QUALIFICATION_NOUNS[q]).join(" ou ");
 }
 
 export function driverRequirement(type: VehicleType): readonly Qualification[] {
@@ -51,10 +56,10 @@ export function crewOneOfRequirement(type: VehicleType): readonly Qualification[
   return CREW_REQUIRED_ONE_OF[type];
 }
 
-/** ", avec au moins un Ambulancier DE dans l'équipage" for an ambulance, "" otherwise. */
+/** ", avec au moins un ambulancier DE dans l'équipage" for an ambulance, "" otherwise. */
 export function crewRuleSuffix(type: VehicleType): string {
   const oneOf = crewOneOfRequirement(type);
-  return oneOf ? `, avec au moins un ${qualificationRequirement(oneOf)} dans l'équipage` : "";
+  return oneOf ? `, avec au moins un ${qualificationNoun(oneOf)} dans l'équipage` : "";
 }
 
 /**
@@ -70,7 +75,7 @@ export function crewCompositionError(
   const oneOf = crewOneOfRequirement(type);
   if (!oneOf || !driver || !crewMate) return null;
   if (crewHoldsRequired(type, [driver.qualifications, crewMate.qualifications])) return null;
-  return `Il faut au moins un ${qualificationRequirement(oneOf)} dans l'équipage d'${VEHICLE_TYPE_WITH_ARTICLE[type].replace(/^une? /, "")}, au volant ou auprès du patient : ni ${driver.name} ni ${crewMate.name} ne l'est.`;
+  return `Il faut au moins un ${qualificationNoun(oneOf)} dans l'équipage d'${VEHICLE_TYPE_WITH_ARTICLE[type].replace(/^une? /, "")}, au volant ou auprès du patient : ni ${driver.name} ni ${crewMate.name} ne l'est.`;
 }
 
 /** A crew member as the forms show it. */
@@ -193,7 +198,7 @@ export function qualificationScope(qualification: Qualification): string {
     const oneOf = crewOneOfRequirement(t);
     if (!oneOf) continue;
     if (oneOf.includes(qualification)) parts.push(`Au moins un dans chaque équipage d'${names[t]}`);
-    else if (drive.includes(t) || crew.includes(t)) parts.push(`En ${names[t]}, avec un ${qualificationRequirement(oneOf)}`);
+    else if (drive.includes(t) || crew.includes(t)) parts.push(`En ${names[t]}, avec un ${qualificationNoun(oneOf)}`);
   }
   return parts.join(" · ");
 }

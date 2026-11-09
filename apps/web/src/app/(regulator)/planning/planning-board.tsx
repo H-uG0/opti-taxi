@@ -12,6 +12,7 @@ import type { DroppedLock } from "@/lib/optimizer/build-request";
 import type { TimeRange } from "@/lib/planning/timeline";
 import type { VehicleIssue } from "@/lib/planning/route-issues";
 import type { TripView, UnassignedView, VehicleRowView, ViolationView } from "@/lib/planning/types";
+import type { CrewRules } from "@/lib/staff/day-crews";
 import type { CrewChoice } from "@/lib/staff/route-crew";
 import { STOP_KIND_LABELS } from "@/lib/labels";
 import { formatMinute } from "@/lib/time";
@@ -36,6 +37,8 @@ export type PlanningBoardProps = {
   initialTripId: string | null;
   /** « Changer l'équipage » of a route: people offered, where the change happens, what blocks it now. */
   crewChoices: CrewChoice[];
+  /** Settings of the crews of the day (shared working time of an ambulance pair). */
+  crewRules: Pick<CrewRules, "minPairOverlapMin">;
   crewChangeMode: CrewChangeMode;
   crewChangeBlocked: string | null;
   /** Plan version shown (actions on a stale page are refused). */
@@ -61,6 +64,7 @@ export function PlanningBoard({
   lockBlocked,
   initialTripId,
   crewChoices,
+  crewRules,
   crewChangeMode,
   crewChangeBlocked,
   version,
@@ -195,6 +199,7 @@ export function PlanningBoard({
                   date={date}
                   vehicle={selectedVehicle}
                   choices={crewChoices}
+                  rules={crewRules}
                   version={version}
                   mode={crewChangeMode}
                   blocked={crewChangeBlocked}

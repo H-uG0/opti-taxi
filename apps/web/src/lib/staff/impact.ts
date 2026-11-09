@@ -6,8 +6,10 @@
  * - a validated day: « Changer l'équipage » of the route on the planning, or
  *   reopen the planning and re-run it;
  * - a started day: « Changer l'équipage » of the route (no re-optimization);
- * - a fixed crew of a day still open to change: a replacement is proposed on
- *   it (absence, deactivation), or the pair has to be changed by hand.
+ * - a fixed crew of a day still open to change: the seat is to replace on the
+ *   Équipages page (absence, deactivation; a replacement is proposed when
+ *   someone is free), or the pair has to be changed by hand. A fixed crew of
+ *   a validated or started day is not listed: its routes keep their crews.
  *
  * `staffImpactNotice` is pure (unit-tested); `loadStaffImpact` reads the rows,
  * with the Prisma client as a parameter (no server-only import).
@@ -66,7 +68,7 @@ export function staffImpactNotice(impact: StaffImpact, subject: ImpactSubject): 
     parts.push(
       subject === "pair"
         ? `Équipage${many ? "s" : ""} fixé${many ? "s" : ""} à revoir sur la page Équipages, ces deux personnes y sont ensemble : ${text}.`
-        : `Équipage${many ? "s" : ""} fixé${many ? "s" : ""} avec cette personne : ${text} ; un remplaçant y est proposé, à vérifier sur la page Équipages.`,
+        : `Équipage${many ? "s" : ""} fixé${many ? "s" : ""} avec cette personne : ${text} ; ${many ? "ses postes sont" : "son poste est"} à remplacer, voir la page Équipages.`,
     );
   }
   return parts.length > 0 ? ` ${parts.join(" ")}` : "";
@@ -115,9 +117,11 @@ export async function loadStaffImpact(
   ]);
   const dates = [...new Set(routes.map((route) => toIsoDate(route.serviceDate)))].sort();
   if (dates.length === 0 && fixedRows.length === 0) return { days: [], fixed: [] };
-  const onDates = { in: dates.map(fromIsoDate) };
+  // The state of the days of the routes and of the fixed crews (a spare vehicle may have a fixed crew and no route).
+  const checked = [...new Set([...dates, ...fixedRows.map((row) => toIsoDate(row.serviceDate))])].sort();
+  const onDates = { in: checked.map(fromIsoDate) };
   const [validated, pickedUp, recorded] =
-    dates.length > 0
+    checked.length > 0
       ? await Promise.all([
           prisma.route.findMany({
             where: { serviceDate: onDates, status: "VALIDATED" },
@@ -141,9 +145,10 @@ export async function loadStaffImpact(
     ...pickedUp.map((row) => toIsoDate(row.serviceDate)),
     ...recorded.map((row) => toIsoDate(row.route.serviceDate)),
   ]);
-  const days = dates.map((date) => ({ date, state: dayStateOf(validatedDates.has(date), startedDates.has(date)) }));
-  // A validated or started day keeps its routes: its fixed crews no longer count (the route does).
-  const locked = new Set(days.filter((day) => day.state !== "proposed").map((day) => day.date));
+  const stateOf = (date: string) => dayStateOf(validatedDates.has(date), startedDates.has(date));
+  const days = dates.map((date) => ({ date, state: stateOf(date) }));
+  // A validated or started day keeps its routes: its fixed crews no longer count (the route does), Équipages is locked.
+  const locked = new Set(checked.filter((date) => stateOf(date) !== "proposed"));
   const fixed = fixedRows
     .map((row) => ({ date: toIsoDate(row.serviceDate), vehicleLabel: row.vehicle.label }))
     .filter((crew) => !locked.has(crew.date));

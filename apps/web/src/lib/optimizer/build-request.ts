@@ -13,6 +13,7 @@
  */
 import type {
   AppSettings,
+  Prisma,
   PrismaClient,
   SharingStatus,
   TariffGrid,
@@ -586,7 +587,7 @@ export type DayCrewContext = {
 };
 
 /** Everything the crews of isoDate depend on, resolved (lib/staff/day-crews.ts). */
-export async function loadDayCrewContext(prisma: PrismaClient, isoDate: string): Promise<DayCrewContext> {
+export async function loadDayCrewContext(prisma: PrismaClient | Prisma.TransactionClient, isoDate: string): Promise<DayCrewContext> {
   const serviceDate = fromIsoDate(isoDate);
   const [vehicles, people, absences, incompatibilities, saved, outages, deadlines, odometers, depots, rules] = await Promise.all([
     prisma.vehicle.findMany({

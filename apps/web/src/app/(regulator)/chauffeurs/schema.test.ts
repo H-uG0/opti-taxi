@@ -136,7 +136,7 @@ describe("assignmentConflicts", () => {
     expect(assignmentConflicts(["AUXILIARY"], [{ label: "Ambulance 1", type: "AMBULANCE", partner: ["DEA"] }], [])).toEqual([]);
     // The DEA of the pair loses the diploma: the pair has none left.
     expect(assignmentConflicts(["AUXILIARY"], [], [{ label: "Ambulance 1", type: "AMBULANCE", partner: ["AUXILIARY"] }])).toEqual([
-      "équipier par défaut de « Ambulance 1 » (l'équipage doit compter un Ambulancier DE)",
+      "équipier par défaut de « Ambulance 1 » (l'équipage doit compter un ambulancier DE)",
     ]);
     // No partner yet: the crew mate of the day will have to be a DEA, nothing to refuse here.
     expect(assignmentConflicts(["AUXILIARY"], [{ label: "Ambulance 1", type: "AMBULANCE", partner: null }], [])).toEqual([]);

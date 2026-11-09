@@ -75,7 +75,7 @@ describe("staff actions: audit trail", () => {
     expect(result.message).toBe(
       "Absence enregistrée. Tournées déjà calculées avec cette personne le 05/01/2099 : relancez l'optimisation de ce jour depuis le planning." +
         " Planning déjà validé le 07/01/2099 : changez l'équipage de la tournée (planning, panneau du véhicule, « Changer l'équipage ») ou rouvrez le planning puis relancez l'optimisation." +
-        " Équipage fixé avec cette personne : VSL 2 le 06/01/2099 ; un remplaçant y est proposé, à vérifier sur la page Équipages.",
+        " Équipage fixé avec cette personne : VSL 2 le 06/01/2099 ; son poste est à remplacer, voir la page Équipages.",
     );
   });
 

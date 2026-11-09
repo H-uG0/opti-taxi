@@ -72,6 +72,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
         proposedSeats: crew?.proposedSeats ?? [],
         // An unavailable vehicle keeps no crew (saveDayCrews): its old fixed row is not offered.
         fixed: fixed && !crew?.unavailable ? { version: fixed.updatedAt.toISOString(), by: fixed.updatedBy } : null,
+        savedVersion: fixed ? fixed.updatedAt.toISOString() : null,
         shift: crew?.shift ?? null,
         issues: crew?.issues ?? [],
         blocked: crew?.blocked ?? null,
@@ -190,7 +191,8 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
             : "Chaque véhicule a son"}{" "}
           équipage attitré quand il est disponible, sinon un remplaçant qualifié : du même dépôt d&apos;abord, puis du
           dépôt le plus proche (Paramètres, « Équipages »), qui couvre l&apos;horaire du titulaire, en gardant les
-          ambulanciers DE pour les ambulances. Modifiez une ligne pour la fixer.
+          ambulanciers DE pour les ambulances. Modifiez une ligne pour la fixer, ou « Fixer cette proposition » pour
+          garder le remplaçant proposé.
         </p>
 
         <CrewForm date={date} rows={rows} people={people} locked={locked} hasSavedCrews={hasSavedCrews} />

@@ -75,7 +75,10 @@ export function PlanningActivityProvider({ timeLimitSec, children }: { timeLimit
           // A redirect (expired session) resolves without a result: the router navigates.
           if (!result) return;
           if (result.ok) setFeedback({ tone: "success", text: result.message });
-          else if (!result.needsConfirmation) setFeedback({ tone: "error", text: result.error, reload: result.stale === true });
+          // Errors shown next to the fields of the form that sent them: the banner, far above, stays quiet.
+          else if (!result.needsConfirmation && !result.fieldErrors) {
+            setFeedback({ tone: "error", text: result.error, reload: result.stale === true });
+          }
           options?.onResult?.(result);
         } catch {
           setFeedback({

@@ -13,6 +13,7 @@ import {
   crewRuleSuffix,
   driverRequirement,
   hasRequiredQualification,
+  qualificationNoun,
   qualificationRequirement,
   sharedCrewWarning,
   VEHICLE_TYPE_WITH_ARTICLE,
@@ -140,9 +141,9 @@ function VehicleFields({
     } else if (crewMateShared) {
       crewMateHint = <InlineWarning>{crewMateShared}</InlineWarning>;
     } else if (crewMateId === "") {
-      crewMateHint = `Une ambulance part à deux : sans équipier par défaut, elle n'est planifiée que si un équipier qualifié reste libre ce jour-là (page Équipages). Requis : ${qualificationRequirement(crewRule)}${lacksOneOf(selectedDriver) ? `, et ${qualificationRequirement(oneOf ?? [])} puisque le chauffeur ne l'est pas` : ""}.`;
+      crewMateHint = `Une ambulance part à deux : sans équipier par défaut, elle n'est planifiée que si un équipier qualifié reste libre ce jour-là (page Équipages). Requis : ${qualificationRequirement(crewRule)}${lacksOneOf(selectedDriver) ? `, et ${qualificationNoun(oneOf ?? [])} puisque le chauffeur ne l'est pas` : ""}.`;
     } else {
-      crewMateHint = `Une ambulance part à deux, avec au moins un ${qualificationRequirement(oneOf ?? [])} au volant ou auprès du patient. Requis : ${qualificationRequirement(crewRule)}.`;
+      crewMateHint = `Une ambulance part à deux, avec au moins un ${qualificationNoun(oneOf ?? [])} au volant ou auprès du patient. Requis : ${qualificationRequirement(crewRule)}.`;
     }
   }
 

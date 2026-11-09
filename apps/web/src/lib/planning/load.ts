@@ -11,6 +11,7 @@ import {
   vehicleInputSelect,
 } from "@/lib/optimizer/build-request";
 import { readRunDetails, type RunDetails } from "@/lib/optimizer/run-details";
+import { DEFAULT_CREW_RULES, type CrewRules } from "@/lib/staff/day-crews";
 import { crewChoices, type CrewChoice } from "@/lib/staff/route-crew";
 import { fromIsoDate } from "@/lib/time";
 import { vehicleIssues } from "./route-issues";
@@ -42,7 +43,7 @@ const recorderSelect = { select: { name: true } } as const;
 
 export async function loadPlanningDay(
   isoDate: string,
-): Promise<PlanningDayView & { timeLimitSec: number; crewChoices: CrewChoice[] }> {
+): Promise<PlanningDayView & { timeLimitSec: number; crewChoices: CrewChoice[]; crewRules: CrewRules }> {
   const serviceDate = fromIsoDate(isoDate);
   const [settings, defaultVehicles, crewContext, trips, routes, lastRun, planRun, tariffs] = await Promise.all([
     getSettings(db),
@@ -159,7 +160,8 @@ export async function loadPlanningDay(
     [...crewContext.people.values()],
     crewContext.input.absences,
     routes.map((r) => ({ vehicleId: r.vehicleId, vehicleLabel: labelOf.get(r.vehicleId) ?? "Véhicule", driverId: r.driverId, crewMateId: r.crewMateId })),
+    crewContext.input.depots ?? [],
   );
   // view.timeLimitSec: the solver budget scaled with the day's trips, not the bare setting.
-  return { ...view, crewChoices: choices };
+  return { ...view, crewChoices: choices, crewRules: crewContext.input.rules ?? DEFAULT_CREW_RULES };
 }

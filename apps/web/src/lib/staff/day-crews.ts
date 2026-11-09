@@ -19,13 +19,18 @@
  *    with no seat yet, compatible with the other crew member. Candidates are
  *    ranked by depot (the vehicle's own first, then the nearest, within
  *    CrewRules.maxReplacementKm), then by how much of the holder's usual
- *    shift they cover, then the least versatile first (a DEA is kept for the
- *    ambulances: a VSL takes an auxiliary when one is free). Seats are served
- *    in this order: fixed crews that lost a member, vehicles with a default
- *    crew, then spare vehicles (no default crew), which only take the people
- *    left over beyond the reserve kept per depot (CrewRules.reservePerDepot);
- *    within each group, ambulances first (the scarcest people), then VSL,
- *    then taxis.
+ *    shift they cover, then the least versatile first. Seats are served from
+ *    the scarcest people to the most common, so a DEA is kept for the
+ *    ambulances: the ambulances of the fixed and default crews first (a seat
+ *    only a DEA can fill before the others), then the VSL, then the taxis
+ *    (within a type, fixed crews that lost a member before default crews);
+ *    spare vehicles (no default crew) come last and only take the people left
+ *    over beyond the reserve kept per depot (CrewRules.reservePerDepot).
+ *    A default member left alone on an ambulance nobody can complete is
+ *    offered to the other vehicles (a VSL whose driver is absent) before the
+ *    spare vehicles; when none needs them, they stay on the ambulance.
+ *    An empty seat says why the free qualified people were not proposed
+ *    (too far, kept in reserve).
  * An ambulance crew needs a DEA at the wheel or beside the patient (rules.ts,
  * R. 6312-10) and CrewRules.minPairOverlapMin of shared working time.
  * A vehicle with a blocking problem (`blocked`) is left out of the planning.
@@ -43,7 +48,7 @@
 import type { AbsenceKind, Qualification, VehicleType } from "@prisma/client";
 import { CREW_REQUIRED_ONE_OF, crewHoldsRequired, REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
 import { unavailabilityOn, unavailabilityText, type DatedVehicleUnavailability } from "@/lib/fleet/availability";
-import { ABSENCE_KIND_LABELS, QUALIFICATION_LABELS } from "@/lib/labels";
+import { ABSENCE_KIND_LABELS, QUALIFICATION_NOUNS } from "@/lib/labels";
 import { formatDuration, formatMinute, formatShortDate, isoWeekday, WEEKDAY_LABELS } from "@/lib/time";
 
 export type StaffPerson = {
@@ -181,10 +186,10 @@ export function completesCrew(
   return !other || crewHoldsRequired(type, [person.qualifications, other.qualifications]);
 }
 
-/** "Ambulancier DE" for an ambulance: what one member of its crew must hold. */
-function oneOfLabel(type: VehicleType): string | null {
+/** "ambulancier DE" for an ambulance (inside a sentence): what one member of its crew must hold. */
+export function oneOfNoun(type: VehicleType): string | null {
   const oneOf: readonly Qualification[] | null = CREW_REQUIRED_ONE_OF[type];
-  return oneOf ? oneOf.map((q) => QUALIFICATION_LABELS[q]).join(" ou ") : null;
+  return oneOf ? oneOf.map((q) => QUALIFICATION_NOUNS[q]).join(" ou ") : null;
 }
 
 type Shift = Pick<StaffPerson, "shiftStartMinute" | "shiftEndMinute">;
@@ -276,6 +281,8 @@ const SEAT_LABEL: Record<Seat, string> = { driver: "Chauffeur", crewMate: "Équi
 
 /** Message of a vehicle kept at the depot by the regulator. */
 export const PARKED_MESSAGE = "Laissé au dépôt ce jour (choix du régulateur)";
+/** Message of a fixed ambulance whose driver seat the regulator left empty (crew mate only). */
+export const NO_DRIVER_CHOSEN_MESSAGE = "Pas de chauffeur ce jour (choix du régulateur)";
 
 type Draft = {
   vehicle: CrewVehicle;
@@ -292,7 +299,17 @@ type Draft = {
   /** Usual holder of each seat (default member, or the fixed member who became unavailable). */
   holder: Partial<Record<Seat, StaffPerson>>;
   parked: boolean;
+  /** The lone default member proposed on another vehicle, and the seat nobody could fill next to them. */
+  shortOf: { seat: Seat; partner: StaffPerson } | null;
 };
+
+/** "Aucun chauffeur disponible", "Aucun équipier ambulancier DE disponible": what a seat left empty lacks. */
+function missingText(type: VehicleType, seat: Seat, onBoard: Pick<StaffPerson, "qualifications"> | undefined): string {
+  if (seat === "driver") return "Aucun chauffeur disponible";
+  // With an auxiliary at the wheel, only a DEA completes the crew.
+  const needed = onBoard && !crewHoldsRequired(type, [onBoard.qualifications]) ? ` ${oneOfNoun(type)}` : "";
+  return `Aucun équipier${needed} disponible`;
+}
 
 type Candidate = { person: StaffPerson; sameDepot: boolean; km: number | null; uncovered: number; versatility: number };
 
@@ -360,6 +377,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
     proposed: new Set(),
     holder: {},
     parked: false,
+    shortOf: null,
   });
   const seatsOf = (vehicle: CrewVehicle): Seat[] => (vehicle.type === "AMBULANCE" ? ["driver", "crewMate"] : ["driver"]);
   const setSeat = (d: Draft, seat: Seat, id: string | null) => {
@@ -410,7 +428,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
     if (holder) return `déjà sur ${holder}`;
     if (!isQualified(person, vehicle.type, seat)) return "qualification manquante";
     if (partner && areIncompatible(partner.id, person.id, incompatibilities)) return "incompatible avec le chauffeur";
-    if (partner && !completesCrew(person, partner, vehicle.type)) return `aucun ${oneOfLabel(vehicle.type)} dans l'équipage`;
+    if (partner && !completesCrew(person, partner, vehicle.type)) return `aucun ${oneOfNoun(vehicle.type)} dans l'équipage`;
     if (partner && vehicle.type === "AMBULANCE" && sharedMinutes(person, partner) < rules.minPairOverlapMin) {
       return `${formatDuration(sharedMinutes(person, partner))} d'horaire commun avec le chauffeur, ${formatDuration(rules.minPairOverlapMin)} au moins`;
     }
@@ -450,11 +468,52 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
     taken.set(person.id, label);
     if (person.depotId) freeByDepot.set(person.depotId, (freeByDepot.get(person.depotId) ?? 0) - 1);
   };
+  const release = (person: StaffPerson) => {
+    taken.delete(person.id);
+    if (person.depotId) freeByDepot.set(person.depotId, (freeByDepot.get(person.depotId) ?? 0) + 1);
+  };
   const hasDefaultCrew = (d: Draft) => d.vehicle.defaultDriverId !== null || d.vehicle.defaultCrewMateId !== null;
   const group = (d: Draft) => (d.source === "saved" ? 0 : hasDefaultCrew(d) ? 1 : 2);
+  const isSpare = (d: Draft) => group(d) === 2;
+  const emptySeats = (d: Draft) => seatsOf(d.vehicle).filter((seat) => d.open.has(seat) && seatOf(d, seat) === null);
+  /**
+   * How scarce the people a vehicle needs are, among its type: 0 for a seat
+   * only a DEA can fill (the member on board is not one), 1 for both seats
+   * of an ambulance, 2 for anyone qualified.
+   */
+  const need = (d: Draft): number => {
+    if (CREW_REQUIRED_ONE_OF[d.vehicle.type] === null) return 2;
+    const seats = emptySeats(d);
+    if (seats.length === 2) return 1;
+    const onBoard = seats[0] ? other(d, seats[0]) : undefined;
+    return onBoard && !crewHoldsRequired(d.vehicle.type, [onBoard.qualifications]) ? 0 : 2;
+  };
+  const needOf = new Map(drafts.map((d) => [d, need(d)]));
   const order = drafts
     .filter((d) => d.open.size > 0)
-    .sort((a, b) => group(a) - group(b) || SCARCITY_ORDER[a.vehicle.type] - SCARCITY_ORDER[b.vehicle.type] || a.index - b.index);
+    .sort(
+      (a, b) =>
+        Number(isSpare(a)) - Number(isSpare(b)) ||
+        SCARCITY_ORDER[a.vehicle.type] - SCARCITY_ORDER[b.vehicle.type] ||
+        (needOf.get(a) ?? 2) - (needOf.get(b) ?? 2) ||
+        group(a) - group(b) ||
+        a.index - b.index,
+    );
+
+  /** Whether `p` may take `seat` next to `partner`, before the distance and reserve limits. */
+  const fits = (p: StaffPerson, d: Draft, seat: Seat, partner: StaffPerson | undefined): boolean => {
+    const { type } = d.vehicle;
+    if (taken.has(p.id) || p.id === partner?.id || !isQualified(p, type, seat)) return false;
+    if (!partner) return true;
+    if (areIncompatible(partner.id, p.id, incompatibilities) || !completesCrew(p, partner, type)) return false;
+    return type !== "AMBULANCE" || sharedMinutes(p, partner) >= rules.minPairOverlapMin;
+  };
+  /** The reserve of the person's depot is reached (the partner chosen with them counts as taken). */
+  const inReserve = (p: StaffPerson, partner: StaffPerson | undefined): boolean => {
+    if (!p.depotId) return false;
+    const free = (freeByDepot.get(p.depotId) ?? 0) - (partner && partner.depotId === p.depotId && !taken.has(partner.id) ? 1 : 0);
+    return free <= rules.reservePerDepot;
+  };
 
   /** Ranked candidates for a seat; `partner`: the other member (on board or about to be). */
   const candidatesFor = (d: Draft, seat: Seat, partner: StaffPerson | undefined, spare: boolean): Candidate[] => {
@@ -462,16 +521,10 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
     const holder = d.holder[seat] ?? null;
     const found: Candidate[] = [];
     for (const p of pool) {
-      if (taken.has(p.id) || p.id === partner?.id || !isQualified(p, vehicle.type, seat)) continue;
-      if (partner && (areIncompatible(partner.id, p.id, incompatibilities) || !completesCrew(p, partner, vehicle.type))) continue;
-      if (partner && vehicle.type === "AMBULANCE" && sharedMinutes(p, partner) < rules.minPairOverlapMin) continue;
+      if (!fits(p, d, seat, partner)) continue;
       const km = depotKm(p.depotId, vehicle.depotId);
       if (km !== null && km > rules.maxReplacementKm) continue;
-      if (spare && p.depotId) {
-        // Keep the reserve of the person's depot (the partner chosen with them counts as taken).
-        const free = (freeByDepot.get(p.depotId) ?? 0) - (partner && partner.depotId === p.depotId && !taken.has(partner.id) ? 1 : 0);
-        if (free <= rules.reservePerDepot) continue;
-      }
+      if (spare && inReserve(p, partner)) continue;
       found.push({
         person: p,
         sameDepot: p.depotId === vehicle.depotId,
@@ -481,6 +534,30 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
       });
     }
     return found.sort(compareCandidates);
+  };
+
+  /**
+   * `base` and why the free qualified people were not proposed for an empty
+   * seat: the nearest one beyond the replacement distance, or one kept in the
+   * reserve of their depot (spare vehicle). Read once every seat is served.
+   */
+  const unfilledText = (d: Draft, seat: Seat, partner: StaffPerson | undefined, base: string): string => {
+    let far: { person: StaffPerson; km: number } | null = null;
+    let kept: StaffPerson | null = null;
+    for (const p of pool) {
+      if (!fits(p, d, seat, partner)) continue;
+      const km = depotKm(p.depotId, d.vehicle.depotId);
+      if (km !== null && km > rules.maxReplacementKm) {
+        if (!far || km < far.km) far = { person: p, km };
+      } else if (isSpare(d) && inReserve(p, partner)) kept ??= p;
+    }
+    if (far) {
+      const depot = far.person.depotId ? depots.get(far.person.depotId) : undefined;
+      const where = `${depot ? `dépôt de ${depot.name}, ` : ""}${Math.round(far.km)} km`;
+      return `${base} dans un rayon de ${rules.maxReplacementKm.toLocaleString("fr-FR")} km (Paramètres) : ${staffName(far.person)} (${where}) est libre`;
+    }
+    if (kept) return `${base} sans entamer la réserve du dépôt (Paramètres) : ${staffName(kept)} reste en réserve`;
+    return base;
   };
 
   const proposalText = (d: Draft, seat: Seat, c: Candidate): string => {
@@ -508,9 +585,9 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
     d.issues.push({ level: "info", seat, message: proposalText(d, seat, c) });
   };
 
-  for (const d of order) {
-    const spare = group(d) === 2;
-    const seats = seatsOf(d.vehicle).filter((seat) => d.open.has(seat) && seatOf(d, seat) === null);
+  const serve = (d: Draft) => {
+    const spare = isSpare(d);
+    const seats = emptySeats(d);
     if (seats.length === 2) {
       // Both seats of an ambulance: the first driver who can be completed, with the best crew mate for them.
       for (const driver of candidatesFor(d, "driver", undefined, spare)) {
@@ -526,7 +603,42 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
         if (pick) place(d, seat, pick);
       }
     }
+  };
+
+  const staffed = order.filter((d) => !isSpare(d));
+  for (const d of staffed.filter((d) => d.vehicle.type === "AMBULANCE")) serve(d);
+  // A default member alone on an ambulance nobody can complete is offered to the other vehicles first.
+  const alone: { d: Draft; seat: Seat; person: StaffPerson; empty: Seat }[] = [];
+  for (const d of staffed) {
+    if (d.source === "saved" || d.vehicle.type !== "AMBULANCE") continue;
+    const [empty, ...more] = emptySeats(d);
+    if (!empty || more.length > 0) continue;
+    const seat: Seat = empty === "driver" ? "crewMate" : "driver";
+    const id = seatOf(d, seat);
+    const person = id ? people.get(id) : undefined;
+    if (!person) continue;
+    alone.push({ d, seat, person, empty });
+    setSeat(d, seat, null);
+    release(person);
   }
+  for (const d of staffed.filter((d) => d.vehicle.type !== "AMBULANCE")) serve(d);
+  for (const { d, seat, person, empty } of alone) {
+    const elsewhere = taken.get(person.id);
+    if (elsewhere) {
+      d.shortOf = { seat: empty, partner: person };
+      const lacking = missingText(d.vehicle.type, empty, person);
+      d.issues.push({
+        level: "info",
+        seat,
+        message: `${SEAT_LABEL[seat]} attitré proposé sur ${elsewhere} (${staffName(person)}) : ${lacking.charAt(0).toLowerCase()}${lacking.slice(1)} pour cette ambulance`,
+      });
+    } else {
+      // Nobody needs them: they stay on their ambulance, which still lacks its partner.
+      setSeat(d, seat, person.id);
+      take(person, d.vehicle.label);
+    }
+  }
+  for (const d of order.filter(isSpare)) serve(d);
 
   // Problems of every crew, then the first blocking one.
   const crews: DayCrewView[] = [];
@@ -585,7 +697,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
         issues.push({
           level: "error",
           seat: "crewMate",
-          message: `Il faut au moins un ${oneOfLabel(vehicle.type)} dans l'équipage, au volant ou auprès du patient`,
+          message: `Il faut au moins un ${oneOfNoun(vehicle.type)} dans l'équipage, au volant ou auprès du patient`,
         });
       } else if (vehicle.type === "AMBULANCE" && sharedMinutes(driver, mate) < rules.minPairOverlapMin) {
         issues.push({
@@ -595,15 +707,26 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
         });
       }
     }
+    /** Left empty by the regulator on a fixed crew (not vacated by an absence). */
+    const chosenEmpty = (seat: Seat) => saved && !d.open.has(seat) && !d.holder[seat];
     if (d.parked) {
       issues.push({ level: "info", seat: "driver", message: PARKED_MESSAGE });
+    } else if (d.shortOf) {
+      const { seat, partner } = d.shortOf;
+      issues.push({ level: "error", seat, message: unfilledText(d, seat, partner, missingText(vehicle.type, seat, partner)) });
     } else if (d.driverId === null) {
-      issues.push({ level: "error", seat: "driver", message: "Aucun chauffeur disponible" });
+      const message = chosenEmpty("driver")
+        ? NO_DRIVER_CHOSEN_MESSAGE
+        : // Both seats of an ambulance empty: no single person to name.
+          mate || vehicle.type !== "AMBULANCE"
+          ? unfilledText(d, "driver", mate, missingText(vehicle.type, "driver", mate))
+          : missingText(vehicle.type, "driver", undefined);
+      issues.push({ level: "error", seat: "driver", message });
     } else if (vehicle.type === "AMBULANCE" && d.crewMateId === null) {
-      // With an auxiliary at the wheel, only a DEA completes the crew.
-      const needed = driver && !crewHoldsRequired(vehicle.type, [driver.qualifications]) ? ` ${oneOfLabel(vehicle.type)}` : "";
-      const fixedAlone = saved && !d.open.has("crewMate") && !d.holder.crewMate;
-      issues.push({ level: "error", seat: "crewMate", message: fixedAlone ? "Ambulance sans équipier ce jour" : `Aucun équipier${needed} disponible` });
+      const message = chosenEmpty("crewMate")
+        ? "Ambulance sans équipier ce jour"
+        : unfilledText(d, "crewMate", driver, missingText(vehicle.type, "crewMate", driver));
+      issues.push({ level: "error", seat: "crewMate", message });
     }
     let shift: DayCrewView["shift"] = driver ? { start: driver.shiftStartMinute, end: driver.shiftEndMinute } : null;
     if (shift && mate && vehicle.type === "AMBULANCE") {

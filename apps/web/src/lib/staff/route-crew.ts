@@ -8,23 +8,32 @@
  * The rules of the crews of the day apply to the people put on the route:
  * active, not absent, qualified for the seat, on no other route that day, a
  * shift that covers what is left of the route; an ambulance pair compatible,
- * with a DEA at the wheel or beside the patient (rules.ts, R. 6312-10). Pure
- * module, unit-tested; the server action reads the rows and writes.
+ * with a DEA at the wheel or beside the patient (rules.ts, R. 6312-10) and
+ * the shared working time of CrewRules.minPairOverlapMin, so the crew of the
+ * day written with the route (DayCrew) resolves without a blocking problem.
+ * Pure module, unit-tested; the server action reads the rows and writes.
  */
 import type { StopKind, TripStatus, VehicleType } from "@prisma/client";
-import { stopState } from "@/app/chauffeur/_lib/roadmap";
+import { stopState } from "@/lib/domain/stops";
 import { CREW_REQUIRED_ONE_OF } from "@/lib/domain/rules";
 import { QUALIFICATION_LABELS } from "@/lib/labels";
-import { isoWeekday, WEEKDAY_LABELS } from "@/lib/time";
+import { formatDuration, isoWeekday, WEEKDAY_LABELS } from "@/lib/time";
 import {
   absenceOn,
   areIncompatible,
   completesCrew,
+  DEFAULT_CREW_RULES,
+  depotDistanceKm,
   isQualified,
+  oneOfNoun,
   planningAbsenceText,
   seatRequirement,
+  sharedMinutes,
   shiftText,
   staffName,
+  versatility,
+  type CrewDepot,
+  type CrewRules,
   type DatedAbsence,
   type Incompatibility,
   type Seat,
@@ -64,6 +73,8 @@ export type RouteCrewChangeInput = {
   incompatibilities: readonly Incompatibility[];
   /** The other routes of the day and their crew. */
   otherRoutes: readonly ({ vehicleLabel: string } & RouteCrew)[];
+  /** Settings of the crews of the day (absent: DEFAULT_CREW_RULES). */
+  rules?: Pick<CrewRules, "minPairOverlapMin">;
 };
 
 export type RouteCrewCheck = {
@@ -125,14 +136,36 @@ export function checkRouteCrewChange(input: RouteCrewChangeInput): RouteCrewChec
   const driver = next.driverId ? people.get(next.driverId) : undefined;
   const mate = next.crewMateId ? people.get(next.crewMateId) : undefined;
   if (ambulance && driver && mate) {
+    const pair = pairProblem(driver, mate, vehicle.type, input.rules ?? DEFAULT_CREW_RULES);
     if (areIncompatible(driver.id, mate.id, input.incompatibilities)) {
       errors.crewMate = `${staffName(driver)} et ${staffName(mate)} ne doivent pas travailler ensemble.`;
-    } else if (!completesCrew(driver, mate, vehicle.type)) {
-      const oneOf = (CREW_REQUIRED_ONE_OF[vehicle.type] ?? []).map((q) => QUALIFICATION_LABELS[q]).join(" ou ");
-      errors.crewMate = `Il faut au moins un ${oneOf} dans l'équipage, au volant ou auprès du patient : ni ${staffName(driver)} ni ${staffName(mate)} ne l'est.`;
-    }
+    } else if (pair) errors.crewMate = pair;
   }
   return { errors, notes };
+}
+
+type PairMember = Pick<StaffPerson, "firstName" | "lastName" | "qualifications" | "shiftStartMinute" | "shiftEndMinute">;
+
+/**
+ * Why an ambulance pair cannot work together (no DEA in the crew, too little
+ * shared working time), or null; the same rules as the crews of the day. Also
+ * read by the form, before submitting.
+ */
+export function pairProblem(
+  driver: PairMember,
+  mate: PairMember,
+  type: VehicleType,
+  rules: Pick<CrewRules, "minPairOverlapMin">,
+): string | null {
+  if (type !== "AMBULANCE") return null;
+  if (!completesCrew(driver, mate, type)) {
+    return `Il faut au moins un ${oneOfNoun(type)} dans l'équipage, au volant ou auprès du patient : ni ${staffName(driver)} ni ${staffName(mate)} ne l'est.`;
+  }
+  const shared = sharedMinutes(driver, mate);
+  if (shared < rules.minPairOverlapMin) {
+    return `${staffName(driver)} et ${staffName(mate)} n'ont que ${formatDuration(shared)} d'horaire commun (${formatDuration(rules.minPairOverlapMin)} au moins, Paramètres).`;
+  }
+  return null;
 }
 
 /** A person offered in « Changer l'équipage », with what the form needs to tell the possible choices. */
@@ -140,7 +173,14 @@ export type CrewChoice = {
   id: string;
   /** "NOM Prénom". */
   name: string;
+  firstName: string;
+  lastName: string;
   depotId: string | null;
+  /** The person's depot and where it is (distance to the vehicle's depot), null without one. */
+  depot: { name: string; lat: number; lng: number } | null;
+  qualifications: StaffPerson["qualifications"];
+  /** lib/staff/day-crews versatility: the least versatile are offered first, as in the replacements. */
+  versatility: number;
   canDrive: Record<VehicleType, boolean>;
   canCrew: boolean;
   /** Holds the qualification an ambulance crew needs once (DEA). */
@@ -151,6 +191,8 @@ export type CrewChoice = {
   routeVehicleId: string | null;
   routeVehicleLabel: string | null;
   shift: { start: number; end: number };
+  shiftStartMinute: number;
+  shiftEndMinute: number;
   worksThatDay: boolean;
 };
 
@@ -159,14 +201,16 @@ const VEHICLE_TYPES: readonly VehicleType[] = ["TAXI", "VSL", "AMBULANCE"];
 /**
  * The people « Changer l'équipage » offers on `date`: everyone active, plus
  * whoever is on a route that day (an absent driver stays listed, as the
- * current crew), sorted by name.
+ * current crew), sorted by name (rankChoices sorts them for a vehicle).
  */
 export function crewChoices(
   date: string,
   people: readonly StaffPerson[],
   absences: readonly DatedAbsence[],
   routes: readonly ({ vehicleId: string; vehicleLabel: string } & RouteCrew)[],
+  depots: readonly CrewDepot[] = [],
 ): CrewChoice[] {
+  const depotOf = new Map(depots.map((d) => [d.id, d]));
   const weekday = isoWeekday(date);
   const routeOf = new Map<string, { vehicleId: string; vehicleLabel: string }>();
   for (const route of routes) {
@@ -179,10 +223,16 @@ export function crewChoices(
     .map((p) => {
       const absence = absenceOn(p.id, date, absences);
       const route = routeOf.get(p.id);
+      const depot = p.depotId ? depotOf.get(p.depotId) : undefined;
       return {
         id: p.id,
         name: `${p.lastName.toUpperCase()} ${p.firstName}`,
+        firstName: p.firstName,
+        lastName: p.lastName,
         depotId: p.depotId,
+        depot: depot ? { name: depot.name, lat: depot.lat, lng: depot.lng } : null,
+        qualifications: [...p.qualifications],
+        versatility: versatility(p),
         canDrive: Object.fromEntries(VEHICLE_TYPES.map((t) => [t, isQualified(p, t, "driver")])) as Record<VehicleType, boolean>,
         canCrew: isQualified(p, "AMBULANCE", "crewMate"),
         completesAmbulance: p.qualifications.some((q) => oneOf.includes(q)),
@@ -190,6 +240,8 @@ export function crewChoices(
         routeVehicleId: route?.vehicleId ?? null,
         routeVehicleLabel: route?.vehicleLabel ?? null,
         shift: { start: p.shiftStartMinute, end: p.shiftEndMinute },
+        shiftStartMinute: p.shiftStartMinute,
+        shiftEndMinute: p.shiftEndMinute,
         worksThatDay: p.workDays.includes(weekday),
       };
     });
@@ -212,4 +264,39 @@ export function choiceProblem(
     return `horaire ${shiftText(choice.shift)}`;
   }
   return null;
+}
+
+/** Straight-line distance from the person's depot to the vehicle's (0: same depot), null without a depot. */
+export function choiceDepotKm(choice: Pick<CrewChoice, "depot">, vehicleDepot: { lat: number; lng: number }): number | null {
+  return choice.depot ? depotDistanceKm(choice.depot, vehicleDepot) : null;
+}
+
+/** Same place: the same depot (positions are those of the Depot rows). */
+const SAME_DEPOT_KM = 0.1;
+
+/** "dépôt de Manosque, 66 km" when the person belongs to another depot than the vehicle; "sans dépôt"; null for the same depot. */
+export function choiceDepotText(choice: Pick<CrewChoice, "depot">, vehicleDepot: { lat: number; lng: number }): string | null {
+  const km = choiceDepotKm(choice, vehicleDepot);
+  if (km === null || !choice.depot) return "sans dépôt";
+  return km < SAME_DEPOT_KM ? null : `dépôt de ${choice.depot.name}, ${Math.round(km)} km`;
+}
+
+/**
+ * The choices in the order of the automatic replacements (lib/staff/day-crews):
+ * the vehicle's depot first, then the nearest, then the least versatile (a DEA
+ * last), then by name; a person without a depot last.
+ */
+export function rankChoices<T extends Pick<CrewChoice, "depot" | "versatility" | "name">>(
+  choices: readonly T[],
+  vehicleDepot: { lat: number; lng: number },
+): T[] {
+  const km = new Map(choices.map((c) => [c, choiceDepotKm(c, vehicleDepot) ?? Number.POSITIVE_INFINITY]));
+  const near = (c: T) => (km.get(c) ?? Number.POSITIVE_INFINITY) < SAME_DEPOT_KM;
+  return [...choices].sort(
+    (a, b) =>
+      Number(near(b)) - Number(near(a)) ||
+      (km.get(a) ?? 0) - (km.get(b) ?? 0) ||
+      a.versatility - b.versatility ||
+      a.name.localeCompare(b.name, "fr"),
+  );
 }

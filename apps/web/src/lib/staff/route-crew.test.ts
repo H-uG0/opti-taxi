@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Qualification } from "@prisma/client";
-import type { StaffPerson } from "./day-crews";
+import { DEFAULT_CREW_RULES, resolveDayCrews, type StaffPerson } from "./day-crews";
 import {
   checkRouteCrewChange,
+  choiceDepotText,
   choiceProblem,
   crewChoices,
+  pairProblem,
+  rankChoices,
   remainingPart,
   type RemainingStop,
   type RouteCrewChangeInput,
@@ -112,8 +115,59 @@ describe("checkRouteCrewChange", () => {
       "aux1 AUX1 et dea2 DEA2 ne doivent pas travailler ensemble.",
     );
     expect(check({ next: { driverId: "aux1", crewMateId: "aux2" } }).errors.crewMate).toBe(
-      "Il faut au moins un Ambulancier DE dans l'équipage, au volant ou auprès du patient : ni aux1 AUX1 ni aux2 AUX2 ne l'est.",
+      "Il faut au moins un ambulancier DE dans l'équipage, au volant ou auprès du patient : ni aux1 AUX1 ni aux2 AUX2 ne l'est.",
     );
+  });
+
+  it("requires the shared working time of the crews of the day, so the fixed crew written resolves", () => {
+    // Driver 06:00 – 18:00, new crew mate 15:00 – 19:00: both cover 15:30 – 17:50, but share 3 h only.
+    const people = new Map([...PEOPLE, ["drv", person("drv", ["AUXILIARY"], [360, 1080])], ["eve", person("eve", ["DEA"], [900, 1140])]]);
+    const late = { people, current: { driverId: "drv", crewMateId: "dea1" }, remaining: { start: 930, end: 1070 } };
+    expect(check({ ...late, next: { driverId: "drv", crewMateId: "eve" } }).errors.crewMate).toBe(
+      "drv DRV et eve EVE n'ont que 3 h 00 d'horaire commun (4 h 00 au moins, Paramètres).",
+    );
+    expect(check({ ...late, next: { driverId: "drv", crewMateId: "eve" }, rules: { minPairOverlapMin: 180 } }).errors).toEqual({});
+    // Every change accepted gives a crew of the day (DayCrew) that resolves without a blocking problem.
+    const vehicle = { id: "amb", label: "Ambulance 1", type: "AMBULANCE" as const, active: true, depotId: "dep_a", defaultDriverId: null, defaultCrewMateId: null };
+    for (const driverId of ["aux1", "dea1", "drv"]) {
+      for (const crewMateId of ["aux2", "dea2", "eve", "late"]) {
+        const next = { driverId, crewMateId };
+        const { errors } = checkRouteCrewChange({
+          date: MONDAY,
+          vehicle,
+          current: { driverId: "dea1", crewMateId: "aux1" },
+          next,
+          remaining: { start: 930, end: 1070 },
+          people,
+          absences: [],
+          incompatibilities: [],
+          otherRoutes: [],
+          rules: DEFAULT_CREW_RULES,
+        });
+        if (Object.keys(errors).length > 0) continue;
+        const plan = resolveDayCrews({
+          date: MONDAY,
+          vehicles: [vehicle],
+          people: [...people.values()],
+          absences: [],
+          incompatibilities: [],
+          saved: [{ vehicleId: "amb", ...next }],
+        });
+        expect(plan.crews[0]?.blocked, `${driverId} + ${crewMateId}`).toBeNull();
+      }
+    }
+  });
+
+  it("says why a pair cannot work together, before submitting too", () => {
+    const aux = person("aux1", ["AUXILIARY"]);
+    expect(pairProblem(aux, person("aux2", ["AUXILIARY"]), "AMBULANCE", DEFAULT_CREW_RULES)).toMatch(/^Il faut au moins un ambulancier DE/);
+    expect(pairProblem(aux, person("dea", ["DEA"], [960, 1140]), "AMBULANCE", DEFAULT_CREW_RULES)).toBe(
+      "aux1 AUX1 et dea DEA n'ont que 3 h 00 d'horaire commun (4 h 00 au moins, Paramètres).",
+    );
+    // Exactly the minimum is enough.
+    expect(pairProblem(aux, person("dea", ["DEA"], [900, 1140]), "AMBULANCE", DEFAULT_CREW_RULES)).toBeNull();
+    expect(pairProblem(aux, person("dea", ["DEA"]), "AMBULANCE", DEFAULT_CREW_RULES)).toBeNull();
+    expect(pairProblem(aux, person("aux2", ["AUXILIARY"]), "VSL", DEFAULT_CREW_RULES)).toBeNull();
   });
 
   it("does not hold an unchanged member against the change, and notes an unusual working day", () => {
@@ -153,5 +207,26 @@ describe("crewChoices", () => {
     expect(choiceProblem(byId.get("dea2")!, "crewMate", amb, remaining)).toBeNull();
     expect(byId.get("dea2")).toMatchObject({ name: "DEA2 dea2", completesAmbulance: true, worksThatDay: true });
     expect(byId.get("sat")?.worksThatDay).toBe(false);
+  });
+
+  it("names the depot of a person from another depot and ranks the choices like the replacements", () => {
+    const depots = [
+      { id: "mrs", name: "Marseille", lat: 43.3, lng: 5.4 },
+      { id: "mnq", name: "Manosque", lat: 43.83, lng: 5.79 },
+    ];
+    const people = [
+      { ...person("zdea", ["DEA"]), depotId: "mrs" },
+      { ...person("aux", ["AUXILIARY"]), depotId: "mrs" },
+      { ...person("kevin", ["AUXILIARY"]), depotId: "mnq" },
+      { ...person("nowhere", ["AUXILIARY"]), depotId: null },
+    ];
+    const choices = crewChoices(MONDAY, people, [], [], depots);
+    const marseille = { lat: 43.3, lng: 5.4 };
+    const byId = new Map(choices.map((c) => [c.id, c]));
+    expect(choiceDepotText(byId.get("aux")!, marseille)).toBeNull();
+    expect(choiceDepotText(byId.get("kevin")!, marseille)).toMatch(/^dépôt de Manosque, \d+ km$/);
+    expect(choiceDepotText(byId.get("nowhere")!, marseille)).toBe("sans dépôt");
+    // Same depot first (the auxiliary before the more versatile DEA), then the nearest depot, then no depot.
+    expect(rankChoices(choices, marseille).map((c) => c.id)).toEqual(["aux", "zdea", "kevin", "nowhere"]);
   });
 });

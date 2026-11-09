@@ -256,17 +256,45 @@ describe("resolveDayCrews", () => {
     });
     expect(crewOf(result, "Amb")).toMatchObject({ driverId: "aux1", crewMateId: "dea2", source: "replacement", blocked: null });
     const none = plan({ vehicles: [vehicle("Amb", "AMBULANCE", "aux1", "dea1")], absences: [leave("dea1")] });
-    expect(crewOf(none, "Amb")).toMatchObject({ driverId: "aux1", crewMateId: null, blocked: "Aucun équipier Ambulancier DE disponible" });
+    expect(crewOf(none, "Amb")).toMatchObject({ driverId: "aux1", crewMateId: null, blocked: "Aucun équipier ambulancier DE disponible" });
   });
 
   it("refuses a fixed ambulance crew without any DEA", () => {
     const result = plan({ saved: [{ vehicleId: "Amb", driverId: "aux1", crewMateId: "aux2" }] });
-    expect(crewOf(result, "Amb").blocked).toBe("Il faut au moins un Ambulancier DE dans l'équipage, au volant ou auprès du patient");
+    expect(crewOf(result, "Amb").blocked).toBe("Il faut au moins un ambulancier DE dans l'équipage, au volant ou auprès du patient");
   });
 
   it("requires a second person on an ambulance", () => {
     const result = plan({ people: PEOPLE.filter((p) => !["aux1", "aux2", "spare_a"].includes(p.id)) });
     expect(crewOf(result, "Amb")).toMatchObject({ driverId: "dea1", crewMateId: null, blocked: "Aucun équipier disponible" });
+  });
+
+  it("says the regulator left the driver seat of a fixed ambulance empty", () => {
+    const result = plan({ saved: [{ vehicleId: "Amb", driverId: null, crewMateId: "aux1" }] });
+    expect(crewOf(result, "Amb")).toMatchObject({
+      driverId: null,
+      crewMateId: "aux1",
+      parked: false,
+      blocked: "Pas de chauffeur ce jour (choix du régulateur)",
+    });
+  });
+
+  it("offers a default member alone on an ambulance nobody can complete to another vehicle", () => {
+    // aux1 drives the ambulance, its DEA is absent and no DEA is free; the VSL's driver is absent too.
+    const vehicles = [vehicle("VSL", "VSL", "vslHolder"), vehicle("Amb", "AMBULANCE", "aux1", "dea1")];
+    const people = [person("vslHolder", ["AUXILIARY"]), person("aux1", ["AUXILIARY"]), person("dea1", ["DEA"])];
+    const result = plan({ vehicles, people, absences: [leave("vslHolder"), leave("dea1")] });
+    expect(crewOf(result, "VSL")).toMatchObject({ driverId: "aux1", source: "replacement", blocked: null });
+    const amb = crewOf(result, "Amb");
+    expect(amb).toMatchObject({ driverId: null, crewMateId: null, source: "none", blocked: "Aucun équipier ambulancier DE disponible" });
+    expect(amb.issues.map((i) => i.message)).toContain(
+      "Chauffeur attitré proposé sur VSL (aux1 AUX1) : aucun équipier ambulancier DE disponible pour cette ambulance",
+    );
+    expect(result.idle).toEqual([]);
+    // Nobody else needs them: they stay on their ambulance.
+    const alone = plan({ vehicles: [vehicles[1]!], people, absences: [leave("dea1")] });
+    expect(crewOf(alone, "Amb")).toMatchObject({ driverId: "aux1", blocked: "Aucun équipier ambulancier DE disponible" });
+    expect(alone.idle).toEqual(["vslHolder"]);
   });
 });
 
@@ -295,7 +323,11 @@ describe("replacement ranking (depots, shifts, versatility)", () => {
       depots: DEPOTS,
       absences: [leave("taxi1")],
     });
-    expect(crewOf(onlyFar, "Taxi A")).toMatchObject({ driverId: null, blocked: "Aucun chauffeur disponible" });
+    expect(crewOf(onlyFar, "Taxi A")).toMatchObject({
+      driverId: null,
+      // The free driver kept out by the distance is named, so the « Disponibles » card does not contradict the row.
+      blocked: "Aucun chauffeur disponible dans un rayon de 60 km (Paramètres) : far FAR (dépôt de Gap, 150 km) est libre",
+    });
     const wider = plan({
       vehicles: [vehicle("Taxi A", "TAXI", "taxi1")],
       people: people.filter((p) => p.id !== "near"),
@@ -313,6 +345,38 @@ describe("replacement ranking (depots, shifts, versatility)", () => {
     const result = plan({ vehicles, people, absences: [leave("vslHolder"), leave("deaHolder")] });
     expect(crewOf(result, "Amb")).toMatchObject({ driverId: "adea", crewMateId: "aux1", blocked: null });
     expect(crewOf(result, "VSL")).toMatchObject({ driverId: "zaux", blocked: null });
+  });
+
+  it("keeps the DEA for an ambulance even when a fixed VSL would take it for its shift", () => {
+    // The fixed VSL loses its driver; the DEA covers its shift one minute better than the auxiliary,
+    // but the default ambulance (auxiliary at the wheel, DEA absent) can only be completed by the DEA.
+    const vehicles = [vehicle("VSL", "VSL", null), vehicle("Amb", "AMBULANCE", "aux1", "deaHolder")];
+    const people = [
+      person("vslFixed", ["AUXILIARY"]),
+      person("aux1", ["AUXILIARY"]),
+      person("deaHolder", ["DEA"]),
+      person("early", ["DEA"], "dep_a", MON_FRI, [360, 1140]),
+      person("late", ["AUXILIARY"], "dep_a", MON_FRI, [361, 1140]),
+    ];
+    const result = plan({
+      vehicles,
+      people,
+      absences: [leave("vslFixed"), leave("deaHolder")],
+      saved: [{ vehicleId: "VSL", driverId: "vslFixed", crewMateId: null }],
+    });
+    expect(crewOf(result, "Amb")).toMatchObject({ driverId: "aux1", crewMateId: "early", blocked: null });
+    expect(crewOf(result, "VSL")).toMatchObject({ driverId: "late", proposedSeats: ["driver"], blocked: null });
+  });
+
+  it("says a spare vehicle stays empty to keep the reserve of the depot", () => {
+    const result = plan({
+      vehicles: [vehicle("Spare", "TAXI", null)],
+      people: [person("t1", ["TAXI_CARD"])],
+      rules: { ...DEFAULT_CREW_RULES, reservePerDepot: 1 },
+    });
+    expect(crewOf(result, "Spare").blocked).toBe(
+      "Aucun chauffeur disponible sans entamer la réserve du dépôt (Paramètres) : t1 T1 reste en réserve",
+    );
   });
 
   it("puts the auxiliary at the wheel and the DEA beside the patient when both seats are free", () => {
