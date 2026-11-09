@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { connection } from "next/server";
+import { DemoBanner } from "@/components/demo/demo-banner";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,7 +23,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   await connection();
   return (
     <html lang="fr">
-      <body className="min-h-dvh">{children}</body>
+      <body className="min-h-dvh">
+        <DemoBanner />
+        {children}
+      </body>
     </html>
   );
 }

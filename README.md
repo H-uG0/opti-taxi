@@ -49,7 +49,9 @@ docker compose up --build
 
 Le premier lancement construit les images (10 à 20 minutes selon la machine), crée la base et charge
 le jeu de données fictif. Ouvrir ensuite http://localhost:3100 (Chrome ou Edge) et se connecter avec
-un des comptes ci-dessous. L'historique des 20 derniers jours ouvrés, utilisé par le tableau de bord,
+un des comptes ci-dessous. Ce lancement est une démonstration : `docker-compose.yml` pose
+`DEMO_MODE=1`, qui charge le jeu fictif sur une base vide et affiche le bandeau « DÉMO — données
+fictives » sur toutes les pages. L'historique des 20 derniers jours ouvrés, utilisé par le tableau de bord,
 se calcule en arrière-plan pendant quelques minutes après le démarrage. Arrêt : `Ctrl+C`, puis
 `docker compose down` (ajouter `-v` pour repartir d'une base vide au prochain lancement).
 
@@ -132,7 +134,9 @@ ou qui contient des comptes étrangers au jeu fictif (`@opti-taxi.test`). Compte
 | Régulateur | `regulateur@opti-taxi.test` | `regulateur` |
 | Chauffeur | `prenom.nom@opti-taxi.test` (liste affichée à la fin du seed) | `chauffeur` |
 
-Ces comptes n'existent que dans la base de développement.
+Ces comptes n'existent que dans la base de développement et dans la démo (`DEMO_MODE=1`). Leurs mots de
+passe étant publics, l'image Docker ne charge jamais le jeu fictif sans `DEMO_MODE=1`, et le serveur
+refuse de démarrer en production hors démo si un compte `@opti-taxi.test` existe.
 
 ## Tests
 
@@ -175,6 +179,11 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
   sous-domaines inclus). En production, le cookie de session s'appelle `__Host-ot_session` et le
   serveur s'arrête au démarrage si `SESSION_SECRET` est l'exemple fourni ou fait moins de 43
   caractères (`openssl rand -base64 48`).
+- **Mode démo** (`DEMO_MODE=1`, à ne jamais poser en production) : l'image Docker charge le jeu fictif
+  sur une base vide et affiche le bandeau « DÉMO — données fictives ». Sans lui (par défaut), la base
+  reste vide au premier démarrage, et en production le serveur s'arrête s'il trouve un compte
+  `@opti-taxi.test` (comptes du seed, mots de passe publics). L'ancienne variable `DEMO_DATA` n'est
+  plus lue.
 - **Scripts de développement** : `pnpm db:seed`, `pnpm db:reset` et `pnpm db:history` refusent une
   base qui n'est pas sur cette machine ou qui contient des comptes étrangers au jeu fictif
   (`SEED_ALLOW_WIPE=1` pour passer outre, jamais avec `NODE_ENV=production`).

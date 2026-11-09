@@ -3,6 +3,7 @@
  * addresses and phone numbers taken from the ranges ARCEP reserves for fiction
  * (they are never assigned to a real subscriber).
  */
+import { DEMO_EMAIL_DOMAIN } from "@/lib/demo";
 import type { Rng } from "./random";
 
 const PATIENT_FIRST_NAMES = [
@@ -56,8 +57,11 @@ export function slugify(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-/** Domain of every account the seed creates (.test is reserved, never delivered): see prisma/safety.ts. */
-export const SEED_EMAIL_DOMAIN = "@opti-taxi.test";
+/**
+ * Domain of every account the seed creates (.test is reserved, never delivered): see prisma/safety.ts.
+ * The server refuses to start in production outside demo mode while one exists (lib/demo.ts).
+ */
+export const SEED_EMAIL_DOMAIN = DEMO_EMAIL_DOMAIN;
 
 /** prenom.nom@opti-taxi.test, ASCII and lowercase. */
 export function devEmail(firstName: string, lastName: string): string {

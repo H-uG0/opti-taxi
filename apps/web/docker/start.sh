@@ -1,7 +1,12 @@
 #!/bin/sh
-# Entrypoint of the demo container (Dockerfile, service "web" of docker-compose.yml):
-# applies the migrations, loads the fictitious data set on a fresh database, then
-# starts the web server on port 3100.
+# Entrypoint of the web container (Dockerfile, service "web" of docker-compose.yml):
+# applies the migrations, loads the fictitious data set on a fresh database in demo
+# mode only (DEMO_MODE=1), then starts the web server on port 3100.
+#
+# DEMO_MODE=1 must be set on purpose (docker-compose.yml, the online demo): the seed
+# creates accounts whose passwords are published in the README. Without it (the
+# default, production) the database is left empty, and the server refuses to start
+# in production if demo accounts exist (src/lib/demo.ts).
 set -e
 
 # One random secret per container start unless one is given: open sessions end
@@ -14,7 +19,10 @@ fi
 ./node_modules/.bin/prisma migrate deploy
 
 users="$(node -e "const { PrismaClient } = require('@prisma/client'); const p = new PrismaClient(); p.user.count().then((n) => { console.log(n); return p.\$disconnect(); })")"
-if [ "${DEMO_DATA:-1}" = "1" ] && [ "$users" = "0" ]; then
+if [ -n "$DEMO_DATA" ] && [ -z "$DEMO_MODE" ]; then
+  echo "DEMO_DATA n'est plus lu : le jeu fictif ne se charge qu'avec DEMO_MODE=1 (démonstration seulement)."
+fi
+if [ "${DEMO_MODE:-0}" = "1" ] && [ "$users" = "0" ]; then
   # Empty database: the seed and the history simulation are safe to run. Their
   # guard (prisma/safety.ts) refuses production mode and a non-local host by
   # default, hence the development mode and SEED_ALLOW_WIPE for these two runs.

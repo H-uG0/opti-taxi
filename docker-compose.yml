@@ -37,8 +37,9 @@ services:
       timeout: 3s
       retries: 10
 
-  # Web app in production mode. On a fresh database it loads the fictitious data
-  # set (seed), then simulates 20 past days in the background (apps/web/docker/start.sh).
+  # Web app in production mode, as a demo (DEMO_MODE=1): on a fresh database it loads the
+  # fictitious data set (seed), then simulates 20 past days in the background
+  # (apps/web/docker/start.sh), and every page shows a « DÉMO » banner.
   web:
     build:
       context: .
@@ -52,8 +53,10 @@ services:
       DATABASE_URL: postgresql://optitaxi:optitaxi@postgres:5432/optitaxi
       OPTIMIZER_URL: http://optimizer:8100
       GEOCODER_URL: https://data.geopf.fr/geocodage/search
-      # 1: seed + history on an empty database. 0: start with an empty database.
-      DEMO_DATA: "1"
+      # 1: demo with fictitious data only (seed + history on an empty database, banner;
+      # the seed's accounts have public passwords). Never set it in production: without
+      # it the database starts empty and the server refuses to start if demo accounts exist.
+      DEMO_MODE: "1"
     ports:
       - "3100:3100"
     init: true
