@@ -104,7 +104,8 @@ scripts/local-postgres.sh init                # sans Docker (binaires PostgreSQL
 cp .env.example apps/web/.env                 # puis changer SESSION_SECRET
 pnpm install
 pnpm db:migrate                               # applique les migrations
-pnpm db:seed                                  # jeu de données 100 % fictif
+pnpm db:seed                                  # jeu de données 100 % fictif (10 véhicules)
+# ou : pnpm db:seed --fleet                   # grande flotte : 6 dépôts, 120 véhicules, ~150 personnes, ~300 courses/jour
 
 # 3. Service d'optimisation — au choix
 docker compose up -d --build optimizer
@@ -119,9 +120,21 @@ pnpm db:history                               # 20 jours ouvrés passés, pour l
 pnpm dev                                      # http://localhost:3100
 ```
 
+Le seed mêle aux séries (dialyse, radiothérapie, chimiothérapie) des courses ponctuelles de patients
+occasionnels (consultations, imagerie, entrées et sorties d'hospitalisation, clients privés), surtout
+l'après-midi, entre les séances. Les coûts horaires (par rôle : chauffeur de taxi, auxiliaire ambulancier,
+ambulancier DE) et les coûts au km (par type et énergie) sont calculés dans `prisma/seed/costs.ts`, avec
+leurs hypothèses. `pnpm db:seed --fleet` ajoute la grande flotte (`prisma/seed/fleet.ts`, proportions du
+banc `fleet_day` de l'optimiseur) : dépôts d'Aix et de Grenoble, 110 véhicules, 136 personnes avec leurs
+comptes, absences, gardes, échéances et pleins, patients des séries et occasionnels ; le jeu de base est
+inchangé (générateurs séparés).
+
 `pnpm db:history [--days N] [--budget S]` simule les N jours ouvrés précédant aujourd'hui (20 par
-défaut) avec les modules de l'application : génération des courses, optimisation, réponses de partage,
-annulations, absences, horaires réels des chauffeurs, validation, journal d'audit. Il ne touche jamais
+défaut) avec les modules de l'application : génération des courses et courses ponctuelles, absences et
+véhicules au garage, optimisation, courses figées pour les patients qui demandent leur chauffeur, réponses
+de partage, courses non placées confiées à un confrère, annulations, absences, horaires réels saisis par
+environ 85 % des équipages, validation, journal d'audit, puis pleins et relevés de compteur recalculés
+d'après les km simulés. Le tableau de bord et le planning marquent ces jours « simulé ». Il ne touche jamais
 aujourd'hui ni les jours suivants, laisse tels quels les jours qui contiennent des données qu'il n'a pas
 créées (les jours du seed, un jour planifié dans l'application) et remonte d'autant, et peut être
 relancé (il remplace sa simulation précédente). Comme le seed, il refuse une base qui n'est pas locale
@@ -143,7 +156,7 @@ existe.
 ## Tests
 
 ```bash
-pnpm test               # web : vitest (contrat, règles métier, KPI, construction des requêtes…)
+pnpm test               # web : vitest (contrat, règles métier, KPI, construction des requêtes, interface avec @testing-library/react…)
 pnpm typecheck
 pnpm lint
 pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
@@ -268,10 +281,13 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
 - **Temps de calcul** : 10 s par défaut, relevés automatiquement pour les grosses journées
   (1 s pour 8 courses, 600 s au plus). Sur une machine chargée, quelques courses peuvent rester non
   affectées : relancer « Optimiser demain » ou augmenter le temps dans Paramètres.
-- **Marge estimée** : sur les données fictives, elle est proche de zéro ou négative (de l'ordre de
-  −5 000 € sur les 20 jours simulés), car le coût horaire des chauffeurs est compté sur toute
-  l'amplitude de la tournée et les grilles tarifaires du seed sont inventées. Elle ne vaut que par
-  comparaison entre deux plannings ; les vraies grilles CPAM et les vrais coûts se saisissent dans
+- **Marge estimée** : c'est une marge sur coûts variables (CA − km × coût/km − heures de tournée ×
+  coût horaire), avant frais fixes. Sur les données fictives recalibrées (journal des améliorations,
+  lot 8), elle est légèrement positive sur une journée type (+550 € sur 4 jours pour les 10 véhicules
+  du jeu de base, +2 000 à +2 300 € par jour pour la grande flotte), mais reste négative pour les
+  ambulances du petit jeu et pour les VSL en ville : la grille ne connaît pas encore les suppléments
+  « trajet court », « grande ville » ni les majorations (lot tarifaire à venir), et le coût horaire
+  est compté sur toute l'amplitude de la tournée. Les vrais coûts et grilles se saisissent dans
   Tarifs, Véhicules et Chauffeurs.
 - **Limites de débit** (connexion, géocodage) : en mémoire, valables pour une seule instance du web.
   Sur l'hébergeur HDS, les compléter au niveau du proxy : nginx `limit_req` sur toutes les requêtes
