@@ -296,7 +296,7 @@ export function TripPanel({
           </div>
           <p className="text-xs text-slate-500">
             {moveBlocked ??
-              "La course est figée sur ce véhicule, puis le reste de la journée est réoptimisé. Si ce véhicule ne peut pas la servir, le planning reste inchangé."}
+              "La course est figée sur ce véhicule, puis le reste de la journée est réoptimisé. Si ce véhicule ne peut pas la servir, ou si d'autres courses restaient sans véhicule, le planning reste inchangé."}
           </p>
         </form>
       </div>
