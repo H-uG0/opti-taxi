@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { PrismaClient } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { optimizeRequestSchema, planResponseSchema, type PlanResponse, type PlanRoute, type TripResult } from "./contract";
 import {
   nextSharingState,
@@ -18,6 +18,8 @@ import {
 import { readRunDetails, runDetailsJson } from "./run-details";
 
 const NOW = new Date("2026-11-02T17:30:00Z");
+/** When the run being saved was created (its computation started). */
+const RUN_STARTED = new Date("2026-11-02T17:29:40Z");
 
 function current(id: string, overrides: Partial<CurrentTrip> = {}): CurrentTrip {
   return {
@@ -375,7 +377,7 @@ describe("contract fixtures", () => {
    * trips of their stops), with `violationsInPlace` on their run. Each vehicle
    * of the request is crewed by `drv_<vehicle id>`.
    */
-  function fakeClient(inPlace: InPlaceRoute[] = [], violationsInPlace = 0, earlierOsrmRuns = 0) {
+  function fakeClient(inPlace: InPlaceRoute[] = [], violationsInPlace = 0, earlierOsrmRuns = 0, trafficChangedAt: Date | null = null) {
     const servedInPlace = inPlace.flatMap((r) => [...new Set(r.stops.map((s) => s.tripId))].map((id) => ({ id, routeId: r.id })));
     const runWrites: RunWrite[] = [];
     const deleted: unknown[] = [];
@@ -408,6 +410,7 @@ describe("contract fixtures", () => {
         },
       },
       appSettings: {
+        findUnique: async () => ({ trafficChangedAt }),
         updateMany: async (args: unknown) => {
           settingsWrites.push(args);
           return { count: 1 };
@@ -415,6 +418,7 @@ describe("contract fixtures", () => {
       },
       optimizationRun: {
         count: async () => earlierOsrmRuns,
+        findUnique: async () => ({ startedAt: RUN_STARTED }),
         findFirst: async () =>
           inPlace.length > 0
             ? {
@@ -450,13 +454,23 @@ describe("contract fixtures", () => {
 
     const osrm = { ...response, meta: { ...response.meta, matrixSource: "osrm" as const } };
     const first = fakeClient();
-    await savePlan(first.prisma, { runId: "run_2", isoDate: request.date, request, response: osrm, now: NOW });
+    const onTrafficReset = vi.fn(async () => {});
+    await savePlan(first.prisma, { runId: "run_2", isoDate: request.date, request, response: osrm, now: NOW, onTrafficReset });
     expect(first.createdData.every((data) => data.matrixSource === "osrm")).toBe(true);
-    expect(first.settingsWrites).toEqual([{ where: { id: 1 }, data: { trafficChangedAt: expect.any(Date) } }]);
+    // From the run's start, not the save: the routes of this first OSRM run count in the calibration.
+    expect(first.settingsWrites).toEqual([{ where: { id: 1 }, data: { trafficChangedAt: RUN_STARTED } }]);
+    expect(onTrafficReset).toHaveBeenCalledTimes(1);
+
+    // Factors changed by the regulator while the run computed: that change stays the start.
+    const changedSince = new Date(RUN_STARTED.getTime() + 60_000);
+    const changed = fakeClient([], 0, 0, changedSince);
+    await savePlan(changed.prisma, { runId: "run_2", isoDate: request.date, request, response: osrm, now: NOW });
+    expect(changed.settingsWrites).toEqual([{ where: { id: 1 }, data: { trafficChangedAt: changedSince } }]);
 
     const again = fakeClient([], 0, 4);
-    await savePlan(again.prisma, { runId: "run_3", isoDate: request.date, request, response: osrm, now: NOW });
+    await savePlan(again.prisma, { runId: "run_3", isoDate: request.date, request, response: osrm, now: NOW, onTrafficReset });
     expect(again.settingsWrites).toEqual([]);
+    expect(onTrafficReset).toHaveBeenCalledTimes(1);
   });
 
   it("saves the run with exactly the optimizer KPIs and the details in their own column", async () => {

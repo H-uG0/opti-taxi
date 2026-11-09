@@ -25,12 +25,13 @@ export function AvailabilityNotes({ skipped, notes }: { skipped: SkippedVehicle[
       </summary>
       <ul className="mt-2 grid gap-x-6 gap-y-1.5 md:grid-cols-2">
         {skipped.map((s) => (
-          <li key={s.vehicleId} className="flex min-w-0 items-center gap-2">
-            <VehicleTypeBadge type={s.type} />
-            <span className="shrink-0 font-medium text-slate-900">{s.label}</span>
-            <span className="min-w-0 truncate text-slate-600" title={s.reason}>
-              {s.reason}
+          <li key={s.vehicleId} className="flex min-w-0 items-baseline gap-2">
+            <span className="shrink-0 self-center">
+              <VehicleTypeBadge type={s.type} />
             </span>
+            <span className="shrink-0 font-medium text-slate-900">{s.label}</span>
+            {/* Wrapped, not cut: a title tooltip is out of reach on touch screens and from the keyboard. */}
+            <span className="min-w-0 text-slate-600">{s.reason}</span>
           </li>
         ))}
         {notes.map((note, i) => (

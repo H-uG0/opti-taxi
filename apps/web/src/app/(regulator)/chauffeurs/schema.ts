@@ -7,6 +7,7 @@ import type { Driver, Prisma, Qualification, VehicleType } from "@prisma/client"
 import { REVOKE_SESSIONS } from "@/lib/auth/revoke";
 import { formatDuration, formatMinute } from "@/lib/time";
 import { crewHoldsRequired } from "@/lib/domain/rules";
+import { MAX_WORK_WITHOUT_BREAK_MIN, MIN_LEGAL_BREAK_MIN, WORK_TIME_ARTICLE } from "@/lib/staff/work-time";
 import {
   crewMateRequirement,
   crewOneOfRequirement,
@@ -74,10 +75,22 @@ export const driverSchema = driverFields
       });
       return;
     }
-    // Break: window start, window end and duration are optional together.
+    // Break: window start, window end and duration are optional together, and owed over 6 hours (the
+    // crews of the day block the vehicle of such a shift without it: lib/staff/work-time.ts).
     const minutes = v.breakMinutes ?? 0;
     const anyBreak = v.breakWindowStart !== undefined || v.breakWindowEnd !== undefined || minutes > 0;
-    if (!anyBreak) return;
+    const shift = v.shiftEnd - v.shiftStart;
+    const owed = shift > MAX_WORK_WITHOUT_BREAK_MIN;
+    if (!anyBreak) {
+      if (owed) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["breakWindowStart"],
+          message: `Pause obligatoire pour un horaire de ${formatDuration(shift)} : au moins ${MIN_LEGAL_BREAK_MIN} min au-delà de 6 h de travail (${WORK_TIME_ARTICLE}).`,
+        });
+      }
+      return;
+    }
     if (v.breakWindowStart === undefined) {
       ctx.addIssue({ code: "custom", path: ["breakWindowStart"], message: "Début de la fenêtre de pause manquant." });
     }
@@ -110,6 +123,12 @@ export const driverSchema = driverFields
         code: "custom",
         path: ["breakMinutes"],
         message: `La fenêtre (${formatDuration(window)}) est plus courte que la pause (${formatDuration(minutes)}).`,
+      });
+    } else if (owed && minutes < MIN_LEGAL_BREAK_MIN) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["breakMinutes"],
+        message: `Au moins ${MIN_LEGAL_BREAK_MIN} min pour un horaire de ${formatDuration(shift)} (au-delà de 6 h de travail, ${WORK_TIME_ARTICLE}).`,
       });
     }
   })

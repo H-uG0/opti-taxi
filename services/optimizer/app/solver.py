@@ -174,6 +174,10 @@ REASON_DROPPED_ON_BOARD = (
     "Pas de place dans les tournées sans dépasser le temps à bord ou l'attente au lieu de soins "
     "des patients transportés ensemble"
 )
+REASON_DROPPED_WORK_TIME = (
+    "Pas de place dans les tournées sans dépasser 6 h de travail sans pause de 20 min "
+    "(Code du travail, art. L. 3121-16)"
+)
 WARNING_FIRST_SOLUTION_FAILED = (
     "Construction initiale des tournées interrompue par la limite de temps (serveur chargé ?) : "
     "planning construit par une méthode de secours, relancer l'optimisation peut placer davantage de courses"
@@ -580,7 +584,7 @@ class _DayModel:
             if per_meter:
                 distance_dim.SetSpanCostCoefficientForVehicle(per_meter, v)
             if member.work_limit is not None:
-                # No legal break inside the route can be guaranteed: at most 6 hours (art. L3121-16).
+                # No legal break inside the route can be guaranteed: at most 6 hours (art. L. 3121-16).
                 time_dim.SetSpanUpperBoundForVehicle(member.work_limit, v)
             routing.AddVariableMaximizedByFinalizer(time_dim.CumulVar(routing.Start(v)))
             routing.AddVariableMinimizedByFinalizer(time_dim.CumulVar(routing.End(v)))
@@ -872,36 +876,50 @@ class _DayModel:
         return nodes, schedule_route(self.fleet[v].vehicle, stops, self.ctx.matrix)
 
     def _scheduled_breaches(self, v: int, sequence: Sequence[int]) -> set[str]:
+        """Trips of the route breaking a rule the solver cannot see exactly (_scheduled_reasons)."""
+        return set(self._scheduled_reasons(v, sequence))
+
+    def _scheduled_reasons(self, v: int, sequence: Sequence[int]) -> dict[str, str]:
         """Trips of the route breaking a rule the solver cannot see exactly, on the times schedule.py
-        reports: ride limit, wait on board at the facility, and a route longer than 6 hours without a
-        legal break inside it (art. L3121-16: then its first or last trip, the cheaper to drop)."""
+        reports, with the reason to give if they stay out: ride limit and wait on board at the
+        facility, or else a route longer than 6 hours without a legal break inside it
+        (art. L. 3121-16: then its first or last trip, the cheaper to drop)."""
         scheduled = self._scheduled(v, sequence)
         if scheduled is None:
-            return set()
+            return {}
         nodes, schedule = scheduled
         breaches = self._on_board_breaches(
             nodes, [timed.arrival_min for timed in schedule.stops], [timed.start_min for timed in schedule.stops]
         )
-        if not breaches and not _lawful_work_time(schedule):
-            ends = [trip for trip in (nodes[0].trip, nodes[-1].trip) if trip is not None]
-            breaches.add(min(ends, key=lambda trip: self.drop_penalty[trip.id]).id)
-        return breaches
+        if breaches:
+            return dict.fromkeys(sorted(breaches), REASON_DROPPED_ON_BOARD)
+        if _lawful_work_time(schedule):
+            return {}
+        ends = [trip for trip in (nodes[0].trip, nodes[-1].trip) if trip is not None]
+        return {min(ends, key=lambda trip: (self.drop_penalty[trip.id], trip.id)).id: REASON_DROPPED_WORK_TIME}
 
-    def guarded(self, routes: list[list[int]], seconds: float = GUARD_SEC) -> set[str]:
+    def guarded(self, routes: list[list[int]], seconds: float = GUARD_SEC) -> dict[str, str]:
         """Final check of the plan on the times the response will report (schedule.py): the trips
         that break the ride limit, the wait at the facility or the work time are taken out of
         `routes` (changed in place) and reinserted where they pass the same check, within
-        `seconds`. Returns the trips left out. The routing model only bounds these rules through
-        the time cumuls it picks, and the Python steps on close times (_packed)."""
-        removed: list[str] = []
+        `seconds`. Returns the trips left out with their reason. The routing model only bounds
+        these rules through the time cumuls it picks, and the Python steps on close times (_packed)."""
+        removed: dict[str, str] = {}
         for v in range(len(self.fleet)):
-            while breaches := self._scheduled_breaches(v, routes[v]):
-                cheapest = min(breaches, key=lambda trip_id: self.drop_penalty[trip_id])
+            while breaches := self._scheduled_reasons(v, routes[v]):
+                # Ties broken by id: the choice must not depend on the hash seed (tests/hashseed_probe.py).
+                cheapest = min(breaches, key=lambda trip_id: (self.drop_penalty[trip_id], trip_id))
                 before = self._trip_ids(routes[v])
                 routes[v] = self._without_trips(routes[v], {cheapest}, v)
-                removed.extend(trip_id for trip_id in before if trip_id not in self._trip_ids(routes[v]))
+                after = set(self._trip_ids(routes[v]))
+                # The co-passengers taken out with it would ride too long or wait on board without it.
+                removed.update(
+                    (trip_id, breaches[cheapest] if trip_id == cheapest else REASON_DROPPED_ON_BOARD)
+                    for trip_id in before
+                    if trip_id not in after
+                )
         if not removed:
-            return set()
+            return {}
         self._exact_checks = True
         try:
             placed = self._insert_left_out(routes, time.monotonic() + seconds, only=set(removed))
@@ -909,7 +927,7 @@ class _DayModel:
             self._exact_checks = False
         logger.warning("solver: final check took %d trip(s) out (on board or work time), %d reinserted", len(removed), placed)
         served = {trip_id for route in routes for trip_id in self._trip_ids(route)}
-        return {trip_id for trip_id in removed if trip_id not in served}
+        return {trip_id: reason for trip_id, reason in removed.items() if trip_id not in served}
 
     def restore_pairs(self, routes: list[list[int]], seconds: float = PAIR_REPAIR_SEC) -> int:
         """Give a patient whose outbound or return alone is served their other leg (returns first:
@@ -960,6 +978,7 @@ class _DayModel:
         first = (self.nodes[p_node].reference_min or 0) - PAIR_REPAIR_SLACK_MIN
         last = (self.nodes[d_node].reference_min or HORIZON_MIN) + PAIR_REPAIR_SLACK_MIN
         worth = self.drop_penalty[leg.id] + self.coherence_penalty
+        own_leg = self.partner.get(leg.id)
         best: tuple[float, int, list[int], str] | None = None
         for v in self._candidates[leg.id]:
             if time.monotonic() >= deadline:
@@ -975,8 +994,14 @@ class _DayModel:
                     boarded[trip.id] = starts[k]
                     continue
                 begin = boarded.pop(trip.id, starts[k])
-                # Taking out one leg of a served pair would only move the problem.
-                if starts[k] < first or begin > last or self.partner.get(trip.id) in served:
+                # Taking out one leg of a served pair, or the served leg of this patient (swapping
+                # outbound and return), would only move the problem.
+                if (
+                    starts[k] < first
+                    or begin > last
+                    or trip.id == own_leg
+                    or self.partner.get(trip.id) in served
+                ):
                     continue
                 loss = self.drop_penalty[trip.id]
                 if loss >= worth:
@@ -1394,7 +1419,7 @@ class _DayModel:
 
 
 def _lawful_work_time(schedule: RouteSchedule) -> bool:
-    """Route of at most 6 hours, or with a break of at least 20 min inside it (art. L3121-16)."""
+    """Route of at most 6 hours, or with a break of at least 20 min inside it (art. L. 3121-16)."""
     if schedule.duration_min <= MAX_WORK_WITHOUT_BREAK_MIN:
         return True
     slot = schedule.break_slot
@@ -1442,7 +1467,7 @@ def solve(ctx: PlanContext) -> SolveOutcome:
         return SolveOutcome({}, unassigned, "NO_SOLUTION", status_name, None, warnings)
 
     routes = model.routes_of(solution)
-    left_on_board = model.guarded(routes)
+    left_out = model.guarded(routes)
     model.restore_pairs(routes)
     sequences = model.sequences(routes)
     served = {ref.trip_id for refs in sequences.values() for ref in refs}
@@ -1458,8 +1483,8 @@ def solve(ctx: PlanContext) -> SolveOutcome:
         or (model.first_solution_skipped and model.insertion_cut_short)
     )
     for trip in dropped:
-        if trip.id in left_on_board:
-            unassigned[trip.id] = REASON_DROPPED_ON_BOARD
+        if trip.id in left_out:
+            unassigned[trip.id] = left_out[trip.id]
         else:
             unassigned[trip.id] = REASON_DROPPED_TIME_LIMIT if cut_short else REASON_DROPPED
     if dropped and cut_short:

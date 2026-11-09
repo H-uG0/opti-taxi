@@ -46,8 +46,10 @@
  *   complete/delete, fuel_log.create/delete, depot.create/update/deactivate/
  *   reactivate;
  * - settings: settings.update, traffic.update, traffic.apply_observed (details:
- *   changed fields, old and new value), tariff.create/update/delete (details:
- *   changed fields; the deleted grid);
+ *   changed fields, old and new value), traffic.calibration_reset (the first
+ *   plan computed with OSRM starts the measured traffic factors over, details:
+ *   runId), tariff.create/update/delete (details: changed fields; the deleted
+ *   grid);
  * - accounts: driver.*, account.* (create, update, password_reset,
  *   password_change, password_change_failed: a wrong current password,
  *   deactivate, reactivate), session.login, session.logout,

@@ -36,8 +36,9 @@ import {
   type DayCrewPlan,
   type DayCrewView,
   type StaffPerson,
+  workTimeBlock,
 } from "@/lib/staff/day-crews";
-import { breakInShift, workTimeIssue } from "@/lib/staff/work-time";
+import { breakInShift, workTimeSummary } from "@/lib/staff/work-time";
 import { fromIsoDate, isoWeekday, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
 import {
   DEFAULT_MAX_RIDE_EXTRA_MIN,
@@ -351,10 +352,10 @@ export function decideVehicle(vehicle: VehicleInput, weekday: number): VehicleDe
     return { ok: false, reason: `Horaires du chauffeur invalides (${personName(driver)})` };
   }
 
-  // Art. L3121-16: over 6 hours, the shift is only worked with a break of 20 min or more inside it.
+  // Art. L. 3121-16: over 6 hours, the shift is only worked with a break of 20 min or more inside it.
   // A crew of the day was checked on /equipages already (blocked above); this covers the default crew.
   const shift = { start: shiftStart, end: shiftEnd };
-  const workIssue = workTimeIssue(driver, shift, personName(driver));
+  const workIssue = workTimeSummary(driver, shift);
   if (workIssue) return { ok: false, reason: workIssue };
 
   const notes: string[] = [];
@@ -365,7 +366,7 @@ export function decideVehicle(vehicle: VehicleInput, weekday: number): VehicleDe
     if (fitted) {
       breakRule = { windowStartMin: fitted.windowStart, windowEndMin: fitted.windowEnd, durationMin: fitted.duration };
     } else {
-      // Only on a shift of 6 hours or less (workTimeIssue): no break is owed.
+      // Only on a shift of 6 hours or less (workTimeSummary): no break is owed.
       notes.push(`${vehicle.label} : pause ignorée, la fenêtre de pause ne laisse pas ${driver.breakMinutes} min dans l'horaire`);
     }
   }
@@ -611,7 +612,7 @@ export function loadVehicleInputs(prisma: PrismaClient): Promise<VehicleInput[]>
  */
 export function applyDayCrewPlan<V extends VehicleInput>(
   vehicles: readonly V[],
-  plan: { crews: readonly Pick<DayCrewView, "vehicleId" | "driverId" | "crewMateId" | "blocked">[] },
+  plan: { crews: readonly (Pick<DayCrewView, "vehicleId" | "driverId" | "crewMateId" | "blocked"> & Partial<Pick<DayCrewView, "issues">>)[] },
   people: ReadonlyMap<string, DriverInput>,
 ): V[] {
   const byVehicle = new Map(plan.crews.map((c) => [c.vehicleId, c]));
@@ -622,7 +623,8 @@ export function applyDayCrewPlan<V extends VehicleInput>(
       ...vehicle,
       defaultDriver: crew.driverId ? (people.get(crew.driverId) ?? null) : null,
       defaultCrewMate: crew.crewMateId ? (people.get(crew.crewMateId) ?? null) : null,
-      dayCrew: { blocked: crew.blocked },
+      // The vehicles left out are listed with little room: the work-time rule in a few words (remedy on /equipages).
+      dayCrew: { blocked: workTimeBlock(crew) ?? crew.blocked },
     };
   });
 }

@@ -187,7 +187,7 @@ export function IssuesPanel({
               icon={<House aria-hidden className="size-3.5" />}
               title={`Aller ou retour sans véhicule (${halfServed.length})`}
               tone="red"
-              intro="L'autre trajet du patient est planifié : sans celui-ci, il reste au lieu de soins ou n'y est pas conduit. Placez la course à la main, réoptimisez ou confiez-la à un autre transporteur."
+              intro="L'autre trajet du patient est planifié : sans celui-ci, il reste au lieu de soins ou n'y est pas conduit. Placez la course à la main, réoptimisez, ou annulez-la avec le motif « Confiée à un confrère »."
             >
               {halfServed.map((u) => (
                 <li key={u.tripId}>

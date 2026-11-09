@@ -16,7 +16,7 @@ same-day outbound/return pair and for a leg without its pair.
 Time on board (RIDE_TIME): from the end of the pickup to the start of the dropoff, at most the
 direct drive (at the trip's reference minutes) plus settings.maxRideExtraMin.
 
-Work time (BREAK, Code du travail art. L3121-16): a route (depot departure to return) longer than
+Work time (BREAK, Code du travail art. L. 3121-16): a route (depot departure to return) longer than
 6 hours needs a break of at least 20 minutes inside it.
 """
 
@@ -537,7 +537,7 @@ class _RouteCheck:
                 return
         self.out.add("BREAK", f"La pause {span} chevauche un arrêt de la tournée", vehicle_id=vid)
 
-    # -- work time (Code du travail, art. L3121-16)
+    # -- work time (Code du travail, art. L. 3121-16)
     def _check_work_time(self) -> None:
         route = self.route
         duration = route.end_min - route.start_min
@@ -554,7 +554,7 @@ class _RouteCheck:
         self.out.add(
             "BREAK",
             f"Tournée de {_duration_text(duration)} sans pause d'au moins {MIN_BREAK_FOR_WORK_MIN} min pendant le travail : "
-            "pause obligatoire dès 6 h de travail (Code du travail, art. L3121-16)",
+            "pause obligatoire dès 6 h de travail (Code du travail, art. L. 3121-16)",
             vehicle_id=self.vehicle.id,
             key=("WORK_TIME", self.vehicle.id),
         )
@@ -590,7 +590,8 @@ class _RouteCheck:
             if on_board > limit + TIME_TOLERANCE_MIN:
                 self.out.add(
                     "RIDE_TIME",
-                    f"Patient de la course {trip_id} {on_board} min à bord pour un trajet direct de {direct} min "
+                    # The trip comes with trip_id (the web shows it next to the message), not in the text.
+                    f"{on_board} min à bord pour un trajet direct de {direct} min "
                     f"(maximum {limit} min : trajet direct + {self.settings.max_ride_extra_min} min)",
                     trip_id=trip_id,
                     vehicle_id=self.vehicle.id,

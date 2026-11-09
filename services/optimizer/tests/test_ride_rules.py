@@ -80,7 +80,7 @@ def test_final_check_takes_out_and_reinserts_a_patient_waiting_on_board() -> Non
     routes: list[list[int]] = [[] for _ in model.fleet]
     routes[taxi_aix1] = shared
     left_out = model.guarded(routes)
-    assert left_out == set()  # reinserted on the other Aix taxi
+    assert left_out == {}  # reinserted on the other Aix taxi
     assert sum(1 for route in routes if route) == 2
     assert all(not model._scheduled_breaches(v, route) for v, route in enumerate(routes))
 
@@ -173,6 +173,36 @@ def test_final_pass_gives_the_return_back_by_dropping_a_lone_trip_in_the_way() -
     assert not model._scheduled_breaches(0, routes[0])
 
 
+def short_session_day() -> dict[str, Any]:
+    """One taxi at Aix with room for two of three trips: patient A's short session (outbound for
+    08:30, return ready at 09:20: the outbound's dropoff is within the final pass's slack of the
+    return) and a better-paid lone trip Aix -> south of Marseille (RDV 09:05) that fits with either
+    leg but not with both."""
+    trips = [
+        trip("a_out", "pat_a", "OUTBOUND", offset(AIX, 2, 2), AIX_FAC, appointment=510),
+        trip("a_ret", "pat_a", "RETURN", AIX_FAC, offset(AIX, 2, 2), ready=560),
+        trip("x", "pat_x", "OUTBOUND", AIX_FAC, offset(MARSEILLE, -5, 0), appointment=545, shareable=False),
+    ]
+    return request([vehicle("taxi", AIX, cost_per_km=0, cost_per_hour=0)], trips)
+
+
+def test_final_pass_never_drops_the_served_leg_of_the_patient_it_completes() -> None:
+    model = day_model(short_session_day())
+    assert model.drop_penalty["x"] > model.drop_penalty["a_out"]
+
+    def route(*trips: str) -> list[int]:
+        return indices(model, *((t, kind) for t in trips for kind in ("P", "D")))
+
+    assert model._fits(0, route("a_out", "a_ret")) and model._fits(0, route("x", "a_ret"))
+    assert not any(model._fits(0, route(*order)) for order in (("a_out", "x", "a_ret"), ("x", "a_out", "a_ret")))
+    routes = [route("a_out", "x")]
+    assert model._fits(0, routes[0])
+    # Swapping the outbound (cheaper to drop than x) for the return leaves patient A half-served.
+    assert model.restore_pairs(routes) == 1
+    assert model._trip_ids(routes[0]) == ["a_out", "a_ret"]
+    assert not model._scheduled_breaches(0, routes[0])
+
+
 def test_insertion_places_the_return_of_a_served_outbound_first() -> None:
     model = day_model(dialysis_day())
     placed = {"a_out"}
@@ -220,6 +250,21 @@ def test_route_without_a_break_is_capped_at_six_hours() -> None:
     with_break = optimize(early_and_late_day(STANDARD_BREAK))
     assert with_break.validation.valid, with_break.validation.violations
     assert with_break.kpis.trips_served == 2 and len(with_break.routes) == 1
+
+
+def test_final_check_gives_the_work_time_reason_to_a_trip_it_leaves_out_for_the_six_hours() -> None:
+    model = day_model(early_and_late_day(None))
+    routes = [indices(model, ("early", "P"), ("early", "D"), ("late", "P"), ("late", "D"))]
+    left_out = model.guarded(routes)
+    assert len(left_out) == 1 and set(left_out.values()) == {solver.REASON_DROPPED_WORK_TIME}
+    assert "L. 3121-16" in solver.REASON_DROPPED_WORK_TIME
+    assert len(model._trip_ids(routes[0])) == 1
+    # A patient left out for the time on board keeps the on-board reason.
+    model = day_model(dialysis_day())
+    taxi_aix1 = next(v for v, member in enumerate(model.fleet) if member.vehicle.id == "taxi_aix1")
+    assert model._scheduled_reasons(taxi_aix1, indices(model, ("a_ret", "P"), ("b_ret", "P"), ("a_ret", "D"), ("b_ret", "D"))) == {
+        "a_ret": solver.REASON_DROPPED_ON_BOARD
+    }
 
 
 def test_work_limit_depends_on_a_legal_break_node() -> None:

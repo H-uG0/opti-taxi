@@ -3,7 +3,7 @@ import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/components/ui/cn";
 import { Stat } from "@/components/ui/layout";
-import { deltaTrend, kpiDelta, type DayKpis } from "@/lib/kpis";
+import { deltaTrend, kpiDelta, mixedDistanceSources, type DayKpis } from "@/lib/kpis";
 import { formatKm, formatPercent } from "@/lib/labels";
 import { formatDuration, formatLongDate } from "@/lib/time";
 import {
@@ -100,6 +100,12 @@ export function Headline({
             ? `Comparé au ${formatLongDate(previous.date)}, dernier jour planifié avant.`
             : "Aucun jour planifié avant pour comparer."}
         </p>
+        {previous && mixedDistanceSources(focus, previous) ? (
+          <p role="note" className="text-sm text-amber-800">
+            Distances calculées différemment ces deux jours (OSRM ou estimation à vol d&apos;oiseau) : comparaison des
+            km et des durées indicative.
+          </p>
+        ) : null}
       </div>
 
       {noRoutes ? (

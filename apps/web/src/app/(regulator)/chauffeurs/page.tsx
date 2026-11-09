@@ -9,6 +9,7 @@ import { TBody, THead, Table, Td, Th } from "@/components/ui/table";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatEuros, QUALIFICATION_LABELS } from "@/lib/labels";
+import { workTimeSummary } from "@/lib/staff/work-time";
 import { formatMinute, WEEKDAY_LABELS } from "@/lib/time";
 import { plannedSeatCount } from "../vehicules/_lib/crew";
 import { describeBreak, ISO_WEEKDAYS, QUALIFICATION_SHORT, QUALIFICATIONS } from "./schema";
@@ -118,6 +119,13 @@ export default async function DriversPage({
                 driver.active && plannedSeats > 1
                   ? `Dans l'équipage par défaut de ${plannedSeats} véhicules actifs : ne roule que sur un par jour, les autres reçoivent un remplaçant s'il y en a un de libre (page Équipages).`
                   : null;
+              // Over 6 hours without a legal break, the vehicle they drive is left out of the planning (lib/staff/work-time.ts).
+              const workTime = driver.active
+                ? workTimeSummary(driver, { start: driver.shiftStartMinute, end: driver.shiftEndMinute })
+                : null;
+              const workTimeText = workTime
+                ? `${workTime} : le véhicule qu'il conduit n'est pas planifié tant que la pause n'est pas réglée sur sa fiche.`
+                : null;
               return (
                 <tr key={driver.id} className={driver.active ? "hover:bg-slate-50" : "bg-slate-50/60 text-slate-500"}>
                   <Td className="font-medium whitespace-nowrap">
@@ -178,6 +186,12 @@ export default async function DriversPage({
                   </Td>
                   <Td className="tabular text-xs whitespace-nowrap">
                     {breakText ?? <span className="text-slate-400">Aucune</span>}
+                    {workTimeText ? (
+                      <span className="block" title={workTimeText}>
+                        <Badge tone="warning">Pause à régler</Badge>
+                        <span className="sr-only"> : {workTimeText}</span>
+                      </span>
+                    ) : null}
                   </Td>
                   <Td className="tabular text-right whitespace-nowrap">{formatEuros(driver.hourlyCost)}/h</Td>
                   <Td>

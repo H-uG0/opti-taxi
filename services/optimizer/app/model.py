@@ -11,7 +11,7 @@
   the window of the leg: the solver checks it on the reported times (solver._on_board_breaches).
 - Stop durations: the trip's own when given, else the settings'.
 - Vehicle compatibility (prescribed vehicle types, regulator lock), break placement modes and the
-  6-hour work limit without a break (Code du travail, art. L3121-16).
+  6-hour work limit without a break (Code du travail, art. L. 3121-16).
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from app.schemas import MINUTES_PER_DAY, BreakRule, OptimizeRequest, Settings, S
 HORIZON_MIN = 2 * MINUTES_PER_DAY
 """Latest minute of the planning horizon (the contract allows times up to the next midnight)."""
 MAX_WORK_WITHOUT_BREAK_MIN = 6 * 60
-"""Code du travail, art. L3121-16: a break of at least MIN_LEGAL_BREAK_MIN minutes is due once the
+"""Code du travail, art. L. 3121-16: a break of at least MIN_LEGAL_BREAK_MIN minutes is due once the
 daily work reaches 6 hours. A route (depot departure to return) longer than this needs one inside it."""
 MIN_LEGAL_BREAK_MIN = 20
 
@@ -161,7 +161,7 @@ def break_plan(vehicle: Vehicle) -> BreakPlan:
 
 
 def has_legal_break(vehicle: Vehicle) -> bool:
-    """A break rule long enough for art. L3121-16 (20 consecutive minutes)."""
+    """A break rule long enough for art. L. 3121-16 (20 consecutive minutes)."""
     rule = vehicle.break_
     return rule is not None and rule.duration_min >= MIN_LEGAL_BREAK_MIN
 

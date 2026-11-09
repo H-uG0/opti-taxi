@@ -8,7 +8,8 @@
  * computed: a route keeps the vehicle and the crew it was planned with. They
  * are compared here with the crew plan of the date:
  * - a vehicle deactivated or made unavailable since;
- * - a crew of the day that is no longer complete (blocked);
+ * - a crew of the day that can no longer work (blocked: a seat nobody fills,
+ *   hours over 6 hours without a legal break…);
  * - a driver or crew mate of the route who is now absent or deactivated, or
  *   who is no longer the one of the day's crew (crew changed on /equipages);
  * and, for every vehicle with a route or that could get one (complete crew),
@@ -24,6 +25,7 @@ import {
   type DatedAbsence,
   type DayCrewPlan,
   type StaffPerson,
+  workTimeBlock,
 } from "@/lib/staff/day-crews";
 
 /** The crew saved with a route. */
@@ -105,7 +107,8 @@ export function vehicleIssues(input: VehicleIssuesInput): VehicleIssue[] {
       if (crew.unavailable) {
         changes.push(crew.blocked ?? "Véhicule indisponible");
       } else {
-        if (crew.blocked) changes.push(`Équipage du jour incomplet : ${crew.blocked}`);
+        // The work-time rule is about the hours, not a seat: its short form (remedy on /equipages).
+        if (crew.blocked) changes.push(workTimeBlock(crew) ?? `Équipage du jour bloqué : ${crew.blocked}`);
         changes.push(...seatMessages("driver", route.driverId, crew.driverId, input));
         if (vehicleById.get(crew.vehicleId)?.type === "AMBULANCE") {
           changes.push(...seatMessages("crewMate", route.crewMateId, crew.crewMateId, input));

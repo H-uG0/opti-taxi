@@ -366,6 +366,16 @@ export function computeDayKpis(
   };
 }
 
+/**
+ * Whether the km and times of these days (or periods) come from different
+ * distance sources (OSRM, the straight-line estimate, or routes recomputed
+ * with the other one): they do not compare from one to the other.
+ */
+export function mixedDistanceSources(...days: readonly Pick<DayKpis, "matrixSources">[]): boolean {
+  const sources = new Set(days.flatMap((day) => day.matrixSources));
+  return sources.size > 1 || sources.has("mixed");
+}
+
 function distinctSources(routes: readonly Pick<KpiRoute, "matrixSource">[]): string[] {
   return [...new Set(routes.flatMap((route) => (route.matrixSource ? [route.matrixSource] : [])))].sort();
 }

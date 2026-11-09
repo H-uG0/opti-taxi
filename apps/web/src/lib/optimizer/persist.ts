@@ -389,6 +389,11 @@ export async function savePlan(
     check?: (context: SavePlanCheck) => Promise<void> | void;
     /** The trip lock changed with this plan, kept in the run's details (restoring the plan replaced undoes it). */
     lockChange?: LockChange;
+    /**
+     * Called in the transaction when this first plan computed with OSRM starts the traffic calibration
+     * over (AppSettings.trafficChangedAt): the caller records it in the audit trail.
+     */
+    onTrafficReset?: (tx: Prisma.TransactionClient) => Promise<void>;
     now?: Date;
   },
 ): Promise<SavePlanResult> {
@@ -492,9 +497,18 @@ export async function savePlan(
 
       // OSRM put into service: the traffic factors were set on straight-line times until now, the
       // calibration starts over (lib/domain/traffic-observed.ts only counts routes of one source anyway).
+      // It starts at this run (calibrationPeriod compares the runs' startedAt): its own routes, timed with
+      // OSRM and the current factors, are the first measured; unless the factors changed while it ran.
       if (response.meta.matrixSource === "osrm") {
         const earlier = await tx.optimizationRun.count({ where: { matrixSource: "osrm", status: "SUCCESS", id: { not: runId } } });
-        if (earlier === 0) await tx.appSettings.updateMany({ where: { id: 1 }, data: { trafficChangedAt: new Date() } });
+        if (earlier === 0) {
+          const run = await tx.optimizationRun.findUnique({ where: { id: runId }, select: { startedAt: true } });
+          const settings = await tx.appSettings.findUnique({ where: { id: 1 }, select: { trafficChangedAt: true } });
+          const since = run?.startedAt ?? now;
+          const changedAt = settings?.trafficChangedAt && settings.trafficChangedAt > since ? settings.trafficChangedAt : since;
+          await tx.appSettings.updateMany({ where: { id: 1 }, data: { trafficChangedAt: changedAt } });
+          await args.onTrafficReset?.(tx);
+        }
       }
 
       const served = servedTripIds.length;

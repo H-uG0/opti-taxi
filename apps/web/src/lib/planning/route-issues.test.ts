@@ -94,6 +94,14 @@ describe("vehicleIssues", () => {
     expect(issue?.changes.join(" ")).not.toMatch(/maladie/i);
   });
 
+  it("flags a crew of the day that can no longer work, in a few words for the work-time rule", () => {
+    const breakless = { breakWindowStartMinute: null, breakWindowEndMinute: null, breakMinutes: 0 };
+    const [issue] = issuesAfter({ people: PEOPLE.map((p) => (p.id === "taxi1" ? { ...p, ...breakless } : p)) });
+    expect(issue?.changes).toEqual(["Pause de 20 min requise : horaire de 13 h 00 sans pause (art. L. 3121-16)"]);
+    const blocked = issuesAfter({ saved: [{ vehicleId: "A", driverId: "dea1", crewMateId: null }] }).find((i) => i.vehicleId === "A");
+    expect(blocked?.changes).toContain("Équipage du jour bloqué : dea1 X n'a pas la qualification requise pour ce poste");
+  });
+
   it("flags a crew changed on the crew screen after the computation", () => {
     const [issue] = issuesAfter({ saved: [{ vehicleId: "A", driverId: "taxi2", crewMateId: null }] });
     expect(issue?.changes).toEqual(["Chauffeur changé : taxi1 X sur la tournée, taxi2 X dans l'équipage du jour"]);

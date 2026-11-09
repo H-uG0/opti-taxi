@@ -8,7 +8,7 @@
  * unit-tested.
  */
 import type { TripDirection } from "@prisma/client";
-import { sameDayPairs } from "@/app/(regulator)/courses/schedule-fit";
+import { sameDayPairs } from "@/lib/domain/day-pairs";
 
 export type PairableTrip = {
   id: string;
@@ -31,7 +31,7 @@ export function halfServedPairs(trips: readonly PairableTrip[]): HalfServed {
   const result: HalfServed = new Map();
   const byId = new Map(trips.map((trip) => [trip.id, trip]));
   for (const legs of byPatient.values()) {
-    const pairs = sameDayPairs(legs.map((leg) => ({ ...leg, plannedPickupMinute: null, plannedDropoffMinute: null })));
+    const pairs = sameDayPairs(legs);
     for (const { outbound, ret } of pairs) {
       const [out, back] = [byId.get(outbound.id), byId.get(ret.id)];
       if (!out || !back) continue;

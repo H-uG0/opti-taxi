@@ -8,10 +8,12 @@ import {
   listDates,
   MAX_RANGE_DAYS,
   minuteOfServiceDay,
+  mixedDistanceSources,
   pickFocusDay,
   ratio,
   resolveKpiRange,
   summarizePeriod,
+  type DayKpis,
   type KpiData,
   type KpiRoute,
   type KpiRun,
@@ -677,5 +679,12 @@ describe("distance sources", () => {
     expect(days.map((d) => d.matrixSources)).toEqual([[], ["haversine"], ["osrm"]]);
     expect(summarizePeriod(days).matrixSources).toEqual(["haversine", "osrm"]);
     expect(summarizePeriod(days.slice(2)).matrixSources).toEqual(["osrm"]);
+    // Two days, or a period, whose km do not compare (the headline compares the focus day with the day before).
+    const [none, straight, road] = days as [DayKpis, DayKpis, DayKpis];
+    expect(mixedDistanceSources(straight, road)).toBe(true);
+    expect(mixedDistanceSources(road, road)).toBe(false);
+    expect(mixedDistanceSources(none, road)).toBe(false);
+    expect(mixedDistanceSources({ matrixSources: ["mixed"] })).toBe(true);
+    expect(mixedDistanceSources(summarizePeriod(days))).toBe(true);
   });
 });

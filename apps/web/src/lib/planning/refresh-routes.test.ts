@@ -949,6 +949,26 @@ describe("refreshRoutes", () => {
     expect(writes[2]?.data).toMatchObject({ plannedDropoffMinute: 440 });
   });
 
+  it("marks mixed only a route whose stops done keep the times of another distance source", async () => {
+    const evaluate = async (): Promise<EvaluateResult> => ({
+      ok: true,
+      data: response([planRoute("veh_1", [["B", "PICKUP"], ["B", "DROPOFF"]])], [tripResult("B")]),
+    });
+    // OSRM down since the computation: the evaluation uses the straight-line estimate.
+    const started: FakeRoute = {
+      ...r1,
+      matrixSource: "osrm",
+      stops: r1.stops.map((s) => (s.kind === "PICKUP" ? { ...s, completedAt: DONE_AT } : s)),
+    };
+    const day = fakePrisma([started], [refreshTrip("B", "r1", { status: "PICKED_UP" })]);
+    await refreshRoutes({ prisma: day.prisma, evaluate, now: NOW }, ["r1"]);
+    expect(day.writes[0]?.data).toMatchObject({ matrixSource: MIXED_MATRIX_SOURCE });
+    // Not started: every stop is retimed with the new source.
+    const tomorrow = fakePrisma([{ ...r1, matrixSource: "osrm" }], [refreshTrip("B", "r1")]);
+    await refreshRoutes({ prisma: tomorrow.prisma, evaluate, now: NOW }, ["r1"]);
+    expect(tomorrow.writes[0]?.data).toMatchObject({ matrixSource: "haversine" });
+  });
+
   it("does not store the violations when the day changed between the evaluation and the write", async () => {
     const { prisma, writes, version } = fakePrisma([r1], [refreshTrip("B", "r1")]);
     const evaluate = async (): Promise<EvaluateResult> => {
@@ -1006,10 +1026,15 @@ describe("refreshRoutes", () => {
 });
 
 describe("refreshedMatrixSource", () => {
-  it("keeps the source of a route recomputed with the same one, marks a route recomputed with another one", () => {
-    expect(refreshedMatrixSource("osrm", "osrm", true)).toBe("osrm");
-    expect(refreshedMatrixSource(null, "osrm", true)).toBe("osrm");
-    expect(refreshedMatrixSource("osrm", "haversine", true)).toBe(MIXED_MATRIX_SOURCE);
-    expect(refreshedMatrixSource("osrm", "haversine", false)).toBe("osrm");
+  it("keeps the source of a route recomputed with the same one, marks a started route recomputed with another one", () => {
+    expect(refreshedMatrixSource("osrm", "osrm", true, true)).toBe("osrm");
+    expect(refreshedMatrixSource(null, "osrm", true, true)).toBe("osrm");
+    expect(refreshedMatrixSource("osrm", "haversine", true, true)).toBe(MIXED_MATRIX_SOURCE);
+    expect(refreshedMatrixSource("osrm", "haversine", false, false)).toBe("osrm");
+  });
+
+  it("gives a route not started the new source: every stop was retimed with it", () => {
+    expect(refreshedMatrixSource("osrm", "haversine", true, false)).toBe("haversine");
+    expect(refreshedMatrixSource(MIXED_MATRIX_SOURCE, "osrm", true, false)).toBe("osrm");
   });
 });

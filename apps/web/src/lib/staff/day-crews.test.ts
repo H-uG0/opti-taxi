@@ -10,6 +10,7 @@ import {
   type DatedAbsence,
   type DayCrewInput,
   type StaffPerson,
+  workTimeBlock,
 } from "./day-crews";
 
 const MONDAY = "2026-11-09";
@@ -494,7 +495,7 @@ describe("absences", () => {
   });
 });
 
-describe("work time of the crew (art. L3121-16)", () => {
+describe("work time of the crew (art. L. 3121-16)", () => {
   it("blocks a crew working more than 6 hours when the driver's break is not a legal one", () => {
     const withBreak = (id: string, breakMinutes: number, shift: [number, number] = [360, 1140]): StaffPerson => ({
       ...person(id, ["TAXI_CARD"], "dep_a", MON_FRI, shift),
@@ -506,11 +507,65 @@ describe("work time of the crew (art. L3121-16)", () => {
       vehicles: [vehicle("Taxi A", "TAXI", "a"), vehicle("Taxi B", "TAXI", "b"), vehicle("Taxi C", "TAXI", "c")],
       people: [withBreak("a", 0), withBreak("b", 30), withBreak("c", 0, [480, 840])],
     });
-    expect(crewOf(result, "Taxi A").blocked).toMatch(/^Horaire de 13 h 00 sans pause : .*L3121-16/);
+    const taxiA = crewOf(result, "Taxi A");
+    expect(taxiA.blocked).toMatch(/^Horaire de 13 h 00 sans pause : .*art\. L\. 3121-16/);
+    expect(workTimeBlock(taxiA)).toBe("Pause de 20 min requise : horaire de 13 h 00 sans pause (art. L. 3121-16)");
     expect(crewOf(result, "Taxi B").blocked).toBeNull();
     expect(crewOf(result, "Taxi C").blocked).toBeNull(); // 6 hours: no break owed
     // People without break settings (older callers) are not checked.
     expect(crewOf(plan(), "Taxi A").blocked).toBeNull();
+    // Another blocking problem has no short form: the lists show it as it is.
+    const nobody = crewOf(plan({ absences: [leave("taxi1"), leave("spare_a"), leave("spare_b")] }), "Taxi A");
+    expect(nobody.blocked).toBe("Aucun chauffeur disponible");
+    expect(workTimeBlock(nobody)).toBeNull();
+  });
+
+  it("does not propose a replacement whose hours with the crew would need a break they do not have", () => {
+    const withBreak = (id: string, breakMinutes: number, shift: [number, number] = [360, 1140]): StaffPerson => ({
+      ...person(id, ["TAXI_CARD"], "dep_a", MON_FRI, shift),
+      breakWindowStartMinute: 690,
+      breakWindowEndMinute: 840,
+      breakMinutes,
+    });
+    // Sorted first by name, the free driver without a break would be proposed before the one with a break.
+    const people = [withBreak("titular", 45), withBreak("a_breakless", 0), withBreak("b_lawful", 45)];
+    const result = plan({ vehicles: [vehicle("Taxi A", "TAXI", "titular")], people, absences: [leave("titular")] });
+    expect(crewOf(result, "Taxi A")).toMatchObject({ driverId: "b_lawful", source: "replacement", blocked: null });
+    expect(result.idle).toEqual(["a_breakless"]);
+    // Nobody else: the seat stays empty and says why the free driver was not proposed.
+    const alone = plan({ vehicles: [vehicle("Taxi A", "TAXI", "titular")], people: people.slice(0, 2), absences: [leave("titular")] });
+    expect(crewOf(alone, "Taxi A").blocked).toBe(
+      "Aucun chauffeur disponible : a_breakless A_BREAKLESS est libre, mais l'équipage dépasserait 6 h de travail sans pause de 20 min (art. L. 3121-16)",
+    );
+    // A shift of 6 hours needs no break: proposed.
+    const short = plan({
+      vehicles: [vehicle("Taxi A", "TAXI", "titular")],
+      people: [withBreak("titular", 45), withBreak("a_breakless", 0, [480, 840])],
+      absences: [leave("titular")],
+    });
+    expect(crewOf(short, "Taxi A")).toMatchObject({ driverId: "a_breakless", blocked: null });
+  });
+
+  it("checks the driver's break on the hours shared with the crew mate of an ambulance", () => {
+    const dea1: StaffPerson = {
+      ...person("dea1", ["DEA"]),
+      breakWindowStartMinute: 690,
+      breakWindowEndMinute: 840,
+      breakMinutes: 45,
+    };
+    // Usual crew mate absent; two free auxiliaries cover the holder's hours (06:00–12:05) alike.
+    const result = plan({
+      vehicles: [vehicle("Amb", "AMBULANCE", "dea1", "aux_off")],
+      people: [
+        dea1,
+        person("aux_off", ["AUXILIARY"], "dep_a", MON_FRI, [360, 725]),
+        person("aux_a", ["AUXILIARY"], "dep_a", MON_FRI, [360, 725]),
+        person("aux_b", ["AUXILIARY"]),
+      ],
+      absences: [leave("aux_off")],
+    });
+    // aux_a is first by name, but 06:00–12:05 with the driver leaves 35 min of the 45 min break's window (11:30–14:00).
+    expect(crewOf(result, "Amb")).toMatchObject({ driverId: "dea1", crewMateId: "aux_b", blocked: null });
   });
 });
 

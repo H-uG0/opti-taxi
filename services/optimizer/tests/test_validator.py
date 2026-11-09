@@ -204,6 +204,7 @@ def test_ride_time() -> None:
     # A rides through B's pickup (5 min) and the 10 min wait, B through A's dropoff: over direct + 5.
     assert set(rides) == {"a_ret", "b_ret"}
     assert "trajet direct + 5 min" in rides["a_ret"]
+    assert "a_ret" not in rides["a_ret"]  # an id means nothing to the regulator: trip_id carries it
     req, routes, matrix = dialysis_returns()
     assert not [v for v in validate(req, routes, matrix) if v.code == "RIDE_TIME"]
 
@@ -218,7 +219,7 @@ def test_route_longer_than_six_hours_needs_a_break() -> None:
     taxi = route_of(routes, "taxi_1")
     assert taxi.end_min - taxi.start_min > 360 and taxi.break_ is None
     work = [v for v in validate(req, routes, matrix) if v.code == "BREAK"]
-    assert len(work) == 1 and "L3121-16" in work[0].message
+    assert len(work) == 1 and "art. L. 3121-16" in work[0].message
     # With a 45 min break inside the route, the same day is lawful.
     raw = request([vehicle("taxi_1", MARSEILLE, break_=TAXI_BREAK)], trips)
     req, routes, matrix = planned(raw, sequences)

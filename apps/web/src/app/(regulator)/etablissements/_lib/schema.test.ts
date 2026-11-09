@@ -42,7 +42,9 @@ describe("parseFacilityForm", () => {
   it("reads the minutes added to the stop at the facility", () => {
     const parsed = parseFacilityForm(form({ ...facility, extraServiceMin: "10" }));
     expect(parsed.success && parsed.data.extraServiceMin).toBe(10);
-    for (const [typed, message] of [["2,5", "Nombre entier"], ["61", "60 min au plus"], ["-1", "0 min au moins"], ["dix", "Nombre"]] as const) {
+    expect(parseFacilityForm(form({ ...facility, extraServiceMin: " 15 " })).success).toBe(true);
+    const cases = [["2,5", "Nombre entier"], ["61", "60 min au plus"], ["-1", "0 min au moins"], ["dix", "Nombre"], ["0x3C", "Nombre"], ["1e1", "Nombre"]] as const;
+    for (const [typed, message] of cases) {
       const result = parseFacilityForm(form({ ...facility, extraServiceMin: typed }));
       expect(result.success).toBe(false);
       if (!result.success) expect(result.state.fieldErrors.extraServiceMin?.[0]).toContain(message);

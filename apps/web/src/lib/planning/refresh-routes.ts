@@ -78,13 +78,19 @@ export const MIXED_MATRIX_SOURCE = "mixed";
 
 /**
  * Distance source of a route once /evaluate rewrote its times with `evaluated`:
- * the same as before, or MIXED_MATRIX_SOURCE when the two differ (the stops
- * already done keep their times, and the source changed meanwhile, OSRM down
- * or put into service). Unchanged when no time was rewritten.
+ * `evaluated` when every stop was rewritten (a route not started), else the
+ * same as before, or MIXED_MATRIX_SOURCE when the two differ (the stops `kept`
+ * keep their times, and the source changed meanwhile, OSRM down or put into
+ * service). Unchanged when no time was rewritten.
  */
-export function refreshedMatrixSource(previous: string | null | undefined, evaluated: string, rewritten: boolean): string | null {
+export function refreshedMatrixSource(
+  previous: string | null | undefined,
+  evaluated: string,
+  rewritten: boolean,
+  kept: boolean,
+): string | null {
   if (!rewritten) return previous ?? null;
-  return !previous || previous === evaluated ? evaluated : MIXED_MATRIX_SOURCE;
+  return !kept || !previous || previous === evaluated ? evaluated : MIXED_MATRIX_SOURCE;
 }
 
 /** A route as stored, with its stops (any order). */
@@ -662,7 +668,12 @@ async function writeRefresh(
 
   const sourceOf = new Map(unchanged.map((route) => [route.id, route.matrixSource]));
   for (const route of plan.routes) {
-    const matrixSource = refreshedMatrixSource(sourceOf.get(route.routeId), response.meta.matrixSource, route.stops.length > 0);
+    const matrixSource = refreshedMatrixSource(
+      sourceOf.get(route.routeId),
+      response.meta.matrixSource,
+      route.stops.length > 0,
+      route.keptStops.length > 0,
+    );
     await tx.route.update({ where: { id: route.routeId }, data: { ...route.data, matrixSource } });
     for (const stop of route.stops) await tx.routeStop.update({ where: { id: stop.id }, data: stop.data });
   }

@@ -375,6 +375,11 @@ function CrewFormBody({
                         {row.issues.map((issue, i) => (
                           <li key={i} className={issue.level === "error" ? "font-medium text-red-700" : "text-slate-600"}>
                             {issue.message}
+                            {issue.workTime && row.driverId ? (
+                              <a href={`/chauffeurs/${row.driverId}`} className="block underline">
+                                Ouvrir la fiche du chauffeur
+                              </a>
+                            ) : null}
                           </li>
                         ))}
                       </ul>

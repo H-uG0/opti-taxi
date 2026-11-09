@@ -97,7 +97,7 @@ ci-dessous) ; le validateur vérifie le total.
 **Temps d'arrêt par course** : `trips[].pickupServiceMin` / `dropoffServiceMin` quand le web les
 envoie (mode de transport, mobilité, établissement), sinon ceux de `settings`.
 
-**Pause de 20 min dès 6 h de travail** (Code du travail, art. L3121-16). Une tournée (départ du
+**Pause de 20 min dès 6 h de travail** (Code du travail, art. L. 3121-16). Une tournée (départ du
 dépôt → retour) de plus de 6 h doit contenir une pause d'au moins 20 min. Un véhicule dont la
 pause ne la garantit pas (pas de pause, pause de moins de 20 min, ou pause toujours avant le
 départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit_min`,
@@ -198,12 +198,16 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   `schedule.py`. Chaque tournée finale est donc minutée comme la réponse : une course dont le
   patient dépasse son temps à bord ou attend à bord au-delà de sa fenêtre, ou une tournée de plus
   de 6 h sans pause, sort de la tournée (la moins chère d'abord) puis est réinsérée là où la même
-  vérification passe (5 s au plus). Une course qui ne trouve pas de place reçoit le motif « Pas de
-  place dans les tournées sans dépasser le temps à bord ou l'attente au lieu de soins… ».
+  vérification passe (5 s au plus), à égalité de coût la course d'identifiant le plus petit (le
+  choix ne dépend pas de `PYTHONHASHSEED`). Une course qui ne trouve pas de place reçoit le motif
+  « Pas de place dans les tournées sans dépasser le temps à bord ou l'attente au lieu de soins… »,
+  ou, sortie pour la durée de tournée, « Pas de place dans les tournées sans dépasser 6 h de
+  travail sans pause de 20 min… ».
 - **Patients à moitié servis** (`_DayModel.restore_pairs`, 3 s au plus). Pour chaque aller ou
   retour non placé dont l'autre trajet est servi (les retours d'abord), une course qui gêne et
-  coûte moins à laisser (course isolée, ou dont le patient n'a pas non plus son autre trajet) sort
-  de sa tournée pour lui faire place, puis est réinsérée là où elle tient. La recherche locale
+  coûte moins à laisser (course isolée, ou dont le patient n'a pas non plus son autre trajet ;
+  jamais l'autre trajet du même patient, qui resterait à moitié servi) sort de sa tournée pour lui
+  faire place, puis est réinsérée là où elle tient. La recherche locale
   d'OR-Tools ne fait pas cet échange : sur la journée chargée, la pénalité seule ne réduisait pas le
   nombre de patients à moitié servis.
 - **Première solution coupée par sa limite** (grande flotte : à 120 véhicules et 300 voyages, aucune
@@ -249,7 +253,7 @@ partir de la requête, de la matrice et des tournées produites (avec leurs hora
 `EXCLUSIVE_RIDE`, `TIME_WINDOW` (dont horaires intenables vu les temps de trajet et temps d'arrêt
 propres à chaque course), `TOTAL_WAIT` (attente à bord devant le lieu de soins comprise, par paire
 aller/retour et pour un trajet seul), `RIDE_TIME`, `DETOUR`, `SHIFT`, `BREAK` (dont tournée de plus
-de 6 h sans pause de 20 min, art. L3121-16). Tolérances : 0,05 km sur les distances ; 0 minute sur
+de 6 h sans pause de 20 min, art. L. 3121-16). Tolérances : 0,05 km sur les distances ; 0 minute sur
 les horaires (minutes entières, calcul exact).
 
 ## Limites connues

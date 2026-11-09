@@ -302,6 +302,27 @@ describe("vehicle availability", () => {
     expect(other?.dayCrew).toBeUndefined();
   });
 
+  it("gives a vehicle left out for the work-time rule its short reason", () => {
+    const long = "Horaire de 12 h 30 sans pause : au-delà de 6 h de travail… Réglez la pause de Julien Marchetti";
+    const short = "Pause de 20 min requise : horaire de 12 h 30 sans pause (art. L. 3121-16)";
+    const [taxi] = applyDayCrewPlan(
+      [vehicle("t")],
+      {
+        crews: [
+          {
+            vehicleId: "t",
+            driverId: "spare",
+            crewMateId: null,
+            blocked: long,
+            issues: [{ level: "error", seat: "driver", message: long, workTime: { summary: short } }],
+          },
+        ],
+      },
+      new Map([["spare", driver("spare")]]),
+    );
+    expect(taxi?.dayCrew).toEqual({ blocked: short });
+  });
+
   it("returns the crew sent with each vehicle, for the routes saved from the plan", () => {
     const amb = vehicle("a", { type: "AMBULANCE", defaultDriver: driver("dea"), defaultCrewMate: driver("aux") });
     const build = buildOptimizeRequest({ date: TUESDAY, settings, vehicles: [amb, vehicle("t")], trips: [], tariffs: [] });
@@ -333,7 +354,7 @@ describe("vehicle availability", () => {
     expect(available.map((v) => v.break)).toEqual([null, null]);
   });
 
-  it("leaves out a vehicle whose shift is over 6 hours without a break of 20 min (art. L3121-16)", () => {
+  it("leaves out a vehicle whose shift is over 6 hours without a break of 20 min (art. L. 3121-16)", () => {
     const { available, skipped } = resolveVehicleAvailability(
       [
         vehicle("v1", { label: "Taxi 1", defaultDriver: driver("d1", { breakMinutes: 0 }) }),
@@ -345,7 +366,8 @@ describe("vehicle availability", () => {
     );
     expect(available.map((v) => v.id)).toEqual(["v4"]);
     expect(skipped.map((s) => s.reason)).toEqual([
-      expect.stringMatching(/^Horaire de 13 h 00 sans pause : .* \(Code du travail, art\. L3121-16\)\. Réglez la pause de Prénom D1/),
+      // In a few words: the list of vehicles left out has little room, Équipages gives the remedy.
+      "Pause de 20 min requise : horaire de 13 h 00 sans pause (art. L. 3121-16)",
       expect.stringContaining("avec une pause de 15 min"),
       expect.stringContaining("fenêtre de pause qui ne laisse pas 45 min dans l'horaire"),
     ]);

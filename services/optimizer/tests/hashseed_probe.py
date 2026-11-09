@@ -1,8 +1,9 @@
 """Run by tests/test_search.py in subprocesses, one per PYTHONHASHSEED (not collected by pytest).
 
 Prints as JSON what must not depend on the hash seed: the node layout of the model of a generated
-day, and the plan of a search stopped by a solution limit rather than by the clock (the LNS
-sub-searches of OR-Tools, bounded to 100 ms by default, get a long limit too).
+day, the plan of a search stopped by a solution limit rather than by the clock (the LNS
+sub-searches of OR-Tools, bounded to 100 ms by default, get a long limit too), and that plan after
+the final check and the pair pass (guarded, restore_pairs).
 """
 
 from __future__ import annotations
@@ -46,13 +47,22 @@ def main() -> None:
     model = solver._DayModel(ctx, fleet, routable)
     solution = model.search(GUARD_SEC)
     assert solution is not None
+    routes = model.routes_of(solution)
+    plan = model.sequences(routes)
+    left_out = model.guarded(routes, GUARD_SEC)
+    restored = model.restore_pairs(routes, GUARD_SEC)
     print(
         json.dumps(
             {
                 "nodes": [[n.role.value, n.point, n.trip.id if n.trip else None, n.vehicle] for n in model.nodes],
                 "candidates": [[trip.id, candidates] for trip, candidates in routable],
-                "plan": {vid: [[ref.trip_id, ref.kind] for ref in refs] for vid, refs in model.sequences(model.routes_of(solution)).items()},
+                "plan": {vid: [[ref.trip_id, ref.kind] for ref in refs] for vid, refs in plan.items()},
                 "objective": solution.ObjectiveValue(),
+                "final": {
+                    "plan": {vid: [[ref.trip_id, ref.kind] for ref in refs] for vid, refs in model.sequences(routes).items()},
+                    "leftOut": left_out,
+                    "restored": restored,
+                },
             }
         )
     )

@@ -4,7 +4,7 @@ import { LinkButton } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, EmptyState, PageHeader } from "@/components/ui/layout";
 import { FormMessage } from "@/components/ui/form";
 import { requireUser } from "@/lib/auth";
-import { computeKpisByDay, hasPlanning, pickFocusDay, resolveKpiRange, summarizePeriod } from "@/lib/kpis";
+import { computeKpisByDay, hasPlanning, mixedDistanceSources, pickFocusDay, resolveKpiRange, summarizePeriod } from "@/lib/kpis";
 import { addDays, formatShortDate, todayIso, tomorrowIso } from "@/lib/time";
 import { KpiCharts } from "./charts";
 import { plural } from "./format";
@@ -82,6 +82,14 @@ export default async function DashboardPage({
             <h2 id="trends-title" className="mb-3 text-base font-semibold text-slate-900">
               Évolution sur la période
             </h2>
+            {/* Above the charts: they mix the same days as the table. */}
+            {mixedDistanceSources(period) ? (
+              <p role="note" className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                Cette période mélange des tournées calculées avec les distances routières (OSRM) et avec l&apos;estimation à
+                vol d&apos;oiseau (indiqué sous chaque jour du détail) : leurs kilomètres, durées et retards prévus ne se
+                comparent pas d&apos;un jour à l&apos;autre.
+              </p>
+            ) : null}
             <KpiCharts days={days} period={period} focusDate={focus?.date ?? null} />
           </section>
 
@@ -92,13 +100,6 @@ export default async function DashboardPage({
               </h2>
               <p className="text-xs text-slate-500">Cliquez sur un jour pour l&apos;afficher en tête de page.</p>
             </div>
-            {period.matrixSources.length > 1 || period.matrixSources.includes("mixed") ? (
-              <p role="note" className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                Cette période mélange des tournées calculées avec les distances routières (OSRM) et avec l&apos;estimation à
-                vol d&apos;oiseau (indiqué sous chaque jour) : leurs kilomètres, durées et retards prévus ne se comparent pas
-                d&apos;un jour à l&apos;autre.
-              </p>
-            ) : null}
             <KpiTable days={days} period={period} focusDate={focus?.date ?? null} range={range} today={today} tomorrow={tomorrow} />
           </section>
         </>

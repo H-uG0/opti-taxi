@@ -140,7 +140,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Attente maximale cumulée (min)"
             htmlFor="maxTotalWaitMin"
             error={errors.maxTotalWaitMin}
-            hint={`Aller + retour d'un même patient dans la journée. ${DECREE_LIMITS.maxTotalWaitMin} min au plus (décret).`}
+            hint={`Aller + retour d'un même patient dans la journée, attente à bord du véhicule garé comprise. ${DECREE_LIMITS.maxTotalWaitMin} min au plus (décret).`}
           >
             <NumberInput
               name="maxTotalWaitMin"
@@ -153,6 +153,11 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             />
           </Field>
         </div>
+        <Explanation>
+          L&apos;attente d&apos;un patient dans le véhicule arrêté devant son lieu de soins (le véhicule attend
+          l&apos;heure d&apos;un autre patient) compte dans son attente au lieu de soins : l&apos;optimiseur ne la
+          laisse pas dépasser la marge avant le rendez-vous (aller) ni la marge après la séance (retour).
+        </Explanation>
         {waitsKnown && total !== null ? (
           <div
             className={cn(
@@ -202,16 +207,11 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Temps à bord en plus du trajet direct (min)"
             htmlFor="maxRideExtraMin"
             error={errors.maxRideExtraMin}
-            hint="Du départ de la prise en charge à l'arrivée à la dépose, un patient ne reste pas à bord plus longtemps que le trajet direct + cette durée, détours et autres arrêts compris. 30 min par défaut."
+            hint="De la fin de la prise en charge au début de la dépose (attente à bord comprise), un patient ne reste pas à bord plus longtemps que le trajet direct + cette durée, détours et autres arrêts compris. 30 min par défaut : règle de l'entreprise, pas un plafond du décret."
           >
             <NumberInput name="maxRideExtraMin" unit="min" integer values={values} errors={errors} />
           </Field>
         </div>
-        <Explanation>
-          L&apos;attente d&apos;un patient dans le véhicule arrêté devant son lieu de soins (le véhicule attend
-          l&apos;heure d&apos;un autre patient) compte dans son attente au lieu de soins : l&apos;optimiseur ne la
-          laisse pas dépasser les marges ci-dessus.
-        </Explanation>
       </Fieldset>
 
       <Fieldset legend="Temps d'arrêt">

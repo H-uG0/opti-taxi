@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { checkScheduleFit, sameDayPairs, type PatientDayTrip, type WaitSettings } from "./schedule-fit";
+import { sameDayPairs } from "@/lib/domain/day-pairs";
+import { checkScheduleFit, type PatientDayTrip, type WaitSettings } from "./schedule-fit";
 
 const settings: WaitSettings = { waitBeforeAppointmentMin: 30, waitAfterSessionMin: 15, maxTotalWaitMin: 45 };
 

@@ -178,8 +178,9 @@ export function DriverForm({
         <div className="space-y-2">
           <p className="text-sm font-medium text-slate-700">Pause</p>
           <p className="text-xs text-slate-500">
-            L&apos;optimiseur place la pause n&apos;importe où dans la fenêtre. Laissez les trois champs vides s&apos;il
-            n&apos;y a pas de pause planifiée.
+            L&apos;optimiseur place la pause n&apos;importe où dans la fenêtre. Obligatoire au-delà de 6 h d&apos;horaire :
+            au moins 20 min (Code du travail, art. L. 3121-16). Laissez les trois champs vides seulement pour un horaire
+            de 6 h ou moins.
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="Fenêtre : à partir de" htmlFor="breakWindowStart" error={errors.breakWindowStart}>

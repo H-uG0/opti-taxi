@@ -74,11 +74,26 @@ describe("driverSchema", () => {
     expect(errorsOf({ ...valid, shiftEnd: "07:00" }).shiftEnd).toMatch(/après le début/);
   });
 
-  it("accepts no break when the three break fields are blank", () => {
-    const driver = driverSchema.parse({ ...valid, breakWindowStart: "", breakWindowEnd: "", breakMinutes: "" });
+  it("accepts no break when the three break fields are blank, on a shift of 6 hours or less", () => {
+    const sixHours = { ...valid, shiftEnd: "13:00" };
+    const driver = driverSchema.parse({ ...sixHours, breakWindowStart: "", breakWindowEnd: "", breakMinutes: "" });
     expect(driver).toMatchObject({ breakWindowStartMinute: null, breakWindowEndMinute: null, breakMinutes: 0 });
-    const zero = driverSchema.parse({ ...valid, breakWindowStart: "", breakWindowEnd: "", breakMinutes: "0" });
+    const zero = driverSchema.parse({ ...sixHours, breakWindowStart: "", breakWindowEnd: "", breakMinutes: "0" });
     expect(zero.breakMinutes).toBe(0);
+  });
+
+  it("requires a break of 20 min or more over 6 hours (art. L. 3121-16)", () => {
+    const blank = { breakWindowStart: "", breakWindowEnd: "", breakMinutes: "" };
+    expect(errorsOf({ ...valid, ...blank }).breakWindowStart).toBe(
+      "Pause obligatoire pour un horaire de 11 h 30 : au moins 20 min au-delà de 6 h de travail (Code du travail, art. L. 3121-16).",
+    );
+    expect(errorsOf({ ...valid, breakMinutes: "15" }).breakMinutes).toBe(
+      "Au moins 20 min pour un horaire de 11 h 30 (au-delà de 6 h de travail, Code du travail, art. L. 3121-16).",
+    );
+    expect(errorsOf({ ...valid, breakMinutes: "20" })).toEqual({});
+    const short = { breakWindowEnd: "13:00", breakMinutes: "15" };
+    expect(errorsOf({ ...valid, ...short, shiftEnd: "13:01" }).breakMinutes).toMatch(/^Au moins 20 min pour un horaire de 6 h 01/);
+    expect(errorsOf({ ...valid, ...short, shiftEnd: "13:00" })).toEqual({});
   });
 
   it("requires the break fields together", () => {
@@ -107,7 +122,7 @@ describe("driverSchema", () => {
   it("round-trips a record through the form values", () => {
     const parsed = driverSchema.parse(valid);
     expect(driverSchema.parse(driverFormValues(parsed))).toEqual(parsed);
-    const noBreak = { ...parsed, breakWindowStartMinute: null, breakWindowEndMinute: null, breakMinutes: 0 };
+    const noBreak = { ...parsed, shiftEndMinute: 780, breakWindowStartMinute: null, breakWindowEndMinute: null, breakMinutes: 0 };
     expect(driverSchema.parse(driverFormValues(noBreak))).toEqual(noBreak);
   });
 

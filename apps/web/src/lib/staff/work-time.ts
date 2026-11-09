@@ -1,5 +1,5 @@
 /**
- * Break owed by a working day (Code du travail, art. L3121-16): « dès que le
+ * Break owed by a working day (Code du travail, art. L. 3121-16): « dès que le
  * temps de travail quotidien atteint six heures, le salarié bénéficie d'un
  * temps de pause d'une durée minimale de vingt minutes consécutives ».
  *
@@ -15,6 +15,8 @@ import { formatDuration } from "@/lib/time";
 
 export const MAX_WORK_WITHOUT_BREAK_MIN = 6 * 60;
 export const MIN_LEGAL_BREAK_MIN = 20;
+/** As the other citations of the interface write it (Légifrance style). */
+export const WORK_TIME_ARTICLE = "Code du travail, art. L. 3121-16";
 
 /** A person's break settings (Driver). */
 export type BreakSettings = {
@@ -34,12 +36,8 @@ export function breakInShift(person: BreakSettings, shift: Shift): { windowStart
   return windowEnd - windowStart >= duration ? { windowStart, windowEnd, duration } : null;
 }
 
-/**
- * Why `shift` cannot be worked with this break (French, for the regulator), or
- * null when it can: a shift of at most six hours, or a break of at least 20 min
- * that fits in it. `name` is the person whose break settings apply.
- */
-export function workTimeIssue(person: BreakSettings, shift: Shift, name: string): string | null {
+/** Length of `shift` and what is wrong with its break, or null when the shift can be worked. */
+function breach(person: BreakSettings, shift: Shift): { length: number; why: string } | null {
   const length = shift.end - shift.start;
   if (length <= MAX_WORK_WITHOUT_BREAK_MIN) return null;
   const fitted = breakInShift(person, shift);
@@ -50,9 +48,31 @@ export function workTimeIssue(person: BreakSettings, shift: Shift, name: string)
       : fitted
         ? `avec une pause de ${person.breakMinutes} min`
         : `avec une fenêtre de pause qui ne laisse pas ${person.breakMinutes} min dans l'horaire`;
+  return { length, why };
+}
+
+/**
+ * Why `shift` cannot be worked with this break (French, for the regulator), or
+ * null when it can: a shift of at most six hours, or a break of at least 20 min
+ * that fits in it. `name` is the person whose break settings apply.
+ */
+export function workTimeIssue(person: BreakSettings, shift: Shift, name: string): string | null {
+  const found = breach(person, shift);
+  if (!found) return null;
   return (
-    `Horaire de ${formatDuration(length)} ${why} : au-delà de 6 h de travail, une pause d'au moins ` +
-    `${MIN_LEGAL_BREAK_MIN} min est obligatoire (Code du travail, art. L3121-16). Réglez la pause de ${name} ` +
+    `Horaire de ${formatDuration(found.length)} ${found.why} : au-delà de 6 h de travail, une pause d'au moins ` +
+    `${MIN_LEGAL_BREAK_MIN} min est obligatoire (${WORK_TIME_ARTICLE}). Réglez la pause de ${name} ` +
     "(fiche du chauffeur) ou raccourcissez son horaire"
   );
+}
+
+/**
+ * workTimeIssue in a few words, for lists with little room (vehicles left out
+ * of the planning, drivers list): « Pause de 20 min requise : horaire de 12 h 30
+ * sans pause (art. L. 3121-16) ». Null when the shift can be worked.
+ */
+export function workTimeSummary(person: BreakSettings, shift: Shift): string | null {
+  const found = breach(person, shift);
+  if (!found) return null;
+  return `Pause de ${MIN_LEGAL_BREAK_MIN} min requise : horaire de ${formatDuration(found.length)} ${found.why} (art. L. 3121-16)`;
 }

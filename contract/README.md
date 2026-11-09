@@ -68,7 +68,7 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
     "shiftStartMin": 360,               // départ du dépôt au plus tôt
     "shiftEndMin": 1140,                // retour au dépôt au plus tard
     "break": { "windowStartMin": 690, "windowEndMin": 840, "durationMin": 45 } // ou null ; sans pause
-                                        // d'au moins 20 min dans l'horaire, une tournée dure 6 h au plus (L3121-16)
+                                        // d'au moins 20 min dans l'horaire, une tournée dure 6 h au plus (art. L. 3121-16)
   }],
   "trips": [{
     "id": "trip_1",
@@ -263,4 +263,4 @@ Si la course est partagée avec `n - 1` co-passagers distincts (n plafonné à 3
 | `RIDE_TIME` | temps à bord > trajet direct + `maxRideExtraMin` |
 | `DETOUR` | détour > `min(maxDetourKmPerExtraPatient * co-passagers, maxDetourKmTotal)` |
 | `SHIFT` | départ avant `shiftStartMin` ou retour après `shiftEndMin` |
-| `BREAK` | pas de pause de `durationMin` sans patient à bord dans la fenêtre de pause ; ou tournée de plus de 6 h sans pause d'au moins 20 min en son sein (Code du travail, art. L3121-16) |
+| `BREAK` | pas de pause de `durationMin` sans patient à bord dans la fenêtre de pause ; ou tournée de plus de 6 h sans pause d'au moins 20 min en son sein (Code du travail, art. L. 3121-16) |

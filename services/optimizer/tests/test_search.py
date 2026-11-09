@@ -243,7 +243,8 @@ def test_fallback_plan_says_a_rerun_may_place_the_trips_left_out(monkeypatch: py
 
 def test_model_and_plan_do_not_depend_on_the_hash_seed() -> None:
     """Same node layout, candidates and plan (search stopped by a solution limit, see
-    tests/hashseed_probe.py) under several PYTHONHASHSEED values, in separate interpreters."""
+    tests/hashseed_probe.py), before and after the final check and pair pass, under several
+    PYTHONHASHSEED values, in separate interpreters."""
     env = {key: value for key, value in os.environ.items() if key != "OSRM_URL"}
     runs = [
         subprocess.Popen(
@@ -264,5 +265,5 @@ def test_model_and_plan_do_not_depend_on_the_hash_seed() -> None:
     reference = outputs[0]
     assert reference["plan"]
     for seed, other in zip(HASH_SEEDS[1:], outputs[1:], strict=True):
-        for key in ("nodes", "candidates", "plan", "objective"):
+        for key in ("nodes", "candidates", "plan", "objective", "final"):
             assert other[key] == reference[key], f"{key} differs with PYTHONHASHSEED={seed}"

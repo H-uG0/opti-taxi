@@ -367,6 +367,17 @@ async function failRun(runId: string, error: string, extra: { matrixSource?: str
   return { ok: false as const, error };
 }
 
+/** The first plan computed with OSRM started the traffic calibration over (savePlan): traced like a change of it. */
+function auditTrafficReset(tx: Prisma.TransactionClient, user: Actor, runId: string, isoDate: string): Promise<void> {
+  return audit(tx, user, {
+    action: "traffic.calibration_reset",
+    entity: "AppSettings",
+    entityId: "1",
+    serviceDate: isoDate,
+    details: { runId, matrixSource: "osrm" },
+  });
+}
+
 const AUDIT_ACTION: Record<RunKind, "plan.optimize" | "plan.restore"> = {
   optimize: "plan.optimize",
   move: "plan.optimize",
@@ -457,6 +468,7 @@ async function finishRun(args: {
       crews: build.crews,
       kind,
       lockChange: lock?.change,
+      onTrafficReset: (tx) => auditTrafficReset(tx, user, runId, isoDate),
       check: ({ comparison, version }) => {
         // A move that would leave other trips without a vehicle is never applied silently: the question
         // names them. A trip the computation was not given (left out of the request since) is not lost by
@@ -672,6 +684,7 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
       // The computation ended when it was put on hold, not when the regulator confirmed it.
       finishedAt: run.finishedAt ?? undefined,
       lockChange: lockChange ?? undefined,
+      onTrafficReset: (tx) => auditTrafficReset(tx, user, run.id, isoDate),
       // Under the planning lock of the date, which discardPendingRun takes too: never both confirmed and discarded.
       check: async ({ tx, version }) => {
         const still = await tx.optimizationRun.findUnique({ where: { id: run.id }, select: { status: true } });

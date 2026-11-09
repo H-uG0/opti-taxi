@@ -179,7 +179,10 @@ function CalibrationSource({ source, otherSourceRoutes }: Pick<ObservedCalibrati
         <span className="text-amber-800">
           {" "}
           {otherSourceRoutes} {otherSourceRoutes > 1 ? "tournées calculées" : "tournée calculée"} avec une autre source ne{" "}
-          {otherSourceRoutes > 1 ? "comptent" : "compte"} pas : leurs écarts viendraient de l&apos;estimation, pas du trafic.
+          {otherSourceRoutes > 1 ? "comptent" : "compte"} pas :{" "}
+          {source === "osrm"
+            ? "leurs écarts viendraient de l'estimation à vol d'oiseau, pas du trafic."
+            : "leurs temps viennent d'une autre base de calcul, leurs écarts ne se comparent pas à ceux du dernier calcul."}
         </span>
       ) : null}
     </p>

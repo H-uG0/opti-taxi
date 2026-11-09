@@ -34,7 +34,8 @@
  * An ambulance crew needs a DEA at the wheel or beside the patient (rules.ts,
  * R. 6312-10) and CrewRules.minPairOverlapMin of shared working time. A crew
  * working more than 6 hours needs the driver's break of at least 20 min to fit
- * in its hours (Code du travail, art. L3121-16; lib/staff/work-time.ts).
+ * in its hours (Code du travail, art. L. 3121-16; lib/staff/work-time.ts): a
+ * replacement who would break it is not proposed.
  * A vehicle with a blocking problem (`blocked`) is left out of the planning.
  * A vehicle unavailable that day (maintenance, on-call duty…, lib/fleet)
  * gets nobody, even a crew fixed earlier, and its default crew is free for
@@ -52,7 +53,7 @@ import { CREW_REQUIRED_ONE_OF, crewHoldsRequired, REQUIRED_QUALIFICATIONS } from
 import { unavailabilityOn, unavailabilityText, type DatedVehicleUnavailability } from "@/lib/fleet/availability";
 import { ABSENCE_KIND_LABELS, QUALIFICATION_NOUNS } from "@/lib/labels";
 import { formatDuration, formatMinute, formatShortDate, isoWeekday, WEEKDAY_LABELS } from "@/lib/time";
-import { workTimeIssue } from "./work-time";
+import { workTimeIssue, workTimeSummary, type BreakSettings } from "./work-time";
 
 export type StaffPerson = {
   id: string;
@@ -104,7 +105,13 @@ export type SavedCrew = { vehicleId: string; driverId: string | null; crewMateId
 
 export type Seat = "driver" | "crewMate";
 export type CrewSource = "saved" | "default" | "replacement" | "none";
-export type CrewIssue = { level: "error" | "info"; seat: Seat | null; message: string };
+export type CrewIssue = {
+  level: "error" | "info";
+  seat: Seat | null;
+  message: string;
+  /** Problem of the work-time rule (lib/staff/work-time.ts): `message` says what to do, `summary` sums it up for the lists. */
+  workTime?: { summary: string };
+};
 
 export type DayCrewView = {
   vehicleId: string;
@@ -204,6 +211,42 @@ type Shift = Pick<StaffPerson, "shiftStartMinute" | "shiftEndMinute">;
 /** Minutes two shifts have in common (0 when they do not meet). */
 export function sharedMinutes(a: Shift, b: Shift): number {
   return Math.max(0, Math.min(a.shiftEndMinute, b.shiftEndMinute) - Math.max(a.shiftStartMinute, b.shiftStartMinute));
+}
+
+/** Working hours of a crew: the driver's, within the crew mate's on an ambulance; null when they do not meet. */
+function crewShift(driver: Shift, mate: Shift | undefined, type: VehicleType): { start: number; end: number } | null {
+  if (!mate || type !== "AMBULANCE") return { start: driver.shiftStartMinute, end: driver.shiftEndMinute };
+  const start = Math.max(driver.shiftStartMinute, mate.shiftStartMinute);
+  const end = Math.min(driver.shiftEndMinute, mate.shiftEndMinute);
+  return end > start ? { start, end } : null;
+}
+
+/** The person's break settings, null when the caller gave none (not checked). */
+function breakSettingsOf(person: StaffPerson): BreakSettings | null {
+  if (person.breakMinutes === undefined) return null;
+  return {
+    breakWindowStartMinute: person.breakWindowStartMinute ?? null,
+    breakWindowEndMinute: person.breakWindowEndMinute ?? null,
+    breakMinutes: person.breakMinutes,
+  };
+}
+
+/** Whether this crew would work more than 6 hours without a legal break (the driver's applies to the crew). */
+function breaksWorkTime(driver: StaffPerson, mate: StaffPerson | undefined, type: VehicleType): boolean {
+  const settings = breakSettingsOf(driver);
+  const shift = crewShift(driver, mate, type);
+  return settings !== null && shift !== null && workTimeSummary(settings, shift) !== null;
+}
+
+/**
+ * The blocking problem of a crew in a few words when it is the work-time rule
+ * (its remedy is on /equipages), else null: what the planning's lists show in
+ * place of `blocked` (vehicles to review, vehicles left out).
+ */
+export function workTimeBlock(crew: Pick<DayCrewView, "blocked"> & { issues?: readonly CrewIssue[] }): string | null {
+  if (crew.blocked === null) return null;
+  const issue = crew.issues?.find((i) => i.level === "error");
+  return issue?.message === crew.blocked ? (issue.workTime?.summary ?? null) : null;
 }
 
 /** Minutes of `holder`'s shift that `person` does not work. */
@@ -522,13 +565,19 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
     return free <= rules.reservePerDepot;
   };
 
+  /** Whether the crew with `p` in `seat` would work more than 6 hours without a legal break: `p` is not proposed. */
+  const breaksRule = (p: StaffPerson, d: Draft, seat: Seat, partner: StaffPerson | undefined): boolean => {
+    const driver = seat === "driver" ? p : partner;
+    return driver !== undefined && breaksWorkTime(driver, seat === "driver" ? partner : p, d.vehicle.type);
+  };
+
   /** Ranked candidates for a seat; `partner`: the other member (on board or about to be). */
   const candidatesFor = (d: Draft, seat: Seat, partner: StaffPerson | undefined, spare: boolean): Candidate[] => {
     const { vehicle } = d;
     const holder = d.holder[seat] ?? null;
     const found: Candidate[] = [];
     for (const p of pool) {
-      if (!fits(p, d, seat, partner)) continue;
+      if (!fits(p, d, seat, partner) || breaksRule(p, d, seat, partner)) continue;
       const km = depotKm(p.depotId, vehicle.depotId);
       if (km !== null && km > rules.maxReplacementKm) continue;
       if (spare && inReserve(p, partner)) continue;
@@ -545,16 +594,20 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
 
   /**
    * `base` and why the free qualified people were not proposed for an empty
-   * seat: the nearest one beyond the replacement distance, or one kept in the
-   * reserve of their depot (spare vehicle). Read once every seat is served.
+   * seat: the nearest one beyond the replacement distance, one kept in the
+   * reserve of their depot (spare vehicle), or one whose hours with this crew
+   * would need a break they do not have. Read once every seat is served.
    */
   const unfilledText = (d: Draft, seat: Seat, partner: StaffPerson | undefined, base: string): string => {
     let far: { person: StaffPerson; km: number } | null = null;
     let kept: StaffPerson | null = null;
+    let breakless: StaffPerson | null = null;
     for (const p of pool) {
       if (!fits(p, d, seat, partner)) continue;
       const km = depotKm(p.depotId, d.vehicle.depotId);
-      if (km !== null && km > rules.maxReplacementKm) {
+      if (breaksRule(p, d, seat, partner)) {
+        if (km === null || km <= rules.maxReplacementKm) breakless ??= p;
+      } else if (km !== null && km > rules.maxReplacementKm) {
         if (!far || km < far.km) far = { person: p, km };
       } else if (isSpare(d) && inReserve(p, partner)) kept ??= p;
     }
@@ -564,6 +617,9 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
       return `${base} dans un rayon de ${rules.maxReplacementKm.toLocaleString("fr-FR")} km (Paramètres) : ${staffName(far.person)} (${where}) est libre`;
     }
     if (kept) return `${base} sans entamer la réserve du dépôt (Paramètres) : ${staffName(kept)} reste en réserve`;
+    if (breakless) {
+      return `${base} : ${staffName(breakless)} est libre, mais l'équipage dépasserait 6 h de travail sans pause de 20 min (art. L. 3121-16)`;
+    }
     return base;
   };
 
@@ -735,23 +791,13 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
         : unfilledText(d, "crewMate", driver, missingText(vehicle.type, "crewMate", driver));
       issues.push({ level: "error", seat: "crewMate", message });
     }
-    let shift: DayCrewView["shift"] = driver ? { start: driver.shiftStartMinute, end: driver.shiftEndMinute } : null;
-    if (shift && mate && vehicle.type === "AMBULANCE") {
-      shift = { start: Math.max(shift.start, mate.shiftStartMinute), end: Math.min(shift.end, mate.shiftEndMinute) };
-      if (shift.end <= shift.start) shift = null;
-    }
+    const shift = driver ? crewShift(driver, mate, vehicle.type) : null;
     // The optimizer gets the driver's break for the whole crew: over 6 hours it must be a legal one.
-    if (shift && driver && driver.breakMinutes !== undefined && !d.parked) {
-      const workIssue = workTimeIssue(
-        {
-          breakWindowStartMinute: driver.breakWindowStartMinute ?? null,
-          breakWindowEndMinute: driver.breakWindowEndMinute ?? null,
-          breakMinutes: driver.breakMinutes,
-        },
-        shift,
-        staffName(driver),
-      );
-      if (workIssue) issues.push({ level: "error", seat: "driver", message: workIssue });
+    const settings = driver ? breakSettingsOf(driver) : null;
+    if (shift && driver && settings && !d.parked) {
+      const message = workTimeIssue(settings, shift, staffName(driver));
+      const summary = workTimeSummary(settings, shift);
+      if (message && summary) issues.push({ level: "error", seat: "driver", message, workTime: { summary } });
     }
     const blocked = issues.find((i) => i.level === "error")?.message ?? (d.parked ? PARKED_MESSAGE : null);
     crews.push({

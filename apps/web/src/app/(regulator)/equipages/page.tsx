@@ -122,7 +122,8 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
   const fixedCount = rows.filter((r) => r.fixed !== null).length;
   const summary = [
     `${ready} véhicule${ready > 1 ? "s" : ""} avec équipage`,
-    blocked > 0 ? `${blocked} sans équipage complet (non planifié${blocked > 1 ? "s" : ""})` : null,
+    // A seat nobody fills, or hours over 6 hours without a legal break: the problems column says which.
+    blocked > 0 ? `${blocked} non planifié${blocked > 1 ? "s" : ""} (équipage à revoir)` : null,
     parked > 0 ? `${parked} laissé${parked > 1 ? "s" : ""} au dépôt` : null,
     `${plan.absent.length} absence${plan.absent.length > 1 ? "s" : ""}`,
   ].filter(Boolean);

@@ -12,7 +12,7 @@ decides the order of the stops, every reported time, km and load is recomputed h
 3. Driver break: tried before the depot departure, on every leg driven empty (no patient on
    board, depot legs included) and after the return. The placement with the least lateness, then
    one that keeps a route of more than 6 hours legal (a break of at least 20 min inside it, Code du
-   travail art. L3121-16), then the shortest route, then the earliest break wins. On a leg the
+   travail art. L. 3121-16), then the shortest route, then the earliest break wins. On a leg the
    driver may drive first and rest at the next stop, or rest on the way when the window closes
    before the arrival. A break that would make patients later than without it is not placed
    (reported as a missing break).
