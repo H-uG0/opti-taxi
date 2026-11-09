@@ -60,7 +60,9 @@ def vehicle(
     break_: Json | None = None,
     cost_per_km: float | None = None,
     cost_per_hour: float | None = None,
+    tariff_id: str | None = "",
 ) -> Json:
+    """`tariff_id`: "" = the grid of the vehicle type in tariffs(), None = no grid."""
     defaults = {"TAXI": (2, 0.32, 24.0), "VSL": (2, 0.30, 23.0), "AMBULANCE": (1, 0.42, 46.0)}[type_]
     return {
         "id": vehicle_id,
@@ -74,6 +76,7 @@ def vehicle(
         "shiftStartMin": shift[0],
         "shiftEndMin": shift[1],
         "break": break_,
+        "tariffId": type_.lower() if tariff_id == "" else tariff_id,
     }
 
 
@@ -107,14 +110,34 @@ def trip(
 
 
 def tariffs() -> list[Json]:
+    """One simple grid per vehicle type (ids "taxi", "vsl", "ambulance"): a fare and a km rate, the
+    sharing discounts of a TAP grid, no surcharge. tests/test_pricing.py covers the full grids."""
+    tap_discounts = [{"patients": 2, "rate": 0.23}, {"patients": 3, "rate": 0.35}]
     return [
-        {"vehicleType": "TAXI", "department": "*", "baseFare": 13, "pricePerKm": 1.12, "includedKm": 0,
-         "sharedDiscount2": 0.23, "sharedDiscount3": 0.35},
-        {"vehicleType": "VSL", "department": "*", "baseFare": 13.6, "pricePerKm": 1.0, "includedKm": 0,
-         "sharedDiscount2": 0.23, "sharedDiscount3": 0.35},
-        {"vehicleType": "AMBULANCE", "department": "*", "baseFare": 64.5, "pricePerKm": 2.4, "includedKm": 3,
-         "sharedDiscount2": 0, "sharedDiscount3": 0},
+        {"id": "taxi", "vehicleType": "TAXI", "baseFare": 13, "pricePerKm": 1.12, "includedKm": 0,
+         "sharedDiscounts": tap_discounts, "maxSharedPatients": 3},
+        {"id": "vsl", "vehicleType": "VSL", "baseFare": 13.6, "pricePerKm": 1.0, "includedKm": 0,
+         "sharedDiscounts": tap_discounts, "maxSharedPatients": 3},
+        {"id": "ambulance", "vehicleType": "AMBULANCE", "baseFare": 64.5, "pricePerKm": 2.4, "includedKm": 3,
+         "maxSharedPatients": 1},
     ]
+
+
+def official_tariffs() -> list[Json]:
+    """The grids of the seed (tariffs of 1 November 2025, contract/fixtures/fare-cases.json): a taxi
+    grid per department of the axis, the VSL and ambulance grids of a certified company."""
+    cases = load_fixture("fare-cases.json")
+    by_id = {grid["id"]: grid for grid in cases["grids"]}
+    taxis = [{**by_id["taxi_13"], "id": f"taxi_{department}", "pricePerKm": rate} for department, rate in OFFICIAL_TAXI_KM_RATES.items()]
+    return [*taxis, by_id["vsl_certified"], by_id["ambulance_certified"]]
+
+
+OFFICIAL_TAXI_KM_RATES = {"04": 1.14, "05": 1.18, "13": 1.10, "26": 1.16, "38": 1.22, "84": 1.20}
+"""Taxi km rate by department of the ADS (convention of 2025, from 1 November 2025)."""
+
+
+def official_tariff_id(type_: str, department: str) -> str:
+    return f"taxi_{department}" if type_ == "TAXI" else {"VSL": "vsl_certified", "AMBULANCE": "ambulance_certified"}[type_]
 
 
 def request(vehicles: list[Json], trips: list[Json], **setting_overrides: Any) -> Json:
@@ -377,13 +400,21 @@ def _fleet_lock(fleet: list[Json], city: str, types: tuple[str, ...], appointmen
 
 
 def fleet_day(
-    vehicles: int = 120, trips: int = 300, *, seed: int = 3, long_share: float = 0.5, time_limit_sec: int = 38
+    vehicles: int = 120,
+    trips: int = 300,
+    *,
+    seed: int = 3,
+    long_share: float = 0.5,
+    time_limit_sec: int = 38,
+    grids: str = "official",
 ) -> Json:
     """A day at the scale V announced (120 vehicles, ~300 one-way trips), entirely fictitious.
 
     `trips` // 2 patients, outbound + return, `long_share` of them treated outside their city, ~12 %
     of ambulance patients, a few locks, and the traffic settings of the web. The city shares and the
-    vehicle mix are assumptions: V has not given them yet.
+    vehicle mix are assumptions: V has not given them yet. `grids`: "official" (the seed's grids,
+    every trip linked to a hospital session, « Grande ville » in Marseille and Grenoble, empty-leg
+    surcharge on) or "simple" (tariffs(): one fare and km rate per type, as before November 2026).
     """
     rng = random.Random(seed)
     fleet = fleet_vehicles(vehicles)
@@ -405,8 +436,21 @@ def fleet_day(
             shareable = (not ambulance) and rng.random() < 0.8
             fac_point = FACILITIES[facility][1]
             locked = _fleet_lock(fleet, city, types, appointment) if not is_long and index % FLEET_LOCK_EVERY == 0 else None
-            result.append(trip(f"{pid}_out", pid, "OUTBOUND", home, fac_point, appointment=appointment,
-                               types=types, shareable=shareable, facility=facility, locked=locked))
-            result.append(trip(f"{pid}_ret", pid, "RETURN", fac_point, home, ready=ready,
-                               types=types, shareable=shareable, facility=facility))
-    return request(fleet, result, timeLimitSec=time_limit_sec, traffic=FLEET_TRAFFIC)
+            flags = {"hospitalLinked": True, "bigCity": city in BIG_CITIES or FACILITIES[facility][0] in BIG_CITIES}
+            result.append({**trip(f"{pid}_out", pid, "OUTBOUND", home, fac_point, appointment=appointment,
+                                  types=types, shareable=shareable, facility=facility, locked=locked), **flags})
+            result.append({**trip(f"{pid}_ret", pid, "RETURN", fac_point, home, ready=ready,
+                                  types=types, shareable=shareable, facility=facility), **flags})
+    if grids == "simple":
+        for item in result:
+            item["hospitalLinked"] = item["bigCity"] = False
+        return request(fleet, result, timeLimitSec=time_limit_sec, traffic=FLEET_TRAFFIC)
+    for member in fleet:
+        member["tariffId"] = official_tariff_id(member["type"], member["department"])
+    raw = request(fleet, result, timeLimitSec=time_limit_sec, traffic=FLEET_TRAFFIC, pricing={"emptyLeg": "DEPOT"})
+    raw["tariffs"] = official_tariffs()
+    return raw
+
+
+BIG_CITIES = ("marseille", "grenoble")
+"""Cities of the axis with the taxi « Grande ville » fare."""

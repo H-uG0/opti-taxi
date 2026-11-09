@@ -136,14 +136,15 @@ from app.model import (
     work_limit_min,
 )
 from app.plan import plan_margin
-from app.pricing import base_revenue
 from app.schedule import PlannedStop, RouteSchedule, schedule_route
-from app.schemas import LatLng, PlanStatus, RoutePlan, StopRef, Tariff, Trip, Vehicle
+from app.schemas import LatLng, PlanStatus, RoutePlan, StopRef, Trip, Vehicle
 from app.traffic import stop_reference_minute
 
 logger = logging.getLogger("optimizer.solver")
 
 CENTS_PER_EURO = 100
+TariffKey = tuple[str | None, bool]
+"""(grid id, TPMR-fitted) of a vehicle: what a trip's estimated revenue depends on (Model._tariff_key)."""
 UNITS_PER_CENT = 1000
 """Objective units per cent: the km cost of each vehicle goes per meter on the Distance dimension,
 an integer coefficient that keeps a cost per km to the cent (0.32 EUR/km = 32 units per meter)."""
@@ -419,8 +420,10 @@ class _DayModel:
         """True when a reinsertion stopped at its deadline with trips still to place."""
         self._exact_checks = False
         """While set (final check, _guarded), every insertion is also timed by schedule.py."""
-        self._lost_cents: list[dict[tuple[float, float, float] | None, int]] = []
+        self._lost_cents: list[dict[TariffKey, int]] = []
         """Per pickup node: revenue lost (cents) with each candidate tariff (see _lost_revenue_cents)."""
+        self._best_cents: dict[str, int] = {}
+        """Best estimated revenue (cents) of each routable trip among its candidate vehicles."""
         self._meter_rows: list[list[int]] = []
         self._limit_functions: list[Callable[[int, int], int]] = []
         """Pickup-to-delivery limit callbacks, kept alive while the C++ model uses them."""
@@ -538,30 +541,38 @@ class _DayModel:
         return max(minutes, matrix.slowest_by_index(a.point, b.point, a.window.open - BREAK_LEG_LOOKBACK_MIN, a.window.close))
 
     # -- costs and transit tables
-    def _tariff_key(self, vehicle: Vehicle) -> tuple[float, float, float] | None:
-        """What the revenue of a trip depends on for this vehicle (pricing.base_revenue): vehicles
-        whose grids price alike share their arc cost matrix."""
-        tariff: Tariff | None = self.ctx.tariffs.for_vehicle(vehicle)
-        return None if tariff is None else (tariff.base_fare, tariff.price_per_km, tariff.included_km)
+    def _tariff_key(self, vehicle: Vehicle) -> TariffKey:
+        """What the revenue of a trip depends on for this vehicle (context.estimated_cents): vehicles
+        on the same grid and alike for the TPMR supplement share their arc cost matrix."""
+        return (vehicle.tariff_id, vehicle.tpmr_equipped)
 
-    def _lost_revenue_cents(self) -> list[dict[tuple[float, float, float] | None, int]]:
-        """Per pickup node: revenue lost (cents) with each candidate tariff vs the best one."""
-        lost: list[dict[tuple[float, float, float] | None, int]] = [{} for _ in self.nodes]
-        tariffs = self.ctx.tariffs
+    def _estimates(self, trip: Trip, candidates: Sequence[int]) -> dict[TariffKey, int]:
+        """Estimated revenue (cents) of `trip` with each candidate vehicle's grid."""
+        estimates: dict[TariffKey, int] = {}
+        for v in candidates:
+            vehicle = self.fleet[v].vehicle
+            key = self._tariff_key(vehicle)
+            if key not in estimates:
+                estimates[key] = self.ctx.estimated_cents(trip, vehicle)
+        return estimates
+
+    def _lost_revenue_cents(self) -> list[dict[TariffKey, int]]:
+        """Per pickup node: revenue lost (cents) with each candidate grid vs the best one."""
+        lost: list[dict[TariffKey, int]] = [{} for _ in self.nodes]
         for trip, candidates in self.routable:
-            direct = self.ctx.direct_km(trip)
-            revenue = {
-                self._tariff_key(self.fleet[v].vehicle): base_revenue(tariffs.for_vehicle(self.fleet[v].vehicle), direct)
-                for v in candidates
-            }
-            best = max(revenue.values(), default=0.0)
+            revenue = self._estimates(trip, candidates)
+            best = max(revenue.values(), default=0)
+            self._best_cents[trip.id] = best
             pickup, _ = self.trip_nodes[trip.id]
-            lost[pickup] = {key: round((best - value) * CENTS_PER_EURO) for key, value in revenue.items()}
+            lost[pickup] = {key: best - value for key, value in revenue.items()}
         return lost
 
     def best_revenue(self, trip: Trip, candidates: Sequence[int]) -> float:
-        direct = self.ctx.direct_km(trip)
-        return max((base_revenue(self.ctx.tariffs.for_vehicle(self.fleet[v].vehicle), direct) for v in candidates), default=0.0)
+        """Best estimated revenue (euros) of `trip` among the candidate vehicles."""
+        best = self._best_cents.get(trip.id)
+        if best is None:
+            best = max(self._estimates(trip, candidates).values(), default=0)
+        return best / CENTS_PER_EURO
 
     def _point_rows(self, table: Sequence[Sequence[float]], scale: float) -> dict[int, list[int]]:
         """round(table[p][q] * scale) towards every node, for each distinct point p of the nodes.
@@ -596,7 +607,7 @@ class _DayModel:
         lost = self._lost_cents = self._lost_revenue_cents()
         base_rate = min(member.vehicle.cost_per_km for member in fleet)
         base_rows = self._point_rows(matrix.km_table, base_rate * CENTS_PER_EURO * UNITS_PER_CENT)
-        cost_callbacks: dict[tuple[float, float, float] | None, int] = {}
+        cost_callbacks: dict[TariffKey, int] = {}
         for v, member in enumerate(fleet):
             tariff = self._tariff_key(member.vehicle)
             if tariff not in cost_callbacks:

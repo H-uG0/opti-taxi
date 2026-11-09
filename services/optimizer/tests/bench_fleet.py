@@ -39,13 +39,16 @@ def main() -> None:
     parser.add_argument("--budget", type=int, default=38, help="settings.timeLimitSec")
     parser.add_argument("--seed", type=int, default=3)
     parser.add_argument("--long-share", type=float, default=0.5)
+    parser.add_argument("--grids", choices=("official", "simple"), default="official", help="tariff grids of the day")
     args = parser.parse_args()
 
     keep = _Keep()
     logging.getLogger().addHandler(keep)
     logging.getLogger().setLevel(logging.INFO)
 
-    raw = fleet_day(args.vehicles, args.trips, seed=args.seed, long_share=args.long_share, time_limit_sec=args.budget)
+    raw = fleet_day(
+        args.vehicles, args.trips, seed=args.seed, long_share=args.long_share, time_limit_sec=args.budget, grids=args.grids
+    )
     request = OptimizeRequest.model_validate(raw)
 
     started = time.perf_counter()

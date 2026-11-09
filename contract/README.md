@@ -26,7 +26,11 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
   n'est pas compté.
 - **Taille** : un corps de plus de `OPTIMIZER_MAX_BODY_MB` Mo (10 par défaut) reçoit `413` avant
   d'être lu. Une requête porte au plus 300 véhicules (`vehicles`, et `routes` pour `/evaluate`),
-  3 000 courses (`trips`) et 500 grilles (`tariffs`) ; au-delà, `422`.
+  3 000 courses (`trips`) et 500 grilles (`tariffs`) ; au-delà, `422`. Un `tariffId` (véhicule ou course)
+  qui ne nomme aucune grille, ou deux grilles de même `id`, donnent aussi `422`.
+- **Version** : les grilles par `id` (novembre 2026) remplacent la recherche par (type, département) : le web
+  et l'optimizer se déploient ensemble (un optimizer antérieur refuse `tariffId`, un web antérieur envoie
+  des grilles sans `id` : `422` dans les deux cas).
 
 ## Unités
 
@@ -54,6 +58,12 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
       "bands": [{ "startMin": 420, "endMin": 570 }, { "startMin": 570, "endMin": 960 }],
       "roadFactors": [1.05, 1],         // un facteur par créneau, hors des zones
       "zones": [{ "lat": 43.2965, "lng": 5.3698, "radiusKm": 14, "factors": [1.5, 1.2] }]
+    },
+    "pricing": {                        // facultatif, absent ou null = les valeurs par défaut ci-dessous (voir « Calcul du CA »)
+      "emptyLeg": "DEPOT",              // NONE (défaut) | DEPOT : majoration taxi « retour à vide »
+      "emptyLegOrder": "MULTIPLICATIVE",// MULTIPLICATIVE (défaut) | ADDITIVE
+      "patientCount": "DISTINCT",       // DISTINCT (défaut) | MAX_ON_BOARD : patients comptés pour l'abattement
+      "publicHolidays": ["2026-11-11"]  // jours fériés (YYYY-MM-DD) : au moins la date et le lendemain ; [] par défaut
     }
   },
   "vehicles": [{
@@ -62,7 +72,9 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
     "type": "TAXI",                     // TAXI | VSL | AMBULANCE
     "capacity": 2,                      // patients simultanés (AMBULANCE : 1)
     "depot": { "lat": 43.2965, "lng": 5.3698 },
-    "department": "13",                 // sélectionne la grille tarifaire
+    "department": "13",                 // informatif (taxi : département de l'ADS)
+    "tariffId": "taxi_13",              // grille de ses courses, choisie par le web ; absent ou null = CA estimé à 0 (avertissement)
+    "tpmrEquipped": false,              // facultatif (false) : équipé pour un patient dans son fauteuil (supplément TPMR)
     "costPerKm": 0.32,                  // € / km (carburant, entretien)
     "costPerHour": 24,                  // € / h de service (chauffeur, équipage)
     "shiftStartMin": 360,               // départ du dépôt au plus tôt
@@ -83,16 +95,33 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
     "shareable": true,                  // prescription compatible ET patient non opposé
     "lockedVehicleId": null,            // course figée sur ce véhicule par le régulateur
     "pickupServiceMin": 10,             // facultatifs, 0..120 : temps d'arrêt propres à la course
-    "dropoffServiceMin": 10             //   (absents ou null : ceux de settings)
+    "dropoffServiceMin": 10,            //   (absents ou null : ceux de settings)
+    "tariffId": null,                   // facultatif : grille de la course quel que soit le véhicule (ambulance au tarif VSL)
+    "bigCity": false,                   // facultatifs (false / 0) : prise en charge ou dépose en zone « Grande ville »
+    "agglomeration": false,             //   course entièrement dans l'agglomération du siège (forfait agglomération)
+    "hospitalLinked": true,             //   hospitalisation, dialyse, chimiothérapie, radiothérapie (retour à vide taxi)
+    "wheelchair": false,                //   patient transporté dans son fauteuil (supplément TPMR)
+    "tollAmount": 0                     //   péages de la facture de ce patient, € (0..1000)
   }],
-  "tariffs": [{
-    "vehicleType": "TAXI",
-    "department": "13",                 // "*" = toutes les zones (repli si pas de grille exacte)
-    "baseFare": 13,                     // forfait de prise en charge
-    "pricePerKm": 1.12,
-    "includedKm": 0,                    // km compris dans le forfait
-    "sharedDiscount2": 0.23,            // abattement à 2 patients partagés
-    "sharedDiscount3": 0.35             // abattement à 3 patients ou plus
+  "tariffs": [{                         // les grilles citées par les véhicules et les courses, ids uniques
+    "id": "taxi_13",
+    "vehicleType": "TAXI",              // informatif
+    "baseFare": 13,                     // forfait (taxi : prise en charge et accompagnement)
+    "aggloFare": null,                  // facultatif : remplace baseFare pour une course « agglomeration » (ambulance)
+    "bigCityFare": 15,                  // facultatif (0) : ajouté au forfait d'une course « bigCity »
+    "includedKm": 4,                    // km compris dans le forfait
+    "pricePerKm": 1.1,
+    "shortTripBands": [],               // facultatif : [{ "upToKm": 7, "amount": 8.54 }, …] par km croissants
+    "nightRate": 0.5, "weekendRate": 0.5,           // facultatifs (0) : majorations, jamais cumulées
+    "nightStartMin": 1200, "nightEndMin": 480,      // facultatifs : nuit de 20:00 à 08:00
+    "saturdayFromMin": 720,                         // facultatif : le samedi compte comme un dimanche dès 12:00
+    "surchargeShortTrip": true,                     // facultatif : le trajet court est majoré aussi
+    "emptyLegRateShort": 0.25, "emptyLegRateLong": 0.5, "emptyLegThresholdKm": 50,  // facultatifs : retour à vide
+    "sharedDiscounts": [{ "patients": 2, "rate": 0.23 }, { "patients": 3, "rate": 0.35 }, { "patients": 4, "rate": 0.37 }],
+    "maxSharedPatients": 8,             // facultatif (8) : au-delà, le taux de la dernière ligne
+    "aloneDiscount": 0.05, "aloneThresholdKm": 30,  // facultatifs : patient seul à bord sur un trajet partagé
+    "billableDetourKm": [],             // facultatif : détour facturable par co-passager (VSL : [10, 10])
+    "tpmrFare": 30                      // facultatif (0) : supplément TPMR
   }],
   "initialRoutes": [{                   // facultatif, absent ou null = aucun : le planning en place (voir plus bas)
     "vehicleId": "veh_taxi_1",
@@ -245,10 +274,10 @@ Les courses absentes de `routes` sont non affectées.
     "pickupMin": 410, "dropoffMin": 440,// début de service des deux arrêts, null si non affectée
     "shared": true,                     // au moins un co-passager pendant le trajet
     "coPassengerTripIds": ["trip_7"],
-    "directKm": 18.2,                   // distance directe prise en charge -> dépose (base du CA)
+    "directKm": 18.2,                   // distance directe prise en charge -> dépose (km facturés d'un patient seul)
     "rideKm": 24.0,                     // distance réellement parcourue patient à bord
     "detourKm": 5.8,                    // rideKm - directKm
-    "revenue": 31.6,                    // CA estimé de la course (abattement inclus), 0 si non affectée
+    "revenue": 31.6,                    // facture estimée du patient (voir « Calcul du CA »), 0 si non affectée
     "waitAtFacilityMin": 10             // aller : RDV - début de la dépose ; retour : prise en charge - fin de séance
                                         // (sans l'attente à bord, comptée par TOTAL_WAIT)
   }],
@@ -278,10 +307,48 @@ Les courses absentes de `routes` sont non affectées.
 
 ### Calcul du CA estimé d'une course
 
-`base = baseFare + pricePerKm * max(0, directKm - includedKm)` avec la grille
-(`vehicleType` du véhicule, `department` du véhicule, repli sur `"*"`).
-Si la course est partagée avec `n - 1` co-passagers distincts (n plafonné à 3) :
-`revenue = base * (1 - sharedDiscount{n})`. Sinon `revenue = base`.
+Une facture par patient et par trajet (`trips[].revenue`) ; `routes[].revenue` en est la somme. Le web
+choisit la grille : `trips[].tariffId` s'il est donné (ambulance qui fait exceptionnellement un transport
+assis : la grille VSL), sinon `vehicles[].tariffId` (taxi : grille du département de son ADS ; VSL et
+ambulance : grille de la certification de l'entreprise à la date et de son siège). Sans grille, 0 € et un
+avertissement. Implémentation de référence : `services/optimizer/app/pricing.py` ; le validateur la
+recalcule avec son propre code (`REVENUE`) et `apps/web/src/lib/domain/fare.ts` (simulateur) aussi. Les
+cas de `fixtures/fare-cases.json` (exemples T1 à T6 et VSL / ambulance du mémo tarifaire) sont
+recalculés des deux côtés.
+
+Lus sur la tournée, pour la course `p` :
+
+- `d`, **km facturés** : la distance directe prise en charge → dépose ; partagée avec `k` co-passagers
+  distincts et avec `billableDetourKm`, `d = direct + min(détour, somme des k premiers billableDetourKm)` ;
+- **patients** `n` : `1 + co-passagers distincts` (`DISTINCT`) ou le plus grand nombre de patients à bord en
+  même temps pendant le trajet (`MAX_ON_BOARD`) ; **km seul à bord** : km du trajet sans autre patient ;
+- **horaires** : début de la prise en charge (`P`) et de la dépose (`D`) planifiées. Le solveur les estime
+  avec les minutes de référence de la course (voir « Trafic ») ; la réponse et le validateur les relisent sur
+  les arrêts ;
+- **retour à vide** (`emptyLeg: DEPOT`, course `hospitalLinked`) : l'aller dont la dépose termine la tournée,
+  le retour dont la prise en charge la commence (le véhicule rentre à vide à sa station, ou en vient).
+
+```text
+forfait   = (agglomeration et aggloFare non null ? aggloFare : baseFare) + (bigCity ? bigCityFare : 0)
+km        = pricePerKm × max(0, d − includedKm)
+court     = amount de la 1re tranche de shortTripBands telle que d <= upToKm, sinon 0
+nuit      = 2 × (minutes de [P, D] dans la nuit nightStartMin → nightEndMin) > (D − P)
+week-end  = jour férié (publicHolidays), dimanche, ou samedi à partir de saturdayFromMin, au jour de P
+M         = le plus grand des taux qui s'appliquent : nightRate (nuit), weekendRate (week-end), sinon 0
+E         = retour à vide ? (d < emptyLegThresholdKm ? emptyLegRateShort : emptyLegRateLong) : 0
+MULTIPLICATIVE : socle = forfait × (1 + M) + km × (1 + E) × (1 + M) + court × (surchargeShortTrip ? 1 + M : 1)
+ADDITIVE       : socle = forfait × (1 + M) + km × (1 + E + M)       + court × (surchargeShortTrip ? 1 + M : 1)
+A         = n < 2 ? 0
+          : (aloneDiscount > 0 et km seul à bord >= aloneThresholdKm) ? aloneDiscount
+          : rate de la ligne de sharedDiscounts au plus grand `patients` <= min(n, maxSharedPatients), sinon 0
+facture   = socle × (1 − A) + (wheelchair et véhicule tpmrEquipped ? tpmrFare : 0) + tollAmount
+```
+
+Arrondis : chaque valeur d'entrée est arrondie à demi supérieur depuis son écriture décimale la plus
+courte (montants à 0,0001 €, taux à 0,0001, km au mètre), le calcul est exact, et la facture est arrondie au
+centime, à demi supérieur (jamais l'arrondi « bancaire » d'un flottant : 27,59 × 1,5 = 41,385 donne
+41,39 €). Le validateur tolère 1 centime d'écart par facture. Le solveur, avant de connaître les tournées,
+compte chaque course seule, sur la distance directe, sans retour à vide ni abattement.
 
 ### Codes de violation (`validation.violations[].code`)
 
@@ -300,3 +367,4 @@ Si la course est partagée avec `n - 1` co-passagers distincts (n plafonné à 3
 | `DETOUR` | détour > `min(maxDetourKmPerExtraPatient * co-passagers, maxDetourKmTotal)` |
 | `SHIFT` | départ avant `shiftStartMin` ou retour après `shiftEndMin` |
 | `BREAK` | pas de pause de `durationMin` sans patient à bord dans la fenêtre de pause ; ou tournée de plus de 6 h sans pause d'au moins 20 min en son sein (Code du travail, art. L. 3121-16) |
+| `REVENUE` | CA d'une course différent de plus d'un centime de celui que le validateur recalcule, ou CA d'une tournée différent de la somme de ses courses |

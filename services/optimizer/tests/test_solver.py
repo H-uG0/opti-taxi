@@ -69,7 +69,11 @@ def test_fixture_lock_is_respected(fixture_plan: PlanResponse) -> None:
 def test_fixture_neighbours_share_the_taxi(fixture_plan: PlanResponse) -> None:
     results = {t.trip_id: t for t in fixture_plan.trips}
     assert results["trip_1"].co_passenger_trip_ids == ["trip_3"]
-    assert results["trip_1"].revenue < results["trip_1"].direct_km * 1.12 + 13  # sharing discount applied
+    # taxi_13 grid, 4 km included, before 08:00 (night, +50 %), 23 % sharing discount, no detour billed.
+    first = results["trip_1"]
+    assert first.pickup_min is not None and first.dropoff_min is not None and first.dropoff_min <= 8 * 60
+    solo = (13 + (first.direct_km - 4) * 1.10) * 1.5
+    assert first.revenue == pytest.approx(solo * 0.77, abs=0.011)
 
 
 def test_fixture_warm_start_gives_the_same_checks() -> None:

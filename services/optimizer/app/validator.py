@@ -18,6 +18,12 @@ direct drive (at the trip's reference minutes) plus settings.maxRideExtraMin.
 
 Work time (BREAK, Code du travail art. L. 3121-16): a route (depot departure to return) longer than
 6 hours needs a break of at least 20 minutes inside it.
+
+Revenue (REVENUE): every patient's invoice is recomputed from the request, the travel matrix and the
+produced routes with this module's own code (decimal arithmetic, not pricing.py's scaled integers):
+billed distance, short-trip band, night and weekend surcharges at the planned times, empty leg,
+sharing discount, supplements, rounded half up to the cent. A trip result off by more than one cent,
+or a route whose revenue is not the sum of its trips', is reported.
 """
 
 from __future__ import annotations
@@ -25,6 +31,8 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date, timedelta
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 
 from app.labels import hhmm, km_text, types_text, vehicle_name
 from app.matrix import TravelMatrix
@@ -37,7 +45,9 @@ from app.schemas import (
     Stop,
     StopKind,
     StopRef,
+    Tariff,
     Trip,
+    TripResult,
     Vehicle,
     Violation,
     ViolationCode,
@@ -46,6 +56,8 @@ from app.traffic import stop_reference_minute
 
 DISTANCE_TOLERANCE_KM = 0.05
 TIME_TOLERANCE_MIN = 0
+REVENUE_TOLERANCE_CENTS = 1
+"""A recomputed invoice may differ by one cent (contract/README.md, « Calcul du CA »)."""
 MAX_WORK_WITHOUT_BREAK_MIN = 6 * 60
 MIN_BREAK_FOR_WORK_MIN = 20
 
@@ -625,3 +637,184 @@ class _RouteCheck:
                     trip_id=trip_id,
                     vehicle_id=self.vehicle.id,
                 )
+
+
+# --------------------------------------------------------------------------- revenue
+
+_KM = Decimal("0.001")
+_MONEY = Decimal("0.0001")
+_RATE = Decimal("0.0001")
+_CENT = Decimal("0.01")
+_DAY = 24 * 60
+
+
+def _dec(value: float, step: Decimal) -> Decimal:
+    """The contract's input rounding: half up to `step`, from the shortest writing of the float."""
+    return Decimal(repr(float(value))).quantize(step, rounding=ROUND_HALF_UP)
+
+
+def _in_night(tariff: Tariff, first: int, last: int) -> bool:
+    start, end = tariff.night_start_min, tariff.night_end_min
+    nights = (
+        [(d * _DAY - _DAY + start, d * _DAY + end) for d in (0, 1, 2)]
+        if start > end
+        else [(d * _DAY + start, d * _DAY + end) for d in (0, 1)]
+    )
+    if last <= first:
+        return any(a <= first < b for a, b in nights)
+    covered = sum(max(0, min(last, b) - max(first, a)) for a, b in nights)
+    return covered * 2 > last - first
+
+
+def _weekend(day: date, holidays: frozenset[str], minute: int, saturday_from: int) -> bool:
+    shift, in_day = divmod(minute, _DAY)
+    when = day + timedelta(days=shift)
+    if when.isoformat() in holidays:
+        return True
+    return when.isoweekday() == 7 or (when.isoweekday() == 6 and in_day >= saturday_from)
+
+
+@dataclass(frozen=True)
+class _Served:
+    """A served trip as the routes show it."""
+
+    trip: Trip
+    vehicle: Vehicle
+    route_no: int
+    first_stop: bool
+    last_stop: bool
+    pickup_min: int
+    dropoff_min: int
+    ride_km: float
+    alone_km: float
+    others: frozenset[str]
+    most_on_board: int
+
+
+def _served_trips(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix) -> dict[str, _Served]:
+    trips = {trip.id: trip for trip in request.trips}
+    vehicles = {vehicle.id: vehicle for vehicle in request.vehicles}
+    served: dict[str, _Served] = {}
+    for route_no, route in enumerate(routes):
+        vehicle = vehicles.get(route.vehicle_id)
+        if vehicle is None:
+            continue
+        stops = [(stop, trips[stop.trip_id]) for stop in route.stops if stop.trip_id in trips]
+        places = [trip.pickup if stop.kind == "PICKUP" else trip.dropoff for stop, trip in stops]
+        aboard: list[frozenset[str]] = []
+        current: set[str] = set()
+        for stop, trip in stops:
+            if stop.kind == "PICKUP":
+                current.add(trip.id)
+            else:
+                current.discard(trip.id)
+            aboard.append(frozenset(current))
+        where: dict[str, dict[StopKind, int]] = defaultdict(dict)
+        for k, (stop, trip) in enumerate(stops):
+            where[trip.id].setdefault(stop.kind, k)
+        for trip_id, kinds in where.items():
+            first, last = kinds.get("PICKUP"), kinds.get("DROPOFF")
+            if first is None or last is None or last < first or trip_id in served:
+                continue
+            # Between stop k and stop k + 1 the vehicle carries aboard[k].
+            legs = [(matrix.km(places[k], places[k + 1]), aboard[k]) for k in range(first, last)]
+            others = frozenset().union(*(on for _, on in legs)) - {trip_id}
+            served[trip_id] = _Served(
+                trip=trips[trip_id],
+                vehicle=vehicle,
+                route_no=route_no,
+                first_stop=first == 0,
+                last_stop=last == len(stops) - 1,
+                pickup_min=stops[first][0].start_min,
+                dropoff_min=stops[last][0].start_min,
+                ride_km=sum(km for km, _ in legs),
+                alone_km=sum(km for km, on in legs if on == {trip_id}),
+                others=others,
+                most_on_board=max((len(on) for _, on in legs), default=1),
+            )
+    return served
+
+
+def _invoice(request: DayRequest, tariff: Tariff, served: _Served, direct_km: float, holidays: frozenset[str]) -> Decimal:
+    """One patient's invoice in euros, rounded to the cent (contract/README.md, « Calcul du CA »)."""
+    trip, pricing = served.trip, request.settings.pricing
+    direct = _dec(direct_km, _KM)
+    billed = direct
+    if served.others and tariff.billable_detour_km:
+        allowance = sum((_dec(km, _KM) for km in tariff.billable_detour_km[: len(served.others)]), Decimal(0))
+        billed = direct + min(max(Decimal(0), _dec(served.ride_km, _KM) - direct), allowance)
+    fare = _dec(tariff.agglo_fare if trip.agglomeration and tariff.agglo_fare is not None else tariff.base_fare, _MONEY)
+    if trip.big_city:
+        fare += _dec(tariff.big_city_fare, _MONEY)
+    km_amount = _dec(tariff.price_per_km, _MONEY) * max(Decimal(0), billed - _dec(tariff.included_km, _KM))
+    short = next((_dec(b.amount, _MONEY) for b in tariff.short_trip_bands if billed <= _dec(b.up_to_km, _KM)), Decimal(0))
+
+    surcharge = Decimal(0)
+    if _in_night(tariff, served.pickup_min, served.dropoff_min):
+        surcharge = max(surcharge, _dec(tariff.night_rate, _RATE))
+    if _weekend(date.fromisoformat(request.date), holidays, served.pickup_min, tariff.saturday_from_min):
+        surcharge = max(surcharge, _dec(tariff.weekend_rate, _RATE))
+    empty = Decimal(0)
+    if pricing.empty_leg == "DEPOT" and trip.hospital_linked:
+        back_empty = served.last_stop if trip.direction == "OUTBOUND" else served.first_stop
+        if back_empty:
+            long_trip = billed >= _dec(tariff.empty_leg_threshold_km, _KM)
+            empty = _dec(tariff.empty_leg_rate_long if long_trip else tariff.empty_leg_rate_short, _RATE)
+
+    patients = max(1, served.most_on_board) if pricing.patient_count == "MAX_ON_BOARD" else 1 + len(served.others)
+    discount = Decimal(0)
+    if patients >= 2:
+        if tariff.alone_discount > 0 and _dec(served.alone_km, _KM) >= _dec(tariff.alone_threshold_km, _KM):
+            discount = _dec(tariff.alone_discount, _RATE)
+        else:
+            counted = min(patients, tariff.max_shared_patients)
+            rows = sorted((d.patients, d.rate) for d in tariff.shared_discounts if d.patients <= counted)
+            discount = _dec(rows[-1][1], _RATE) if rows else Decimal(0)
+
+    with localcontext() as context:
+        context.prec = 60
+        km_factor = (1 + empty + surcharge) if pricing.empty_leg_order == "ADDITIVE" else (1 + empty) * (1 + surcharge)
+        base = fare * (1 + surcharge) + km_amount * km_factor + short * ((1 + surcharge) if tariff.surcharge_short_trip else 1)
+        total = base * (1 - discount)
+        if trip.wheelchair and served.vehicle.tpmr_equipped:
+            total += _dec(tariff.tpmr_fare, _MONEY)
+        total += _dec(trip.toll_amount, _MONEY)
+        return total.quantize(_CENT, rounding=ROUND_HALF_UP)
+
+
+def validate_revenue(
+    request: DayRequest, routes: Sequence[Route], results: Sequence[TripResult], matrix: TravelMatrix
+) -> list[Violation]:
+    """Invoices of the trip results against an independent recomputation (REVENUE)."""
+    out = _Collector()
+    grids = {tariff.id: tariff for tariff in request.tariffs}
+    holidays = frozenset(request.settings.pricing.public_holidays)
+    served = _served_trips(request, routes, matrix)
+    expected_by_route: dict[int, Decimal] = defaultdict(Decimal)
+    for result in results:
+        item = served.get(result.trip_id)
+        expected = Decimal(0)
+        if item is not None:
+            grid_id = item.trip.tariff_id if item.trip.tariff_id is not None else item.vehicle.tariff_id
+            tariff = grids.get(grid_id) if grid_id is not None else None
+            if tariff is not None:
+                expected = _invoice(request, tariff, item, matrix.km(item.trip.pickup, item.trip.dropoff), holidays)
+            expected_by_route[item.route_no] += expected
+        reported = _dec(result.revenue, _CENT)
+        if abs(reported - expected) * 100 > REVENUE_TOLERANCE_CENTS:
+            out.add(
+                "REVENUE",
+                f"CA de la course {result.trip_id} annoncé à {reported} €, recalculé à {expected} €",
+                trip_id=result.trip_id,
+                vehicle_id=item.vehicle.id if item is not None else result.vehicle_id,
+            )
+    for route_no, route in enumerate(routes):
+        expected = expected_by_route.get(route_no, Decimal(0))
+        trips_on_route = sum(1 for item in served.values() if item.route_no == route_no)
+        if abs(_dec(route.revenue, _CENT) - expected) * 100 > REVENUE_TOLERANCE_CENTS * max(1, trips_on_route):
+            out.add(
+                "REVENUE",
+                f"CA de la tournée annoncé à {_dec(route.revenue, _CENT)} €, somme des courses recalculée à {expected} €",
+                vehicle_id=route.vehicle_id,
+            )
+    return out.items

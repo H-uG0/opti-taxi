@@ -1,8 +1,9 @@
 """Assemble a PlanResponse from ordered stop sequences (solver output or regulator plan).
 
 Everything reported is recomputed from the sequences: times (schedule.py), km driven empty and
-loaded, sharing (co-passengers), revenue with the sharing discount, cost, margin, KPIs. The
-independent validator then checks the produced routes.
+loaded, sharing (co-passengers), revenue of each patient's invoice (pricing.py: billed distance,
+surcharges at the planned times, sharing discount, supplements), cost, margin, KPIs. The independent
+validator then checks the produced routes and recomputes every invoice.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from dataclasses import dataclass, field
 from app.context import PlanContext
 from app.kpis import compute_kpis
 from app.model import service_minutes
-from app.pricing import trip_revenue
+from app.pricing import Ride, cents_to_euros, revenue_cents
 from app.schedule import PlannedStop, RouteSchedule, schedule_route
 from app.schemas import (
     BreakSlot,
@@ -31,7 +32,7 @@ from app.schemas import (
     Validation,
     Violation,
 )
-from app.validator import validate
+from app.validator import validate, validate_revenue
 
 KM_DIGITS = 2
 MONEY_DIGITS = 2
@@ -46,6 +47,9 @@ class _TripPlacement:
     dropoff: tuple[int, int] | None = None
     co_passengers: set[str] = field(default_factory=set)
     ride_km: float = 0.0
+    alone_km: float = 0.0
+    """Part of ride_km with nobody else on board."""
+    max_on_board: int = 0
 
     @property
     def complete(self) -> bool:
@@ -111,10 +115,40 @@ def _locate_trips(schedules: Sequence[RouteSchedule]) -> dict[str, _TripPlacemen
         # Leg k + 1 goes from stop k to stop k + 1.
         ride_legs = schedule.legs[placement.pickup[1] + 1 : placement.dropoff[1] + 1]
         placement.ride_km = sum(leg.km for leg in ride_legs)
+        placement.alone_km = sum(leg.km for leg in ride_legs if leg.on_board == {trip_id})
+        placement.max_on_board = max((len(leg.on_board) for leg in ride_legs), default=1)
         for leg in ride_legs:
             placement.co_passengers.update(leg.on_board)
         placement.co_passengers.discard(trip_id)
     return placements
+
+
+def _empty_leg(ctx: PlanContext, trip: Trip, schedule: RouteSchedule, placement: _TripPlacement) -> bool:
+    """settings.pricing.emptyLeg DEPOT: the outbound trip whose dropoff ends the route (the vehicle
+    drives back empty to its station), the return trip whose pickup starts it (it came empty)."""
+    if ctx.request.settings.pricing.empty_leg != "DEPOT" or not trip.hospital_linked:
+        return False
+    assert placement.pickup is not None and placement.dropoff is not None
+    if trip.direction == "OUTBOUND":
+        return placement.dropoff[1] == len(schedule.stops) - 1
+    return placement.pickup[1] == 0
+
+
+def _revenue_cents(ctx: PlanContext, trip: Trip, schedules: Sequence[RouteSchedule], placement: _TripPlacement) -> int:
+    """Invoice of a trip served by the routes (cents): pricing.py on the planned stops."""
+    assert placement.pickup is not None and placement.dropoff is not None
+    schedule = schedules[placement.pickup[0]]
+    ride = Ride(
+        direct_km=ctx.direct_km(trip),
+        ride_km=placement.ride_km,
+        alone_km=placement.alone_km,
+        co_passengers=len(placement.co_passengers),
+        max_on_board=placement.max_on_board,
+        pickup_min=schedule.stops[placement.pickup[1]].start_min,
+        dropoff_min=schedule.stops[placement.dropoff[1]].start_min,
+        empty_leg=_empty_leg(ctx, trip, schedule, placement),
+    )
+    return revenue_cents(ctx.tariffs, trip, schedule.vehicle, ride, ctx.request.settings.pricing, ctx.calendar)
 
 
 def _schedules(ctx: PlanContext, sequences: Mapping[str, Sequence[StopRef]]) -> list[RouteSchedule]:
@@ -134,20 +168,18 @@ def _route_cost(schedule: RouteSchedule) -> float:
 
 
 def plan_margin(ctx: PlanContext, sequences: Mapping[str, Sequence[StopRef]]) -> tuple[float, set[str]]:
-    """Margin of the sequences as build_response reports it (revenue with the sharing discount,
+    """Margin of the sequences as build_response reports it (each invoice as pricing.py prices it,
     minus the cost of the routes, unrounded) and the trips they serve, without the validation:
     how the solver compares two finished plans."""
     schedules = _schedules(ctx, sequences)
     served: set[str] = set()
-    revenue = 0.0
+    revenue = 0
     for trip_id, placement in _locate_trips(schedules).items():
         if not placement.complete:
             continue
-        assert placement.pickup is not None
         served.add(trip_id)
-        tariff = ctx.tariffs.for_vehicle(schedules[placement.pickup[0]].vehicle)
-        revenue += trip_revenue(tariff, ctx.direct_km(ctx.trips[trip_id]), 1 + len(placement.co_passengers))
-    return revenue - sum(_route_cost(schedule) for schedule in schedules), served
+        revenue += _revenue_cents(ctx, ctx.trips[trip_id], schedules, placement)
+    return cents_to_euros(revenue) - sum(_route_cost(schedule) for schedule in schedules), served
 
 
 def build_response(ctx: PlanContext, outcome: PlanOutcome, started_at: float) -> PlanResponse:
@@ -155,7 +187,8 @@ def build_response(ctx: PlanContext, outcome: PlanOutcome, started_at: float) ->
     schedules = _schedules(ctx, outcome.sequences)
     placements = _locate_trips(schedules)
     trip_results: list[TripResult] = []
-    route_revenue = [0.0] * len(schedules)
+    route_revenue = [0] * len(schedules)
+    """Cents."""
     unassigned: list[Unassigned] = []
     for trip in ctx.request.trips:
         direct_km = ctx.direct_km(trip)
@@ -188,10 +221,9 @@ def build_response(ctx: PlanContext, outcome: PlanOutcome, started_at: float) ->
             minutes["PICKUP"] = schedules[placement.pickup[0]].stops[placement.pickup[1]].start_min
         if placement.dropoff is not None:
             minutes["DROPOFF"] = schedules[placement.dropoff[0]].stops[placement.dropoff[1]].start_min
-        revenue = 0.0
+        revenue = 0
         if placement.complete:
-            patients = 1 + len(placement.co_passengers)
-            revenue = trip_revenue(ctx.tariffs.for_vehicle(schedule.vehicle), direct_km, patients)
+            revenue = _revenue_cents(ctx, trip, schedules, placement)
             route_revenue[anchor[0]] += revenue
         trip_results.append(
             TripResult(
@@ -204,13 +236,17 @@ def build_response(ctx: PlanContext, outcome: PlanOutcome, started_at: float) ->
                 direct_km=round(direct_km, KM_DIGITS),
                 ride_km=round(placement.ride_km, KM_DIGITS),
                 detour_km=round(max(0.0, placement.ride_km - direct_km), KM_DIGITS) if placement.complete else 0.0,
-                revenue=round(revenue, MONEY_DIGITS),
+                revenue=cents_to_euros(revenue),
                 wait_at_facility_min=_wait_at_facility(trip, minutes),
             )
         )
 
-    routes = [_route_model(schedule, route_revenue[r]) for r, schedule in enumerate(schedules)]
-    violations = [*outcome.extra_violations, *validate(ctx.request, routes, ctx.matrix)]
+    routes = [_route_model(schedule, cents_to_euros(route_revenue[r])) for r, schedule in enumerate(schedules)]
+    violations = [
+        *outcome.extra_violations,
+        *validate(ctx.request, routes, ctx.matrix),
+        *validate_revenue(ctx.request, routes, trip_results, ctx.matrix),
+    ]
     warnings = list(outcome.warnings)
     return PlanResponse(
         status=outcome.status,

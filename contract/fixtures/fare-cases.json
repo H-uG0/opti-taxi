@@ -1,0 +1,790 @@
+{
+  "description": "Factures de référence d'un patient (contract/README.md, « Calcul du CA estimé d'une course ») : services/optimizer/tests/test_pricing.py (pricing.py et le validateur) et apps/web/src/app/(regulator)/tarifs/fare.test.ts les recalculent. Valeurs des grilles : seed du 1er novembre 2025 ; exemples T1 à T6 et VSL / ambulance du mémo tarifaire du 9 novembre 2026.",
+  "defaults": {
+    "trip": { "bigCity": false, "agglomeration": false, "hospitalLinked": false, "wheelchair": false, "tollAmount": 0 },
+    "vehicle": { "tpmrEquipped": false },
+    "pricing": { "emptyLeg": "DEPOT", "emptyLegOrder": "MULTIPLICATIVE", "patientCount": "DISTINCT" }
+  },
+  "grids": [
+    {
+      "id": "taxi_04",
+      "vehicleType": "TAXI",
+      "baseFare": 13,
+      "includedKm": 4,
+      "pricePerKm": 1.14,
+      "bigCityFare": 15,
+      "nightRate": 0.5,
+      "weekendRate": 0.5,
+      "emptyLegRateShort": 0.25,
+      "emptyLegRateLong": 0.5,
+      "emptyLegThresholdKm": 50,
+      "sharedDiscounts": [
+        { "patients": 2, "rate": 0.23 },
+        { "patients": 3, "rate": 0.35 },
+        { "patients": 4, "rate": 0.37 }
+      ],
+      "maxSharedPatients": 8,
+      "aloneDiscount": 0.05,
+      "aloneThresholdKm": 30,
+      "tpmrFare": 30
+    },
+    {
+      "id": "taxi_05",
+      "vehicleType": "TAXI",
+      "baseFare": 13,
+      "includedKm": 4,
+      "pricePerKm": 1.18,
+      "bigCityFare": 15,
+      "nightRate": 0.5,
+      "weekendRate": 0.5,
+      "emptyLegRateShort": 0.25,
+      "emptyLegRateLong": 0.5,
+      "emptyLegThresholdKm": 50,
+      "sharedDiscounts": [
+        { "patients": 2, "rate": 0.23 },
+        { "patients": 3, "rate": 0.35 },
+        { "patients": 4, "rate": 0.37 }
+      ],
+      "maxSharedPatients": 8,
+      "aloneDiscount": 0.05,
+      "aloneThresholdKm": 30,
+      "tpmrFare": 30
+    },
+    {
+      "id": "taxi_13",
+      "vehicleType": "TAXI",
+      "baseFare": 13,
+      "includedKm": 4,
+      "pricePerKm": 1.1,
+      "bigCityFare": 15,
+      "nightRate": 0.5,
+      "weekendRate": 0.5,
+      "emptyLegRateShort": 0.25,
+      "emptyLegRateLong": 0.5,
+      "emptyLegThresholdKm": 50,
+      "sharedDiscounts": [
+        { "patients": 2, "rate": 0.23 },
+        { "patients": 3, "rate": 0.35 },
+        { "patients": 4, "rate": 0.37 }
+      ],
+      "maxSharedPatients": 8,
+      "aloneDiscount": 0.05,
+      "aloneThresholdKm": 30,
+      "tpmrFare": 30
+    },
+    {
+      "id": "vsl_certified",
+      "vehicleType": "VSL",
+      "baseFare": 15.75,
+      "includedKm": 3,
+      "pricePerKm": 1.1,
+      "shortTripBands": [
+        { "upToKm": 7, "amount": 8.54 },
+        { "upToKm": 8, "amount": 7.68 },
+        { "upToKm": 9, "amount": 7.03 },
+        { "upToKm": 10, "amount": 6.35 },
+        { "upToKm": 11, "amount": 5.22 },
+        { "upToKm": 12, "amount": 4.62 },
+        { "upToKm": 13, "amount": 4.01 },
+        { "upToKm": 14, "amount": 3.41 },
+        { "upToKm": 15, "amount": 2.8 },
+        { "upToKm": 16, "amount": 2.07 },
+        { "upToKm": 17, "amount": 1.5 },
+        { "upToKm": 18, "amount": 0.91 }
+      ],
+      "nightRate": 0.5,
+      "weekendRate": 0.25,
+      "sharedDiscounts": [{ "patients": 2, "rate": 0.15 }, { "patients": 3, "rate": 0.33 }],
+      "maxSharedPatients": 3,
+      "billableDetourKm": [10, 10],
+      "tpmrFare": 30
+    },
+    {
+      "id": "vsl_zone_b",
+      "vehicleType": "VSL",
+      "baseFare": 12.11,
+      "includedKm": 3,
+      "pricePerKm": 0.93,
+      "shortTripBands": [
+        { "upToKm": 7, "amount": 8.54 },
+        { "upToKm": 8, "amount": 7.68 },
+        { "upToKm": 9, "amount": 7.03 },
+        { "upToKm": 10, "amount": 6.35 },
+        { "upToKm": 11, "amount": 5.22 },
+        { "upToKm": 12, "amount": 4.62 },
+        { "upToKm": 13, "amount": 4.01 },
+        { "upToKm": 14, "amount": 3.41 },
+        { "upToKm": 15, "amount": 2.8 },
+        { "upToKm": 16, "amount": 2.07 },
+        { "upToKm": 17, "amount": 1.5 },
+        { "upToKm": 18, "amount": 0.91 }
+      ],
+      "nightRate": 0.5,
+      "weekendRate": 0.25,
+      "sharedDiscounts": [{ "patients": 2, "rate": 0.23 }, { "patients": 3, "rate": 0.35 }],
+      "maxSharedPatients": 3,
+      "billableDetourKm": [10, 10],
+      "tpmrFare": 30
+    },
+    {
+      "id": "ambulance_certified",
+      "vehicleType": "AMBULANCE",
+      "baseFare": 57.39,
+      "aggloFare": 64.08,
+      "includedKm": 3,
+      "pricePerKm": 2.44,
+      "shortTripBands": [
+        { "upToKm": 5, "amount": 9.75 },
+        { "upToKm": 10, "amount": 7.53 },
+        { "upToKm": 15, "amount": 5.47 },
+        { "upToKm": 19, "amount": 3.42 }
+      ],
+      "nightRate": 0.75,
+      "weekendRate": 0.5,
+      "maxSharedPatients": 1
+    },
+    {
+      "id": "ambulance_base",
+      "vehicleType": "AMBULANCE",
+      "baseFare": 45.6,
+      "aggloFare": 50.92,
+      "includedKm": 3,
+      "pricePerKm": 2.44,
+      "shortTripBands": [
+        { "upToKm": 5, "amount": 7.57 },
+        { "upToKm": 10, "amount": 5.95 },
+        { "upToKm": 15, "amount": 4.32 },
+        { "upToKm": 19, "amount": 2.71 }
+      ],
+      "nightRate": 0.75,
+      "weekendRate": 0.5,
+      "maxSharedPatients": 1
+    }
+  ],
+  "cases": [
+    {
+      "name": "T1 taxi ADS 04, Manosque -> Marseille, 90 km, mardi 9 h, seul, Grande ville",
+      "grid": "taxi_04",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 90,
+        "rideKm": 90,
+        "aloneKm": 90,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 126.04,
+      "trip": { "bigCity": true }
+    },
+    {
+      "name": "T2 comme T1, retour à vide (>= 50 km)",
+      "grid": "taxi_04",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 90,
+        "rideKm": 90,
+        "aloneKm": 90,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": true
+      },
+      "expected": 175.06,
+      "trip": { "bigCity": true, "hospitalLinked": true }
+    },
+    {
+      "name": "T3 comme T2, de nuit, majorations multipliées",
+      "grid": "taxi_04",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 90,
+        "rideKm": 90,
+        "aloneKm": 90,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 1260,
+        "dropoffMin": 1330,
+        "emptyLeg": true
+      },
+      "expected": 262.59,
+      "trip": { "bigCity": true, "hospitalLinked": true }
+    },
+    {
+      "name": "T3 additive: majorations additionnées",
+      "grid": "taxi_04",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 90,
+        "rideKm": 90,
+        "aloneKm": 90,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 1260,
+        "dropoffMin": 1330,
+        "emptyLeg": true
+      },
+      "expected": 238.08,
+      "trip": { "bigCity": true, "hospitalLinked": true },
+      "pricing": { "emptyLegOrder": "ADDITIVE" }
+    },
+    {
+      "name": "Retour à vide sans lien hospitalier : pas de majoration",
+      "grid": "taxi_04",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 90,
+        "rideKm": 90,
+        "aloneKm": 90,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": true
+      },
+      "expected": 126.04,
+      "trip": { "bigCity": true }
+    },
+    {
+      "name": "Retour à vide court (< 50 km) : +25 % du tarif km",
+      "grid": "taxi_13",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 20,
+        "rideKm": 20,
+        "aloneKm": 20,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": true
+      },
+      "expected": 35.0,
+      "trip": { "hospitalLinked": true }
+    },
+    {
+      "name": "T4 taxi ADS 13, 3 km à Aix : forfait seul",
+      "grid": "taxi_13",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 3,
+        "rideKm": 3,
+        "aloneKm": 3,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 13.0
+    },
+    {
+      "name": "T5 taxi ADS 13, 20 km, partagé à 2, de jour",
+      "grid": "taxi_13",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 20,
+        "rideKm": 20,
+        "aloneKm": 0,
+        "coPassengers": 1,
+        "maxOnBoard": 2,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 23.56
+    },
+    {
+      "name": "T6 taxi ADS 05, 45 km partagé dont 32 km seul à bord : 5 %",
+      "grid": "taxi_05",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 45,
+        "rideKm": 45,
+        "aloneKm": 32,
+        "coPassengers": 1,
+        "maxOnBoard": 2,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 58.31
+    },
+    {
+      "name": "Taxi 13, 20 km, 4 patients : 37 %",
+      "grid": "taxi_13",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 20,
+        "rideKm": 20,
+        "aloneKm": 0,
+        "coPassengers": 3,
+        "maxOnBoard": 4,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 19.28
+    },
+    {
+      "name": "Taxi 13, 20 km, 3 co-passagers distincts mais 2 à bord au plus, règle MAX_ON_BOARD : 23 %",
+      "grid": "taxi_13",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 20,
+        "rideKm": 20,
+        "aloneKm": 0,
+        "coPassengers": 2,
+        "maxOnBoard": 2,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 23.56,
+      "pricing": { "patientCount": "MAX_ON_BOARD" }
+    },
+    {
+      "name": "Même course, règle DISTINCT : 3 patients, 35 %",
+      "grid": "taxi_13",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 20,
+        "rideKm": 20,
+        "aloneKm": 0,
+        "coPassengers": 2,
+        "maxOnBoard": 2,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 19.89
+    },
+    {
+      "name": "Taxi 13, détour non facturable : distance directe",
+      "grid": "taxi_13",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 20,
+        "rideKm": 28,
+        "aloneKm": 0,
+        "coPassengers": 1,
+        "maxOnBoard": 2,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 23.56
+    },
+    {
+      "name": "Taxi 13, 10 km, samedi 11 h : pas de majoration",
+      "grid": "taxi_13",
+      "date": "2026-11-14",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 10,
+        "rideKm": 10,
+        "aloneKm": 10,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 660,
+        "dropoffMin": 690,
+        "emptyLeg": false
+      },
+      "expected": 19.6
+    },
+    {
+      "name": "Taxi 13, 10 km, samedi 14 h : +50 %",
+      "grid": "taxi_13",
+      "date": "2026-11-14",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 10,
+        "rideKm": 10,
+        "aloneKm": 10,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 840,
+        "dropoffMin": 870,
+        "emptyLeg": false
+      },
+      "expected": 29.4
+    },
+    {
+      "name": "Taxi 13, 10 km, jour férié 10 h : +50 %",
+      "grid": "taxi_13",
+      "date": "2026-11-11",
+      "publicHolidays": ["2026-11-11"],
+      "ride": {
+        "directKm": 10,
+        "rideKm": 10,
+        "aloneKm": 10,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 600,
+        "dropoffMin": 630,
+        "emptyLeg": false
+      },
+      "expected": 29.4
+    },
+    {
+      "name": "Taxi 13, 10 km, nuit et dimanche : une seule majoration",
+      "grid": "taxi_13",
+      "date": "2026-11-15",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 10,
+        "rideKm": 10,
+        "aloneKm": 10,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 1290,
+        "dropoffMin": 1320,
+        "emptyLeg": false
+      },
+      "expected": 29.4
+    },
+    {
+      "name": "Taxi 13, 10 km, 19:30 - 21:00 : plus de la moitié de nuit",
+      "grid": "taxi_13",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 10,
+        "rideKm": 10,
+        "aloneKm": 10,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 1170,
+        "dropoffMin": 1260,
+        "emptyLeg": false
+      },
+      "expected": 29.4
+    },
+    {
+      "name": "Taxi 13, 10 km, 19:00 - 20:30 : moins de la moitié de nuit",
+      "grid": "taxi_13",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 10,
+        "rideKm": 10,
+        "aloneKm": 10,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 1140,
+        "dropoffMin": 1230,
+        "emptyLeg": false
+      },
+      "expected": 19.6
+    },
+    {
+      "name": "Taxi 13, 10 km, vendredi 23:30 - samedi 00:30 : nuit",
+      "grid": "taxi_13",
+      "date": "2026-11-13",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 10,
+        "rideKm": 10,
+        "aloneKm": 10,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 1410,
+        "dropoffMin": 1470,
+        "emptyLeg": false
+      },
+      "expected": 29.4
+    },
+    {
+      "name": "Taxi 13, partagé à 2, fauteuil en véhicule TPMR et péage : hors abattement",
+      "grid": "taxi_13",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 20,
+        "rideKm": 20,
+        "aloneKm": 0,
+        "coPassengers": 1,
+        "maxOnBoard": 2,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 56.96,
+      "trip": { "wheelchair": true, "tollAmount": 3.4 },
+      "vehicle": { "tpmrEquipped": true }
+    },
+    {
+      "name": "Taxi 13, fauteuil dans un véhicule non équipé : pas de TPMR",
+      "grid": "taxi_13",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 20,
+        "rideKm": 20,
+        "aloneKm": 20,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 30.6,
+      "trip": { "wheelchair": true }
+    },
+    {
+      "name": "VSL certifié, 25 km",
+      "grid": "vsl_certified",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 25,
+        "rideKm": 25,
+        "aloneKm": 25,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 39.95
+    },
+    {
+      "name": "VSL non certifié zone B, 25 km",
+      "grid": "vsl_zone_b",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 25,
+        "rideKm": 25,
+        "aloneKm": 25,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 32.57
+    },
+    {
+      "name": "VSL certifié, 6 km : trajet court",
+      "grid": "vsl_certified",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 6,
+        "rideKm": 6,
+        "aloneKm": 6,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 27.59
+    },
+    {
+      "name": "VSL certifié, 6 km, de nuit : 41,385 arrondi à 41,39",
+      "grid": "vsl_certified",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 6,
+        "rideKm": 6,
+        "aloneKm": 6,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 1260,
+        "dropoffMin": 1280,
+        "emptyLeg": false
+      },
+      "expected": 41.39
+    },
+    {
+      "name": "VSL certifié, 25 km, partagé à 2",
+      "grid": "vsl_certified",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 25,
+        "rideKm": 25,
+        "aloneKm": 0,
+        "coPassengers": 1,
+        "maxOnBoard": 2,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 33.96
+    },
+    {
+      "name": "VSL certifié, 25 km, dimanche de jour : +25 %",
+      "grid": "vsl_certified",
+      "date": "2026-11-15",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 25,
+        "rideKm": 25,
+        "aloneKm": 25,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 49.94
+    },
+    {
+      "name": "VSL certifié, 7 km exactement : 1re tranche",
+      "grid": "vsl_certified",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 7,
+        "rideKm": 7,
+        "aloneKm": 7,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 28.69
+    },
+    {
+      "name": "VSL certifié, partagé à 2, détour facturé jusqu'à 10 km",
+      "grid": "vsl_certified",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 20,
+        "rideKm": 32,
+        "aloneKm": 0,
+        "coPassengers": 1,
+        "maxOnBoard": 2,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 38.63
+    },
+    {
+      "name": "VSL non certifié zone B, 3 patients : 35 %",
+      "grid": "vsl_zone_b",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 25,
+        "rideKm": 25,
+        "aloneKm": 0,
+        "coPassengers": 2,
+        "maxOnBoard": 3,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 21.17
+    },
+    {
+      "name": "Ambulance majorée, Manosque -> Marseille, 90 km, semaine de jour",
+      "grid": "ambulance_certified",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 90,
+        "rideKm": 90,
+        "aloneKm": 90,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 269.67
+    },
+    {
+      "name": "Ambulance majorée, même trajet de nuit : +75 %",
+      "grid": "ambulance_certified",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 90,
+        "rideKm": 90,
+        "aloneKm": 90,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 1260,
+        "dropoffMin": 1350,
+        "emptyLeg": false
+      },
+      "expected": 471.92
+    },
+    {
+      "name": "Ambulance majorée, 4 km dans l'agglomération de Marseille",
+      "grid": "ambulance_certified",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 4,
+        "rideKm": 4,
+        "aloneKm": 4,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 76.27,
+      "trip": { "agglomeration": true }
+    },
+    {
+      "name": "Ambulance socle, Manosque -> Marseille, 90 km",
+      "grid": "ambulance_base",
+      "date": "2026-11-10",
+      "publicHolidays": [],
+      "ride": {
+        "directKm": 90,
+        "rideKm": 90,
+        "aloneKm": 90,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 257.88
+    },
+    {
+      "name": "Ambulance majorée, 12 km, jour férié : trajet court majoré",
+      "grid": "ambulance_certified",
+      "date": "2026-11-11",
+      "publicHolidays": ["2026-11-11"],
+      "ride": {
+        "directKm": 12,
+        "rideKm": 12,
+        "aloneKm": 12,
+        "coPassengers": 0,
+        "maxOnBoard": 1,
+        "pickupMin": 540,
+        "dropoffMin": 600,
+        "emptyLeg": false
+      },
+      "expected": 127.23
+    }
+  ]
+}

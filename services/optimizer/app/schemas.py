@@ -32,7 +32,11 @@ ViolationCode = Literal[
     "DETOUR",
     "SHIFT",
     "BREAK",
+    "REVENUE",
 ]
+EmptyLegRule = Literal["NONE", "DEPOT"]
+SurchargeOrder = Literal["MULTIPLICATIVE", "ADDITIVE"]
+PatientCountRule = Literal["DISTINCT", "MAX_ON_BOARD"]
 
 MINUTES_PER_DAY = 24 * 60
 DayMinute = Annotated[int, Field(ge=0, le=2 * MINUTES_PER_DAY)]
@@ -99,6 +103,24 @@ class TrafficSettings(ContractModel):
         return self
 
 
+IsoDate = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")]
+
+
+class PricingSettings(ContractModel):
+    """Readings of the conventions the PO has not settled yet (contract/README.md, « Calcul du CA »)."""
+
+    empty_leg: EmptyLegRule = "NONE"
+    """Taxi empty-leg surcharge of a hospital-linked trip: NONE, or DEPOT (the outbound trip whose
+    dropoff ends the route, the return trip whose pickup starts it: the vehicle drives empty to or
+    from its station)."""
+    empty_leg_order: SurchargeOrder = "MULTIPLICATIVE"
+    """Empty-leg and night/weekend surcharges on the km fare: multiplied, or added."""
+    patient_count: PatientCountRule = "DISTINCT"
+    """Patients of a shared ride for its discount: 1 + distinct co-passengers, or most on board at once."""
+    public_holidays: list[IsoDate] = Field(default_factory=list, max_length=400)
+    """Public holidays (weekend surcharge); at least the planned date and the next day are needed."""
+
+
 class Settings(ContractModel):
     wait_before_appointment_min: int = Field(ge=0, le=180)
     wait_after_session_min: int = Field(ge=0, le=180)
@@ -112,6 +134,15 @@ class Settings(ContractModel):
     max_ride_extra_min: int = Field(default=DEFAULT_MAX_RIDE_EXTRA_MIN, ge=0, le=180)
     """Time on board (end of the pickup to start of the dropoff) above the direct drive allowed to a patient."""
     traffic: TrafficSettings | None = None
+    pricing: PricingSettings = Field(default_factory=PricingSettings)
+    """Absent or null: the defaults (no empty-leg surcharge, multiplied, distinct co-passengers, no holiday)."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _null_pricing(cls, data: object) -> object:
+        if isinstance(data, dict) and data.get("pricing", 0) is None:
+            data = {key: value for key, value in data.items() if key != "pricing"}
+        return data
 
 
 class BreakRule(ContractModel):
@@ -138,6 +169,11 @@ class Vehicle(ContractModel):
     shift_start_min: DayMinute
     shift_end_min: DayMinute
     break_: BreakRule | None = Field(default=None, alias="break")
+    tariff_id: str | None = None
+    """Grid of the vehicle's trips, chosen by the web (taxi: department of its ADS; VSL and
+    ambulance: the company's certification and head office); None: revenue estimated at 0."""
+    tpmr_equipped: bool = False
+    """Fitted to carry a patient in their wheelchair (TPMR supplement of the grid)."""
 
     @model_validator(mode="after")
     def _shift_ordered(self) -> Vehicle:
@@ -162,6 +198,19 @@ class Trip(ContractModel):
     """Stop duration at this trip's pickup; None: settings.pickupServiceMin."""
     dropoff_service_min: ServiceMinutes | None = None
     """Stop duration at this trip's dropoff; None: settings.dropoffServiceMin."""
+    tariff_id: str | None = None
+    """Grid of this trip whatever the vehicle (a seated trip exceptionally driven by an ambulance:
+    the VSL grid); None: the vehicle's."""
+    big_city: bool = False
+    """Picked up or dropped in a « Grande ville » area: the grid's bigCityFare is added."""
+    agglomeration: bool = False
+    """Entirely inside the agglomeration of the company's head office: the grid's aggloFare replaces baseFare."""
+    hospital_linked: bool = False
+    """To or from a hospitalisation or a dialysis, chemotherapy or radiotherapy session (taxi empty leg)."""
+    wheelchair: bool = False
+    """The patient rides in their own wheelchair (TPMR supplement in a fitted vehicle)."""
+    toll_amount: float = Field(default=0, ge=0, le=1000)
+    """Tolls billed on this patient's invoice (euros), outside surcharges and discounts."""
 
     @model_validator(mode="after")
     def _times_match_direction(self) -> Trip:
@@ -172,14 +221,60 @@ class Trip(ContractModel):
         return self
 
 
+class ShortTripBand(ContractModel):
+    up_to_km: float = Field(ge=0, le=1000)
+    amount: float = Field(ge=0, le=1000)
+
+
+class SharedDiscount(ContractModel):
+    patients: int = Field(ge=2, le=8)
+    rate: float = Field(ge=0, le=1)
+
+
+Rate = Annotated[float, Field(ge=0, le=5)]
+Km = Annotated[float, Field(ge=0, le=1000)]
+
+
 class Tariff(ContractModel):
+    """One grid, as the web picked it for the vehicles and trips that reference its id."""
+
+    id: str = Field(min_length=1)
     vehicle_type: VehicleType
-    department: str = Field(min_length=1)
-    base_fare: float = Field(ge=0)
-    price_per_km: float = Field(ge=0)
-    included_km: float = Field(default=0, ge=0)
-    shared_discount2: float = Field(ge=0, le=1)
-    shared_discount3: float = Field(ge=0, le=1)
+    base_fare: float = Field(ge=0, le=1000)
+    agglo_fare: float | None = Field(default=None, ge=0, le=1000)
+    """Replaces baseFare for a trip inside the head office's agglomeration (ambulance)."""
+    big_city_fare: float = Field(default=0, ge=0, le=1000)
+    included_km: Km = 0
+    price_per_km: float = Field(ge=0, le=50)
+    short_trip_bands: list[ShortTripBand] = Field(default_factory=list, max_length=50)
+    """Added to the fare: the first band whose upToKm is at least the billed km."""
+    night_rate: Rate = 0
+    weekend_rate: Rate = 0
+    night_start_min: int = Field(default=1200, ge=0, le=MINUTES_PER_DAY)
+    night_end_min: int = Field(default=480, ge=0, le=MINUTES_PER_DAY)
+    saturday_from_min: int = Field(default=720, ge=0, le=MINUTES_PER_DAY)
+    surcharge_short_trip: bool = True
+    empty_leg_rate_short: Rate = 0
+    empty_leg_rate_long: Rate = 0
+    empty_leg_threshold_km: Km = 50
+    shared_discounts: list[SharedDiscount] = Field(default_factory=list, max_length=7)
+    """Discount by number of patients; the largest entry also covers more patients."""
+    max_shared_patients: int = Field(default=8, ge=1, le=8)
+    alone_discount: float = Field(default=0, ge=0, le=1)
+    alone_threshold_km: Km = 30
+    billable_detour_km: list[Km] = Field(default_factory=list, max_length=7)
+    """Detour billed to a shared patient: at most the sum of the first k entries (k co-passengers)."""
+    tpmr_fare: float = Field(default=0, ge=0, le=1000)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Tariff:
+        bands = [band.up_to_km for band in self.short_trip_bands]
+        if any(later <= earlier for earlier, later in zip(bands, bands[1:], strict=False)):
+            raise ValueError("shortTripBands must be sorted by increasing upToKm")
+        counts = [discount.patients for discount in self.shared_discounts]
+        if len(set(counts)) != len(counts):
+            raise ValueError("one sharedDiscounts entry per number of patients")
+        return self
 
 
 class StopRef(ContractModel):
@@ -200,6 +295,21 @@ class DayRequest(ContractModel):
     vehicles: list[Vehicle] = Field(max_length=MAX_VEHICLES)
     trips: list[Trip] = Field(max_length=MAX_TRIPS)
     tariffs: list[Tariff] = Field(max_length=MAX_TARIFFS)
+
+    @model_validator(mode="after")
+    def _tariff_references(self) -> DayRequest:
+        ids = [tariff.id for tariff in self.tariffs]
+        if len(set(ids)) != len(ids):
+            raise ValueError("tariff ids must be unique")
+        known = set(ids)
+        unknown = {
+            ref
+            for ref in [*(vehicle.tariff_id for vehicle in self.vehicles), *(trip.tariff_id for trip in self.trips)]
+            if ref is not None and ref not in known
+        }
+        if unknown:
+            raise ValueError(f"unknown tariff id(s): {', '.join(sorted(unknown))}")
+        return self
 
 
 class OptimizeRequest(DayRequest):

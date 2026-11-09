@@ -124,6 +124,12 @@
         "message": "Exemple de violation : patient de la course trip_1 à bord plus longtemps que le trajet direct + 30 min",
         "tripId": "trip_1",
         "vehicleId": "veh_taxi_1"
+      },
+      {
+        "code": "REVENUE",
+        "message": "Exemple de violation : CA de la course trip_7 annoncé à 40,10 €, recalculé à 41,39 €",
+        "tripId": "trip_7",
+        "vehicleId": "veh_taxi_1"
       }
     ]
   },

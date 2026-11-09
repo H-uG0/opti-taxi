@@ -67,7 +67,7 @@ docker compose up -d --build optimizer
 | --- | --- |
 | `app/matrix.py` | matrice temps/distances : OSRM (`/table`, par blocs de 100 points, délai 10 s) avec repli automatique sur l'estimation à vol d'oiseau ; points identiques dédoublonnés |
 | `app/traffic.py` | temps de trajet par créneau : `TrafficProvider` remplit une table de minutes par créneau (`ZoneFactors` aujourd'hui, une API de trafic demain), minute de référence de chaque arrêt |
-| `app/pricing.py` | grille tarifaire (type + département, repli sur `"*"`), CA d'une course, abattement de partage |
+| `app/pricing.py` | grille d'une course (`tariffId` de la course, sinon du véhicule) et facture d'un patient en centimes entiers (km facturés, trajet court, nuit et week-end, retour à vide, abattements, TPMR, péages) ; le validateur la recalcule (`REVENUE`) |
 | `app/model.py` | fenêtres horaires dérivées (source unique), paires aller/retour d'un patient, compatibilité véhicule, mode de pause |
 | `app/solver.py` | modèle OR-Tools (PDPTW) et recherche |
 | `app/schedule.py` | horaires d'une séquence d'arrêts donnée (au plus tôt, puis sans attente patient à bord), placement de la pause |
@@ -152,9 +152,10 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   première solution d'une journée de 160 courses 5 à 7 fois plus lente (6 à 10 s au lieu de
   1,5 s).
 - Objectif (millièmes de centime ; `meta.objective` en centimes) : km × coût/km par véhicule ;
-  minutes de tournée × coût/h ÷ 60 ; CA perdu par rapport au type de véhicule le mieux payé pour la
-  course (sur l'arc qui quitte la prise en charge) ; course non affectée = pénalité + son meilleur
-  CA (doublée pour une course figée) ; pause non prise = pénalité supérieure à toutes les courses
+  minutes de tournée × coût/h ÷ 60 ; CA perdu par rapport à la grille la mieux payée pour la
+  course (sur l'arc qui quitte la prise en charge ; course comptée seule, sur la distance directe, avec
+  les majorations de nuit et de week-end aux minutes de référence de la course) ; course non affectée =
+  pénalité + son meilleur CA (doublée pour une course figée) ; pause non prise = pénalité supérieure à toutes les courses
   réunies. **Aller et retour d'un patient** : laisser l'un sans véhicule pendant que l'autre est
   servi coûte une pénalité de non-affectation de plus, payée une fois par paire
   (`AddDisjunction([aller, retour], pénalité, 2, PENALIZE_ONCE)`) : le solveur préfère laisser une
@@ -162,7 +163,7 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   passe donc aussi avant deux courses isolées. La priorité médicale par type de soin relève
   d'OBJ-02 (décision du PO).
 - Coût au km : les arcs portent les km au coût au km le plus bas de la flotte, plus le CA perdu,
-  avec une matrice par grille tarifaire (au plus une par type de véhicule et département) ; le reste
+  avec une matrice par grille tarifaire (une par grille et équipement TPMR des véhicules) ; le reste
   du coût au km de chaque véhicule est un coût d'étendue de la dimension distance
   (`SetSpanCostCoefficientForVehicle`, par mètre). Avant, une matrice dense par coût au km distinct
   (32 Mo à 2 000 nœuds, jusqu'à 60 clés sur le banc) : aucun coût propre à un véhicule ne doit
@@ -280,8 +281,9 @@ plus tard possible sans retarder le premier arrêt ; pause placée avant le dép
 vide ou après le retour (la moins pénalisante, puis celle qui garde une tournée de plus de 6 h
 légale, puis la plus courte, puis la plus tôt) ; une tournée de plus de 6 h sans pause légale est
 minutée au plus serré (chaque arrêt le plus tard possible) ; km à vide (dépôt compris), km en
-charge, partage et co-passagers, CA avec abattement, coût `km × coût/km + durée/60 × coût/h`,
-marge et indicateurs.
+charge, partage et co-passagers, facture de chaque patient (contract/README.md, « Calcul du CA » :
+km facturés et horaires lus sur la tournée), coût `km × coût/km + durée/60 × coût/h`, marge et
+indicateurs.
 
 **`/evaluate`** prend les séquences telles quelles : références inconnues ignorées
 (`UNKNOWN_REFERENCE`), arrêts répétés gardés une fois (`DUPLICATE_TRIP`), horaires au plus tôt,
@@ -364,8 +366,9 @@ les horaires (minutes entières, calcul exact).
   chargée, ils servaient autant de courses à 10 s (116) et moins à 30 s (132 contre 135), et
   pouvaient laisser deux véhicules échangés. Écart mesuré par
   `test_objective_gap_of_a_route_ending_before_the_break_window`.
-- L'abattement de partage n'entre pas dans l'objectif du solveur (non linéaire) : il favorise un
-  peu plus le partage que la marge réelle ; le CA renvoyé, lui, applique l'abattement.
+- L'abattement de partage, le détour facturé, le retour à vide et les heures réelles n'entrent pas dans
+  l'objectif du solveur (ils dépendent de la tournée) : il favorise un peu plus le partage que la marge
+  réelle ; le CA renvoyé, lui, les applique, et la comparaison finale de deux plannings aussi.
 - Pour un véhicule de 3 places ou plus, le détour autorisé par le solveur reste celui d'un seul
   co-passager (prudent).
 - Lieux de pause candidats limités au dépôt, aux 11 établissements les plus proches du dépôt et
