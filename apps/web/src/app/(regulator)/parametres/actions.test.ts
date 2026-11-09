@@ -34,6 +34,9 @@ const STORED = {
   replanMaxMarginLoss: 0.1,
   lateCancellationHours: 2,
   tripHorizonDays: 14,
+  crewMaxReplacementKm: 60,
+  crewMinPairOverlapMin: 240,
+  crewReservePerDepot: 0,
   regulatorPhone: "04 65 71 00 00",
 };
 

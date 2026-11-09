@@ -517,11 +517,15 @@ model DayCrew {
   vehicleId   String
   driverId    String?
   crewMateId  String?
+  /// Contrôle de concurrence : un enregistrement fait sur une version plus ancienne de la ligne est refusé.
   updatedAt   DateTime @updatedAt
+  /// Compte qui a fixé ou modifié la ligne en dernier (null : inconnu, ligne antérieure).
+  updatedById String?
 
-  vehicle  Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  driver   Driver? @relation("DayCrewDriver", fields: [driverId], references: [id], onDelete: SetNull)
-  crewMate Driver? @relation("DayCrewCrewMate", fields: [crewMateId], references: [id], onDelete: SetNull)
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  driver    Driver? @relation("DayCrewDriver", fields: [driverId], references: [id], onDelete: SetNull)
+  crewMate  Driver? @relation("DayCrewCrewMate", fields: [crewMateId], references: [id], onDelete: SetNull)
+  updatedBy User?   @relation("DayCrewUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@unique([serviceDate, vehicleId])
 }
@@ -635,6 +639,12 @@ model AppSettings {
   /// Les courses des récurrences sont créées de demain à J+N (création, modification ou réactivation
   /// d'une récurrence, d'une prescription ou d'un patient ; ouverture du planning ou des courses).
   tripHorizonDays            Int      @default(14)
+  /// Équipages proposés : un remplaçant d'un autre dépôt vient d'au plus N km (à vol d'oiseau entre dépôts).
+  crewMaxReplacementKm       Float    @default(60)
+  /// Horaires communs minimum (min) du chauffeur et de l'équipier d'une ambulance.
+  crewMinPairOverlapMin      Int      @default(240)
+  /// Personnes de chaque dépôt laissées sans véhicule (réserve du jour) avant d'équiper un véhicule de réserve.
+  crewReservePerDepot        Int      @default(0)
   updatedAt                  DateTime @updatedAt
 }
 
@@ -703,6 +713,7 @@ model User {
   completedStops   RouteStop[]       @relation("RouteStopCompletedBy")
   sharingResponses Trip[]            @relation("TripSharingRespondedBy")
   cancelledTrips   Trip[]            @relation("TripCancelledBy")
+  dayCrews         DayCrew[]         @relation("DayCrewUpdatedBy")
   auditEvents      AuditEvent[]
 }
 

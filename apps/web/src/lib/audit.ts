@@ -36,8 +36,11 @@
  *   kept), plan.validate, plan.reopen;
  * - field, on the Trip (stops are deleted by re-optimizations): stop.pickup,
  *   stop.dropoff, stop.no_show, stop.undo_pickup, stop.undo_dropoff;
- * - staff and crews: day_crew.save, day_crew.reset (serviceDate),
- *   staff_absence.create/delete, crew_incompatibility.create/delete;
+ * - staff and crews: day_crew.save (one per vehicle fixed, details: vehicle
+ *   and people ids), day_crew.unfix (one vehicle back to the proposal),
+ *   day_crew.reset (the whole date), route.crew_change (« Changer l'équipage »
+ *   of a route, details: old and new people ids), staff_absence.create/delete,
+ *   crew_incompatibility.create/delete;
  * - fleet: vehicle.create/update/deactivate/reactivate,
  *   vehicle_unavailability.create/delete, maintenance_deadline.create/
  *   complete/delete, fuel_log.create/delete, depot.create/update/deactivate/

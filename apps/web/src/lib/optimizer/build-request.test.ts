@@ -232,8 +232,8 @@ describe("vehicle availability", () => {
       [vehicle("t"), vehicle("a", { type: "AMBULANCE" }), vehicle("x")],
       {
         crews: [
-          { vehicleId: "t", driverId: "spare", crewMateId: null, source: "replacement", issues: [], blocked: null, unavailable: false },
-          { vehicleId: "a", driverId: null, crewMateId: "mate", source: "none", issues: [], blocked: "Aucun chauffeur disponible", unavailable: false },
+          { vehicleId: "t", driverId: "spare", crewMateId: null, blocked: null },
+          { vehicleId: "a", driverId: null, crewMateId: "mate", blocked: "Aucun chauffeur disponible" },
         ],
       },
       people,

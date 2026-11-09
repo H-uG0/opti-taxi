@@ -7,7 +7,17 @@ const MONDAY = "2026-11-09";
 const MON_FRI = [1, 2, 3, 4, 5];
 
 function person(id: string, qualifications: Qualification[]): StaffPerson {
-  return { id, firstName: id, lastName: "X", active: true, workDays: MON_FRI, qualifications, depotId: "dep_a" };
+  return {
+    id,
+    firstName: id,
+    lastName: "X",
+    active: true,
+    workDays: MON_FRI,
+    qualifications,
+    depotId: "dep_a",
+    shiftStartMinute: 360,
+    shiftEndMinute: 1140,
+  };
 }
 
 function vehicle(id: string, type: CrewVehicle["type"], driver: string | null, mate: string | null = null): CrewVehicle {

@@ -16,6 +16,9 @@ const defaults = {
   replanMaxMarginLoss: "10",
   lateCancellationHours: "2",
   tripHorizonDays: "14",
+  crewMaxReplacementKm: "60",
+  crewMinPairOverlapMin: "240",
+  crewReservePerDepot: "0",
   regulatorPhone: "",
 };
 
@@ -41,8 +44,18 @@ describe("settingsSchema", () => {
       replanMaxMarginLoss: 0.1,
       lateCancellationHours: 2,
       tripHorizonDays: 14,
+      crewMaxReplacementKm: 60,
+      crewMinPairOverlapMin: 240,
+      crewReservePerDepot: 0,
       regulatorPhone: null,
     });
+  });
+
+  it("bounds the crew settings", () => {
+    expect(settingsSchema.parse({ ...defaults, crewMaxReplacementKm: "45,5" }).crewMaxReplacementKm).toBe(45.5);
+    expect(errorsOf({ ...defaults, crewMinPairOverlapMin: "90,5" }).crewMinPairOverlapMin).toBe("Nombre entier attendu.");
+    expect(errorsOf({ ...defaults, crewReservePerDepot: "-1" }).crewReservePerDepot).toMatch(/Minimum/);
+    expect(errorsOf({ ...defaults, crewMaxReplacementKm: "1000" }).crewMaxReplacementKm).toMatch(/Maximum/);
   });
 
   it("takes the margin loss tolerance in % and stores it as a fraction of the revenue", () => {

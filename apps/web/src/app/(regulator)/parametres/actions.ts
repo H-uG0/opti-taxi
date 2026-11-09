@@ -29,6 +29,9 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
     }
   });
   revalidatePath("/parametres");
+  // The crew settings change the proposals of the crews of the day.
+  revalidatePath("/equipages");
+  revalidatePath("/planning");
   // The regulation phone number is shown on the drivers' roadmap.
   revalidatePath("/chauffeur", "layout");
   return successState(settingsSavedMessage(previous.regulatorPhone, parsed.data.regulatorPhone));

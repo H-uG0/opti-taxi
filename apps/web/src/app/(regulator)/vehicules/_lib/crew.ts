@@ -51,10 +51,10 @@ export function crewOneOfRequirement(type: VehicleType): readonly Qualification[
   return CREW_REQUIRED_ONE_OF[type];
 }
 
-/** " avec au moins un Ambulancier DE dans l'équipage" for an ambulance, "" otherwise. */
+/** ", avec au moins un Ambulancier DE dans l'équipage" for an ambulance, "" otherwise. */
 export function crewRuleSuffix(type: VehicleType): string {
   const oneOf = crewOneOfRequirement(type);
-  return oneOf ? ` avec au moins un ${qualificationRequirement(oneOf)} dans l'équipage` : "";
+  return oneOf ? `, avec au moins un ${qualificationRequirement(oneOf)} dans l'équipage` : "";
 }
 
 /**

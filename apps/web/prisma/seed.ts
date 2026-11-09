@@ -276,7 +276,8 @@ async function seedVehicles(
 /**
  * Staff planning examples (lot 3), next week so the Équipages page shows them:
  * a taxi driver of Sisteron on leave Monday to Friday (no spare taxi driver in
- * Sisteron: the replacement comes from another depot), an ambulance driver of
+ * Sisteron: from Tuesday the spare of Manosque, 44 km away, replaces him; on
+ * Monday nobody within the 60 km of the settings is free), an ambulance driver of
  * Gap on call on Wednesday (replaced by Gap's spare DEA), that spare on sick
  * leave on Thursday and Friday (its reason shows on her sheet only), and one
  * pair of people not to put in the same crew.
@@ -811,8 +812,8 @@ async function printSummary(dates: Dates, refusals: string[], accounts: DriverAc
   }
   if (accounts.some((account) => account.vehicle === null)) {
     console.log(
-      "  * Remplaçant : chauffeur attitré d'aucun véhicule. L'optimiseur ne l'utilise pas tant que le régulateur\n" +
-        "    ne l'a pas désigné comme chauffeur d'un véhicule (page Véhicules).",
+      "  * Remplaçant : chauffeur attitré d'aucun véhicule. Il est proposé d'office (page Équipages) quand une\n" +
+        "    personne de son dépôt ou d'un dépôt proche est absente.",
     );
   }
 }

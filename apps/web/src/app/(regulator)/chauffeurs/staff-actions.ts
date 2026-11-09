@@ -5,8 +5,8 @@ import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { errorState, idSchema, invalidState, isUniqueViolation, messageState, readForm, successState, type FormState } from "@/lib/forms";
-import { formatShortDate, fromIsoDate, todayIso } from "@/lib/time";
-import { toUpcomingRoutes, upcomingRouteDates } from "../vehicules/_lib/upcoming-routes";
+import { loadStaffImpact, staffImpactNotice } from "@/lib/staff/impact";
+import { fromIsoDate, todayIso } from "@/lib/time";
 import { absenceSchema, incompatibilitySchema, orderedPair } from "./staff-schema";
 
 const DRIVER_GONE = "Ce chauffeur n'existe plus : rechargez la page.";
@@ -15,23 +15,6 @@ function refreshPages(driverId: string) {
   revalidatePath(`/chauffeurs/${driverId}`);
   revalidatePath("/equipages");
   revalidatePath("/planning");
-}
-
-/** " Tournées déjà calculées avec lui les 10/11/2026, 12/11/2026 : relancez l'optimisation de ces jours." or "". */
-async function plannedDaysNotice(driverIds: string[], from: string, to: string | null): Promise<string> {
-  const start = from > todayIso() ? from : todayIso();
-  const routes = await db.route.findMany({
-    where: {
-      serviceDate: { gte: fromIsoDate(start), ...(to ? { lte: fromIsoDate(to) } : {}) },
-      OR: [{ driverId: { in: driverIds } }, { crewMateId: { in: driverIds } }],
-    },
-    select: { serviceDate: true, status: true },
-  });
-  const dates = upcomingRouteDates(toUpcomingRoutes(routes));
-  if (dates.length === 0) return "";
-  const listed = dates.slice(0, 5).map(formatShortDate).join(", ");
-  const days = dates.length > 1 ? "ces jours" : "ce jour";
-  return ` Tournées déjà calculées avec cette personne le${dates.length > 1 ? "s" : ""} ${listed}${dates.length > 5 ? "…" : ""} : relancez l'optimisation de ${days} depuis le planning.`;
 }
 
 export async function addAbsence(driverId: string, _state: FormState, formData: FormData): Promise<FormState> {
@@ -59,7 +42,9 @@ export async function addAbsence(driverId: string, _state: FormState, formData: 
     });
   });
   refreshPages(driver.id);
-  return successState(`Absence enregistrée.${await plannedDaysNotice([driver.id], startDate, endDate)}`);
+  // Days already planned with the person, and crews fixed with them (a replacement is proposed there).
+  const impact = await loadStaffImpact(db, [driver.id], startDate, endDate);
+  return successState(`Absence enregistrée.${staffImpactNotice(impact, "person")}`);
 }
 
 export async function deleteAbsence(driverId: string, absenceId: string): Promise<FormState> {
@@ -114,9 +99,9 @@ export async function addIncompatibility(driverId: string, _state: FormState, fo
   }
   refreshPages(id.data);
   revalidatePath(`/chauffeurs/${parsed.data.otherId}`);
-  return successState(
-    `Paire enregistrée : ces deux personnes ne seront plus proposées ensemble.${await plannedDaysNotice([id.data, parsed.data.otherId], todayIso(), null)}`,
-  );
+  // Only the days and fixed crews where the two work together.
+  const impact = await loadStaffImpact(db, [id.data, parsed.data.otherId], todayIso(), null, true);
+  return successState(`Paire enregistrée : ces deux personnes ne seront plus proposées ensemble.${staffImpactNotice(impact, "pair")}`);
 }
 
 export async function deleteIncompatibility(driverId: string, incompatibilityId: string): Promise<FormState> {

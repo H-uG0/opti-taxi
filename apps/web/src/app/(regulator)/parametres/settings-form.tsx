@@ -290,6 +290,42 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
         </div>
       </Fieldset>
 
+      <Fieldset legend="Équipages">
+        <Explanation>
+          Équipages proposés chaque jour (page Équipages) quand l&apos;équipage attitré d&apos;un véhicule est absent, ou
+          pour un véhicule de réserve : un remplaçant qualifié du même dépôt d&apos;abord, puis du dépôt le plus proche,
+          celui qui couvre l&apos;horaire du titulaire, et la personne la moins polyvalente (les ambulanciers DE restent
+          pour les ambulances). Une ambulance part avec au moins un ambulancier DE, au volant ou auprès du patient (art.
+          R. 6312-10 du code de la santé publique).
+        </Explanation>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field
+            label="Distance maximale d'un remplaçant (km)"
+            htmlFor="crewMaxReplacementKm"
+            error={errors.crewMaxReplacementKm}
+            hint="60 km par défaut, à vol d'oiseau entre les dépôts : au-delà, personne d'un autre dépôt n'est proposé."
+          >
+            <NumberInput name="crewMaxReplacementKm" unit="km" values={values} errors={errors} />
+          </Field>
+          <Field
+            label="Horaire commun d'un équipage d'ambulance (min)"
+            htmlFor="crewMinPairOverlapMin"
+            error={errors.crewMinPairOverlapMin}
+            hint="240 min (4 h) par défaut : le chauffeur et l'équipier doivent avoir au moins ce temps de service en commun."
+          >
+            <NumberInput name="crewMinPairOverlapMin" unit="min" integer values={values} errors={errors} />
+          </Field>
+          <Field
+            label="Réserve par dépôt (personnes)"
+            htmlFor="crewReservePerDepot"
+            error={errors.crewReservePerDepot}
+            hint="0 par défaut : nombre de personnes de chaque dépôt laissées sans véhicule (imprévus du jour) avant d'équiper un véhicule de réserve."
+          >
+            <NumberInput name="crewReservePerDepot" unit="pers." integer values={values} errors={errors} />
+          </Field>
+        </div>
+      </Fieldset>
+
       <Fieldset legend="Régulation">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field

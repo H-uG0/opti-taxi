@@ -10,10 +10,11 @@ import { loadDayCrewContext } from "@/lib/optimizer/build-request";
 import { vehicleIssues } from "@/lib/planning/route-issues";
 import { replanBlocker } from "@/lib/planning/run-optimization";
 import { absenceOn, isQualified, planningAbsenceText, staffName } from "@/lib/staff/day-crews";
-import { formatLongDate, fromIsoDate, isIsoDate, isoWeekday, tomorrowIso } from "@/lib/time";
+import { formatLongDate, fromIsoDate, isIsoDate, isoWeekday, todayIso, tomorrowIso } from "@/lib/time";
 import { DateNav } from "../planning/date-nav";
 import { Callout } from "../vehicules/_lib/ui";
 import { CrewForm, type CrewPersonOption, type CrewRow } from "./crew-form";
+import { crewOrigin } from "./schema";
 
 export const metadata: Metadata = { title: "Équipages" };
 
@@ -57,6 +58,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
   const rows: CrewRow[] = vehicles
     .map((v) => {
       const crew = crewOf.get(v.id);
+      const fixed = context.savedMeta.get(v.id);
       return {
         vehicleId: v.id,
         label: v.label,
@@ -66,7 +68,11 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
         depotName: depotName.get(v.depotId) ?? "?",
         driverId: crew?.driverId ?? null,
         crewMateId: crew?.crewMateId ?? null,
-        source: crew?.source ?? "none",
+        origin: crew ? crewOrigin(crew) : "none",
+        proposedSeats: crew?.proposedSeats ?? [],
+        // An unavailable vehicle keeps no crew (saveDayCrews): its old fixed row is not offered.
+        fixed: fixed && !crew?.unavailable ? { version: fixed.updatedAt.toISOString(), by: fixed.updatedBy } : null,
+        shift: crew?.shift ?? null,
         issues: crew?.issues ?? [],
         blocked: crew?.blocked ?? null,
         unavailable: crew?.unavailable ?? false,
@@ -80,6 +86,11 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
     );
 
   const assigned = new Set(rows.flatMap((r) => [r.driverId, r.crewMateId]).filter((id): id is string => id !== null));
+  const labelOf = new Map(vehicles.map((v) => [v.id, v.label]));
+  const vehicleOfPerson = new Map<string, string>();
+  for (const crew of plan.crews) {
+    for (const id of [crew.driverId, crew.crewMateId]) if (id && !vehicleOfPerson.has(id)) vehicleOfPerson.set(id, crew.vehicleId);
+  }
   const people: CrewPersonOption[] = input.people
     .filter((p) => p.active || assigned.has(p.id))
     .sort((a, b) => a.lastName.localeCompare(b.lastName, "fr") || a.firstName.localeCompare(b.firstName, "fr"))
@@ -94,6 +105,8 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
         worksThatDay: p.workDays.includes(weekday),
         canDrive: Object.fromEntries(TYPES.map((t) => [t, isQualified(p, t, "driver")])) as Record<VehicleType, boolean>,
         canCrew: isQualified(p, "AMBULANCE", "crewMate"),
+        vehicleId: vehicleOfPerson.get(p.id) ?? null,
+        vehicleLabel: labelOf.get(vehicleOfPerson.get(p.id) ?? "") ?? null,
       };
     });
 
@@ -102,14 +115,22 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
     return p ? staffName(p) : "?";
   };
   const ready = plan.crews.filter((c) => c.blocked === null).length;
-  const blocked = plan.crews.length - ready;
+  const parked = plan.crews.filter((c) => c.parked).length;
+  const blocked = plan.crews.length - ready - parked;
   const hasSavedCrews = input.saved.length > 0;
+  const fixedCount = rows.filter((r) => r.fixed !== null).length;
+  const summary = [
+    `${ready} véhicule${ready > 1 ? "s" : ""} avec équipage`,
+    blocked > 0 ? `${blocked} sans équipage complet (non planifié${blocked > 1 ? "s" : ""})` : null,
+    parked > 0 ? `${parked} laissé${parked > 1 ? "s" : ""} au dépôt` : null,
+    `${plan.absent.length} absence${plan.absent.length > 1 ? "s" : ""}`,
+  ].filter(Boolean);
 
   return (
     <>
       <PageHeader
         title={`Équipages du ${formatLongDate(date)}`}
-        description={`${ready} véhicule${ready > 1 ? "s" : ""} avec équipage${blocked > 0 ? ` · ${blocked} sans équipage complet (non planifié${blocked > 1 ? "s" : ""})` : ""} · ${plan.absent.length} absence${plan.absent.length > 1 ? "s" : ""}`}
+        description={summary.join(" · ")}
         actions={<DateNav date={date} tomorrow={tomorrow} basePath="/equipages" />}
       />
 
@@ -131,7 +152,10 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
               locked ? (
                 // Re-planning is not possible now: say why instead of asking for it.
                 <p>
-                  Des tournées ont été calculées avant un changement de véhicule ou d&apos;équipage. {locked}{" "}
+                  Des tournées ont été calculées avant un changement de véhicule ou d&apos;équipage. {locked}
+                  {date >= todayIso()
+                    ? " Pour remplacer une personne sans réoptimiser : planning, panneau du véhicule, « Changer l'équipage »."
+                    : ""}{" "}
                   <Link href={`/planning?date=${date}`} className="font-medium underline">
                     Ouvrir le planning
                   </Link>
@@ -161,9 +185,12 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
           </Callout>
         ) : null}
         <p className="text-sm text-slate-600">
-          {hasSavedCrews
-            ? "Équipages fixés pour ce jour : l'optimisation les utilise tels quels."
-            : "Équipages proposés automatiquement : équipage attitré quand il est disponible, sinon un remplaçant qualifié, du même dépôt d'abord. Enregistrez pour les fixer ou les modifier."}
+          {fixedCount > 0
+            ? `${fixedCount} équipage${fixedCount > 1 ? "s fixés" : " fixé"} pour ce jour, utilisé${fixedCount > 1 ? "s" : ""} tel${fixedCount > 1 ? "s" : ""} quel${fixedCount > 1 ? "s" : ""} par l'optimisation. Les autres véhicules ont leur`
+            : "Chaque véhicule a son"}{" "}
+          équipage attitré quand il est disponible, sinon un remplaçant qualifié : du même dépôt d&apos;abord, puis du
+          dépôt le plus proche (Paramètres, « Équipages »), qui couvre l&apos;horaire du titulaire, en gardant les
+          ambulanciers DE pour les ambulances. Modifiez une ligne pour la fixer.
         </p>
 
         <CrewForm date={date} rows={rows} people={people} locked={locked} hasSavedCrews={hasSavedCrews} />

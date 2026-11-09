@@ -307,8 +307,8 @@ export const DRIVERS = {
   romain: { firstName: "Romain", lastName: "Chabert", qualifications: ["DEA"], workDays: MON_SAT, shift: ["06:00", "19:00"], breakMinutes: 30, hourlyCost: 27 },
   franck: { firstName: "Franck", lastName: "Bonnet", qualifications: ["DEA"], workDays: MON_FRI, shift: ["06:00", "19:00"], breakMinutes: 45, hourlyCost: 28.5 },
   amandine: { firstName: "Amandine", lastName: "Reynaud", qualifications: ["DEA", "AUXILIARY"], workDays: MON_FRI, shift: ["06:00", "19:00"], breakMinutes: 45, hourlyCost: 27.5 },
-  // Replacement drivers: default driver of no vehicle, so the optimizer only uses them once the
-  // regulator names them on a vehicle (Véhicules page).
+  // Replacement drivers: default driver of no vehicle; the crews of the day propose them when someone
+  // of their depot, or of a depot close enough (Paramètres, « Équipages »), is absent.
   kevin: { firstName: "Kévin", lastName: "Lambert", qualifications: ["TAXI_CARD", "AUXILIARY"], workDays: TUE_SAT, shift: ["07:00", "19:00"], breakMinutes: 30, hourlyCost: 22 },
   sabrina: { firstName: "Sabrina", lastName: "Morel", qualifications: ["DEA", "AUXILIARY"], workDays: MON_FRI, shift: ["06:00", "17:00"], breakMinutes: 30, hourlyCost: 26 },
 } as const satisfies Record<string, DriverDef>;
@@ -316,7 +316,7 @@ export const DRIVERS = {
 export type DriverKey = keyof typeof DRIVERS;
 
 /** Depot of the replacement drivers (the others belong to the depot of the vehicle they crew). */
-export const REPLACEMENT_DRIVER_DEPOTS: Partial<Record<DriverKey, DepotKey>> = { kevin: "marseille", sabrina: "gap" };
+export const REPLACEMENT_DRIVER_DEPOTS: Partial<Record<DriverKey, DepotKey>> = { kevin: "manosque", sabrina: "gap" };
 
 type VehicleDef = {
   label: string;

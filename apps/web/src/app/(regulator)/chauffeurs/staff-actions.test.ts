@@ -9,6 +9,9 @@ const fake = vi.hoisted(() => {
     driver: { findUnique: vi.fn() },
     staffAbsence: { create: vi.fn(), deleteMany: vi.fn() },
     route: { findMany: vi.fn() },
+    dayCrew: { findMany: vi.fn() },
+    trip: { findMany: vi.fn() },
+    routeStop: { findMany: vi.fn() },
     auditEvent: { createMany: vi.fn() },
   };
   return { ...models, $transaction: vi.fn(async (fn: (tx: typeof models) => unknown) => fn(models)) };
@@ -29,6 +32,9 @@ beforeEach(() => {
   fake.driver.findUnique.mockResolvedValue({ id: DRIVER });
   fake.staffAbsence.create.mockResolvedValue({ id: ABSENCE });
   fake.route.findMany.mockResolvedValue([]);
+  fake.dayCrew.findMany.mockResolvedValue([]);
+  fake.trip.findMany.mockResolvedValue([]);
+  fake.routeStop.findMany.mockResolvedValue([]);
   fake.auditEvent.createMany.mockResolvedValue({ count: 1 });
 });
 
@@ -56,6 +62,21 @@ describe("staff actions: audit trail", () => {
       }),
     ]);
     expect(JSON.stringify(rows)).not.toMatch(/SICK|genou/);
+  });
+
+  it("names the crews fixed with the absent person and the planned days by state", async () => {
+    fake.dayCrew.findMany.mockResolvedValue([{ serviceDate: new Date("2099-01-06T00:00:00Z"), vehicle: { label: "VSL 2" } }]);
+    fake.route.findMany
+      // Routes of the person in the absence.
+      .mockResolvedValueOnce([{ serviceDate: new Date("2099-01-05T00:00:00Z") }, { serviceDate: new Date("2099-01-07T00:00:00Z") }])
+      // Validated days among them.
+      .mockResolvedValueOnce([{ serviceDate: new Date("2099-01-07T00:00:00Z") }]);
+    const result = await addAbsence(DRIVER, IDLE_STATE, absenceForm());
+    expect(result.message).toBe(
+      "Absence enregistrée. Tournées déjà calculées avec cette personne le 05/01/2099 : relancez l'optimisation de ce jour depuis le planning." +
+        " Planning déjà validé le 07/01/2099 : changez l'équipage de la tournée (planning, panneau du véhicule, « Changer l'équipage ») ou rouvrez le planning puis relancez l'optimisation." +
+        " Équipage fixé avec cette personne : VSL 2 le 06/01/2099 ; un remplaçant y est proposé, à vérifier sur la page Équipages.",
+    );
   });
 
   it("traces a deletion only when a row was deleted", async () => {

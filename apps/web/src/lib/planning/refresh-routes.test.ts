@@ -783,7 +783,8 @@ function fakePrisma(routes: FakeRoute[], trips: RefreshTrip[]) {
     (where.serviceDate === undefined || route.serviceDate.getTime() === where.serviceDate.getTime()) &&
     (where.id === undefined || (typeof where.id === "string" ? route.id === where.id : where.id.in.includes(route.id)));
   const client = {
-    appSettings: { upsert: async () => SETTINGS_ROW },
+    appSettings: { upsert: async () => SETTINGS_ROW, findUnique: async () => null },
+    depot: { findMany: async () => [] },
     trafficZone: { findMany: async () => [], createMany: async () => ({ count: 0 }) },
     vehicle: { findMany: async () => VEHICLE_ROWS },
     driver: { findMany: async () => VEHICLE_ROWS.map((v) => v.defaultDriver) },

@@ -19,6 +19,9 @@ export const DECREE_LIMITS = {
 
 export const MAX_SOLVER_TIME_LIMIT_SEC = 120;
 
+/** Upper bounds of the « Équipages » settings. */
+export const CREW_LIMITS = { maxReplacementKm: 400, minPairOverlapMin: 720, reservePerDepot: 50 } as const;
+
 export const PHONE_ERROR =
   "Numéro invalide : saisissez un numéro français à 10 chiffres (ex. 04 65 71 00 00), éventuellement au format +33 4 65 71 00 00.";
 
@@ -86,6 +89,10 @@ export const settingsSchema = z
       max: LATE_CANCELLATION_HOURS.max,
       unit: "h",
     }),
+    // Automatic crews of the day (lib/staff/day-crews.ts): replacements and ambulance pairs.
+    crewMaxReplacementKm: numberField({ min: 0, max: CREW_LIMITS.maxReplacementKm, unit: "km" }),
+    crewMinPairOverlapMin: numberField({ integer: true, min: 0, max: CREW_LIMITS.minPairOverlapMin, unit: "min" }),
+    crewReservePerDepot: numberField({ integer: true, min: 0, max: CREW_LIMITS.reservePerDepot, unit: "personnes" }),
     // Blank: no number, the drivers' roadmap shows no call link.
     regulatorPhone: z
       .string()
@@ -128,6 +135,9 @@ export const SETTINGS_FIELDS = [
   "replanMaxServedLoss",
   "lateCancellationHours",
   "tripHorizonDays",
+  "crewMaxReplacementKm",
+  "crewMinPairOverlapMin",
+  "crewReservePerDepot",
 ] as const satisfies readonly (keyof SettingsInput & keyof AppSettings)[];
 
 export function settingsFormValues(

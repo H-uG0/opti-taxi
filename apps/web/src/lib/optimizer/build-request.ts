@@ -26,7 +26,15 @@ import { loadTrafficZones, toContractTraffic, type TrafficInput } from "@/lib/do
 import { tariffGaps, tariffsInForce, type TariffGap } from "@/lib/domain/tariffs";
 import { complianceAlerts, COMPLIANCE_KINDS } from "@/lib/fleet/maintenance";
 import type { ReplaceThresholds } from "@/lib/planning/plan-compare";
-import { resolveDayCrews, type DayCrewInput, type DayCrewPlan, type StaffPerson } from "@/lib/staff/day-crews";
+import {
+  DEFAULT_CREW_RULES,
+  resolveDayCrews,
+  type CrewRules,
+  type DayCrewInput,
+  type DayCrewPlan,
+  type DayCrewView,
+  type StaffPerson,
+} from "@/lib/staff/day-crews";
 import { fromIsoDate, isoWeekday, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
 import type {
   OptimizeRequest,
@@ -543,7 +551,7 @@ export function loadVehicleInputs(prisma: PrismaClient): Promise<VehicleInput[]>
  */
 export function applyDayCrewPlan<V extends VehicleInput>(
   vehicles: readonly V[],
-  plan: Pick<DayCrewPlan, "crews">,
+  plan: { crews: readonly Pick<DayCrewView, "vehicleId" | "driverId" | "crewMateId" | "blocked">[] },
   people: ReadonlyMap<string, DriverInput>,
 ): V[] {
   const byVehicle = new Map(plan.crews.map((c) => [c.vehicleId, c]));
@@ -559,10 +567,15 @@ export function applyDayCrewPlan<V extends VehicleInput>(
   });
 }
 
+/** A crew fixed for the date (DayCrew row): its version for the concurrency check, and its author. */
+export type SavedCrewMeta = { id: string; updatedAt: Date; updatedBy: string | null };
+
 export type DayCrewContext = {
   /** What the plan was resolved from: resolve it again with other fixed crews (crew form). */
   input: DayCrewInput;
   plan: DayCrewPlan;
+  /** Fixed crews of the date by vehicle id. */
+  savedMeta: Map<string, SavedCrewMeta>;
   /** Every person, active or not, by id. */
   people: Map<string, DriverInput & StaffPerson>;
   /**
@@ -575,7 +588,7 @@ export type DayCrewContext = {
 /** Everything the crews of isoDate depend on, resolved (lib/staff/day-crews.ts). */
 export async function loadDayCrewContext(prisma: PrismaClient, isoDate: string): Promise<DayCrewContext> {
   const serviceDate = fromIsoDate(isoDate);
-  const [vehicles, people, absences, incompatibilities, saved, outages, deadlines, odometers] = await Promise.all([
+  const [vehicles, people, absences, incompatibilities, saved, outages, deadlines, odometers, depots, rules] = await Promise.all([
     prisma.vehicle.findMany({
       select: { id: true, label: true, type: true, active: true, depotId: true, defaultDriverId: true, defaultCrewMateId: true },
     }),
@@ -585,7 +598,10 @@ export async function loadDayCrewContext(prisma: PrismaClient, isoDate: string):
       select: { driverId: true, kind: true, startDate: true, endDate: true },
     }),
     prisma.crewIncompatibility.findMany({ select: { driverAId: true, driverBId: true } }),
-    prisma.dayCrew.findMany({ where: { serviceDate }, select: { vehicleId: true, driverId: true, crewMateId: true } }),
+    prisma.dayCrew.findMany({
+      where: { serviceDate },
+      select: { id: true, vehicleId: true, driverId: true, crewMateId: true, updatedAt: true, updatedBy: { select: { name: true } } },
+    }),
     prisma.vehicleUnavailability.findMany({
       where: { startDate: { lte: serviceDate }, endDate: { gte: serviceDate } },
       select: { vehicleId: true, kind: true, startDate: true, endDate: true },
@@ -595,6 +611,8 @@ export async function loadDayCrewContext(prisma: PrismaClient, isoDate: string):
       select: { vehicleId: true, kind: true, label: true, dueDate: true, dueKm: true, doneDate: true },
     }),
     prisma.fuelLog.groupBy({ by: ["vehicleId"], _max: { odometerKm: true } }),
+    prisma.depot.findMany({ select: { id: true, name: true, lat: true, lng: true } }),
+    loadCrewRules(prisma),
   ]);
   const odometerOf = new Map(odometers.map((o) => [o.vehicleId, o._max.odometerKm ?? null]));
   const fleetAlerts = new Map<string, string[]>();
@@ -611,10 +629,27 @@ export async function loadDayCrewContext(prisma: PrismaClient, isoDate: string):
     people,
     absences: absences.map((a) => ({ ...a, startDate: toIsoDate(a.startDate), endDate: toIsoDate(a.endDate) })),
     incompatibilities,
-    saved,
+    saved: saved.map((s) => ({ vehicleId: s.vehicleId, driverId: s.driverId, crewMateId: s.crewMateId })),
     vehicleUnavailabilities: outages.map((u) => ({ ...u, startDate: toIsoDate(u.startDate), endDate: toIsoDate(u.endDate) })),
+    depots,
+    rules,
   };
-  return { input, plan: resolveDayCrews(input), people: new Map(people.map((p) => [p.id, p])), fleetAlerts };
+  const savedMeta = new Map(saved.map((s) => [s.vehicleId, { id: s.id, updatedAt: s.updatedAt, updatedBy: s.updatedBy?.name ?? null }]));
+  return { input, plan: resolveDayCrews(input), savedMeta, people: new Map(people.map((p) => [p.id, p])), fleetAlerts };
+}
+
+/** Settings of the automatic crews (Paramètres « Équipages »); the schema defaults before the row exists. Read only. */
+export async function loadCrewRules(prisma: Pick<PrismaClient, "appSettings">): Promise<CrewRules> {
+  const row = await prisma.appSettings.findUnique({
+    where: { id: 1 },
+    select: { crewMaxReplacementKm: true, crewMinPairOverlapMin: true, crewReservePerDepot: true },
+  });
+  if (!row) return DEFAULT_CREW_RULES;
+  return {
+    maxReplacementKm: row.crewMaxReplacementKm,
+    minPairOverlapMin: row.crewMinPairOverlapMin,
+    reservePerDepot: row.crewReservePerDepot,
+  };
 }
 
 /** Every vehicle with the crew of isoDate (optimisation, planning view, moves). */

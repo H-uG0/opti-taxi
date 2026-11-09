@@ -7,8 +7,8 @@ import { audit, type AuditEntry } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { hashPassword } from "@/lib/auth/password";
 import { db } from "@/lib/db";
-import { fromIsoDate, todayIso } from "@/lib/time";
-import { toUpcomingRoutes, upcomingRoutesNotice } from "../vehicules/_lib/upcoming-routes";
+import { loadStaffImpact, staffImpactNotice } from "@/lib/staff/impact";
+import { todayIso } from "@/lib/time";
 import { depotChoiceError } from "@/app/(regulator)/depots/options";
 import {
   errorState,
@@ -174,21 +174,20 @@ export async function setDriverActive(driverId: string, active: boolean): Promis
     const events: AuditEntry[] = [{ action: "driver.deactivate", entity: "Driver", entityId: driver.id }];
     if (account && accountDisabled) events.push({ action: "account.deactivate", entity: "User", entityId: account.id });
     await audit(tx, user, events);
-    // Planned routes keep their crew: the regulator re-runs those days.
-    const routes = await tx.route.findMany({
-      where: { serviceDate: { gte: fromIsoDate(todayIso()) }, OR: [{ driverId: driver.id }, { crewMateId: driver.id }] },
-      select: { serviceDate: true, status: true },
-    });
-    return { detached: asDriver.count + asCrewMate.count, accountDisabled, routes };
+    return { detached: asDriver.count + asCrewMate.count, accountDisabled };
   });
   revalidateDriver(driver.id);
+  revalidatePath("/equipages");
+  revalidatePath("/planning");
   if (!result) return successState("Ce chauffeur est déjà désactivé.");
-  const { detached, accountDisabled, routes } = result;
+  const { detached, accountDisabled } = result;
   const parts = ["Chauffeur désactivé."];
   if (detached > 0) parts.push(`Retiré de l'équipage par défaut de ${detached} véhicule${detached > 1 ? "s" : ""}.`);
   if (accountDisabled) parts.push(`Son compte d'accès est désactivé : il ne peut plus se connecter. ${OPEN_SESSION_NOTE}`);
-  const notice = upcomingRoutesNotice(toUpcomingRoutes(routes), "driver");
-  if (notice) parts.push(notice);
+  // Planned routes keep their crew; fixed crews get a replacement for the seat.
+  const impact = await loadStaffImpact(db, [driver.id], todayIso(), null);
+  const notice = staffImpactNotice(impact, "person");
+  if (notice) parts.push(`Les tournées déjà calculées ne changent pas.${notice}`);
   return successState(parts.join(" "));
 }
 
