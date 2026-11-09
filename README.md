@@ -293,10 +293,12 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
   dont 2 samedis) affiche −590 €. Le samedi, 6 véhicules restent mobilisés de 6 h à 18 h pour une
   vingtaine de courses de dialyse ; en semaine, les plannings validés ne dégagent que +499 € sur 16 jours
   et les annulations du jour en retirent 238 € ; ambulances et VSL en ville font surtout des courses de
-  3 à 4 km au forfait. La grille ne connaît pas encore les suppléments « trajet court »,
-  « grande ville » ni les majorations (lot tarifaire TAR-01), et le coût horaire est compté sur toute
-  l'amplitude de la tournée : **jusqu'à ce lot, la marge de la période reste négative sur le tableau de
-  bord de la démonstration.** Les vrais coûts et grilles se saisissent dans Tarifs, Véhicules et
+  3 à 4 km au forfait. Ces chiffres datent d'avant les grilles des conventions de 2025 (lot tarifaire,
+  journal des améliorations : km inclus, « grande ville », trajet court, majorations, retour à vide) :
+  sur les 4 jours de semaine du jeu de base, la marge du planning J+1 passe de +1 156 € à +5 427 €
+  (taxis, VSL positifs ; ambulances proches de zéro). Une simulation `pnpm db:history` antérieure
+  garde les anciens montants tant qu'elle n'est pas relancée. Le coût horaire reste compté sur toute
+  l'amplitude de la tournée. Les vrais coûts et grilles se saisissent dans Tarifs, Véhicules et
   Chauffeurs (le coût d'un chauffeur est celui d'une heure de tournée, amplitude entière).
 - **Limites de débit** (connexion, géocodage) : en mémoire, valables pour une seule instance du web.
   Sur l'hébergeur HDS, les compléter au niveau du proxy : nginx `limit_req` sur toutes les requêtes

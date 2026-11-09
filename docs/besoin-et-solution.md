@@ -61,6 +61,7 @@ L'optimiseur doit respecter des règles réglementaires strictes : un planning 
 | Le transporteur prévient l'accueil du lieu de soins d'un transport partagé | Liste des arrivées partagées par établissement | [Décret 2025-202, art. R. 322-11-7](https://www.legifrance.gouv.fr/codes/section_lc/LEGITEXT000006073189/LEGISCTA000006173384/) |
 | Taxi conventionné (tarifs du 1er novembre 2025) : forfait de 13 € qui inclut les 4 premiers km en charge, tarif kilométrique selon le département de l'ADS, majorations, une facture par patient sur la distance qu'il a parcourue | Estimer le chiffre d'affaires de chaque tournée, patient par patient ; détail dans « Réglementation 2025-2027 » | [Arrêté du 29 juillet 2025 (convention-cadre)](https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000052060568), [ameli](https://www.ameli.fr/taxi-conventionne/textes-reference/convention-nationale-type) |
 | Transport partagé facturé avec un abattement par patient. Taxi : 23 % à 2 patients, 35 % à 3, 37 % à 4 et plus. VSL : 15 % à 2 patients et 33 % à 3 si l'entreprise facture par SEFi avec une flotte géolocalisée certifiée, sinon 23 % et 35 % | Le partage réduit le prix par patient : l'optimiseur doit raisonner en marge, pas en nombre de courses | [Arrêté du 29 juillet 2025](https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000052060568), [ameli, tarifs VSL](https://www.ameli.fr/transporteur-sanitaire/exercice-professionnel/facturation/tarifs/vsl-tarifs-conventionnels) |
+| Ambulance utilisée exceptionnellement pour un transport assis, faute de taxi ou de VSL, facturée au tarif VSL | Proposée par le régulateur pour une course assise non affectée, jamais par l'optimiseur seul ; motif tracé sur la course et compté au tableau de bord | [Protocole du 24 septembre 2025, art. 4.1.1](https://www.legifrance.gouv.fr/jorf/id/JORFTEXT000052304334) |
 | Horaires : arrivée avant le RDV ; fin de séance variable pour le retour | Fenêtres horaires + réoptimisation en journée | — |
 | Chauffeurs : horaires, pauses, qualifications | Contraintes de ressources | À recueillir auprès de V |
 
@@ -460,7 +461,7 @@ Mise à jour le 9 novembre 2026. La première série passe avant tout : au 1er 
 - [ ] Quel logiciel utilisez-vous pour la facturation et la télétransmission (éditeur, produit, version) ? Est-il certifié SEFi ? Quel boîtier de géolocalisation équipe les véhicules, et est-il certifié par l'Assurance maladie ? (inconnu ; aucun lot n'en dépend encore)
 - [ ] Ce logiciel fait-il aussi la régulation, le planning du personnel et l'entretien ? Que lui manque-t-il ? S'il gère déjà le personnel et l'entretien, les lots correspondants d'Opti-Taxi se réduisent à un import.
 - [ ] Sait-il importer des courses planifiées et exporter les courses réalisées (fichier CSV, API) ? Pouvez-vous nous donner un modèle de fichier, colonnes seulement ? (export CSV d'abord : Lomaco, SCR et Saphir ne publient pas d'API)
-- [ ] Vos VSL et ambulances sont-ils en flux certifiés, c'est-à-dire SEFi et géolocalisation certifiée sur tous les véhicules ? Cela fixe le tarif et l'abattement de partage du VSL : 15 % et 33 %, ou 23 % et 35 %. (non certifiés : 23 % et 35 %, comme les grilles fictives de la démo)
+- [ ] Vos VSL et ambulances sont-ils en flux certifiés, c'est-à-dire SEFi et géolocalisation certifiée sur tous les véhicules ? Cela fixe le tarif et l'abattement de partage du VSL : 15 % et 33 %, ou 23 % et 35 %, et le forfait de l'ambulance : 57,39 € ou 45,60 €. (démonstration : certifiée depuis le 01/01/2025, grilles majorées ; la période se saisit dans Grilles tarifaires › Règles de facturation)
 - [ ] Taxis : comment votre éditeur tiendra-t-il SEFi au 1er janvier 2027, alors que le service SEFi Taxis serait fermé depuis le 1er octobre 2025 (à recouper) ?
 - [ ] Recevez-vous des commandes par une plateforme d'établissement (Amblea, LCR_i, Rubis Santé, SPS, plateforme d'un CHU) ? Lesquelles, et pour quelle part des courses ? (aucune : la régulation saisit tout)
 
@@ -501,6 +502,30 @@ Ajoutées après l'appel du 6 novembre (entre parenthèses, l'hypothèse retenue
 - [ ] Quand tout ne tient pas : un patient conduit au centre sans retour prévu compte-t-il comme deux courses non servies ? (oui : laisser un aller ou un retour seul coûte une pénalité de plus, payée une fois par patient ; la priorité par type de soin reste à fixer)
 - [ ] Pause de 20 min dès 6 h de travail (art. L. 3121-16) : les chauffeurs de V sont-ils salariés, artisans ou les deux, et quel accord s'applique (accord-cadre du 4 mai 2000 pour le transport sanitaire) ? Faut-il en plus interdire plus de 6 h de travail d'affilée avant la pause ? (une pause d'au moins 20 min dans toute tournée de plus de 6 h, où qu'elle tombe ; un horaire de plus de 6 h sans pause valable est bloqué sur Équipages)
 - [ ] Temps d'arrêt : combien de minutes pour une prise en charge et une dépose en ambulance, pour un patient en fauteuil ou allongé, et quels établissements sont longs à desservir ? (5 min partout par défaut, comme avant ; le jeu de démonstration met 10 min en ambulance et 5 min de plus à l'hôpital des Calanques)
+
+**Tarifs et facturation (lot tarifaire, 9 novembre 2026)**
+
+Questions du mémo tarifaire ; entre parenthèses, la lecture retenue (Grilles tarifaires › Règles de facturation).
+
+- [ ] Siège : département et commune du siège ? Avec des dépôts dans plusieurs départements, la zone VSL est-elle celle du siège ou celle de chaque établissement ? (siège à Marseille, 13 ; il décide aussi du forfait agglomération des ambulances)
+- [ ] ADS : quel est le département de l'ADS de chaque taxi ? Est-ce bien le « département de rattachement » de la fiche véhicule ? (oui)
+- [ ] TVA : le CA estimé doit-il être TTC ou HT ? Les tarifs VSL sont TTC avec 10 % de TVA, l'ambulance est exonérée, la TVA du taxi n'est pas connue. (TTC)
+- [ ] Retour à vide en taxi : faut-il le compter ? Il concerne dialyse, chimiothérapie et radiothérapie, donc l'essentiel de la patientèle, mais récompense un trajet à vide. Quand un retour est-il « à vide », et avec quelle preuve ? (compté pour l'aller qui termine la tournée et le retour qui la commence)
+- [ ] Retour à vide et majoration de 50 % : se multiplient-ils ou s'additionnent-ils ? (multipliés : 262,59 € au lieu de 238,08 € sur l'exemple T3)
+- [ ] Abattement quand la composition change en route (A avec B, puis B avec C) : compte-t-on les patients distincts ou le plus grand nombre à bord en même temps ? (patients distincts)
+- [ ] Taxi : le détour d'un patient en transport partagé est-il facturable ? (non : distance directe)
+- [ ] Seuil local de l'abattement de 5 % (patient seul sur une longue distance) dans les CPAM 13, 84, 04, 05, 26 et 38 ? (30 km, minimum national)
+- [ ] Supplément local de carence (SX1) : existe-t-il dans ces départements, et pour quel montant ? (aucun)
+- [ ] Supplément taxi « courte distance » de 2 € depuis le 1er août 2026 : la CPAM le confirme-t-elle, et avec quels cumuls ? (non compté)
+- [ ] Arrondis : km entiers ou décimaux, arrondi par ligne ou par facture ? À vérifier sur une facture SEFi ou B2 réelle de V. (km au mètre, facture au centime)
+- [ ] Jours fériés retenus pour la majoration : seulement les fériés légaux ? (les 11 fériés légaux)
+- [ ] VSL et ambulance : la majoration de nuit, de dimanche et de jour férié s'applique-t-elle au trajet court et au TPMR ? L'abattement de partage VSL porte-t-il sur les suppléments et les péages ? (trajet court majoré, TPMR et péages ni majorés ni abattus)
+- [ ] « Forfait spécial » de l'agglomération de Grenoble en ambulance : montant et règle ? (forfait départemental)
+- [ ] Ambulance pour un transport assis : quand l'autoriser, et avec quel code de facturation ? (proposée par le régulateur pour une course assise non affectée, facturée au tarif VSL, comptée au tableau de bord)
+- [ ] VSL à 3 patients : faut-il relever la capacité des VSL de V ? (2 places ; la grille autorise 3)
+- [ ] Péages et TPMR : V suit-il ses péages par course ? A-t-il des véhicules équipés TPMR ? (saisie possible par course ; un VSL équipé dans la démo)
+- [ ] Un distancier local est-il négocié avec la CPAM (convention ambulance, art. 14) ? (distance routière d'OSRM, ou à vol d'oiseau sans OSRM)
+- [ ] Échéances à suivre : décret de géolocalisation (au plus tard le 1er janvier 2027), étape du 1er juillet 2027 (tarif majoré réservé aux flux certifiés de niveau 3 à 5), avenant 12, recours des fédérations taxi contre l'arrêté du 29 juillet 2025, clause de revoyure taxi (31 mars), baisse éventuelle des tarifs ambulance et VSL en 2027.
 
 ## Brief de démarrage pour Claude Code
 
