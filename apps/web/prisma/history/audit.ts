@@ -5,7 +5,8 @@
  * saved plan as runOptimization does), the patients' sharing answers
  * (trip.sharing_accept / trip.sharing_refuse, only for an answer actually
  * saved), « Valider le planning » (plan.validate), the cancellations and
- * hand-overs to a partner company (trip.cancel, as « Annuler ») and the crews'
+ * hand-overs to a partner company (trip.cancel, as « Annuler »), the trips the
+ * regulator freezes on their vehicle (trip.lock, as « Figer ») and the crews'
  * statuses (stop.pickup, stop.dropoff, stop.no_show, written on the trip as
  * the roadmap does). day.ts writes each event in the transaction of its
  * change. Each event carries the instant the change was saved and a "hist-"
@@ -27,6 +28,7 @@ export const SIMULATED_ACTIONS = {
   "trip.sharing_accept": "Trip",
   "trip.sharing_refuse": "Trip",
   "trip.cancel": "Trip",
+  "trip.lock": "Trip",
   "stop.pickup": "Trip",
   "stop.dropoff": "Trip",
   "stop.no_show": "Trip",

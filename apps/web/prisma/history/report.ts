@@ -5,12 +5,21 @@ export type DayReport = {
   date: string;
   /** Why the day was not simulated (left untouched or stopped), null when it was. */
   skipped: string | null;
-  /** Trips generated from the recurrences. */
+  /** Trips of the day: generated from the recurrences, plus the one-off care. */
   trips: number;
+  /** Of which one-off trips (occasional patients, private clients). */
+  oneOff: number;
   /** Dropped off by the crews. */
   realized: number;
-  /** Still open on no route at the end of the day (PLANNED or ASSIGNED): should stay 0. */
+  /** Still open at the end of the day (PLANNED or ASSIGNED) besides `unrecorded`: should stay 0. */
   unassigned: number;
+  /** Trips left « Affectée » because their crew recorded no status that day (about 15 % of the crews). */
+  unrecorded: number;
+  /** Trips frozen by the regulator on their vehicle (patients who ask for their driver). */
+  locked: number;
+  /** Absences and vehicles off the road starting on the day. */
+  absences: number;
+  offRoad: number;
   /** Left out by the last optimization, handed over to a partner company the day before (CANCELLED with a note). */
   handedOver: number;
   /** Cancelled by the patient or the facility (the hand-overs are not counted here). */
@@ -37,8 +46,13 @@ export function emptyDayReport(date: string, skipped: string | null): DayReport 
     date,
     skipped,
     trips: 0,
+    oneOff: 0,
     realized: 0,
     unassigned: 0,
+    unrecorded: 0,
+    locked: 0,
+    absences: 0,
+    offRoad: 0,
     handedOver: 0,
     cancelled: 0,
     noShows: 0,
@@ -55,15 +69,20 @@ export function emptyDayReport(date: string, skipped: string | null): DayReport 
 
 const COLUMNS: { label: string; value: (r: DayReport) => string }[] = [
   { label: "courses", value: (r) => String(r.trips) },
+  { label: "ponct.", value: (r) => String(r.oneOff) },
   { label: "réalisées", value: (r) => String(r.realized) },
+  { label: "sans statut", value: (r) => String(r.unrecorded) },
   { label: "confiées", value: (r) => String(r.handedOver) },
   { label: "annulées", value: (r) => String(r.cancelled) },
   { label: "absents", value: (r) => String(r.noShows) },
   { label: "partagées", value: (r) => String(r.shared) },
   { label: "refus", value: (r) => String(r.refused) },
+  { label: "figées", value: (r) => String(r.locked) },
   { label: "optim.", value: (r) => String(r.runs) },
   { label: "planif.", value: (r) => (r.planningMinutes === null ? "—" : `${Math.round(r.planningMinutes)} min`) },
   { label: "retards", value: (r) => String(r.late) },
+  { label: "absences", value: (r) => String(r.absences) },
+  { label: "garage", value: (r) => String(r.offRoad) },
 ];
 
 /** "Lun 12/10/2026". */
@@ -138,8 +157,13 @@ export function interruptedMessage(date: string, cause: string, simulatedDays: n
 export function totalReport(reports: readonly DayReport[]): Omit<DayReport, "date" | "skipped" | "planningMinutes"> {
   const total = {
     trips: 0,
+    oneOff: 0,
     realized: 0,
     unassigned: 0,
+    unrecorded: 0,
+    locked: 0,
+    absences: 0,
+    offRoad: 0,
     handedOver: 0,
     cancelled: 0,
     noShows: 0,

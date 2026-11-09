@@ -204,6 +204,14 @@ export function KpiTable({
               ) : day.date === today ? (
                 <span className="ml-1.5 text-[11px] font-semibold text-sky-700">auj.</span>
               ) : null}
+              {day.simulated ? (
+                <span
+                  className="ml-1.5 rounded-sm bg-violet-100 px-1 py-px text-[11px] font-semibold text-violet-800"
+                  title="Journée produite par la simulation d'historique (pnpm db:history) : retards et temps de planification sont des paramètres, pas des mesures"
+                >
+                  simulé
+                </span>
+              ) : null}
               {day.matrixSources.length > 0 ? (
                 <span className={cn("block text-[11px]", TONES[sources.tone])} title={sources.title}>
                   {sources.text}

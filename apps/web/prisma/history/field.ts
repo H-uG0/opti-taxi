@@ -2,6 +2,8 @@
  * What happened on the road (pure, unit-tested): cancellations, absent
  * patients and the times the crews recorded on the roadmap (/chauffeur).
  *
+ * - About 85 % of the crews record their statuses (crewRecordsStatuses); the
+ *   others record nothing that day.
  * - « Pris en charge » is tapped once the patient is on board (planned
  *   departure from the pickup stop), « Déposé » on arrival at the drop-off.
  * - « Patient absent » is tapped on the pickup stop after waiting a few
@@ -59,7 +61,19 @@ export const FIELD_BEHAVIOUR = {
   minTimeRatio: 0.8,
   /** Two-person crew (ambulance): share of the statuses the crew mate taps rather than the driver. */
   crewMateTaps: 0.3,
+  /**
+   * Vehicle and day: the crew records its statuses on the roadmap. The others
+   * (forgotten phone, a crew that does not use the app yet) record none: their
+   * trips stay « Affectée », and the dashboard leaves the vehicle out of the
+   * realized indicators (« véhicules sans statut saisi »).
+   */
+  crewRecordsStatuses: 0.85,
 } as const;
+
+/** Whether the crew of `vehicleId` records its statuses on `isoDate` (stable for the vehicle and the day). */
+export function crewRecordsStatuses(isoDate: string, vehicleId: string): boolean {
+  return unitFromKey(`records:${isoDate}:${vehicleId}`) < FIELD_BEHAVIOUR.crewRecordsStatuses;
+}
 
 /** Trips that may still be cancelled or carried. */
 const OPEN_STATUSES: readonly TripStatus[] = ["PLANNED", "ASSIGNED"];
@@ -115,9 +129,10 @@ export type DayEvents = {
 /**
  * Cancellations and absences of a service day. Only trips still open
  * (PLANNED or ASSIGNED) are concerned; only a trip on a route can be
- * declared absent (the crew taps it on the pickup stop).
+ * declared absent (the crew taps it on the pickup stop), and not on a route
+ * of `silentRouteIds`, whose crew records no status that day.
  */
-export function decideDayEvents(trips: readonly DayTrip[], isoDate: string): DayEvents {
+export function decideDayEvents(trips: readonly DayTrip[], isoDate: string, silentRouteIds: ReadonlySet<string> = new Set()): DayEvents {
   const open = [...trips].filter((trip) => OPEN_STATUSES.includes(trip.status)).sort((a, b) => a.id.localeCompare(b.id));
   const noShows = new Set<string>();
   const cancellations = new Map<string, CancellationReason>();
@@ -128,7 +143,8 @@ export function decideDayEvents(trips: readonly DayTrip[], isoDate: string): Day
       for (const trip of open) if (trip.patientId === patientId) cancellations.set(trip.id, "ON_THE_DAY");
     }
   }
-  const carried = (trip: DayTrip) => trip.routeId !== null && trip.status === "ASSIGNED" && !cancellations.has(trip.id);
+  const carried = (trip: DayTrip) =>
+    trip.routeId !== null && !silentRouteIds.has(trip.routeId) && trip.status === "ASSIGNED" && !cancellations.has(trip.id);
 
   for (const trip of open) {
     if (trip.direction !== "OUTBOUND" || !carried(trip)) continue;

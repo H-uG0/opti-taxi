@@ -5,6 +5,7 @@ import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { Badge } from "@/components/ui/badge";
+import { isSimulatedId } from "@/lib/simulated";
 import { LinkButton } from "@/components/ui/button";
 import { EmptyState, PageHeader } from "@/components/ui/layout";
 import { AvailabilityNotes } from "@/components/planning/availability-notes";
@@ -131,6 +132,13 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
             {view.dayStatus === "VALIDATED" ? <Badge tone="success">Validé</Badge> : null}
             {view.dayStatus === "PROPOSED" ? <Badge tone="info">Proposé</Badge> : null}
             {view.dayStatus === "MIXED" ? <Badge tone="warning">Partiellement validé</Badge> : null}
+            {isSimulatedId(view.planRun?.id ?? view.lastRun?.id) ? (
+              <Badge tone="simulated">
+                <span title="Journée produite par la simulation d'historique (pnpm db:history) : données fictives, statuts et retards simulés">
+                  Journée simulée
+                </span>
+              </Badge>
+            ) : null}
           </span>
         }
         description={headerDescription(view, availableVehicles)}

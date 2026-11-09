@@ -91,6 +91,10 @@ function context(prisma: PrismaClient, plan: Partial<PlanResponse> = {}): DayCon
     regulatorId: "regulator-1",
     driverAccounts: new Map(),
     lateCancellationHours: 2,
+    pool: [],
+    facilities: new Map(),
+    staff: [],
+    vehicleIds: [],
   };
 }
 

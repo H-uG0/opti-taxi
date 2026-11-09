@@ -116,3 +116,17 @@ describe("rows the simulation owns", () => {
     for (const trip of trips) expect(matches(own.trips, trip) !== matches(foreign.trips, trip)).toBe(true);
   });
 });
+
+describe("rows of the date found by their id", () => {
+  const own = simulatedRowsWhere(day);
+
+  it("deletes the one-off prescriptions, absences and vehicles off the road the simulation wrote for the date", () => {
+    expect(matches(own.prescriptions, { id: "hist-20261012-rx07" })).toBe(true);
+    expect(matches(own.prescriptions, { id: "hist-20261013-rx07" })).toBe(false);
+    expect(matches(own.prescriptions, { id: "cmvziv4z5003obers45zpe61a" })).toBe(false);
+    expect(matches(own.absences, { id: "hist-20261012-abs03" })).toBe(true);
+    expect(matches(own.absences, { id: "hist-20261013-abs03" })).toBe(false);
+    expect(matches(own.unavailabilities, { id: "hist-20261012-una01" })).toBe(true);
+    expect(matches(own.unavailabilities, { id: "cmvzuna" })).toBe(false);
+  });
+});

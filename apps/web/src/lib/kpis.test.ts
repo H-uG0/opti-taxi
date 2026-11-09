@@ -688,3 +688,17 @@ describe("distance sources", () => {
     expect(mixedDistanceSources(summarizePeriod(days))).toBe(true);
   });
 });
+
+describe("simulated days", () => {
+  it("marks a day « simulé » when one of its runs comes from the history simulation, and counts them over the period", () => {
+    const run = (serviceDate: string, simulated?: boolean): KpiRun => ({ serviceDate, startedAt: paris(serviceDate, "06:00"), simulated });
+    const data: KpiData = {
+      routes: [route({ serviceDate: "2026-11-02" }), route({ serviceDate: "2026-11-03" })],
+      trips: [],
+      runs: [run("2026-11-02", true), run("2026-11-02", true), run("2026-11-03", false), run("2026-11-01")],
+    };
+    const days = computeKpisByDay("2026-11-01", "2026-11-03", data, TODAY);
+    expect(days.map((d) => d.simulated)).toEqual([false, true, false]);
+    expect(summarizePeriod(days).simulatedDays).toBe(1);
+  });
+});

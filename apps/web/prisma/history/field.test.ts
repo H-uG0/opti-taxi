@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Rng } from "../seed/random";
 import {
   cancellationsBeforePlanning,
+  crewRecordsStatuses,
   decideDayEvents,
   earliestTap,
   FIELD_BEHAVIOUR,
@@ -287,5 +288,23 @@ describe("stopRecorder", () => {
     expect(stopRecorder({ driverId: "driver-2", crewMateId: "mate-1" }, accounts, "trip-1", "DROPOFF")).toBe("user-2");
     expect(stopRecorder({ driverId: null, crewMateId: null }, accounts, "trip-1", "DROPOFF")).toBeNull();
     expect(stopRecorder({ driverId: "driver-2", crewMateId: null }, accounts, "trip-1", "DROPOFF")).toBeNull();
+  });
+});
+
+describe("crews that record their statuses", () => {
+  it("are about 85 % of the vehicles, the same for a vehicle and a day on every run", () => {
+    const vehicles = Array.from({ length: 2000 }, (_, i) => `vehicle-${i}`);
+    const share = vehicles.filter((v) => crewRecordsStatuses("2026-10-12", v)).length / vehicles.length;
+    expect(share).toBeGreaterThan(FIELD_BEHAVIOUR.crewRecordsStatuses - 0.03);
+    expect(share).toBeLessThan(FIELD_BEHAVIOUR.crewRecordsStatuses + 0.03);
+    expect(crewRecordsStatuses("2026-10-12", "vehicle-1")).toBe(crewRecordsStatuses("2026-10-12", "vehicle-1"));
+  });
+
+  it("declare no absent patient on the route of a crew that records nothing, nor the return it would cancel", () => {
+    const silentDay = Array.from({ length: 3000 }, (_, i) => patientDay(i, "route-silent")).flat();
+    const silent = decideDayEvents(silentDay, "2026-10-12", new Set(["route-silent"]));
+    expect(silent.noShows.size).toBe(0);
+    expect([...silent.cancellations.values()].includes("AFTER_NO_SHOW")).toBe(false);
+    expect(decideDayEvents(silentDay, "2026-10-12").noShows.size).toBeGreaterThan(0);
   });
 });

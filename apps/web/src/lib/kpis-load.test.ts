@@ -55,7 +55,10 @@ const rows: KpiQueryRows = {
       stops: [],
     },
   ],
-  runs: [{ serviceDate: day, startedAt }],
+  runs: [
+    { id: "cmvzrun", serviceDate: day, startedAt },
+    { id: "hist-20261012-run1", serviceDate: day, startedAt },
+  ],
 };
 
 describe("toKpiData", () => {
@@ -110,7 +113,11 @@ describe("toKpiData", () => {
           dropoffCompletedAt: null,
         },
       ],
-      runs: [{ serviceDate: "2026-10-12", startedAt }],
+      // A run of the history simulation (id "hist-…") is flagged: its day shows « simulé ».
+      runs: [
+        { serviceDate: "2026-10-12", startedAt, simulated: false },
+        { serviceDate: "2026-10-12", startedAt, simulated: true },
+      ],
     });
   });
 });
@@ -138,6 +145,6 @@ describe("loadKpiRows", () => {
       where: { serviceDate: range, routeId: { not: null }, status: { in: ["ASSIGNED", "PICKED_UP", "DROPPED_OFF"] } },
       select: { stops: { where: { kind: "DROPOFF", completedAt: { not: null } }, select: { completedAt: true } } },
     });
-    expect(calls.runs).toEqual({ where: { serviceDate: range }, select: { serviceDate: true, startedAt: true } });
+    expect(calls.runs).toEqual({ where: { serviceDate: range }, select: { id: true, serviceDate: true, startedAt: true } });
   });
 });

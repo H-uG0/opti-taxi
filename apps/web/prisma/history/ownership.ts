@@ -10,7 +10,8 @@
  * app's events are never deleted.
  */
 import type { Prisma } from "@prisma/client";
-import { HISTORY_ID_PREFIX } from "./ids";
+import { toIsoDate } from "@/lib/time";
+import { HISTORY_ID_PREFIX, historyDatePrefix } from "./ids";
 
 const ownId = { startsWith: HISTORY_ID_PREFIX };
 
@@ -26,13 +27,26 @@ export type OwnershipFilters = {
   runs: Prisma.OptimizationRunWhereInput;
 };
 
-/** Rows of `serviceDate` created by the simulation (what a re-run deletes; stops go with routes and trips). */
-export function simulatedRowsWhere(serviceDate: Date): OwnershipFilters & { events: Prisma.AuditEventWhereInput } {
+/**
+ * Rows of `serviceDate` created by the simulation (what a re-run deletes; stops go with routes and trips):
+ * also the one-off prescriptions of its trips, and the absences and vehicles off the road that start on
+ * the date, found by the date in their id (they have no service date).
+ */
+export function simulatedRowsWhere(serviceDate: Date): OwnershipFilters & {
+  events: Prisma.AuditEventWhereInput;
+  prescriptions: Prisma.PrescriptionWhereInput;
+  absences: Prisma.StaffAbsenceWhereInput;
+  unavailabilities: Prisma.VehicleUnavailabilityWhereInput;
+} {
+  const ofDate = { startsWith: historyDatePrefix(toIsoDate(serviceDate)) };
   return {
     trips: { serviceDate, id: ownId },
     routes: { serviceDate, optimizationRunId: ownId },
     runs: { serviceDate, id: ownId },
     events: { serviceDate, id: ownId },
+    prescriptions: { id: ofDate },
+    absences: { id: ofDate },
+    unavailabilities: { id: ofDate },
   };
 }
 

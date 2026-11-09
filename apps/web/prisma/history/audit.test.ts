@@ -41,6 +41,8 @@ describe("DayAuditTrail", () => {
       "trip.sharing_accept": "Trip",
       "trip.sharing_refuse": "Trip",
       "trip.cancel": "Trip",
+      // « Figer » in the planning (lockTrip): same action and entity.
+      "trip.lock": "Trip",
       "stop.pickup": "Trip",
       "stop.dropoff": "Trip",
       "stop.no_show": "Trip",

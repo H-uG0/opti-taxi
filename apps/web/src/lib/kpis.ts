@@ -47,7 +47,8 @@ export type KpiTrip = {
   dropoffCompletedAt: Date | null;
 };
 
-export type KpiRun = { serviceDate: string; startedAt: Date };
+/** `simulated`: a run of the history simulation (pnpm db:history), whose day is marked « simulé ». */
+export type KpiRun = { serviceDate: string; startedAt: Date; simulated?: boolean };
 
 export type KpiData = { routes: KpiRoute[]; trips: KpiTrip[]; runs: KpiRun[] };
 
@@ -136,6 +137,11 @@ export type DayKpis = KpiTotals &
     planningMinutes: number | null;
     /** Distance sources of the day's routes, sorted (km and planned delays compare only within one). */
     matrixSources: string[];
+    /**
+     * The day was produced by the history simulation (pnpm db:history): its
+     * lateness and planning time are parameters of the simulation, not measurements.
+     */
+    simulated: boolean;
   };
 
 export type PeriodKpis = KpiTotals &
@@ -157,6 +163,8 @@ export type PeriodKpis = KpiTotals &
     averagePlanningMinutes: number | null;
     /** Distance sources of the period's routes, sorted: more than one, its days do not compare. */
     matrixSources: string[];
+    /** Days produced by the history simulation. */
+    simulatedDays: number;
   };
 
 // ---------------------------------------------------------------------------
@@ -363,6 +371,7 @@ export function computeDayKpis(
     // A validation older than the first run means the routes did not come from these runs.
     planningMinutes: elapsed !== null && elapsed >= 0 ? elapsed : null,
     matrixSources: distinctSources(routes),
+    simulated: runs.some((run) => run.simulated === true),
   };
 }
 
@@ -422,6 +431,7 @@ export function summarizePeriod(days: readonly DayKpis[]): PeriodKpis {
     measuredPlanningDays: measured.length,
     averagePlanningMinutes: ratio(planningSum, measured.length),
     matrixSources: [...new Set(days.flatMap((day) => day.matrixSources))].sort(),
+    simulatedDays: days.filter((d) => d.simulated).length,
     ...totals,
     ...deriveRates(totals),
   };

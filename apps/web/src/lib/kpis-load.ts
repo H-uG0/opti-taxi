@@ -11,6 +11,7 @@
  */
 import type { PrismaClient } from "@prisma/client";
 import { SERVED_TRIP_STATUSES, type KpiData, type KpiRoute, type KpiTrip } from "@/lib/kpis";
+import { isSimulatedId } from "@/lib/simulated";
 import { fromIsoDate, toIsoDate } from "@/lib/time";
 
 /** The models the loader reads. */
@@ -30,7 +31,7 @@ export type KpiQueryRows = {
     /** Completed DROPOFF stops of the trip. */
     stops: { completedAt: Date | null }[];
   })[];
-  runs: { serviceDate: Date; startedAt: Date }[];
+  runs: { id: string; serviceDate: Date; startedAt: Date }[];
 };
 
 export async function loadKpiRows(prisma: KpiClient, from: string, to: string): Promise<KpiData> {
@@ -73,7 +74,7 @@ export async function loadKpiRows(prisma: KpiClient, from: string, to: string): 
     }),
     prisma.optimizationRun.findMany({
       where: { serviceDate },
-      select: { serviceDate: true, startedAt: true },
+      select: { id: true, serviceDate: true, startedAt: true },
     }),
   ]);
 
@@ -100,6 +101,7 @@ export function toKpiData({ routes, recorded, trips, runs }: KpiQueryRows): KpiD
         null,
       ),
     })),
-    runs: runs.map((run) => ({ serviceDate: toIsoDate(run.serviceDate), startedAt: run.startedAt })),
+    // A run of the history simulation marks its day « simulé » (ids "hist-", lib/simulated.ts).
+    runs: runs.map((run) => ({ serviceDate: toIsoDate(run.serviceDate), startedAt: run.startedAt, simulated: isSimulatedId(run.id) })),
   };
 }

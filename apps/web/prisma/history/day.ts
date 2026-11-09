@@ -45,10 +45,12 @@ import {
   validationInstant,
 } from "./calendar";
 import { DayAuditTrail, sharingAuditAction, stopAuditAction, type AuditActor } from "./audit";
+import type { AnyFacilityKey } from "../seed/data";
 import {
   AFTER_NO_SHOW_NOTE,
   AFTER_NO_SHOW_REASON,
   cancellationsBeforePlanning,
+  crewRecordsStatuses,
   decideDayEvents,
   fieldStatusUpdates,
   patientCancellationReason,
@@ -58,7 +60,10 @@ import {
 import { rngFor } from "./hash";
 import { historyRunId, historyTripId } from "./ids";
 import { withTimeLimit, type OptimizerClient } from "./optimizer";
+import { planOneOffDay, type DestinationRow, type PoolPatientRow } from "./one-off";
 import { foreignRowsWhere, simulatedRowsWhere } from "./ownership";
+import { planStaffEvents, type StaffMember } from "./staff";
+import { tripsToLock } from "./tweaks";
 import { handOverCancellation, MAX_RUNS_PER_DAY, nextPlanningStep, unplacedTripIds } from "./planning";
 import { emptyDayReport, type DayReport, type ForeignRowCounts } from "./report";
 import { answerData, isHabitualRefuser, knownRefusal, sharingAnswer, UNANSWERED } from "./sharing";
@@ -88,6 +93,12 @@ export type DayContext = {
   driverAccounts: ReadonlyMap<string, string>;
   /** Setting lateCancellationHours: a cancellation closer than this to the pickup is late. */
   lateCancellationHours: number;
+  /** The seed's occasional patients (one-off care, one-off.ts) and the facilities they go to, by seed key. */
+  pool: readonly PoolPatientRow[];
+  facilities: ReadonlyMap<AnyFacilityKey, DestinationRow>;
+  /** Active people and vehicles: absences and vehicles off the road of the day (staff.ts). */
+  staff: readonly StaffMember[];
+  vehicleIds: readonly string[];
 };
 
 export type RowCounts = { trips: number; routes: number; runs: number };
@@ -141,10 +152,13 @@ export async function foreignDates(prisma: PrismaClient, from: string, to: strin
  */
 export async function clearSimulatedDay(prisma: PrismaClient, isoDate: string): Promise<ClearedRows> {
   const where = simulatedRowsWhere(fromIsoDate(isoDate));
-  const [, routes, trips, runs, events] = await prisma.$transaction([
+  const [, routes, trips, , , , runs, events] = await prisma.$transaction([
     liftAuditGuard(prisma),
     prisma.route.deleteMany({ where: where.routes }),
     prisma.trip.deleteMany({ where: where.trips }),
+    prisma.prescription.deleteMany({ where: where.prescriptions }),
+    prisma.staffAbsence.deleteMany({ where: where.absences }),
+    prisma.vehicleUnavailability.deleteMany({ where: where.unavailabilities }),
     prisma.optimizationRun.deleteMany({ where: where.runs }),
     prisma.auditEvent.deleteMany({ where: where.events }),
     restoreAuditGuard(prisma),
@@ -316,14 +330,47 @@ async function handOverUnplaced(
   return { handedOver: ids.length, lastAt: instants.at(-1) ?? null };
 }
 
+/**
+ * « Figer » after the first plan: the trips of the patients who ask for their
+ * usual driver stay on the vehicle the plan gave them (tweaks.ts), traced
+ * trip.lock like the planning's action, a minute or two after the plan.
+ */
+async function lockPreferredDrivers(ctx: DayContext, trail: DayAuditTrail, serviceDate: Date, after: Date, rng: Rng): Promise<number> {
+  const { prisma } = ctx;
+  const trips = await prisma.trip.findMany({
+    where: { serviceDate, status: "ASSIGNED", routeId: { not: null } },
+    select: { id: true, patientId: true, recurrenceId: true, lockedVehicleId: true, route: { select: { vehicleId: true } } },
+  });
+  const locks = tripsToLock(trips.map((t) => ({ ...t, vehicleId: t.route?.vehicleId ?? null })));
+  if (locks.length === 0) return 0;
+  let at = new Date(after.getTime() + rng.int(40, 90) * 1000);
+  const events: Prisma.AuditEventCreateManyInput[] = [];
+  await prisma.$transaction(async (tx) => {
+    for (const lock of locks) {
+      const { count } = await tx.trip.updateMany({
+        where: { id: lock.id, lockedVehicleId: null, route: { is: { vehicleId: lock.vehicleId } } },
+        data: { lockedVehicleId: lock.vehicleId },
+      });
+      if (count === 0) continue;
+      events.push(trail.event(regulator(ctx), "trip.lock", lock.id, at));
+      at = new Date(at.getTime() + rng.int(10, 30) * 1000);
+    }
+    if (events.length > 0) await tx.auditEvent.createMany({ data: events });
+  });
+  return events.length;
+}
+
 // ---------------------------------------------------------------------------
 // The day itself
 
-type FieldOutcome = { noShows: number; late: number; refreshed: number; notRefreshed: number };
+type FieldOutcome = { noShows: number; late: number; refreshed: number; notRefreshed: number; unrecorded: number };
 
 async function simulateField(ctx: DayContext, trail: DayAuditTrail, isoDate: string): Promise<FieldOutcome> {
   const { prisma } = ctx;
   const serviceDate = fromIsoDate(isoDate);
+  // Crews that record no status today (crewRecordsStatuses): no absence is declared on their routes either.
+  const dayRoutes = await prisma.route.findMany({ where: { serviceDate }, select: { id: true, vehicleId: true } });
+  const silentRouteIds = new Set(dayRoutes.filter((r) => !crewRecordsStatuses(isoDate, r.vehicleId)).map((r) => r.id));
   const trips = await prisma.trip.findMany({
     where: { serviceDate },
     select: {
@@ -340,7 +387,7 @@ async function simulateField(ctx: DayContext, trail: DayAuditTrail, isoDate: str
     },
     orderBy: { id: "asc" },
   });
-  const events = decideDayEvents(trips, isoDate);
+  const events = decideDayEvents(trips, isoDate, silentRouteIds);
 
   // « Annuler » in « Courses »: the trip leaves its route; the routes it left are then
   // recomputed. Traced trip.cancel early in the morning for a cancellation by phone; a
@@ -379,7 +426,7 @@ async function simulateField(ctx: DayContext, trail: DayAuditTrail, isoDate: str
 
   // The crews' statuses, route by route.
   const routes = await prisma.route.findMany({
-    where: { serviceDate },
+    where: { serviceDate, id: { notIn: [...silentRouteIds] } },
     select: {
       vehicleId: true,
       driverId: true,
@@ -439,8 +486,9 @@ async function simulateField(ctx: DayContext, trail: DayAuditTrail, isoDate: str
   if (audits.length > 0) writes.push(prisma.auditEvent.createMany({ data: audits }));
   await prisma.$transaction(writes);
 
+  const unrecorded = await prisma.trip.count({ where: { serviceDate, status: "ASSIGNED", routeId: { in: [...silentRouteIds] } } });
   // kept: routes left with their stored times (optimizer unavailable or in error), simulated as stored.
-  return { noShows: events.noShows.size, late, refreshed: refresh.refreshed, notRefreshed: refresh.kept };
+  return { noShows: events.noShows.size, late, refreshed: refresh.refreshed, notRefreshed: refresh.kept, unrecorded };
 }
 
 // ---------------------------------------------------------------------------
@@ -454,12 +502,21 @@ export async function simulateDay(ctx: DayContext, isoDate: string): Promise<Day
 
   // 1. Trips generated from the recurrences.
   const generatedAt = tripGenerationInstant(isoDate, rngFor(ctx.seed, isoDate, "generation"));
-  const trips = planTripsFromRecurrences(ctx.recurrences, isoDate, isoDate).map((trip) => {
+  const trips: (Prisma.TripCreateManyInput & { id: string })[] = planTripsFromRecurrences(ctx.recurrences, isoDate, isoDate).map((trip) => {
     if (!trip.recurrenceId) throw new Error("Course générée sans récurrence");
     return { ...trip, id: historyTripId(isoDate, trip.recurrenceId, trip.direction), createdAt: generatedAt, updatedAt: generatedAt };
   });
+  // The one-off care booked for the day (occasional patients), each with its one-off prescription.
+  const oneOff = planOneOffDay(ctx.seed, isoDate, ctx.pool, ctx.facilities);
+  trips.push(...oneOff.trips.map((trip) => ({ ...trip, createdAt: generatedAt, updatedAt: generatedAt })));
   if (trips.length === 0) return emptyDayReport(isoDate, "aucune course prévue par les récurrences");
+  if (oneOff.prescriptions.length > 0) await prisma.prescription.createMany({ data: oneOff.prescriptions });
   await prisma.trip.createMany({ data: trips });
+
+  // Absences and vehicles off the road that start today, known before the planning (staff.ts).
+  const staff = planStaffEvents(isoDate, ctx.staff, ctx.vehicleIds);
+  if (staff.absences.length > 0) await prisma.staffAbsence.createMany({ data: staff.absences });
+  if (staff.unavailabilities.length > 0) await prisma.vehicleUnavailability.createMany({ data: staff.unavailabilities });
 
   // 2. The day before: cancellations by phone (traced trip.cancel, a minute apart
   // before the first optimization), then the refusals the regulator already knows.
@@ -514,12 +571,14 @@ export async function simulateDay(ctx: DayContext, isoDate: string): Promise<Day
   let lastEventAt = firstRunAt;
   let lastFinishedAt = firstRunAt;
   let runs = 0;
+  let locked = 0;
   for (;;) {
     const outcome = await optimizeOnce(ctx, trail, isoDate, runs + 1, startedAt, planning);
     if (!outcome.ok) return giveUpDay(prisma, isoDate, outcome.error);
     runs++;
     lastFinishedAt = outcome.finishedAt;
     lastEventAt = outcome.finishedAt;
+    if (runs === 1) locked = await lockPreferredDrivers(ctx, trail, serviceDate, outcome.finishedAt, planning);
     const answers = await answerProposals(ctx, trail, serviceDate, outcome.finishedAt, planning);
     if (answers.lastAt) lastEventAt = answers.lastAt;
     const step = nextPlanningStep(runs, answers.refused);
@@ -565,9 +624,15 @@ export async function simulateDay(ctx: DayContext, isoDate: string): Promise<Day
     date: isoDate,
     skipped: null,
     trips: trips.length,
+    oneOff: oneOff.trips.length,
     realized: count("DROPPED_OFF"),
-    // Trips still open once the day is over: 0 unless something above went wrong (shown on the day's line).
-    unassigned: count("PLANNED") + count("ASSIGNED"),
+    // Trips still open once the day is over, besides those of the crews that recorded nothing:
+    // 0 unless something above went wrong (shown on the day's line).
+    unassigned: count("PLANNED") + count("ASSIGNED") - field.unrecorded,
+    unrecorded: field.unrecorded,
+    locked,
+    absences: staff.absences.length,
+    offRoad: staff.unavailabilities.length,
     handedOver: handOver.handedOver,
     cancelled: count("CANCELLED") - handOver.handedOver,
     noShows: count("NO_SHOW"),

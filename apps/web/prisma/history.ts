@@ -1,11 +1,17 @@
 /**
  * Development history: simulates the working days before today as if V had
  * planned them with the tool, so that /tableau-de-bord has weeks to show.
- * For each day: trips generated from the recurrences, « Optimiser demain »
- * the evening before (real optimizer, real savePlan), sharing answers, a
+ * For each day: trips generated from the recurrences and the one-off care of
+ * the seed's occasional patients, absences and vehicles off the road,
+ * « Optimiser demain » the evening before (real optimizer, real savePlan),
+ * trips frozen for the patients who ask for their driver, sharing answers, a
  * re-optimization after each round with a refusal, the trips no plan could
- * place handed over to a partner company, validation, then the statuses the
- * crews tap on the roadmap (pickups, drop-offs, absences, cancellations).
+ * place handed over to a partner company (« Confiée à un confrère »),
+ * validation, then the statuses about 85 % of the crews tap on the roadmap
+ * (pickups, drop-offs, absences, cancellations). Then the fill-ups and
+ * odometer readings are rebuilt from the simulated km (history/fuel.ts).
+ * The dashboard marks these days « simulé »: their lateness and planning
+ * time are parameters of the simulation, not measurements.
  *
  * Run with `pnpm db:history [--days N] [--budget S]` (tsx prisma/history.ts);
  * the optimizer must be running (OPTIMIZER_URL, default http://localhost:8100).
@@ -32,7 +38,11 @@ import {
 import { computeKpisByDay, summarizePeriod } from "@/lib/kpis";
 import { loadKpiRows } from "@/lib/kpis-load";
 import { logError } from "@/lib/log";
-import { addDays, formatShortDate, todayIso } from "@/lib/time";
+import { formatAddress } from "@/lib/domain/rules";
+import { addDays, formatShortDate, fromIsoDate, isoWeekday, todayIso, toIsoDate } from "@/lib/time";
+import { fuelProfileOf, FUEL_LOG_SEED_PREFIX } from "./seed/costs";
+import { FACILITIES, ONE_OFF_FACILITIES, type AnyFacilityKey } from "./seed/data";
+import { OCCASIONAL_ID_PREFIX } from "./seed/one-off";
 import { pickSimulationDates } from "./history/calendar";
 import {
   clearSimulatedDay,
@@ -44,6 +54,10 @@ import {
   type RowCounts,
 } from "./history/day";
 import { HistoryError } from "./history/errors";
+import { dailyKm, nominalKm, rebuildFuelLog } from "./history/fuel";
+import { rngFor } from "./history/hash";
+import { historyFuelLogId, isHistoryId } from "./history/ids";
+import type { DestinationRow } from "./history/one-off";
 import { periodSummaryLines } from "./history/kpis";
 import { createOptimizerClient, optimizerBaseUrl } from "./history/optimizer";
 import { HISTORY_USAGE, parseHistoryArgs } from "./history/options";
@@ -120,6 +134,107 @@ async function replaceDay(ctx: DayContext, date: string, removed: ClearedRows, s
   }
 }
 
+/**
+ * What the simulated days draw from, besides the recurrences: the seed's
+ * occasional patients and the facilities of their care (by the seed's names),
+ * the active people and vehicles.
+ */
+async function loadDayResources(): Promise<Pick<DayContext, "pool" | "facilities" | "staff" | "vehicleIds">> {
+  const [pool, facilityRows, staff, vehicles] = await Promise.all([
+    prisma.patient.findMany({
+      where: { id: { startsWith: OCCASIONAL_ID_PREFIX }, active: true },
+      select: { id: true, mobility: true, address: true, postalCode: true, city: true, lat: true, lng: true },
+      orderBy: { id: "asc" },
+    }),
+    prisma.facility.findMany({ where: { active: true }, select: { id: true, name: true, address: true, postalCode: true, city: true, lat: true, lng: true } }),
+    prisma.driver.findMany({ where: { active: true }, select: { id: true, workDays: true }, orderBy: { id: "asc" } }),
+    prisma.vehicle.findMany({ where: { active: true }, select: { id: true }, orderBy: { id: "asc" } }),
+  ]);
+  const byName = new Map(facilityRows.map((f) => [f.name, f]));
+  const facilities = new Map<AnyFacilityKey, DestinationRow>();
+  for (const [key, def] of [...Object.entries(FACILITIES), ...Object.entries(ONE_OFF_FACILITIES)]) {
+    const row = byName.get(def.name);
+    if (row) facilities.set(key as AnyFacilityKey, { id: row.id, address: formatAddress(row), lat: row.lat, lng: row.lng });
+  }
+  return { pool, facilities, staff, vehicleIds: vehicles.map((v) => v.id) };
+}
+
+/** Km a vehicle is assumed to drive on a working day when nothing is known (the seed's fill-ups: about 90 km). */
+const DEFAULT_DAILY_KM = 90;
+
+/**
+ * Rebuilds each vehicle's fill-ups of the window (fuel.ts) from the km of
+ * its routes on the simulated days. Only fill-ups the seed or a simulation
+ * wrote are replaced; a vehicle with a fill-up recorded in the app in the
+ * window is left as it is.
+ */
+async function rebuildFuelLogs(simulated: ReadonlySet<string>, today: string): Promise<{ vehicles: number; fills: number; leftAlone: number }> {
+  const sorted = [...simulated].sort();
+  const yesterday = addDays(today, -1);
+  const defaultFrom = [addDays(today, -FUEL_WINDOW_DAYS), addDays(sorted[0] ?? today, -7)].sort()[0] ?? addDays(today, -FUEL_WINDOW_DAYS);
+  const owned = (id: string) => id.startsWith(FUEL_LOG_SEED_PREFIX) || isHistoryId(id);
+
+  const [vehicles, fills] = await Promise.all([
+    prisma.vehicle.findMany({ select: { id: true, type: true, energy: true } }),
+    prisma.fuelLog.findMany({ where: { date: { lte: fromIsoDate(yesterday) } }, select: { id: true, vehicleId: true, date: true, odometerKm: true } }),
+  ]);
+  // The window of a vehicle starts with its oldest fill-up the seed or a simulation wrote, the simulated days at the latest.
+  const earliest = fills.filter((f) => owned(f.id)).reduce((min, f) => (toIsoDate(f.date) < min ? toIsoDate(f.date) : min), defaultFrom);
+  const routes = await prisma.route.findMany({
+    where: { serviceDate: { gte: fromIsoDate(earliest), lte: fromIsoDate(yesterday) }, stops: { some: {} } },
+    select: { vehicleId: true, serviceDate: true, distanceKm: true },
+  });
+  let rebuilt = 0;
+  let written = 0;
+  let leftAlone = 0;
+  for (const vehicle of vehicles) {
+    const all = fills.filter((f) => f.vehicleId === vehicle.id);
+    const own = all.filter((f) => owned(f.id));
+    if (own.length === 0) continue;
+    const from = own.reduce((min, f) => (toIsoDate(f.date) < min ? toIsoDate(f.date) : min), defaultFrom);
+    if (all.some((f) => !owned(f.id) && toIsoDate(f.date) >= from)) {
+      leftAlone++;
+      continue;
+    }
+    const days: string[] = [];
+    for (let day = from; day <= yesterday; day = addDays(day, 1)) days.push(day);
+    const routeKm = new Map<string, number>();
+    for (const route of routes.filter((r) => r.vehicleId === vehicle.id)) {
+      const date = toIsoDate(route.serviceDate);
+      routeKm.set(date, (routeKm.get(date) ?? 0) + route.distanceKm);
+    }
+    const km = dailyKm(days, {
+      simulated,
+      routeKm,
+      nominalKm: nominalKm(routeKm, DEFAULT_DAILY_KM),
+      isSunday: (date) => isoWeekday(date) === 7,
+    });
+    // The last reading stays: the deadlines by km (oil change…) keep their meaning.
+    const finalOdometer = Math.max(...own.map((f) => f.odometerKm));
+    const electric = vehicle.energy === "ELECTRIC";
+    const plan = rebuildFuelLog(km, finalOdometer, fuelProfileOf(vehicle.type, vehicle.energy), electric, rngFor(RANDOM_SEED, "fuel", vehicle.id));
+    await prisma.$transaction([
+      prisma.fuelLog.deleteMany({ where: { id: { in: own.map((f) => f.id) } } }),
+      prisma.fuelLog.createMany({
+        data: plan.map((fill, index) => ({
+          id: historyFuelLogId(vehicle.id, index + 1),
+          vehicleId: vehicle.id,
+          date: fromIsoDate(fill.date),
+          odometerKm: fill.odometerKm,
+          quantity: fill.quantity,
+          cost: fill.cost,
+        })),
+      }),
+    ]);
+    rebuilt++;
+    written += plan.length;
+  }
+  return { vehicles: rebuilt, fills: written, leftAlone };
+}
+
+/** The fill-ups the seed writes go 42 days back: the rebuilt window covers them, and the simulated days. */
+const FUEL_WINDOW_DAYS = 42;
+
 async function main(): Promise<void> {
   const options = parseHistoryArgs(process.argv.slice(2));
   if (options.help) {
@@ -180,6 +295,7 @@ async function main(): Promise<void> {
     regulatorId: regulator.id,
     driverAccounts: new Map(driverAccounts.flatMap((user) => (user.driverId ? [[user.driverId, user.id] as const] : []))),
     lateCancellationHours: settings?.lateCancellationHours ?? DEFAULT_LATE_CANCELLATION_HOURS,
+    ...(await loadDayResources()),
   };
   const reports: DayReport[] = [];
   const removed: ClearedRows = { trips: 0, routes: 0, runs: 0, events: 0 };
@@ -191,6 +307,7 @@ async function main(): Promise<void> {
 
   const total = totalReport(reports);
   const simulated = reports.filter((r) => !r.skipped).length;
+  const simulatedDates = new Set(reports.filter((r) => !r.skipped).map((r) => r.date));
   console.log(
     `  Total : ${plural(simulated, "jour simulé", "jours simulés")}, ${plural(total.trips, "course")}, ` +
       `${plural(total.runs, "optimisation")}, ${total.accepted} partages acceptés et ${total.refused} refusés, ` +
@@ -202,6 +319,20 @@ async function main(): Promise<void> {
   console.log(
     `  Simulation précédente remplacée : ${describeRows(removed)}, ${plural(removed.events, "événement d'audit", "événements d'audit")} supprimés`,
   );
+
+  console.log(
+    `  Ponctuelles : ${plural(total.oneOff, "course")} de patients occasionnels et clients privés ; ` +
+      `${plural(total.unrecorded, "course")} sans statut (équipages qui n'ont rien saisi, environ 15 %) ; ` +
+      `${plural(total.locked, "course figée", "courses figées")} par la régulation ; ` +
+      `${plural(total.absences, "absence")} et ${plural(total.offRoad, "véhicule")} au garage`,
+  );
+  if (simulatedDates.size > 0) {
+    const fuel = await rebuildFuelLogs(simulatedDates, today);
+    console.log(
+      `• Pleins et relevés de compteur reconstruits d'après les km simulés : ${plural(fuel.vehicles, "véhicule")}, ${plural(fuel.fills, "plein")}` +
+        (fuel.leftAlone > 0 ? ` (${plural(fuel.leftAlone, "véhicule laissé", "véhicules laissés")} tels quels : pleins saisis dans l'application)` : ""),
+    );
+  }
 
   const days = computeKpisByDay(first, last, await loadKpiRows(prisma, first, last), today);
   console.log("\nIndicateurs du tableau de bord sur la période (calcul de @/lib/kpis, comme /tableau-de-bord) :");

@@ -88,6 +88,7 @@ export function Headline({
         </h2>
         {focus.date === tomorrow ? <Badge tone="brand">J+1</Badge> : null}
         {focus.date === today ? <Badge tone="info">Aujourd&apos;hui</Badge> : null}
+        {focus.simulated ? <Badge tone="simulated">Journée simulée</Badge> : null}
         {focus.planningStatus === "VALIDATED" ? (
           <Badge tone="success">Planning validé</Badge>
         ) : focus.planningStatus === "NOT_VALIDATED" ? (

@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { cn } from "./cn";
 import { VEHICLE_TYPE_SHORT } from "@/lib/labels";
 
-export type BadgeTone = "neutral" | "brand" | "success" | "warning" | "danger" | "info";
+/** `simulated`: rows produced by the history simulation (pnpm db:history), never measurements. */
+export type BadgeTone = "neutral" | "brand" | "success" | "warning" | "danger" | "info" | "simulated";
 
 const tones: Record<BadgeTone, string> = {
   neutral: "bg-slate-100 text-slate-700 ring-slate-200",
@@ -11,6 +12,7 @@ const tones: Record<BadgeTone, string> = {
   warning: "bg-amber-50 text-amber-800 ring-amber-200",
   danger: "bg-red-50 text-red-800 ring-red-200",
   info: "bg-sky-50 text-sky-800 ring-sky-200",
+  simulated: "bg-violet-50 text-violet-800 ring-violet-200",
 };
 
 export function Badge({ tone = "neutral", className, children }: { tone?: BadgeTone; className?: string; children: ReactNode }) {
