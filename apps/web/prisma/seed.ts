@@ -8,7 +8,15 @@
  * Development only: it refuses a database that is not on this machine or that
  * holds accounts it did not create (prisma/safety.ts, SEED_ALLOW_WIPE=1 to force).
  */
-import { PrismaClient, type PrescribedMode, type SharingScope, type TripDirection } from "@prisma/client";
+import {
+  PrismaClient,
+  type EnergyType,
+  type PrescribedMode,
+  type Prisma,
+  type SharingScope,
+  type TripDirection,
+  type VehicleType,
+} from "@prisma/client";
 import { hashPassword } from "@/lib/auth/password";
 import {
   allowedVehicleTypesFor,
@@ -38,22 +46,45 @@ import {
   DEPOTS,
   depotLocation,
   DRIVERS,
+  FLEET_DEPOTS,
   REPLACEMENT_DRIVER_DEPOTS,
   FACILITIES,
   facilityLocation,
+  OCCASIONAL_AREAS,
+  OCCASIONAL_POOL_SIZE,
   ONE_OFF_CONSULTATION,
+  ONE_OFF_EPISODES_PER_WEEKDAY,
+  ONE_OFF_FACILITIES,
   PATIENTS,
   PRIVATE_CLIENTS,
   TARIFFS,
   TOWNS,
   TREATMENTS,
   VEHICLES,
+  type AnyFacilityKey,
   type AreaKey,
+  type DepotDef,
   type DepotKey,
   type DriverDef,
   type DriverKey,
+  type FacilityDef,
   type FacilityKey,
+  type FleetDepotKey,
 } from "./seed/data";
+import { FLEET_PATIENT_AREAS, FLEET_VEHICLE_MIX, planFleet, planFleetAbsences, planFleetPatients } from "./seed/fleet";
+import { costPerKmFor, FUEL_LOG_SEED_PREFIX, fuelProfileOf, hourlyCostFor } from "./seed/costs";
+import {
+  bookedShare,
+  drawEpisodes,
+  drawOccasionalMobility,
+  episodeCount,
+  episodePrescription,
+  episodeTrips,
+  FLEET_LYING_SHARE,
+  hubOf,
+  OCCASIONAL_ID_PREFIX,
+  type OccasionalPatient,
+} from "./seed/one-off";
 import { liftAuditGuard, restoreAuditGuard } from "./audit-guard";
 import { assertSeedOnlyDatabase, UnsafeDatabaseError } from "./safety";
 import { distanceKm, jitter } from "./seed/geo";
@@ -64,6 +95,7 @@ import {
   NameFactory,
   randomAccessNote,
   SEED_EMAIL_DOMAIN,
+  STAFF_FIRST_NAMES,
   streetAddress,
 } from "./seed/identity";
 import { Rng } from "./seed/random";
@@ -154,10 +186,10 @@ async function seedSettingsAndTariffs(): Promise<void> {
   });
 }
 
-async function seedFacilities(rng: Rng): Promise<Map<FacilityKey, CreatedFacility>> {
-  const facilities = new Map<FacilityKey, CreatedFacility>();
-  for (const key of Object.keys(FACILITIES) as FacilityKey[]) {
-    const def = FACILITIES[key];
+async function seedFacilities<K extends string>(rng: Rng, defs: Record<K, FacilityDef>): Promise<Map<K, CreatedFacility>> {
+  const facilities = new Map<K, CreatedFacility>();
+  for (const key of Object.keys(defs) as K[]) {
+    const def: FacilityDef = defs[key];
     const location = facilityLocation(def);
     const created = await prisma.facility.create({
       data: {
@@ -221,7 +253,7 @@ async function seedDrivers(rng: Rng, depots: Map<DepotKey, string>): Promise<Map
         breakWindowStartMinute: minute(BREAK_WINDOW[0]),
         breakWindowEndMinute: minute(BREAK_WINDOW[1]),
         breakMinutes: def.breakMinutes,
-        hourlyCost: def.hourlyCost,
+        hourlyCost: hourlyCostFor(def.qualifications, def.seniorityYears),
       },
     });
     drivers.set(key, { id: created.id, key, def });
@@ -265,7 +297,7 @@ async function seedVehicles(
         capacity: DEFAULT_CAPACITY[vehicle.type],
         depotId,
         department: DEPOTS[vehicle.depot].department,
-        costPerKm: vehicle.costPerKm,
+        costPerKm: costPerKmFor(vehicle.type, vehicle.energy ?? "DIESEL", vehicle.ageSurcharge),
         energy: vehicle.energy ?? "DIESEL",
         defaultDriverId: driver.id,
         defaultCrewMateId: crewMate?.id ?? null,
@@ -321,13 +353,47 @@ async function seedStaffPlanning(drivers: Map<DriverKey, CreatedDriver>, dates: 
   });
 }
 
-/** Litres or kWh per 100 km, and price per unit, of the seeded fill-ups (fictitious). */
-const FUEL_PROFILE = {
-  TAXI: { per100Km: 6.2, price: 1.72 },
-  VSL: { per100Km: 7.1, price: 1.72 },
-  AMBULANCE: { per100Km: 10.8, price: 1.72 },
-  ELECTRIC: { per100Km: 17.5, price: 0.26 },
-} as const;
+/**
+ * Six weeks of fill-ups per vehicle (every 5 to 8 days, 380 to 720 km
+ * apart) and its next technical inspection and insurance. The fill-ups get
+ * an id with FUEL_LOG_SEED_PREFIX: the history script may rebuild them from
+ * the km of the days it simulates (prisma/history/fuel.ts). Returns the
+ * last odometer reading of each vehicle.
+ */
+async function seedFuelLogsAndDeadlines(
+  rng: Rng,
+  vehicles: readonly { id: string; type: VehicleType; energy: EnergyType | null }[],
+  dates: Dates,
+): Promise<Map<string, number>> {
+  const odometers = new Map<string, number>();
+  for (const v of vehicles) {
+    const profile = fuelProfileOf(v.type, v.energy);
+    let km = rng.int(40, 160) * 1000;
+    const fills: Prisma.FuelLogCreateManyInput[] = [];
+    for (let day = -42; day <= -1; day += rng.int(5, 8)) {
+      const driven = day === -42 ? 0 : rng.int(380, 720);
+      km += driven;
+      const quantity = day === -42 ? 40 : Math.round(((driven * profile.per100Km) / 100) * (0.92 + rng.float(0, 0.16)) * 10) / 10;
+      fills.push({
+        id: `${FUEL_LOG_SEED_PREFIX}${v.id}-${fills.length + 1}`,
+        vehicleId: v.id,
+        date: fromIsoDate(addDays(dates.today, day)),
+        odometerKm: km,
+        quantity,
+        cost: Math.round(quantity * profile.price * 100) / 100,
+      });
+    }
+    await prisma.fuelLog.createMany({ data: fills });
+    odometers.set(v.id, km);
+    await prisma.maintenanceDeadline.createMany({
+      data: [
+        { vehicleId: v.id, kind: "INSPECTION", dueDate: fromIsoDate(addDays(dates.today, rng.int(60, 300))) },
+        { vehicleId: v.id, kind: "INSURANCE", dueDate: fromIsoDate(addDays(dates.today, rng.int(90, 330))) },
+      ],
+    });
+  }
+  return odometers;
+}
 
 /**
  * Vehicle planning examples (lot 4): six weeks of fill-ups per vehicle, the
@@ -343,26 +409,7 @@ async function seedFleetPlanning(rng: Rng, dates: Dates): Promise<void> {
     if (!id) throw new Error(`Véhicule « ${label} » inconnu`);
     return id;
   };
-  const odometers = new Map<string, number>();
-  for (const v of vehicles) {
-    const profile = v.energy === "ELECTRIC" ? FUEL_PROFILE.ELECTRIC : FUEL_PROFILE[v.type];
-    let km = rng.int(40, 160) * 1000;
-    const fills = [];
-    for (let day = -42; day <= -1; day += rng.int(5, 8)) {
-      const driven = day === -42 ? 0 : rng.int(380, 720);
-      km += driven;
-      const quantity = day === -42 ? 40 : Math.round(((driven * profile.per100Km) / 100) * (0.92 + rng.float(0, 0.16)) * 10) / 10;
-      fills.push({ vehicleId: v.id, date: fromIsoDate(addDays(dates.today, day)), odometerKm: km, quantity, cost: Math.round(quantity * profile.price * 100) / 100 });
-    }
-    await prisma.fuelLog.createMany({ data: fills });
-    odometers.set(v.id, km);
-    await prisma.maintenanceDeadline.createMany({
-      data: [
-        { vehicleId: v.id, kind: "INSPECTION", dueDate: fromIsoDate(addDays(dates.today, rng.int(60, 300))) },
-        { vehicleId: v.id, kind: "INSURANCE", dueDate: fromIsoDate(addDays(dates.today, rng.int(90, 330))) },
-      ],
-    });
-  }
+  const odometers = await seedFuelLogsAndDeadlines(rng, vehicles, dates);
   const taxi4 = idOf("Taxi 4 (Gap)");
   await prisma.maintenanceDeadline.updateMany({
     where: { vehicleId: taxi4, kind: "INSPECTION" },
@@ -768,6 +815,290 @@ async function seedSharingRefusals(dates: Dates, regulatorId: string): Promise<s
 }
 
 // ---------------------------------------------------------------------------
+// Occasional patients and their one-off trips (seed/one-off.ts).
+
+type PoolPatient = OccasionalPatient & { home: Place };
+
+/**
+ * The pool of occasional patients (no recurrence): consultations, imaging,
+ * admissions and discharges. Their names avoid those already given (staff
+ * and the patients of the series).
+ */
+async function seedOccasionalPatients(
+  rng: Rng,
+  count: number,
+  areas: readonly (readonly [AreaKey, number])[],
+  options: { firstIndex?: number; lyingShare?: number } = {},
+): Promise<PoolPatient[]> {
+  const firstIndex = options.firstIndex ?? 1;
+  const taken = await prisma.patient.findMany({ select: { firstName: true, lastName: true } });
+  const staff = await prisma.driver.findMany({ select: { firstName: true, lastName: true } });
+  const names = new NameFactory(rng, [...taken, ...staff], { extended: true });
+  const total = areas.reduce((sum, [, weight]) => sum + weight, 0);
+  const pool: PoolPatient[] = [];
+  const rows: Prisma.PatientCreateManyInput[] = [];
+  for (let i = 0; i < count; i++) {
+    let draw = rng.float(0, total);
+    const [key] = areas.find(([, weight]) => (draw -= weight) < 0) ?? areas[areas.length - 1]!;
+    const home = homeIn(rng, key);
+    const mobility = drawOccasionalMobility(rng, area(key).town, options.lyingShare);
+    const id = `${OCCASIONAL_ID_PREFIX}${String(firstIndex + i).padStart(4, "0")}`;
+    rows.push({
+      id,
+      ...names.next(),
+      phone: rng.chance(0.9) ? fictitiousMobile(rng) : null,
+      ...home,
+      mobility,
+      accessNotes: rng.chance(0.25) ? randomAccessNote(rng) : null,
+    });
+    pool.push({ id, mobility, town: area(key).town, home });
+  }
+  await prisma.patient.createMany({ data: rows });
+  return pool;
+}
+
+/**
+ * One-off trips of every day of the seeded fortnight: all of them up to
+ * tomorrow, fewer for the days further ahead (not booked yet, bookedShare).
+ * Each care gets its one-off prescription.
+ */
+async function seedOneOffDays(
+  rng: Rng,
+  pool: readonly PoolPatient[],
+  facilities: Map<AnyFacilityKey, CreatedFacility>,
+  dates: Dates,
+  perWeekday: number,
+): Promise<{ episodes: number; trips: number }> {
+  const homeOf = new Map(pool.map((p) => [p.id, p.home]));
+  let episodes = 0;
+  let trips = 0;
+  for (let day = dates.monday; day <= dates.lastDay; day = addDays(day, 1)) {
+    const daysAhead = Math.round((fromIsoDate(day).getTime() - fromIsoDate(dates.today).getTime()) / 86_400_000);
+    const count = episodeCount(perWeekday, day, rng, bookedShare(daysAhead));
+    for (const episode of drawEpisodes(pool, count, rng)) {
+      const home = lookup(homeOf, episode.patientId, "Patient occasionnel");
+      const facility = episode.facilityKey ? lookup(facilities, episode.facilityKey, "Établissement") : null;
+      const destination = facility
+        ? { id: facility.id, address: formatAddress(facility), lat: facility.lat, lng: facility.lng }
+        : { id: null, ...(episode.place ?? { address: "", lat: 0, lng: 0 }) };
+      const prescription = episodePrescription(episode, day);
+      const prescriptionId = prescription
+        ? (await prisma.prescription.create({ data: { ...prescription, patientId: episode.patientId }, select: { id: true } })).id
+        : null;
+      const data = episodeTrips(episode, home, destination, day, prescriptionId);
+      await prisma.trip.createMany({ data });
+      episodes++;
+      trips += data.length;
+    }
+  }
+  return { episodes, trips };
+}
+
+// ---------------------------------------------------------------------------
+// Large fleet (pnpm db:seed --fleet, seed/fleet.ts).
+
+/** Generators of the large fleet: none of the small data set's draws changes with --fleet. */
+const FLEET_SEED = RANDOM_SEED + 20;
+/** Patients of the series added by --fleet, and one-off care a weekday for its pool of occasional patients. */
+const FLEET_SERIES_PATIENTS = 130;
+const FLEET_OCCASIONAL_POOL_SIZE = 600;
+const FLEET_ONE_OFF_EPISODES_PER_WEEKDAY = 45;
+
+type FleetSummary = { depots: number; vehicles: number; people: number; absences: number; unavailabilities: number; patients: number };
+
+/**
+ * Adds the large fleet to the small data set: two depots (Aix, Grenoble),
+ * vehicles and people up to FLEET_VEHICLE_MIX (120 vehicles, about 150
+ * people, with their accounts), fill-ups and deadlines, absences, on-call
+ * duty and vehicles off the road over the fortnight, patients of the series
+ * and occasional patients with their trips. Run after the small data set.
+ */
+async function seedLargeFleet(
+  dates: Dates,
+  depots: Map<DepotKey, string>,
+  facilities: Map<AnyFacilityKey, CreatedFacility>,
+): Promise<FleetSummary> {
+  const depotIds = new Map<FleetDepotKey, string>(depots);
+  for (const key of Object.keys(FLEET_DEPOTS) as (keyof typeof FLEET_DEPOTS)[]) {
+    const def: DepotDef = FLEET_DEPOTS[key];
+    const location = depotLocation(def);
+    const created = await prisma.depot.create({
+      data: {
+        name: def.label,
+        address: formatAddress({ address: def.address, postalCode: def.postalCode, city: TOWNS[def.town].name }),
+        lat: location.lat,
+        lng: location.lng,
+        notes: def.notes,
+      },
+    });
+    depotIds.set(key, created.id);
+  }
+  const depotDef = (key: FleetDepotKey): DepotDef => (key in DEPOTS ? DEPOTS[key as DepotKey] : FLEET_DEPOTS[key as keyof typeof FLEET_DEPOTS]);
+  const depotLabels = Object.fromEntries(
+    (Object.keys(FLEET_VEHICLE_MIX) as FleetDepotKey[]).map((key) => [key, depotDef(key).label]),
+  ) as Record<FleetDepotKey, string>;
+
+  const existingDrivers = await prisma.driver.findMany({ select: { firstName: true, lastName: true } });
+  const replacements: Partial<Record<FleetDepotKey, number>> = {};
+  for (const depot of Object.values(REPLACEMENT_DRIVER_DEPOTS)) if (depot) replacements[depot] = (replacements[depot] ?? 0) + 1;
+  const plan = planFleet(
+    new Rng(FLEET_SEED),
+    new NameFactory(new Rng(FLEET_SEED + 1), existingDrivers, { firstNames: STAFF_FIRST_NAMES, extended: true }),
+    { vehicles: VEHICLES, replacements, registrations: VEHICLES.map((v) => v.registration) },
+    depotLabels,
+    { TAXI: 5, VSL: 5, AMBULANCE: 3 },
+  );
+
+  const phones = new Rng(FLEET_SEED + 2);
+  const personIds: string[] = [];
+  for (const person of plan.people) {
+    const created = await prisma.driver.create({
+      data: {
+        depotId: depotIds.get(person.depot) ?? null,
+        firstName: person.firstName,
+        lastName: person.lastName,
+        phone: fictitiousMobile(phones),
+        qualifications: person.qualifications,
+        workDays: person.workDays,
+        shiftStartMinute: person.shift[0],
+        shiftEndMinute: person.shift[1],
+        breakWindowStartMinute: minute(BREAK_WINDOW[0]),
+        breakWindowEndMinute: minute(BREAK_WINDOW[1]),
+        breakMinutes: person.breakMinutes,
+        hourlyCost: hourlyCostFor(person.qualifications, person.seniorityYears),
+      },
+      select: { id: true },
+    });
+    personIds.push(created.id);
+  }
+  const personId = (index: number) => lookup(new Map(personIds.entries()), index, "Personne");
+
+  const vehicleIds: string[] = [];
+  for (const vehicle of plan.vehicles) {
+    const driver = plan.people[vehicle.driver];
+    const mate = vehicle.crewMate === null ? null : plan.people[vehicle.crewMate];
+    const required = REQUIRED_QUALIFICATIONS[vehicle.type];
+    const holds = (quals: readonly string[] | undefined, needed: readonly string[]) => (quals ?? []).some((q) => needed.includes(q));
+    if (!holds(driver?.qualifications, required.driver)) throw new Error(`${vehicle.label} : chauffeur non qualifié`);
+    if (required.crewMate && (!mate || !holds(mate.qualifications, required.crewMate))) throw new Error(`${vehicle.label} : équipier absent ou non qualifié`);
+    if (mate && !crewHoldsRequired(vehicle.type, [driver?.qualifications ?? [], mate.qualifications])) {
+      throw new Error(`${vehicle.label} : aucun ambulancier DE dans l'équipage`);
+    }
+    const created = await prisma.vehicle.create({
+      data: {
+        label: vehicle.label,
+        registration: vehicle.registration,
+        type: vehicle.type,
+        capacity: DEFAULT_CAPACITY[vehicle.type],
+        depotId: lookup(depotIds, vehicle.depot, "Dépôt"),
+        department: depotDef(vehicle.depot).department,
+        costPerKm: costPerKmFor(vehicle.type, vehicle.energy, vehicle.ageSurcharge),
+        energy: vehicle.energy,
+        defaultDriverId: personId(vehicle.driver),
+        defaultCrewMateId: vehicle.crewMate === null ? null : personId(vehicle.crewMate),
+      },
+      select: { id: true, type: true, energy: true },
+    });
+    vehicleIds.push(created.id);
+  }
+
+  // Accounts: the same published password for everyone, hashed once.
+  const passwordHash = await hashPassword(DRIVER_PASSWORD);
+  await prisma.user.createMany({
+    data: plan.people.map((person, index) => ({
+      email: devEmail(person.firstName, person.lastName),
+      name: `${person.firstName} ${person.lastName}`,
+      passwordHash,
+      role: "DRIVER" as const,
+      driverId: personId(index),
+      mustChangePassword: false,
+    })),
+  });
+
+  const vehicles = await prisma.vehicle.findMany({ where: { id: { in: vehicleIds } }, select: { id: true, type: true, energy: true } });
+  const byId = new Map(vehicles.map((v) => [v.id, v]));
+  await seedFuelLogsAndDeadlines(new Rng(FLEET_SEED + 3), vehicleIds.map((id) => lookup(byId, id, "Véhicule")), dates);
+
+  const { absences, unavailabilities } = planFleetAbsences(new Rng(FLEET_SEED + 4), plan.people, plan.vehicles);
+  const day = (offset: number) => fromIsoDate(addDays(dates.monday, offset));
+  await prisma.staffAbsence.createMany({
+    data: absences.map((a) => ({ driverId: personId(a.person), kind: a.kind, startDate: day(a.from), endDate: day(a.to), note: a.note })),
+  });
+  await prisma.vehicleUnavailability.createMany({
+    data: unavailabilities.map((u) => ({
+      vehicleId: lookup(new Map(vehicleIds.entries()), u.vehicle, "Véhicule"),
+      kind: u.kind,
+      startDate: day(u.from),
+      endDate: day(u.to),
+      note: u.note,
+    })),
+  });
+
+  // Patients of the series, then their trips (generateTrips only adds the missing ones).
+  const taken = await prisma.patient.findMany({ select: { firstName: true, lastName: true } });
+  const names = new NameFactory(new Rng(FLEET_SEED + 5), taken, { extended: true });
+  const rng = new Rng(FLEET_SEED + 6);
+  const specs = planFleetPatients(rng, FLEET_SERIES_PATIENTS, (key) => hubOf(area(key).town));
+  for (const spec of specs) {
+    const treatment = TREATMENTS[spec.treatment];
+    const facility = lookup(facilities, spec.facility, "Établissement");
+    const mode: PrescribedMode = spec.mobility === "LYING" ? "AMBULANCE" : "TAP";
+    const validFrom = addDays(dates.today, -rng.int(30, 120));
+    const patient = await prisma.patient.create({
+      data: {
+        ...names.next(),
+        phone: rng.chance(0.85) ? fictitiousMobile(rng) : null,
+        ...homeIn(rng, spec.area),
+        mobility: spec.mobility,
+        accessNotes: rng.chance(0.3) ? randomAccessNote(rng) : null,
+        prescriptions: {
+          create: {
+            mode,
+            sharing: mode === "AMBULANCE" ? "NONE" : spec.sharing,
+            validFrom: fromIsoDate(validFrom),
+            validTo: fromIsoDate(addDays(dates.today, rng.int(60, 180))),
+            isSeries: true,
+            prescriber: treatment.prescriber,
+            notes: treatment.notes,
+          },
+        },
+      },
+      select: { id: true, prescriptions: { select: { id: true } } },
+    });
+    const prescription = patient.prescriptions[0];
+    if (!prescription) throw new Error("Prescription non créée");
+    await prisma.recurrence.create({
+      data: {
+        patientId: patient.id,
+        facilityId: facility.id,
+        prescriptionId: prescription.id,
+        label: treatment.label,
+        weekdays: spec.weekdays,
+        appointmentMinute: spec.appointment,
+        sessionMinutes: spec.sessionMinutes,
+        startDate: fromIsoDate(validFrom),
+      },
+    });
+  }
+  await generateTrips(prisma, dates.monday, dates.lastDay);
+
+  const pool = await seedOccasionalPatients(new Rng(FLEET_SEED + 7), FLEET_OCCASIONAL_POOL_SIZE, FLEET_PATIENT_AREAS, {
+    firstIndex: OCCASIONAL_POOL_SIZE + 1,
+    lyingShare: FLEET_LYING_SHARE,
+  });
+  await seedOneOffDays(new Rng(FLEET_SEED + 8), pool, facilities, dates, FLEET_ONE_OFF_EPISODES_PER_WEEKDAY);
+
+  return {
+    depots: Object.keys(FLEET_DEPOTS).length,
+    vehicles: plan.vehicles.length,
+    people: plan.people.length,
+    absences: absences.length,
+    unavailabilities: unavailabilities.length,
+    patients: specs.length + pool.length,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Summary.
 
 async function printSummary(dates: Dates, refusals: string[], accounts: DriverAccount[]): Promise<void> {
@@ -824,7 +1155,23 @@ async function printSummary(dates: Dates, refusals: string[], accounts: DriverAc
 
 // ---------------------------------------------------------------------------
 
+/** A wrong command line: its message alone, without a stack trace. */
+class SeedUsageError extends Error {}
+
+const SEED_USAGE = [
+  "Usage : pnpm db:seed [--fleet]",
+  "  --fleet   ajoute la grande flotte : 6 dépôts, 120 véhicules, environ 150 personnes et 300 courses par jour ouvré",
+].join("\n");
+
 async function main(): Promise<void> {
+  const args = process.argv.slice(2).filter((arg) => arg !== "--");
+  if (args.includes("-h") || args.includes("--help")) {
+    console.log(SEED_USAGE);
+    return;
+  }
+  const unknown = args.filter((arg) => arg !== "--fleet");
+  if (unknown.length > 0) throw new SeedUsageError(`Option inconnue : « ${unknown.join(" ")} ».\n${SEED_USAGE}`);
+  const fleet = args.includes("--fleet");
   // Before anything is written: a local database holding only the seed's accounts (prisma/safety.ts).
   const target = await assertSeedOnlyDatabase("seed", (where) => prisma.user.count({ where }));
   const started = Date.now();
@@ -846,7 +1193,9 @@ async function main(): Promise<void> {
   console.log("• Paramètres et grilles tarifaires");
   await seedSettingsAndTariffs();
   console.log("• Établissements");
-  const facilities = await seedFacilities(rng);
+  const facilities = await seedFacilities(rng, FACILITIES);
+  // Own generator: the patients and trips drawn afterwards stay those of the earlier seeds.
+  const oneOffFacilities = await seedFacilities(new Rng(RANDOM_SEED + 6), ONE_OFF_FACILITIES);
   console.log("• Dépôts, chauffeurs, véhicules et comptes");
   const depots = await seedDepots();
   const drivers = await seedDrivers(rng, depots);
@@ -867,8 +1216,26 @@ async function main(): Promise<void> {
   const oneOff = await seedOneOffTrips(rng, names, facilities, dates);
   console.log(`  ${oneOff} courses ponctuelles`);
   const refusals = await seedSharingRefusals(dates, regulatorId);
+  console.log(`• Patients occasionnels et leurs courses ponctuelles du ${formatShortDate(dates.monday)} au ${formatShortDate(dates.lastDay)}`);
+  // Own generators: the patients and trips drawn above stay those of the earlier seeds.
+  const pool = await seedOccasionalPatients(new Rng(RANDOM_SEED + 7), OCCASIONAL_POOL_SIZE, OCCASIONAL_AREAS);
+  const allFacilities = new Map<AnyFacilityKey, CreatedFacility>([...facilities, ...oneOffFacilities]);
+  const episodes = await seedOneOffDays(new Rng(RANDOM_SEED + 8), pool, allFacilities, dates, ONE_OFF_EPISODES_PER_WEEKDAY);
+  console.log(`  ${pool.length} patients occasionnels, ${episodes.episodes} soins ponctuels, ${episodes.trips} courses`);
+  if (fleet) {
+    console.log("• Grande flotte (--fleet) : dépôts, personnel, véhicules, absences, patients et courses");
+    const added = await seedLargeFleet(dates, depots, allFacilities);
+    console.log(
+      `  ${added.depots} dépôts, ${added.vehicles} véhicules et ${added.people} personnes ajoutés, ` +
+        `${added.absences} absences et gardes, ${added.unavailabilities} indisponibilités de véhicules, ${added.patients} patients`,
+    );
+  }
 
   await printSummary(dates, refusals, accounts);
+  if (fleet) {
+    const more = (await prisma.user.count({ where: { role: "DRIVER" } })) - accounts.length;
+    console.log(`  + ${more} comptes de la grande flotte (prenom.nom${SEED_EMAIL_DOMAIN}, même mot de passe), voir la page Chauffeurs.`);
+  }
   console.log(`\nSeed terminé en ${((Date.now() - started) / 1000).toFixed(1)} s.`);
 }
 
@@ -877,7 +1244,7 @@ main()
   .catch(async (error: unknown) => {
     // A refusal of the guard is expected: its message alone, without a stack trace.
     // Anything else is logged without the Prisma query arguments (addresses, notes).
-    if (error instanceof UnsafeDatabaseError) console.error(`\n${error.message}`);
+    if (error instanceof UnsafeDatabaseError || error instanceof SeedUsageError) console.error(`\n${error.message}`);
     else logError("[seed] le seed a échoué", error);
     await prisma.$disconnect();
     process.exit(1);

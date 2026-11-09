@@ -31,6 +31,20 @@ export const TOWNS = {
   gap: { name: "Gap", lat: 44.5594, lng: 6.0786 },
   veynes: { name: "Veynes", lat: 44.5336, lng: 5.8231 },
   grenoble: { name: "Grenoble", lat: 45.1885, lng: 5.7245 },
+  // Suburbs and villages where occasional patients live (seed/one-off.ts): their care is in the nearest town.
+  allauch: { name: "Allauch", lat: 43.3364, lng: 5.4822 },
+  aubagne: { name: "Aubagne", lat: 43.2927, lng: 5.5708 },
+  pennes: { name: "Les Pennes-Mirabeau", lat: 43.41, lng: 5.31 },
+  venelles: { name: "Venelles", lat: 43.598, lng: 5.481 },
+  bouc: { name: "Bouc-Bel-Air", lat: 43.452, lng: 5.414 },
+  oraison: { name: "Oraison", lat: 43.917, lng: 5.918 },
+  vinon: { name: "Vinon-sur-Verdon", lat: 43.724, lng: 5.811 },
+  chateauArnoux: { name: "Château-Arnoux-Saint-Auban", lat: 44.092, lng: 6.009 },
+  tallard: { name: "Tallard", lat: 44.463, lng: 6.055 },
+  chorges: { name: "Chorges", lat: 44.547, lng: 6.277 },
+  meylan: { name: "Meylan", lat: 45.2096, lng: 5.7787 },
+  echirolles: { name: "Échirolles", lat: 45.1436, lng: 5.7183 },
+  vizille: { name: "Vizille", lat: 45.0786, lng: 5.7708 },
 } as const satisfies Record<string, Town>;
 
 export type TownKey = keyof typeof TOWNS;
@@ -61,17 +75,34 @@ const AREA_DEFS = {
   gap: { town: "gap", postalCode: "05000", bearing: 45, distanceKm: 1.5, spreadKm: 0.8 },
   gapSud: { town: "gap", postalCode: "05000", bearing: 210, distanceKm: 1.8, spreadKm: 0.7 },
   veynes: { town: "veynes", postalCode: "05400", bearing: 90, distanceKm: 1.0, spreadKm: 0.5 },
+  // Used by the occasional patients and the large fleet only (pnpm db:seed --fleet).
+  grenoble: { town: "grenoble", postalCode: "38000", bearing: 330, distanceKm: 1.2, spreadKm: 1.0 },
+  grenobleSud: { town: "grenoble", postalCode: "38100", bearing: 190, distanceKm: 2.6, spreadKm: 1.0 },
+  allauch: { town: "allauch", postalCode: "13190", bearing: 0, distanceKm: 0.5, spreadKm: 1.2 },
+  aubagne: { town: "aubagne", postalCode: "13400", bearing: 0, distanceKm: 0.5, spreadKm: 1.5 },
+  pennes: { town: "pennes", postalCode: "13170", bearing: 0, distanceKm: 0.5, spreadKm: 1.5 },
+  venelles: { town: "venelles", postalCode: "13770", bearing: 0, distanceKm: 0.3, spreadKm: 1.0 },
+  bouc: { town: "bouc", postalCode: "13320", bearing: 0, distanceKm: 0.3, spreadKm: 1.0 },
+  oraison: { town: "oraison", postalCode: "04700", bearing: 0, distanceKm: 0.3, spreadKm: 0.8 },
+  vinon: { town: "vinon", postalCode: "83560", bearing: 0, distanceKm: 0.3, spreadKm: 0.8 },
+  chateauArnoux: { town: "chateauArnoux", postalCode: "04160", bearing: 0, distanceKm: 0.3, spreadKm: 1.0 },
+  tallard: { town: "tallard", postalCode: "05130", bearing: 0, distanceKm: 0.3, spreadKm: 0.8 },
+  chorges: { town: "chorges", postalCode: "05230", bearing: 0, distanceKm: 0.3, spreadKm: 0.8 },
+  meylan: { town: "meylan", postalCode: "38240", bearing: 0, distanceKm: 0.3, spreadKm: 1.0 },
+  echirolles: { town: "echirolles", postalCode: "38130", bearing: 0, distanceKm: 0.3, spreadKm: 1.0 },
+  vizille: { town: "vizille", postalCode: "38220", bearing: 0, distanceKm: 0.3, spreadKm: 0.8 },
 } as const satisfies Record<string, AreaDef>;
 
 export type AreaKey = keyof typeof AREA_DEFS;
 
-export type Area = { key: AreaKey; city: string; postalCode: string; centre: LatLng; spreadKm: number };
+export type Area = { key: AreaKey; town: TownKey; city: string; postalCode: string; centre: LatLng; spreadKm: number };
 
 export function area(key: AreaKey): Area {
   const def: AreaDef = AREA_DEFS[key];
   const town = TOWNS[def.town];
   return {
     key,
+    town: def.town,
     city: town.name,
     postalCode: def.postalCode,
     centre: offset(town, def.bearing, def.distanceKm),
@@ -82,7 +113,7 @@ export function area(key: AreaKey): Area {
 // ---------------------------------------------------------------------------
 // Facilities (all invented, located around real town centres).
 
-type FacilityDef = {
+export type FacilityDef = {
   name: string;
   type: FacilityType;
   town: TownKey;
@@ -210,7 +241,78 @@ export const FACILITIES = {
   },
 } as const satisfies Record<string, FacilityDef>;
 
+/**
+ * Destinations of the one-off trips (consultations, imaging, admissions and
+ * discharges, seed/one-off.ts), created after FACILITIES with their
+ * own generator so the patients drawn afterwards stay those of earlier seeds.
+ */
+export const ONE_OFF_FACILITIES = {
+  imagingMarseille: {
+    name: "Centre d'imagerie médicale des Pins (fictif)",
+    type: "OTHER",
+    town: "marseille",
+    bearing: 200,
+    distanceKm: 2.6,
+    address: "47 avenue des Pins Parasols",
+    postalCode: "13008",
+    notes: "Scanner et IRM au sous-sol : ascenseur à gauche de l'accueil.",
+  },
+  clinicAix: {
+    name: "Clinique du Pays d'Aix (fictif)",
+    type: "CLINIC",
+    town: "aix",
+    bearing: 300,
+    distanceKm: 1.8,
+    address: "12 avenue des Cèdres",
+    postalCode: "13090",
+    notes: "Consultations au rez-de-chaussée ; entrées et sorties d'hospitalisation à l'accueil principal.",
+  },
+  hospitalManosque: {
+    name: "Centre hospitalier de Haute-Provence (fictif)",
+    type: "HOSPITAL",
+    town: "manosque",
+    bearing: 30,
+    distanceKm: 1.5,
+    address: "3 avenue des Romarins",
+    postalCode: "04100",
+    notes: "Sorties d'hospitalisation : hall B, prévenir le service à l'arrivée.",
+  },
+  imagingSisteron: {
+    name: "Centre d'imagerie de la Citadelle (fictif)",
+    type: "OTHER",
+    town: "sisteron",
+    bearing: 160,
+    distanceKm: 0.8,
+    address: "6 rue des Remparts",
+    postalCode: "04200",
+    notes: null,
+  },
+  imagingGap: {
+    name: "Centre d'imagerie du Gapençais (fictif)",
+    type: "OTHER",
+    town: "gap",
+    bearing: 120,
+    distanceKm: 1.0,
+    address: "22 avenue des Écrins",
+    postalCode: "05000",
+    notes: null,
+  },
+  imagingGrenoble: {
+    name: "Centre d'imagerie du Drac (fictif)",
+    type: "OTHER",
+    town: "grenoble",
+    bearing: 250,
+    distanceKm: 2.0,
+    address: "14 quai des Alpages",
+    postalCode: "38000",
+    notes: null,
+  },
+} as const satisfies Record<string, FacilityDef>;
+
+export type OneOffFacilityKey = keyof typeof ONE_OFF_FACILITIES;
 export type FacilityKey = keyof typeof FACILITIES;
+/** Any facility of the seed: those of the series and those of the one-off trips. */
+export type AnyFacilityKey = FacilityKey | OneOffFacilityKey;
 
 export function facilityLocation(def: FacilityDef): LatLng {
   return offset(TOWNS[def.town], def.bearing, def.distanceKm);
@@ -219,7 +321,7 @@ export function facilityLocation(def: FacilityDef): LatLng {
 // ---------------------------------------------------------------------------
 // Depots, drivers and vehicles.
 
-type DepotDef = {
+export type DepotDef = {
   label: string;
   town: TownKey;
   bearing: number;
@@ -276,6 +378,32 @@ export const DEPOTS = {
 
 export type DepotKey = keyof typeof DEPOTS;
 
+/** The two more depots of the large fleet (pnpm db:seed --fleet). */
+export const FLEET_DEPOTS = {
+  aix: {
+    label: "Aix-en-Provence",
+    town: "aix",
+    bearing: 250,
+    distanceKm: 2.4,
+    address: "19 chemin des Micocouliers",
+    postalCode: "13090",
+    department: "13",
+    notes: "Parking des véhicules au sous-sol, badge à l'entrée. Bureau de régulation au 1er étage.",
+  },
+  grenoble: {
+    label: "Grenoble",
+    town: "grenoble",
+    bearing: 170,
+    distanceKm: 3.5,
+    address: "4 rue des Sapins",
+    postalCode: "38100",
+    department: "38",
+    notes: "Portail automatique : code 1938. Chaînes à neige dans le local à droite (novembre à mars).",
+  },
+} as const satisfies Record<string, DepotDef>;
+
+export type FleetDepotKey = DepotKey | keyof typeof FLEET_DEPOTS;
+
 export function depotLocation(def: DepotDef): LatLng {
   return offset(TOWNS[def.town], def.bearing, def.distanceKm);
 }
@@ -287,7 +415,8 @@ export type DriverDef = {
   workDays: readonly number[];
   shift: readonly [start: string, end: string];
   breakMinutes: number;
-  hourlyCost: number;
+  /** Years of seniority: the hourly cost is the loaded cost of the person's role (costs.ts) plus seniority. */
+  seniorityYears: number;
 };
 
 const MON_FRI = [1, 2, 3, 4, 5];
@@ -298,23 +427,23 @@ const TUE_SAT = [2, 3, 4, 5, 6];
 export const BREAK_WINDOW = ["11:30", "14:00"] as const;
 
 export const DRIVERS = {
-  julien: { firstName: "Julien", lastName: "Marchetti", qualifications: ["TAXI_CARD"], workDays: MON_SAT, shift: ["06:00", "18:30"], breakMinutes: 45, hourlyCost: 24 },
-  elodie: { firstName: "Élodie", lastName: "Fabre", qualifications: ["AUXILIARY"], workDays: MON_SAT, shift: ["06:30", "19:00"], breakMinutes: 30, hourlyCost: 25.5 },
-  laurent: { firstName: "Laurent", lastName: "Giraud", qualifications: ["DEA", "AUXILIARY"], workDays: MON_SAT, shift: ["06:00", "19:00"], breakMinutes: 45, hourlyCost: 29 },
-  ines: { firstName: "Inès", lastName: "Moulin", qualifications: ["AUXILIARY"], workDays: MON_SAT, shift: ["06:00", "19:00"], breakMinutes: 45, hourlyCost: 23.5 },
-  sophie: { firstName: "Sophie", lastName: "Rinaldi", qualifications: ["TAXI_CARD"], workDays: MON_FRI, shift: ["06:00", "18:30"], breakMinutes: 30, hourlyCost: 24 },
-  mathieu: { firstName: "Mathieu", lastName: "Roux", qualifications: ["AUXILIARY", "TAXI_CARD"], workDays: MON_SAT, shift: ["06:00", "19:00"], breakMinutes: 45, hourlyCost: 25 },
-  thomas: { firstName: "Thomas", lastName: "Garnier", qualifications: ["TAXI_CARD"], workDays: MON_FRI, shift: ["06:00", "19:00"], breakMinutes: 30, hourlyCost: 23 },
-  celine: { firstName: "Céline", lastName: "Arnaud", qualifications: ["AUXILIARY"], workDays: MON_SAT, shift: ["06:00", "18:30"], breakMinutes: 30, hourlyCost: 24.5 },
-  nadia: { firstName: "Nadia", lastName: "Belkacem", qualifications: ["TAXI_CARD"], workDays: MON_FRI, shift: ["06:30", "19:00"], breakMinutes: 45, hourlyCost: 23 },
+  julien: { firstName: "Julien", lastName: "Marchetti", qualifications: ["TAXI_CARD"], workDays: MON_SAT, shift: ["06:00", "18:30"], breakMinutes: 45, seniorityYears: 3 },
+  elodie: { firstName: "Élodie", lastName: "Fabre", qualifications: ["AUXILIARY"], workDays: MON_SAT, shift: ["06:30", "19:00"], breakMinutes: 30, seniorityYears: 4 },
+  laurent: { firstName: "Laurent", lastName: "Giraud", qualifications: ["DEA", "AUXILIARY"], workDays: MON_SAT, shift: ["06:00", "19:00"], breakMinutes: 45, seniorityYears: 5 },
+  ines: { firstName: "Inès", lastName: "Moulin", qualifications: ["AUXILIARY"], workDays: MON_SAT, shift: ["06:00", "19:00"], breakMinutes: 45, seniorityYears: 1 },
+  sophie: { firstName: "Sophie", lastName: "Rinaldi", qualifications: ["TAXI_CARD"], workDays: MON_FRI, shift: ["06:00", "18:30"], breakMinutes: 30, seniorityYears: 2 },
+  mathieu: { firstName: "Mathieu", lastName: "Roux", qualifications: ["AUXILIARY", "TAXI_CARD"], workDays: MON_SAT, shift: ["06:00", "19:00"], breakMinutes: 45, seniorityYears: 3 },
+  thomas: { firstName: "Thomas", lastName: "Garnier", qualifications: ["TAXI_CARD"], workDays: MON_FRI, shift: ["06:00", "19:00"], breakMinutes: 30, seniorityYears: 1 },
+  celine: { firstName: "Céline", lastName: "Arnaud", qualifications: ["AUXILIARY"], workDays: MON_SAT, shift: ["06:00", "18:30"], breakMinutes: 30, seniorityYears: 2 },
+  nadia: { firstName: "Nadia", lastName: "Belkacem", qualifications: ["TAXI_CARD"], workDays: MON_FRI, shift: ["06:30", "19:00"], breakMinutes: 45, seniorityYears: 0 },
   // Works Saturdays so the Gap fleet is staffed for the Tue/Thu/Sat dialysis patients (with Céline in Sisteron).
-  romain: { firstName: "Romain", lastName: "Chabert", qualifications: ["DEA"], workDays: MON_SAT, shift: ["06:00", "19:00"], breakMinutes: 30, hourlyCost: 27 },
-  franck: { firstName: "Franck", lastName: "Bonnet", qualifications: ["DEA"], workDays: MON_FRI, shift: ["06:00", "19:00"], breakMinutes: 45, hourlyCost: 28.5 },
-  amandine: { firstName: "Amandine", lastName: "Reynaud", qualifications: ["DEA", "AUXILIARY"], workDays: MON_FRI, shift: ["06:00", "19:00"], breakMinutes: 45, hourlyCost: 27.5 },
+  romain: { firstName: "Romain", lastName: "Chabert", qualifications: ["DEA"], workDays: MON_SAT, shift: ["06:00", "19:00"], breakMinutes: 30, seniorityYears: 3 },
+  franck: { firstName: "Franck", lastName: "Bonnet", qualifications: ["DEA"], workDays: MON_FRI, shift: ["06:00", "19:00"], breakMinutes: 45, seniorityYears: 4 },
+  amandine: { firstName: "Amandine", lastName: "Reynaud", qualifications: ["DEA", "AUXILIARY"], workDays: MON_FRI, shift: ["06:00", "19:00"], breakMinutes: 45, seniorityYears: 2 },
   // Replacement drivers: default driver of no vehicle; the crews of the day propose them when someone
   // of their depot, or of a depot close enough (Paramètres, « Équipages »), is absent.
-  kevin: { firstName: "Kévin", lastName: "Lambert", qualifications: ["TAXI_CARD", "AUXILIARY"], workDays: TUE_SAT, shift: ["07:00", "19:00"], breakMinutes: 30, hourlyCost: 22 },
-  sabrina: { firstName: "Sabrina", lastName: "Morel", qualifications: ["DEA", "AUXILIARY"], workDays: MON_FRI, shift: ["06:00", "17:00"], breakMinutes: 30, hourlyCost: 26 },
+  kevin: { firstName: "Kévin", lastName: "Lambert", qualifications: ["TAXI_CARD", "AUXILIARY"], workDays: TUE_SAT, shift: ["07:00", "19:00"], breakMinutes: 30, seniorityYears: 0 },
+  sabrina: { firstName: "Sabrina", lastName: "Morel", qualifications: ["DEA", "AUXILIARY"], workDays: MON_FRI, shift: ["06:00", "17:00"], breakMinutes: 30, seniorityYears: 2 },
 } as const satisfies Record<string, DriverDef>;
 
 export type DriverKey = keyof typeof DRIVERS;
@@ -327,7 +456,8 @@ type VehicleDef = {
   registration: string;
   type: VehicleType;
   depot: DepotKey;
-  costPerKm: number;
+  /** Added to the cost per km of its type and energy (costs.ts): older vehicles cost a little more. */
+  ageSurcharge: number;
   driver: DriverKey;
   crewMate: DriverKey | null;
   /** Diesel unless stated. */
@@ -335,17 +465,17 @@ type VehicleDef = {
 };
 
 export const VEHICLES: readonly VehicleDef[] = [
-  { label: "Taxi 1 (Marseille)", registration: "GH-218-PZ", type: "TAXI", depot: "marseille", costPerKm: 0.31, driver: "julien", crewMate: null },
-  { label: "VSL 1 (Marseille)", registration: "FK-547-TR", type: "VSL", depot: "marseille", costPerKm: 0.34, driver: "elodie", crewMate: null },
+  { label: "Taxi 1 (Marseille)", registration: "GH-218-PZ", type: "TAXI", depot: "marseille", ageSurcharge: 0.02, driver: "julien", crewMate: null },
+  { label: "VSL 1 (Marseille)", registration: "FK-547-TR", type: "VSL", depot: "marseille", ageSurcharge: 0.01, driver: "elodie", crewMate: null },
   // The usual crew of V: the auxiliary drives, the DEA rides beside the patient (R. 6312-10 allows either way).
-  { label: "Ambulance 1 (Marseille)", registration: "GA-903-MB", type: "AMBULANCE", depot: "marseille", costPerKm: 0.44, driver: "ines", crewMate: "laurent" },
-  { label: "Taxi 2 (Manosque)", registration: "FV-162-LD", type: "TAXI", depot: "manosque", costPerKm: 0.3, driver: "sophie", crewMate: null, energy: "ELECTRIC" },
-  { label: "VSL 2 (Manosque)", registration: "GC-775-HN", type: "VSL", depot: "manosque", costPerKm: 0.33, driver: "mathieu", crewMate: null },
-  { label: "Taxi 3 (Sisteron)", registration: "FS-384-KE", type: "TAXI", depot: "sisteron", costPerKm: 0.29, driver: "thomas", crewMate: null },
-  { label: "VSL 3 (Sisteron)", registration: "GE-629-JW", type: "VSL", depot: "sisteron", costPerKm: 0.35, driver: "celine", crewMate: null },
-  { label: "Taxi 4 (Gap)", registration: "FP-451-RC", type: "TAXI", depot: "gap", costPerKm: 0.32, driver: "nadia", crewMate: null },
-  { label: "VSL 4 (Gap)", registration: "GD-806-XA", type: "VSL", depot: "gap", costPerKm: 0.36, driver: "romain", crewMate: null },
-  { label: "Ambulance 2 (Gap)", registration: "FZ-270-BV", type: "AMBULANCE", depot: "gap", costPerKm: 0.45, driver: "franck", crewMate: "amandine" },
+  { label: "Ambulance 1 (Marseille)", registration: "GA-903-MB", type: "AMBULANCE", depot: "marseille", ageSurcharge: 0, driver: "ines", crewMate: "laurent" },
+  { label: "Taxi 2 (Manosque)", registration: "FV-162-LD", type: "TAXI", depot: "manosque", ageSurcharge: 0, driver: "sophie", crewMate: null, energy: "ELECTRIC" },
+  { label: "VSL 2 (Manosque)", registration: "GC-775-HN", type: "VSL", depot: "manosque", ageSurcharge: 0.01, driver: "mathieu", crewMate: null },
+  { label: "Taxi 3 (Sisteron)", registration: "FS-384-KE", type: "TAXI", depot: "sisteron", ageSurcharge: 0, driver: "thomas", crewMate: null },
+  { label: "VSL 3 (Sisteron)", registration: "GE-629-JW", type: "VSL", depot: "sisteron", ageSurcharge: 0.02, driver: "celine", crewMate: null },
+  { label: "Taxi 4 (Gap)", registration: "FP-451-RC", type: "TAXI", depot: "gap", ageSurcharge: 0.01, driver: "nadia", crewMate: null },
+  { label: "VSL 4 (Gap)", registration: "GD-806-XA", type: "VSL", depot: "gap", ageSurcharge: 0.02, driver: "romain", crewMate: null },
+  { label: "Ambulance 2 (Gap)", registration: "FZ-270-BV", type: "AMBULANCE", depot: "gap", ageSurcharge: 0.01, driver: "franck", crewMate: "amandine" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -394,8 +524,10 @@ export const TARIFFS: readonly TariffDef[] = [
 
 // ---------------------------------------------------------------------------
 // Patients: one regular treatment each. Cohorts are tuned so a weekday yields
-// about 55-65 trips and several pairs share a facility, an appointment time,
-// a neighbourhood and a prescription that allows sharing.
+// about 55-65 trips of series, and several pairs share a facility, an
+// appointment time, a neighbourhood and a prescription that allows sharing.
+// The one-off trips (seed/one-off.ts, about 13 more on a weekday) fill
+// the hours between the sessions, as in a real company.
 
 export type Treatment = "DIALYSIS" | "RADIOTHERAPY" | "CHEMOTHERAPY";
 
@@ -547,3 +679,44 @@ export const ONE_OFF_CONSULTATION: {
   prescriber: "Dr Hugo Ferrier — cardiologie",
   notes: "Consultation de cardiologie (ponctuelle).",
 };
+
+// ---------------------------------------------------------------------------
+// Occasional patients (one-off trips, seed/one-off.ts).
+
+/**
+ * Where the occasional patients live (relative weights). The series already
+ * keep the Marseille vehicles busy (dialysis, radiotherapy); the one-off care
+ * follows the depots of the fleet, so that each vehicle finds work near its
+ * depot: about a quarter around Marseille, little around Aix (no depot),
+ * the rest around Manosque, Sisteron and Gap, villages included.
+ */
+export const OCCASIONAL_AREAS: readonly (readonly [AreaKey, number])[] = [
+  ["marseille5", 3],
+  ["marseille10", 3],
+  ["marseille12", 4],
+  ["marseille13", 3],
+  ["allauch", 4],
+  ["aubagne", 4],
+  ["pennes", 3],
+  ["aixSud", 2],
+  ["venelles", 1],
+  ["gardanne", 2],
+  ["pertuis", 1],
+  ["manosque", 6],
+  ["manosqueNord", 4],
+  ["oraison", 5],
+  ["vinon", 3],
+  ["forcalquier", 4],
+  ["sisteron", 8],
+  ["chateauArnoux", 7],
+  ["laragne", 5],
+  ["gap", 8],
+  ["gapSud", 6],
+  ["tallard", 5],
+  ["chorges", 4],
+  ["veynes", 5],
+];
+
+/** Size of the pool of occasional patients and one-off episodes per weekday (small seed). */
+export const OCCASIONAL_POOL_SIZE = 120;
+export const ONE_OFF_EPISODES_PER_WEEKDAY = 8;

@@ -12,7 +12,7 @@
     "test:watch": "vitest",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "prisma db seed",
+    "db:seed": "tsx prisma/seed.ts",
     "db:history": "tsx prisma/history.ts",
     "db:reset": "tsx prisma/reset.ts",
     "db:studio": "prisma studio",
