@@ -36,12 +36,13 @@ export const config = {
     /*
      * Every path except those that are never an HTML page: build assets
      * (_next/static), optimized images (_next/image), public icons, the app
-     * icon, the web app manifest. Router prefetches are skipped too (they
-     * carry no document). Server actions are POSTs to the page path: covered.
+     * icon, the web app manifest, the service worker (its own headers in
+     * next.config.ts). Router prefetches are skipped too (they carry no
+     * document). Server actions are POSTs to the page path: covered.
      */
     {
       source:
-        "/((?!_next/static|_next/image|icons/|icon\\.svg|apple-touch-icon\\.png|favicon\\.ico|manifest\\.webmanifest).*)",
+        "/((?!_next/static|_next/image|icons/|icon\\.svg|apple-touch-icon\\.png|favicon\\.ico|manifest\\.webmanifest|sw\\.js).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },

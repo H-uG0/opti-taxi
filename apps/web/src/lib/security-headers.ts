@@ -78,11 +78,13 @@ export type CspOptions = {
  * - style-src 'unsafe-inline' and no nonce there (a nonce would disable
  *   'unsafe-inline'): React style props, Tailwind and MapLibre set inline
  *   styles.
- * - MapLibre GL (maplibre-gl/build/rollup/bundle_prelude.js) starts its web
- *   workers from a blob: URL, hence worker-src blob: and child-src blob:
- *   (older Safari); it decodes images through data: and blob: URLs (img-src)
- *   and fetches styles, tiles, glyphs and sprites (connect-src; img-src for
- *   browsers that load raster tiles as images).
+ * - worker-src 'self': the driver app's service worker (public/sw.js,
+ *   registered from /chauffeur, see serviceWorkerHeaders). MapLibre GL
+ *   (maplibre-gl/build/rollup/bundle_prelude.js) starts its web workers from a
+ *   blob: URL, hence worker-src blob: and child-src blob: (older Safari); it
+ *   decodes images through data: and blob: URLs (img-src) and fetches styles,
+ *   tiles, glyphs and sprites (connect-src; img-src for browsers that load
+ *   raster tiles as images).
  * - form-action 'self': server actions post to the page itself; their
  *   redirects stay on this origin.
  */
@@ -105,6 +107,20 @@ export function contentSecurityPolicy({ nonce, nodeEnv, mapStyleUrl }: CspOption
   ];
   if (nodeEnv === "production") directives.push(["upgrade-insecure-requests", []]);
   return directives.map(([name, sources]) => [name, ...sources].join(" ")).join("; ");
+}
+
+/**
+ * Headers of the service worker script (/sw.js, next.config.ts; the proxy
+ * skips it). Never cached by the browser, so a new version is picked up at the
+ * next visit; its own policy only lets it reach this origin (it fetches pages
+ * of the driver app and nothing else).
+ */
+export function serviceWorkerHeaders(): HeaderEntry[] {
+  return [
+    { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+    { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+    { key: "Content-Security-Policy", value: "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'" },
+  ];
 }
 
 /** A CSP nonce: 128 random bits in base64 (Web Crypto, available in the proxy runtime). */

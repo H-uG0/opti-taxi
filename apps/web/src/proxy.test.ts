@@ -9,7 +9,16 @@ function matches(url: string, headers: Record<string, string> = {}): boolean {
 
 describe("proxy matcher", () => {
   it("runs on pages, their RSC requests and server actions", () => {
-    for (const url of ["/", "/login", "/planning", "/planning?date=2026-11-04", "/patients/abc", "/chauffeur", "/arrivees-partagees"]) {
+    for (const url of [
+      "/",
+      "/login",
+      "/planning",
+      "/planning?date=2026-11-04",
+      "/patients/abc",
+      "/chauffeur",
+      "/arrivees-partagees",
+      "/api/chauffeur/stops/abc/status",
+    ]) {
       expect(matches(url), url).toBe(true);
     }
     // A server action is a POST to the page path with a Next-Action header.
@@ -17,7 +26,7 @@ describe("proxy matcher", () => {
     expect(matches("/planning", { rsc: "1" })).toBe(true);
   });
 
-  it("skips build assets, icons, the manifest and router prefetches", () => {
+  it("skips build assets, icons, the manifest, the service worker and router prefetches", () => {
     for (const url of [
       "/_next/static/chunks/main.js",
       "/_next/static/css/app.css",
@@ -28,6 +37,7 @@ describe("proxy matcher", () => {
       "/apple-touch-icon.png",
       "/favicon.ico",
       "/manifest.webmanifest",
+      "/sw.js",
     ]) {
       expect(matches(url), url).toBe(false);
     }

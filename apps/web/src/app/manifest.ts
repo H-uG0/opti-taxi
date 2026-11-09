@@ -4,13 +4,16 @@ import type { MetadataRoute } from "next";
  * Web app manifest: drivers add the roadmap (/chauffeur) to their phone's home
  * screen and open it full screen like an app.
  *
- * Deliberately no service worker and no offline caching of pages: the roadmap
- * shows patient health data (names, addresses, phone numbers, access notes,
- * care facilities). A cached copy would survive logout on a lost or stolen
- * phone and live outside the HDS-certified hosting. Pages are always rendered
- * by the server for the signed-in driver (dynamic, not stored by the browser);
- * when the network drops, the roadmap says so instead of showing stale data
- * from a cache.
+ * Deliberately no offline caching of pages: the roadmap shows patient health
+ * data (names, addresses, phone numbers, access notes, care facilities). A
+ * cached copy would survive logout on a lost or stolen phone and live outside
+ * the HDS-certified hosting. Pages are always rendered by the server for the
+ * signed-in driver (dynamic, not stored by the browser). The service worker
+ * (public/sw.js) keeps only the app icon, the regulation's number and the time
+ * of the last sync, for a minimal offline page when the app is reopened with
+ * no network; statuses tapped offline wait in the phone's queue (ids and
+ * times only). An encrypted offline copy of the roadmap is a decision for the
+ * DPO and the HDS host.
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {

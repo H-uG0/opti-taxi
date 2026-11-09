@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contentSecurityPolicy, createNonce, MAP_HOSTS, mapOrigins, securityHeaders } from "./security-headers";
+import { contentSecurityPolicy, createNonce, MAP_HOSTS, mapOrigins, securityHeaders, serviceWorkerHeaders } from "./security-headers";
 
 const NONCE = "cmFuZG9tLW5vbmNlLTEyMw==";
 const OPENFREEMAP = "https://tiles.openfreemap.org/styles/liberty";
@@ -119,6 +119,20 @@ describe("contentSecurityPolicy", () => {
       .map((source) => /^'nonce-([A-Za-z0-9+/_-]+={0,2})'$/.exec(source)?.[1])
       .find(Boolean);
     expect(nonce).toBe(NONCE);
+  });
+});
+
+describe("service worker", () => {
+  it("lets the driver app register its own service worker (worker-src 'self'), not one from another origin", () => {
+    const csp = parse(contentSecurityPolicy({ nonce: NONCE, nodeEnv: "production" }));
+    expect(csp["worker-src"]).toEqual(["'self'", "blob:"]);
+  });
+
+  it("serves /sw.js as JavaScript, never cached, limited to this origin", () => {
+    const headers = Object.fromEntries(serviceWorkerHeaders().map(({ key, value }) => [key, value]));
+    expect(headers["Content-Type"]).toBe("application/javascript; charset=utf-8");
+    expect(headers["Cache-Control"]).toContain("no-store");
+    expect(parse(headers["Content-Security-Policy"] ?? "")["default-src"]).toEqual(["'self'"]);
   });
 });
 
