@@ -36,6 +36,7 @@ Règles suivies : une branche par lot, empilées les unes sur les autres et jama
 - Petits défauts corrigés : le message « Optimisation en cours » ne passe plus d'une date à l'autre ; « Figer » et « Défiger » sont grisés sur une date passée ; une erreur de base de données donne un vrai message au lieu de « connexion perdue ? » ; la carte ne se recadre plus après chaque action ; la page d'erreur du planning parle au régulateur ; les flèches de date montrent le chargement.
 - Migration `replan_guard` (statut « en attente de confirmation » et deux paramètres, valeurs par défaut, aucune donnée modifiée).
 - Tests : 1 095 tests web (1 027 avant) ; optimiseur inchangé.
+- **Après revue** : « Remplacer quand même » fonctionne désormais après un « Déplacer vers… » (il échouait toujours) ; « Revenir au planning précédent » après un déplacement remet aussi le verrou d'avant, sans violation. Le planning en place est jugé sur ce qui peut encore rouler : une tournée devenue impossible (véhicule indisponible, équipage changé) ne compte plus comme « servie », la question le dit, et elle ne bloque plus les déplacements. Les courses perdues et les violations d'un calcul en attente sont nommées (patient, aller ou retour, heure), et ce bandeau prend le focus. La validation redemande confirmation si la liste des points à traiter a changé entre-temps, et ne compte plus l'échéance dépassée d'un véhicule sans tournée. Messages : chaque course d'un refus est nommée, un déplacement refusé n'est plus affiché en « Échec de l'optimisation », toute erreur qui demande de recharger propose « Recharger ». Tests : 1 105 tests web.
 
 ## Décisions prises en l'absence d'Hugo (à valider)
 
@@ -45,6 +46,7 @@ Règles suivies : une branche par lot, empilées les unes sur les autres et jama
 - Lot 2 : « Valider » reste possible quand l'optimiseur est hors ligne (la validation n'en a pas besoin) ; seuls « Optimiser », « Déplacer » et « Revenir au planning précédent » sont grisés.
 - Lot 2 : un contrôle technique ou une assurance dépassés à la date planifiée sont signalés (« À traiter », Équipages, confirmation de la validation) mais ne retirent pas le véhicule du planning : bloquer automatiquement ce véhicule reste une question pour le PO. Une échéance qui tombe le jour même est considérée comme encore valable ce jour-là.
 - Lot 2 : la vérification des tarifs porte sur les véhicules actifs, de demain à J+8 ; le jeu de démonstration n'a pas été modifié pour provoquer une alerte (elle fausserait le CA de la démo).
+- Lot 2 (revue) : un déplacement reste refusé dès qu'il fait sortir une autre course du planning, même si l'optimiseur en place une autre à la place (critère du lot). Sur les données de démonstration, cela arrive souvent ; demander plutôt confirmation en nommant les courses perdues et gagnées est une question pour le PO.
 
 ## Questions pour le PO
 

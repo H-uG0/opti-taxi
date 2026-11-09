@@ -40,6 +40,11 @@ describe("validationIssues", () => {
     ]);
   });
 
+  it("does not ask about an overdue vehicle that has no route that day", () => {
+    const idle = { vehicleId: "v3", label: "Taxi 3", hasRoute: false, changes: [], compliance: ["Assurance : échéance dépassée (01/11/2026)"] };
+    expect(validationIssues({ ...clean, vehicleIssues: [idle] })).toEqual([]);
+  });
+
   it("still warns when the violations of the last computation were not recorded", () => {
     expect(validationIssues({ ...clean, violationsKnown: false })).toEqual(["des violations de contraintes"]);
   });

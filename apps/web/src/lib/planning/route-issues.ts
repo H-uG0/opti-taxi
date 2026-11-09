@@ -11,8 +11,10 @@
  * - a crew of the day that is no longer complete (blocked);
  * - a driver or crew mate of the route who is now absent or deactivated, or
  *   who is no longer the one of the day's crew (crew changed on /equipages);
- * and, for every vehicle that drives that day, an inspection or insurance
- * overdue on the date (DayCrewContext.fleetAlerts).
+ * and, for every vehicle with a route or that could get one (complete crew),
+ * an inspection or insurance overdue on the date (DayCrewContext.fleetAlerts):
+ * it informs the next optimization; validation only counts it on a vehicle
+ * with a route (validation.ts).
  */
 import type { VehicleType } from "@prisma/client";
 import {
@@ -110,7 +112,7 @@ export function vehicleIssues(input: VehicleIssuesInput): VehicleIssue[] {
         }
       }
     }
-    // Overdue inspection or insurance: on every vehicle that drives that day.
+    // Overdue inspection or insurance: on every vehicle with a route, or that the next optimization may use.
     const compliance = route || crew.blocked === null ? [...(input.fleetAlerts.get(crew.vehicleId) ?? [])] : [];
     if (changes.length + compliance.length > 0) {
       issues.push({ vehicleId: crew.vehicleId, label, hasRoute: route !== undefined, changes: [...new Set(changes)], compliance });

@@ -8,14 +8,15 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { loadDayVehicleInputs, personName, resolveVehicleAvailability } from "@/lib/optimizer/build-request";
 import { logError } from "@/lib/log";
-import { planningErrorMessage } from "@/lib/planning/action-errors";
+import { DATABASE_ERROR, PLAN_CHANGED_ERROR, planningErrorMessage, UNEXPECTED_ERROR } from "@/lib/planning/action-errors";
 import { lockPlanningDay } from "@/lib/planning/day-lock";
 import { loadPlanningDay } from "@/lib/planning/load";
-import { LOCKED, lockAction, notLockedOn } from "@/lib/planning/lock";
+import { LOCKED, notLockedOn } from "@/lib/planning/lock";
 import {
   confirmPendingRun,
   discardPendingRun,
   dropPendingRuns,
+  NOT_PENDING_ERROR,
   OPTIMIZATION_IN_PROGRESS_ERROR,
   optimizationInProgress,
   PLANNING_TX_OPTIONS,
@@ -67,14 +68,18 @@ async function guarded(action: string, body: () => Promise<PlanningActionResult>
   } catch (error) {
     unstable_rethrow(error);
     logError(`[planning] ${action} failed`, error);
-    return { ok: false, error: planningErrorMessage(error) };
+    const message = planningErrorMessage(error);
+    // Both ask to reload the page: the banner offers « Recharger ».
+    const reload = message === PLAN_CHANGED_ERROR || message === UNEXPECTED_ERROR;
+    return reload ? { ok: false, error: message, stale: true } : { ok: false, error: message };
   }
 }
 
 /** The action's answer to a computation's outcome. */
 function toResult(outcome: RunOutcome): PlanningActionResult {
   if (outcome.ok) return { ok: true, message: outcome.message };
-  return outcome.needsConfirmation ? { ok: false, error: outcome.error, needsConfirmation: true } : { ok: false, error: outcome.error };
+  if (outcome.needsConfirmation) return { ok: false, error: outcome.error, needsConfirmation: true };
+  return outcome.stale ? { ok: false, error: outcome.error, stale: true } : { ok: false, error: outcome.error };
 }
 
 /** Locks only matter for the next optimization: none on a past date. */
@@ -98,7 +103,8 @@ export async function optimizeDay(date: string): Promise<PlanningActionResult> {
 /**
  * « Déplacer vers… » : lock the trip on another vehicle, then re-optimize the
  * rest of the day. When the optimizer cannot serve the trip with that vehicle,
- * the new plan is not saved and the previous lock is restored.
+ * or the new plan waits for confirmation, the new plan is not saved and the
+ * previous lock is restored (runOptimization; a confirmed plan sets it again).
  */
 export async function moveTrip(tripId: string, vehicleId: string): Promise<PlanningActionResult> {
   const user = await requireUser("REGULATOR");
@@ -114,6 +120,7 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
         status: true,
         allowedVehicleTypes: true,
         lockedVehicleId: true,
+        direction: true,
         patient: { select: { firstName: true, lastName: true } },
       },
     });
@@ -159,30 +166,39 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
       if (count > 0) await audit(tx, user, { action: "trip.move", ...traced });
       return count > 0;
     }, PLANNING_TX_OPTIONS);
-    const outcome = await runOptimization(isoDate, user, {
-      move: { tripId: trip.id, vehicleId: target.id, vehicleLabel: target.label, patientName: who },
-    });
-    if (!outcome.ok && (outcome.moveRejected || outcome.needsConfirmation)) {
-      // Undo the lock this move set (unless it was changed meanwhile) so the next optimization does not keep the trip unassigned.
-      // A plan waiting for confirmation sets it again when confirmed (confirmPendingRun).
-      // The undo is a change of its own, traced as the lock or unlock it amounts to.
-      if (moved) {
-        const previousLock = trip.lockedVehicleId;
-        await db.$transaction(async (tx) => {
-          const { count } = await tx.trip.updateMany({
-            where: { id: trip.id, lockedVehicleId: target.id },
-            data: { lockedVehicleId: previousLock },
-          });
-          if (count > 0) await audit(tx, user, { action: lockAction(previousLock), ...traced });
-        }, PLANNING_TX_OPTIONS);
-      }
+    const lockedThere = `Course de ${who} figée sur ${target.label}, mais le planning n'a pas été recalculé`;
+    let outcome: RunOutcome;
+    try {
+      // A refused move, or one whose plan waits for confirmation, puts the previous lock back
+      // (traced as the lock or unlock it amounts to).
+      outcome = await runOptimization(isoDate, user, {
+        move: {
+          tripId: trip.id,
+          vehicleId: target.id,
+          vehicleLabel: target.label,
+          patientName: who,
+          direction: trip.direction,
+          ...(moved ? { previousLock: trip.lockedVehicleId } : {}),
+        },
+      });
+    } catch (error) {
+      // The lock is committed already (and maybe undone since): never answer that nothing was saved.
+      if (!moved) throw error;
+      logError("[planning] moveTrip failed after the lock", error);
       refreshPages();
-      return toResult(outcome);
+      const why =
+        planningErrorMessage(error) === DATABASE_ERROR ? "la base de données n'a pas répondu à temps" : "erreur inattendue";
+      return {
+        ok: false,
+        error:
+          `Déplacement de la course de ${who} vers ${target.label} interrompu (${why}) : elle est peut-être restée figée ` +
+          `sur ${target.label}. Rechargez la page pour voir l'état réel du planning.`,
+        stale: true,
+      };
     }
     refreshPages();
-    if (!outcome.ok) {
-      return { ok: false, error: `Course de ${who} figée sur ${target.label}, mais le planning n'a pas été recalculé : ${outcome.error}` };
-    }
+    if (!outcome.ok && (outcome.moveRejected || outcome.needsConfirmation)) return toResult(outcome);
+    if (!outcome.ok) return { ok: false, error: `${lockedThere} : ${outcome.error}` };
     return { ok: true, message: `Course de ${who} déplacée et figée sur ${target.label}. ${outcome.message}` };
   });
 }
@@ -196,7 +212,7 @@ export async function confirmPlan(runId: string): Promise<PlanningActionResult> 
   const user = await requireUser("REGULATOR");
   return guarded("confirmPlan", async () => {
     const id = idSchema.safeParse(runId);
-    if (!id.success) return { ok: false, error: "Calcul introuvable : rechargez la page." };
+    if (!id.success) return { ok: false, error: "Calcul introuvable : rechargez la page.", stale: true };
     const outcome = await confirmPendingRun(id.data, user);
     refreshPages();
     return toResult(outcome);
@@ -208,14 +224,14 @@ export async function discardPlan(runId: string): Promise<PlanningActionResult> 
   const user = await requireUser("REGULATOR");
   return guarded("discardPlan", async () => {
     const id = idSchema.safeParse(runId);
-    if (!id.success) return { ok: false, error: "Calcul introuvable : rechargez la page." };
+    if (!id.success) return { ok: false, error: "Calcul introuvable : rechargez la page.", stale: true };
     const dropped = await discardPendingRun(id.data, (tx, isoDate) =>
       audit(tx, user, { action: "plan.discard", entity: "OptimizationRun", entityId: id.data, serviceDate: isoDate }),
     );
     refreshPages();
     return dropped
       ? { ok: true, message: "Calcul écarté : le planning en place est conservé." }
-      : { ok: false, error: "Ce calcul n'attend plus de confirmation (déjà traité ou remplacé par un autre) : rechargez la page." };
+      : { ok: false, error: NOT_PENDING_ERROR, stale: true };
   });
 }
 
@@ -317,9 +333,10 @@ export async function unlockTrip(tripId: string): Promise<PlanningActionResult> 
  * the plan carries something to fix (route planned before a change of vehicle
  * or crew, overdue inspection or insurance, unassigned trip, violation, return
  * to check, trip to review), the regulator must confirm explicitly
- * (`confirmed`): validationIssues, the same list as the page's « À traiter ».
+ * (`confirmed`: the question the regulator answered, which must still be the
+ * one asked): validationIssues, the same list as the page's « À traiter ».
  */
-export async function validateDay(date: string, confirmed: boolean, shownVersion: string): Promise<PlanningActionResult> {
+export async function validateDay(date: string, confirmed: string | null, shownVersion: string): Promise<PlanningActionResult> {
   const user = await requireUser("REGULATOR");
   return guarded("validateDay", async () => {
     const parsed = dateSchema.safeParse(date);
@@ -338,9 +355,9 @@ export async function validateDay(date: string, confirmed: boolean, shownVersion
     if (routes === 0) return { ok: false, error: "Aucune tournée à valider : lancez d'abord l'optimisation." };
 
     const issues = validationIssues(view);
-    if (issues.length > 0 && confirmed !== true) {
-      return { ok: false, needsConfirmation: true, error: validationQuestion(issues) };
-    }
+    // Asked again when the issues changed since the question the regulator confirmed (absence, unavailability…).
+    const question = issues.length > 0 ? validationQuestion(issues) : null;
+    if (question !== null && confirmed !== question) return { ok: false, needsConfirmation: true, error: question };
 
     // Under the planning lock of the date: no computation can start between the checks and the write,
     // and the plan validated is the one the regulator saw (same version), whose issues were listed above.

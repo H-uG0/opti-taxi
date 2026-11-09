@@ -80,11 +80,22 @@ describe("replanning guard details", () => {
     figures: comparison.current,
     routes: [{ vehicleId: "v1", stops: [{ tripId: "t1", kind: "PICKUP" as const }, { tripId: "t1", kind: "DROPOFF" as const }] }],
   };
-  const pending = { response, requestHash: "h", basedOnVersion: "v1", move: null };
+  const lockChange = { tripId: "t1", from: null, to: "v2" };
+  const pending = { response, requestHash: "h", basedOnVersion: "v1", lockChange };
 
-  it("keeps the kind, comparison, previous routes and question through the database", () => {
-    const details = throughDatabase(runDetailsJson(response, { kind: "move", comparison, previous, question: "Remplacer ?" }));
-    expect(readRunDetails({ id: "run_1", details, kpis: null })).toEqual({ ...expected, kind: "move", comparison, previous, question: "Remplacer ?" });
+  it("keeps the kind, comparison, previous routes, question and lock change through the database", () => {
+    const undrivable = { ...comparison, undrivable: { vehicles: ["Taxi 2"], trips: 8 } };
+    const details = throughDatabase(
+      runDetailsJson(response, { kind: "move", comparison: undrivable, previous, question: "Remplacer ?", lockChange }),
+    );
+    expect(readRunDetails({ id: "run_1", details, kpis: null })).toEqual({
+      ...expected,
+      kind: "move",
+      comparison: undrivable,
+      previous,
+      question: "Remplacer ?",
+      lockChange,
+    });
   });
 
   it("reads the plan waiting for confirmation, and drops it once handled (the comparison stays)", () => {

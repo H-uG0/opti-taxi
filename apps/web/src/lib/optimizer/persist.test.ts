@@ -357,20 +357,26 @@ describe("contract fixtures", () => {
 
   type RunWrite = { where: unknown; data: Record<string, unknown> };
   type InPlaceRoute = {
+    id: string;
     vehicleId: string;
+    driverId: string | null;
+    crewMateId: string | null;
     revenue: number;
     margin: number;
     distanceKm: number;
     optimizationRunId: string | null;
+    vehicle: { label: string } | null;
     stops: { tripId: string; kind: "PICKUP" | "DROPOFF"; sequence: number }[];
   };
 
   /**
    * Just enough of a transaction client for savePlan: nothing locked, nothing
-   * started; `inPlace` are the routes already saved for the date, serving
-   * `servedInPlace`, with `violationsInPlace` on their run.
+   * started; `inPlace` are the routes already saved for the date (serving the
+   * trips of their stops), with `violationsInPlace` on their run. Each vehicle
+   * of the request is crewed by `drv_<vehicle id>`.
    */
-  function fakeClient(inPlace: InPlaceRoute[] = [], servedInPlace: string[] = [], violationsInPlace = 0) {
+  function fakeClient(inPlace: InPlaceRoute[] = [], violationsInPlace = 0) {
+    const servedInPlace = inPlace.flatMap((r) => [...new Set(r.stops.map((s) => s.tripId))].map((id) => ({ id, routeId: r.id })));
     const runWrites: RunWrite[] = [];
     const deleted: unknown[] = [];
     let createdRoutes = 0;
@@ -380,7 +386,7 @@ describe("contract fixtures", () => {
       trip: {
         count: async () => 0,
         findMany: async (args: { where: { routeId?: unknown } }) =>
-          args.where.routeId ? servedInPlace.map((id) => ({ id })) : request.trips.map((t) => current(t.id)),
+          args.where.routeId ? servedInPlace : request.trips.map((t) => current(t.id)),
         update: async () => ({}),
         updateMany: async () => ({ count: 0 }),
       },
@@ -451,12 +457,18 @@ describe("contract fixtures", () => {
     });
   });
 
+  // A route in place that can still be driven: a vehicle of the request, with the crew it gets today.
+  const taxi = request.vehicles.find((v) => v.type === "TAXI")!;
   const inPlaceRoute: InPlaceRoute = {
-    vehicleId: "veh_old",
+    id: "route_old",
+    vehicleId: taxi.id,
+    driverId: `drv_${taxi.id}`,
+    crewMateId: null,
     revenue: 500,
     margin: 200,
     distanceKm: 120,
     optimizationRunId: "run_0",
+    vehicle: { label: taxi.label },
     stops: [
       { tripId: "old_trip", kind: "DROPOFF", sequence: 1 },
       { tripId: "old_trip", kind: "PICKUP", sequence: 0 },
@@ -464,7 +476,7 @@ describe("contract fixtures", () => {
   };
 
   it("compares the new plan with the routes in place and keeps their stop sequences", async () => {
-    const { prisma, runWrites } = fakeClient([inPlaceRoute], ["old_trip"], 1);
+    const { prisma, runWrites } = fakeClient([inPlaceRoute], 1);
     const checks: unknown[] = [];
     const saved = await savePlan(prisma, {
       runId: "run_1",
@@ -482,18 +494,44 @@ describe("contract fixtures", () => {
     expect(saved.comparison.next.violations).toBe(response.validation.violations.length);
     // The trip of the old plan is not part of the new request: lost.
     expect(saved.comparison.lostTripIds).toEqual(["old_trip"]);
+    expect(saved.comparison).not.toHaveProperty("undrivable");
     expect(runWrites[0]?.data.details).toMatchObject({
       kind: "optimize",
       previous: {
         runId: "run_0",
         figures: { served: 1 },
-        routes: [{ vehicleId: "veh_old", stops: [{ tripId: "old_trip", kind: "PICKUP" }, { tripId: "old_trip", kind: "DROPOFF" }] }],
+        routes: [{ vehicleId: taxi.id, stops: [{ tripId: "old_trip", kind: "PICKUP" }, { tripId: "old_trip", kind: "DROPOFF" }] }],
       },
     });
   });
 
+  it("does not count the routes in place that can no longer be driven (vehicle gone, crew changed)", async () => {
+    const stops = (tripId: string) => [
+      { tripId, kind: "PICKUP" as const, sequence: 0 },
+      { tripId, kind: "DROPOFF" as const, sequence: 1 },
+    ];
+    const vsl = request.vehicles.find((v) => v.type === "VSL")!;
+    const { prisma, runWrites } = fakeClient([
+      inPlaceRoute,
+      // Vehicle no longer sent to the optimizer (unavailable or deactivated since the computation).
+      { ...inPlaceRoute, id: "route_gone", vehicleId: "veh_gone", driverId: "drv_x", vehicle: { label: "Taxi 9" }, stops: stops("gone_trip") },
+      // Driver of the route absent, replaced in the crew of the day.
+      { ...inPlaceRoute, id: "route_vsl", vehicleId: vsl.id, driverId: "drv_absent", vehicle: { label: vsl.label }, stops: stops("vsl_trip") },
+    ]);
+    const lockChange = { tripId: "t", from: null, to: "v" };
+    const saved = await savePlan(prisma, { runId: "run_1", isoDate: request.date, request, response, lockChange, now: NOW });
+    expect(saved.comparison.current).toEqual({ served: 1, violations: 0, revenue: 500, margin: 200, km: 120 });
+    expect(saved.comparison.lostTripIds).toEqual(["old_trip"]);
+    expect(saved.comparison.undrivable).toEqual({ vehicles: ["Taxi 9", vsl.label], trips: 2 });
+    // Every route is kept for « Revenir au planning précédent », with the figures of what could be driven.
+    expect(runWrites[0]?.data.details).toMatchObject({
+      previous: { figures: { served: 1 }, routes: [{ vehicleId: taxi.id }, { vehicleId: "veh_gone" }, { vehicleId: vsl.id }] },
+      lockChange,
+    });
+  });
+
   it("writes nothing when the guard refuses the new plan", async () => {
-    const { prisma, runWrites, deleted } = fakeClient([inPlaceRoute], ["old_trip"]);
+    const { prisma, runWrites, deleted } = fakeClient([inPlaceRoute]);
     const refusal = new Error("moins bon");
     await expect(
       savePlan(prisma, {

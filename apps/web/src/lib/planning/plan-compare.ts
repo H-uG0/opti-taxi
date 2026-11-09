@@ -11,6 +11,11 @@
  * Otherwise the regulator decides: « remplacer quand même » or keep the plan
  * in place. A move (« Déplacer vers… ») that would leave other trips without
  * a vehicle is refused outright.
+ *
+ * The plan in place is judged on what can still be driven: a route whose
+ * vehicle was made unavailable or deactivated since, or whose crew changed
+ * (absence, replacement: lib/planning/route-issues.ts), serves nobody. Its
+ * trips count neither as served in place nor as lost by the new plan.
  */
 import type { StopKind } from "@prisma/client";
 
@@ -31,6 +36,12 @@ export type PlanComparison = {
   next: PlanFigures;
   /** Trips served in place that the new plan leaves without a vehicle. */
   lostTripIds: string[];
+  /**
+   * Routes in place that can no longer be driven as saved (vehicle labels)
+   * and the trips on them: left out of `current` and of lostTripIds. Absent
+   * when there is none (and from comparisons stored before).
+   */
+  undrivable?: { vehicles: string[]; trips: number };
 };
 
 /** AppSettings.replanMaxServedLoss and replanMaxMarginLoss. */
@@ -72,8 +83,30 @@ export function planFigures(
   };
 }
 
+/** The crew a route is saved with (persist.ts planRoutes): its driver, and the crew mate of an ambulance. */
+export type RouteCrew = { driverId: string | null; crewMateId: string | null };
+
+/** The crew a new route of a vehicle gets today; no crewMateId: not an ambulance, the crew mate does not matter. */
+export type TodayCrew = { driverId: string | null; crewMateId?: string | null };
+
+/**
+ * Whether a route in place can still be driven as saved: its vehicle is sent
+ * to the optimizer today, with the crew a new route would get. Otherwise the
+ * vehicle was made unavailable or deactivated, or its crew changed since
+ * (the same cases as route-issues.ts, whose « Véhicules à revoir » lists them).
+ */
+export function isDrivable(route: RouteCrew & { vehicleId: string }, todayCrews: ReadonlyMap<string, TodayCrew>): boolean {
+  const crew = todayCrews.get(route.vehicleId);
+  if (!crew || crew.driverId !== route.driverId) return false;
+  return crew.crewMateId === undefined || crew.crewMateId === route.crewMateId;
+}
+
 export function comparePlans(
-  current: { figures: PlanFigures; servedTripIds: readonly string[] } | null,
+  current: {
+    figures: PlanFigures;
+    servedTripIds: readonly string[];
+    undrivable?: { vehicles: string[]; trips: number };
+  } | null,
   next: { figures: PlanFigures; servedTripIds: readonly string[] },
 ): PlanComparison {
   const nextServed = new Set(next.servedTripIds);
@@ -81,6 +114,7 @@ export function comparePlans(
     current: current?.figures ?? null,
     next: next.figures,
     lostTripIds: current ? current.servedTripIds.filter((id) => !nextServed.has(id)) : [],
+    ...(current?.undrivable && current.undrivable.vehicles.length > 0 ? { undrivable: current.undrivable } : {}),
   };
 }
 
@@ -110,11 +144,35 @@ function violationsText(count: number | null): string {
   return count === 0 ? "aucune violation" : plural(count, "violation de contrainte", "violations de contraintes");
 }
 
+/** "a", "a et b", "a, b et c". */
+function listing(items: readonly string[]): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} et ${items[items.length - 1]}`;
+}
+
+/**
+ * « Les tournées de Taxi 2 et VSL 2 ne peuvent plus être assurées : 8 courses
+ * ne sont pas comptées comme servies dans le planning actuel. », or null.
+ */
+export function undrivableNote(comparison: Pick<PlanComparison, "undrivable">): string | null {
+  const undrivable = comparison.undrivable;
+  if (!undrivable || undrivable.vehicles.length === 0) return null;
+  const vehicles = listing(undrivable.vehicles);
+  const routes =
+    undrivable.vehicles.length > 1
+      ? `Les tournées de ${vehicles} ne peuvent plus être assurées`
+      : `La tournée de ${vehicles} ne peut plus être assurée`;
+  if (undrivable.trips === 0) return `${routes}.`;
+  const trips = plural(undrivable.trips, "course n'est pas comptée comme servie", "courses ne sont pas comptées comme servies");
+  return `${routes} : ${trips} dans le planning actuel.`;
+}
+
 /**
  * The question asked before replacing the routes in place: « Ce calcul sert
  * 280 courses contre 300 dans le planning actuel, avec 2 violations de
  * contraintes (aucune actuellement) : remplacer quand même ? ». Only the
- * concerns are named; the page shows every figure side by side.
+ * concerns are named; the page shows every figure side by side. Routes in
+ * place that can no longer be driven are said first (undrivableNote).
  */
 export function comparisonQuestion(
   comparison: PlanComparison,
@@ -134,7 +192,9 @@ export function comparisonQuestion(
     parts.push(`dégage une marge de ${euros.format(next.margin)} contre ${euros.format(current.margin)}`);
   }
   const what = parts.length > 0 ? `${subject} ${parts.join(", ")}` : `${subject} est moins bon que le planning actuel`;
-  return current ? `${what} : remplacer quand même ?` : `${what} : l'enregistrer quand même ?`;
+  const question = current ? `${what} : remplacer quand même ?` : `${what} : l'enregistrer quand même ?`;
+  const note = undrivableNote(comparison);
+  return note ? `${note} ${question}` : question;
 }
 
 /** Figures as a short line: "300 courses servies · 0 violation · marge 4 800 € · 1 790 km". */

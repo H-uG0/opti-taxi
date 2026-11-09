@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { BuildResult } from "@/lib/optimizer/build-request";
 import type { OptimizerTrip, PlanResponse, PlanRoute } from "@/lib/optimizer/contract";
-import { movePlacementIssue, moveRequestIssue, plannedVehicleOf, resolveTripRefs, tripRef, type MoveTarget } from "./move";
+import {
+  movePlacementIssue,
+  moveRequestIssue,
+  plannedVehicleOf,
+  resolveTripRefs,
+  tripRef,
+  tripRefIds,
+  type MoveTarget,
+  type TripName,
+} from "./move";
 
 const MOVE: MoveTarget = { tripId: "t1", vehicleId: "vsl_gre", vehicleLabel: "VSL Grenoble", patientName: "Jeanne Martin" };
 
@@ -173,5 +182,18 @@ describe("patient names and technical records (OptimizationRun.error)", () => {
     expect(resolveTripRefs(`Refusé : ${tripRef("cmabc_123")} ailleurs.`, () => null)).toBe("Refusé : une course ailleurs.");
     // A message without reference (every other run error) is left as is.
     expect(resolveTripRefs("aucune solution trouvée", () => "X")).toBe("aucune solution trouvée");
+  });
+
+  it("names the leg when it is known, and lists the trips a message refers to", () => {
+    const text = `${tripRef("a")} et ${tripRef("b")}, puis ${tripRef("a")}`;
+    expect(tripRefIds(text)).toEqual(["a", "b"]);
+    const legs: Record<string, TripName> = {
+      a: { patient: "René Espitalier", direction: "OUTBOUND" },
+      b: { patient: "René Espitalier", direction: "RETURN" },
+    };
+    expect(resolveTripRefs(text, (id) => legs[id] ?? null)).toBe(
+      "L'aller de René Espitalier et le retour de René Espitalier, puis l'aller de René Espitalier",
+    );
+    expect(resolveTripRefs(tripRef("c"), () => ({ patient: "Jeanne Martin", direction: null }))).toBe("La course de Jeanne Martin");
   });
 });

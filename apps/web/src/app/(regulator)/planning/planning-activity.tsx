@@ -81,6 +81,7 @@ export function PlanningActivityProvider({ timeLimitSec, children }: { timeLimit
           setFeedback({
             tone: "error",
             text: "L'action n'a pas abouti (connexion au serveur perdue ?). Rechargez la page pour voir l'état réel du planning.",
+            reload: true,
           });
         } finally {
           setActivity(null);

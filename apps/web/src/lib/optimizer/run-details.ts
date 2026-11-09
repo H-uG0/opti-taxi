@@ -17,6 +17,14 @@ import { planResponseSchema, unassignedSchema, violationSchema, type PlanRespons
 /** What produced a run: « Optimiser », « Déplacer vers… » or « Revenir au planning précédent ». */
 export type RunKind = "optimize" | "move" | "restore";
 
+/**
+ * A trip lock changed with a plan, from `from` to `to` (null: no lock):
+ * « Déplacer vers… » locks the trip on its new vehicle, « Revenir au planning
+ * précédent » puts back the lock that move replaced. Kept with the plan saved
+ * (details.lockChange), so that restoring the routes it replaced undoes it too.
+ */
+export type LockChange = { tripId: string; from: string | null; to: string | null };
+
 export type RunDetails = {
   runId: string;
   solverStatus: string;
@@ -36,6 +44,8 @@ export type RunDetails = {
   evaluatedAt?: string;
   /** Run waiting for confirmation: the question asked (trips named by tripRef, see move.ts). */
   question?: string;
+  /** The trip lock changed with this plan (a move, or the restoration of the plan a move replaced). */
+  lockChange?: LockChange;
 };
 
 /**
@@ -46,12 +56,16 @@ export type RunDetails = {
  */
 export type PendingPlan = {
   response: PlanResponse;
-  /** lib/planning/pending.ts requestHash of the request sent. */
+  /** requestHash (lib/planning/version.ts) of the request sent. */
   requestHash: string;
   /** Plan version (lib/planning/version.ts) of the routes it was compared with. */
   basedOnVersion: string;
-  /** « Déplacer vers… »: the lock to set again when confirmed. */
-  move: { tripId: string; vehicleId: string; vehicleLabel: string } | null;
+  /**
+   * The trip lock the plan was computed with, written when it is confirmed:
+   * meanwhile the trip is locked on `from` (a move's lock was undone, a
+   * restored lock is not written yet).
+   */
+  lockChange: LockChange | null;
 };
 
 /** The OptimizationRun columns the details are read from. */
@@ -73,7 +87,10 @@ const comparisonSchema = z.object({
   current: figuresSchema.nullable(),
   next: figuresSchema,
   lostTripIds: z.array(z.string()),
+  undrivable: z.object({ vehicles: z.array(z.string()), trips: z.number() }).optional(),
 });
+
+const lockChangeSchema = z.object({ tripId: z.string(), from: z.string().nullable(), to: z.string().nullable() });
 
 const stopKindSchema = z.enum(["PICKUP", "DROPOFF"]);
 
@@ -94,13 +111,14 @@ const detailsSchema = z.object({
   previous: snapshotSchema.optional(),
   evaluatedAt: z.string().optional(),
   question: z.string().optional(),
+  lockChange: lockChangeSchema.optional(),
 });
 
 const pendingSchema = z.object({
   response: planResponseSchema,
   requestHash: z.string(),
   basedOnVersion: z.string(),
-  move: z.object({ tripId: z.string(), vehicleId: z.string(), vehicleLabel: z.string() }).nullable(),
+  lockChange: lockChangeSchema.nullable(),
 });
 
 /** Legacy layout: the optimizer KPIs plus the details under the `details` key. */
@@ -113,6 +131,7 @@ export type RunDetailsExtra = {
   previous?: PlanSnapshot;
   question?: string;
   pending?: PendingPlan;
+  lockChange?: LockChange;
 };
 
 /** JSON written to OptimizationRun.details. */

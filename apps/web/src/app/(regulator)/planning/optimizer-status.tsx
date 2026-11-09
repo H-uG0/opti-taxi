@@ -20,7 +20,8 @@ export async function OptimizerStatus() {
       <WifiOff aria-hidden className="mt-0.5 size-4 shrink-0" />
       <p className="min-w-0 break-words">
         <span className="font-semibold">Optimiseur hors ligne.</span> {result.error} Le planning enregistré reste consultable
-        et modifiable (verrous, validation) ; « Optimiser » et « Déplacer » attendent son retour.
+        et modifiable (verrous, validation) ; « Optimiser », « Déplacer » et « Revenir au planning précédent » attendent son
+        retour.
       </p>
     </div>
   );

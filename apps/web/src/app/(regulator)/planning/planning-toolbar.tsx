@@ -44,7 +44,8 @@ export function PlanningToolbar({
   const optimizeOff = optimizeBlocked ?? computing ?? optimizerOffline;
   const validateOff = computing;
 
-  const validate = (confirmed: boolean) => {
+  /** `confirmed`: the question answered « Valider quand même » (asked again if the issues changed since). */
+  const validate = (confirmed: string | null) => {
     setConfirmation(null);
     run("Validation du planning…", () => validateDay(date, confirmed, version), {
       onResult: (result) => {
@@ -74,7 +75,7 @@ export function PlanningToolbar({
         <div className="relative">
           <Button
             variant="secondary"
-            onClick={() => validate(false)}
+            onClick={() => validate(null)}
             disabled={busy || validateOff !== null}
             title={validateOff ?? "Les tournées passent en « Validée » : les chauffeurs les voient comme définitives"}
             aria-describedby={validateOff ? "validate-blocked" : undefined}
@@ -101,7 +102,7 @@ export function PlanningToolbar({
                 <Button size="sm" variant="ghost" onClick={() => setConfirmation(null)}>
                   Annuler
                 </Button>
-                <Button ref={confirmRef} size="sm" onClick={() => validate(true)} disabled={busy}>
+                <Button ref={confirmRef} size="sm" onClick={() => validate(confirmation)} disabled={busy}>
                   Valider quand même
                 </Button>
               </div>

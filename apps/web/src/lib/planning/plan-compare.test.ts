@@ -3,11 +3,14 @@ import {
   comparePlans,
   comparisonQuestion,
   figuresLine,
+  isDrivable,
   planFigures,
   replaceConcerns,
   restorableRoutes,
   snapshotOf,
   type PlanFigures,
+  type TodayCrew,
+  undrivableNote,
 } from "./plan-compare";
 
 const DEFAULTS = { maxServedLoss: 0, maxMarginLoss: 0.1 };
@@ -69,6 +72,48 @@ describe("comparisonQuestion", () => {
   it("asks to save a first computation that breaks rules", () => {
     const first = compare({ violations: 1 }, null);
     expect(comparisonQuestion(first, ["violations"])).toBe("Ce calcul comporte 1 violation de contrainte : l'enregistrer quand même ?");
+  });
+
+  it("says first which routes in place can no longer be driven, and that they are not counted", () => {
+    const comparison = comparePlans(
+      { figures: inPlace, servedTripIds: ["a", "b", "c"], undrivable: { vehicles: ["Taxi 2", "VSL 2"], trips: 8 } },
+      { figures: { ...inPlace, served: 299 }, servedTripIds: ["a", "b"] },
+    );
+    expect(comparison.undrivable).toEqual({ vehicles: ["Taxi 2", "VSL 2"], trips: 8 });
+    expect(comparisonQuestion(comparison, ["served"])).toBe(
+      "Les tournées de Taxi 2 et VSL 2 ne peuvent plus être assurées : 8 courses ne sont pas comptées comme servies dans le planning actuel. " +
+        "Ce calcul sert 299 courses contre 300 dans le planning actuel : remplacer quand même ?",
+    );
+    expect(undrivableNote({ undrivable: { vehicles: ["VSL 2 (Manosque)"], trips: 1 } })).toBe(
+      "La tournée de VSL 2 (Manosque) ne peut plus être assurée : 1 course n'est pas comptée comme servie dans le planning actuel.",
+    );
+    // Nothing to say when every route can be driven.
+    const none = comparePlans(
+      { figures: inPlace, servedTripIds: [], undrivable: { vehicles: [], trips: 0 } },
+      { figures: inPlace, servedTripIds: [] },
+    );
+    expect(none).not.toHaveProperty("undrivable");
+  });
+});
+
+describe("isDrivable (routes in place against the vehicles and crews of today's request)", () => {
+  const today = new Map<string, TodayCrew>([
+    ["taxi", { driverId: "d1" }],
+    ["amb", { driverId: "d2", crewMateId: "d3" }],
+  ]);
+
+  it("keeps a route on a vehicle sent today with the same crew", () => {
+    expect(isDrivable({ vehicleId: "taxi", driverId: "d1", crewMateId: null }, today)).toBe(true);
+    expect(isDrivable({ vehicleId: "amb", driverId: "d2", crewMateId: "d3" }, today)).toBe(true);
+    // A crew mate left on a taxi route (legacy data) does not matter: only an ambulance has a crew of two.
+    expect(isDrivable({ vehicleId: "taxi", driverId: "d1", crewMateId: "d7" }, today)).toBe(true);
+  });
+
+  it("drops a route whose vehicle is no longer sent (unavailable, deactivated) or whose crew changed", () => {
+    expect(isDrivable({ vehicleId: "vsl", driverId: "d4", crewMateId: null }, today)).toBe(false);
+    expect(isDrivable({ vehicleId: "taxi", driverId: "d9", crewMateId: null }, today)).toBe(false);
+    expect(isDrivable({ vehicleId: "amb", driverId: "d2", crewMateId: "d8" }, today)).toBe(false);
+    expect(isDrivable({ vehicleId: "taxi", driverId: null, crewMateId: null }, today)).toBe(false);
   });
 });
 

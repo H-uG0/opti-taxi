@@ -186,8 +186,13 @@ export type RunView = {
   interrupted: boolean;
   /** « Optimiser », « Déplacer vers… » or « Revenir au planning précédent »; null for a run saved before. */
   kind: "optimize" | "move" | "restore" | null;
-  /** AWAITING_CONFIRMATION: the question asked (patients named) and the figures side by side. */
-  pending: { question: string; comparison: PlanComparison } | null;
+  /**
+   * AWAITING_CONFIRMATION: the question asked (patients named), the figures
+   * side by side, the trips served in place it would leave without a vehicle
+   * and its violations (« Jeanne Martin (aller, RDV 08:30) », « Hors fenêtre
+   * horaire — Taxi 1, … »).
+   */
+  pending: { question: string; comparison: PlanComparison; lostTrips: string[]; violations: string[] } | null;
   /** Figures of the routes this run replaced, when they can be brought back (« Revenir au planning précédent »). */
   previous: PlanFigures | null;
   /** When /evaluate last re-checked the plan's violations (a trip left a route), ISO; null if never. */

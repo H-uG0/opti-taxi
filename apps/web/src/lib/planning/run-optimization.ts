@@ -31,14 +31,30 @@ import {
   savePlan,
   type SavePlanResult,
 } from "@/lib/optimizer/persist";
-import { readPendingPlan, readRunDetails, runDetailsJson, withoutPending, type RunKind } from "@/lib/optimizer/run-details";
+import {
+  readPendingPlan,
+  readRunDetails,
+  runDetailsJson,
+  withoutPending,
+  type LockChange,
+  type RunKind,
+} from "@/lib/optimizer/run-details";
 import { formatLongDate, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import { tariffGapNote } from "./format";
 import { withBeforeCommit } from "./before-commit";
 import { lockPlanningDay } from "./day-lock";
 import { emptyPlanIssue } from "./empty-plan";
-import { notLockedOn } from "./lock";
-import { movePlacementIssue, moveRequestIssue, resolveTripRefs, tripRef, type MoveTarget } from "./move";
+import { lockAction } from "./lock";
+import {
+  MOVE_REFUSED_PREFIX,
+  movePlacementIssue,
+  moveRequestIssue,
+  resolveTripRefs,
+  tripRef,
+  tripRefIds,
+  type MoveTarget,
+  type TripName,
+} from "./move";
 import {
   comparisonQuestion,
   DEFAULT_REPLACE_THRESHOLDS,
@@ -47,7 +63,7 @@ import {
   restorableRoutes,
   type PlanComparison,
 } from "./plan-compare";
-import { requestHash } from "./version";
+import { loadPlanVersion, requestHash } from "./version";
 
 export type RunOutcome =
   | { ok: true; message: string; runId: string }
@@ -58,6 +74,8 @@ export type RunOutcome =
       moveRejected?: boolean;
       /** The plan computed is worse than (or as invalid as) the routes in place: it waits for the regulator's word. */
       needsConfirmation?: boolean;
+      /** The page shows a state that changed since (the plan was handled elsewhere): offer to reload it. */
+      stale?: boolean;
     };
 
 export type RunOptions = {
@@ -147,9 +165,92 @@ class ReplaceRefused extends Error {
   }
 }
 
-const NOT_PENDING_ERROR = "Ce calcul n'attend plus de confirmation (déjà traité ou remplacé par un autre) : rechargez la page.";
+export const NOT_PENDING_ERROR = "Ce calcul n'attend plus de confirmation (déjà traité ou remplacé par un autre) : rechargez la page.";
 const INPUT_CHANGED_ERROR = `${NOT_KEPT_PREFIX} : les données du jour ont changé depuis (course, verrou, équipage, véhicule ou paramètre). Relancez l'optimisation.`;
 const PLAN_CHANGED_SINCE_ERROR = `${NOT_KEPT_PREFIX} : le planning en place a changé depuis. Relancez l'optimisation.`;
+
+type Actor = Pick<SessionUser, "id" | "role">;
+
+/** The lock moveTrip wrote before the computation, or null when the trip already was locked on the vehicle. */
+function moveLockChange(move: MoveTarget | undefined): LockChange | null {
+  if (!move || move.previousLock === undefined) return null;
+  return { tripId: move.tripId, from: move.previousLock, to: move.vehicleId };
+}
+
+function reversed(change: LockChange): LockChange {
+  return { tripId: change.tripId, from: change.to, to: change.from };
+}
+
+/** The day's input as a plan is computed with `change`: its trip locked on `to`, if still locked on `from`. */
+function withLockChange(change: LockChange | null): (input: OptimizeInput) => OptimizeInput {
+  if (!change) return (input) => input;
+  return (input) => ({
+    ...input,
+    trips: input.trips.map((t) =>
+      t.id === change.tripId && t.lockedVehicleId === change.from ? { ...t, lockedVehicleId: change.to } : t,
+    ),
+  });
+}
+
+/**
+ * Writes `change` if the trip is still locked on `from` (conditional: a lock
+ * changed meanwhile is left as is), traced as `action`, by default the lock or
+ * unlock it amounts to.
+ */
+async function writeLockChange(
+  tx: Prisma.TransactionClient,
+  user: Actor,
+  isoDate: string,
+  change: LockChange,
+  action: "trip.move" | "trip.lock" | "trip.unlock" = lockAction(change.to),
+): Promise<void> {
+  const { count } = await tx.trip.updateMany({
+    where: { id: change.tripId, lockedVehicleId: change.from },
+    data: { lockedVehicleId: change.to },
+  });
+  if (count > 0) await audit(tx, user, { action, entity: "Trip", entityId: change.tripId, serviceDate: isoDate });
+}
+
+/**
+ * A refused move puts back the lock moveTrip set, so the next optimization
+ * does not keep the trip unassigned. The undo is a change of its own.
+ */
+async function undoMoveLock(change: LockChange | null, user: Actor, isoDate: string): Promise<void> {
+  if (!change) return;
+  await db.$transaction((tx) => writeLockChange(tx, user, isoDate, reversed(change)), PLANNING_TX_OPTIONS);
+}
+
+/**
+ * A message naming trips by tripRef, as the regulator reads it at once: each
+ * trip named by its patient and leg (« l'aller de … »). Never stored.
+ */
+async function shownMessage(text: string, move?: MoveTarget): Promise<string> {
+  const ids = tripRefIds(text);
+  if (ids.length === 0) return text;
+  const names = new Map<string, TripName>();
+  if (move) names.set(move.tripId, { patient: move.patientName, direction: move.direction ?? null });
+  const others = ids.filter((id) => !names.has(id));
+  if (others.length > 0) {
+    try {
+      const rows = await db.trip.findMany({
+        where: { id: { in: others } },
+        select: { id: true, direction: true, patient: { select: { firstName: true, lastName: true } } },
+      });
+      for (const row of rows) {
+        const patient = `${row.patient.firstName} ${row.patient.lastName}`.trim();
+        names.set(row.id, { patient, direction: row.direction });
+      }
+    } catch (error) {
+      // The message still goes out, with « une course » for the trips it could not name.
+      logError("[planning] naming the trips of a message failed", error);
+    }
+  }
+  return resolveTripRefs(text, (id) => names.get(id) ?? null);
+}
+
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1);
+}
 
 /** The request of isoDate, or why there is nothing to compute. */
 async function prepareRequest(
@@ -285,12 +386,20 @@ async function finishRun(args: {
   build: BuildResult;
   plan: PlanResponse;
   move?: MoveTarget;
+  /**
+   * The trip lock changed with this plan, recorded with it when saved: already
+   * written (a move, by moveTrip: undone when the plan is refused or waits for
+   * confirmation), or written with the routes (a restoration).
+   */
+  lock?: { change: LockChange; written: boolean } | null;
 }): Promise<RunOutcome> {
   const { kind, isoDate, user, runId, build, plan, move } = args;
+  const lock = args.lock ?? null;
   const { request } = build;
   const meta = { matrixSource: plan.meta.matrixSource, wallTimeMs: plan.meta.wallTimeMs };
-  // Move messages name the trip by its id (stored as is); the regulator reads the patient's name.
-  const shown = (text: string) => (move ? resolveTripRefs(text, (id) => (id === move.tripId ? move.patientName : null)) : text);
+  // Messages name trips by id (stored as is); the regulator reads the patients' names.
+  const shown = (text: string) => shownMessage(text, move);
+  const undoMove = () => undoMoveLock(lock?.written ? lock.change : null, user, isoDate);
 
   if (plan.status === "NO_SOLUTION") {
     return failRun(
@@ -307,7 +416,8 @@ async function finishRun(args: {
     const issue = movePlacementIssue(plan, move, labels);
     if (issue) {
       await failRun(runId, issue, meta);
-      return { ok: false, error: shown(issue), moveRejected: true };
+      await undoMove();
+      return { ok: false, error: await shown(issue), moveRejected: true };
     }
   }
 
@@ -315,9 +425,11 @@ async function finishRun(args: {
   let saved: SavePlanResult;
   try {
     // The event commits with the saved plan, or rolls back with it (kept routes, blocked day, database error).
-    const traced = withBeforeCommit(db, (tx) =>
-      audit(tx, user, { action: AUDIT_ACTION[kind], entity: "OptimizationRun", entityId: runId, serviceDate: isoDate }),
-    );
+    const traced = withBeforeCommit(db, async (tx) => {
+      await audit(tx, user, { action: AUDIT_ACTION[kind], entity: "OptimizationRun", entityId: runId, serviceDate: isoDate });
+      // A restoration puts back, with the routes, the lock the move it undoes had replaced.
+      if (lock && !lock.written) await writeLockChange(tx, user, isoDate, lock.change);
+    });
     saved = await savePlan(traced, {
       runId,
       isoDate,
@@ -325,56 +437,76 @@ async function finishRun(args: {
       response: plan,
       crews: build.crews,
       kind,
+      lockChange: lock?.change,
       check: ({ comparison, version }) => {
         if (move) {
-          const others = comparison.lostTripIds.filter((id) => id !== move.tripId);
+          // A trip the computation was not given (left out of the request since) is not lost by the move:
+          // it goes to the confirmation below. Routes that can no longer be driven are not counted at all.
+          const sent = new Set(request.trips.map((t) => t.id));
+          const others = comparison.lostTripIds.filter((id) => id !== move.tripId && sent.has(id));
           if (others.length > 0) {
             const named = others.slice(0, 3).map(tripRef).join(", ");
             const more = others.length > 3 ? ` et ${others.length - 3} autre${others.length > 4 ? "s" : ""}` : "";
             throw new ReplaceRefused(
               "move",
-              `Déplacement refusé : le nouveau calcul laisserait sans véhicule ${plural(others.length, "autre course", "autres courses")} (${named}${more}). Le planning n'a pas été modifié.`,
+              `${MOVE_REFUSED_PREFIX} : le nouveau calcul laisserait sans véhicule ${plural(others.length, "autre course", "autres courses")} (${named}${more}). Le planning n'a pas été modifié.`,
             );
           }
         }
         const concerns = replaceConcerns(comparison, thresholds);
         if (concerns.length > 0) {
           const question = comparisonQuestion(comparison, concerns, kind === "restore" ? "Le planning précédent" : "Ce calcul");
-          const prefix = move ? `Déplacement de ${tripRef(move.tripId)} vers ${move.vehicleLabel} : ` : "";
-          throw new ReplaceRefused("confirm", `${prefix}${question}`, comparison, version);
+          const asked = move
+            ? `Déplacement de ${tripRef(move.tripId)} vers ${move.vehicleLabel} : ${lowerFirst(question)}`
+            : question;
+          throw new ReplaceRefused("confirm", asked, comparison, version);
         }
       },
     });
   } catch (error) {
     if (error instanceof ReplaceRefused && error.reason === "move") {
       await failRun(runId, error.message, meta);
-      return { ok: false, error: shown(error.message), moveRejected: true };
+      await undoMove();
+      return { ok: false, error: await shown(error.message), moveRejected: true };
     }
     if (error instanceof ReplaceRefused && error.comparison && error.version) {
-      // Kept in its run until the regulator decides (confirmPendingRun / discardPendingRun).
-      await db.optimizationRun.update({
-        where: { id: runId },
-        data: {
-          status: "AWAITING_CONFIRMATION",
-          finishedAt: new Date(),
-          ...meta,
-          unassignedCount: plan.unassigned.length,
-          valid: plan.validation.valid,
-          kpis: plan.kpis,
-          details: runDetailsJson(plan, {
-            kind,
-            comparison: error.comparison,
-            question: error.message,
-            pending: {
-              response: plan,
-              requestHash: requestHash(request),
-              basedOnVersion: error.version,
-              move: move ? { tripId: move.tripId, vehicleId: move.vehicleId, vehicleLabel: move.vehicleLabel } : null,
-            },
-          }),
-        },
-      });
-      return { ok: false, needsConfirmation: true, error: shown(error.message) };
+      const { comparison, version: compared, message } = error;
+      // Kept in its run until the regulator decides (confirmPendingRun / discardPendingRun). A move's lock
+      // is undone meanwhile, in the same transaction, and set again when the plan is confirmed.
+      await db.$transaction(async (tx) => {
+        await lockPlanningDay(tx, isoDate);
+        let basedOnVersion = compared;
+        if (lock?.written) {
+          // The undo moves Trip.updatedAt, hence the plan's version: the routes compared are still those
+          // in place, at the version after the undo, if nothing else changed before it.
+          const before = await loadPlanVersion(tx, isoDate);
+          await writeLockChange(tx, user, isoDate, reversed(lock.change));
+          if (before === compared) basedOnVersion = await loadPlanVersion(tx, isoDate);
+        }
+        await tx.optimizationRun.update({
+          where: { id: runId },
+          data: {
+            status: "AWAITING_CONFIRMATION",
+            finishedAt: new Date(),
+            ...meta,
+            unassignedCount: plan.unassigned.length,
+            valid: plan.validation.valid,
+            kpis: plan.kpis,
+            details: runDetailsJson(plan, {
+              kind,
+              comparison,
+              question: message,
+              pending: {
+                response: plan,
+                requestHash: requestHash(request),
+                basedOnVersion,
+                lockChange: lock?.change ?? null,
+              },
+            }),
+          },
+        });
+      }, PLANNING_TX_OPTIONS);
+      return { ok: false, needsConfirmation: true, error: await shown(message) };
     }
     if (error instanceof PlanBlockedError) return failRun(runId, error.message, meta);
     logError("[planning] saving the plan failed", error, { runId, serviceDate: isoDate });
@@ -392,25 +524,35 @@ async function finishRun(args: {
  * and leaves its FAILED run only; a plan worse than the routes in place
  * leaves its run AWAITING_CONFIRMATION.
  */
-export async function runOptimization(
-  isoDate: string,
-  user: Pick<SessionUser, "id" | "role">,
-  options: RunOptions = {},
-): Promise<RunOutcome> {
+export async function runOptimization(isoDate: string, user: Actor, options: RunOptions = {}): Promise<RunOutcome> {
   const prepared = await prepareRequest(isoDate);
   if (!prepared.ok) return { ok: false, error: prepared.error };
   const { input, build } = prepared;
   const { move } = options;
+  const moveLock = moveLockChange(move);
   if (move) {
     const issue = moveRequestIssue(build, move);
-    if (issue) return { ok: false, error: resolveTripRefs(issue, (id) => (id === move.tripId ? move.patientName : null)), moveRejected: true };
+    if (issue) {
+      await undoMoveLock(moveLock, user, isoDate);
+      return { ok: false, error: await shownMessage(issue, move), moveRejected: true };
+    }
   }
 
   const runId = await startRun(isoDate, user, build.request, input.settings.solverTimeLimitSec);
   if (!runId) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
   const result: OptimizerResult<PlanResponse> = await optimize(build.request);
   if (!result.ok) return failRun(runId, result.error);
-  return finishRun({ kind: move ? "move" : "optimize", isoDate, user, runId, input, build, plan: result.data, move });
+  return finishRun({
+    kind: move ? "move" : "optimize",
+    isoDate,
+    user,
+    runId,
+    input,
+    build,
+    plan: result.data,
+    move,
+    lock: moveLock ? { change: moveLock, written: true } : null,
+  });
 }
 
 /**
@@ -419,17 +561,22 @@ export async function runOptimization(
  * optimizer's /evaluate with today's data, then saved like a computation
  * (same comparison with the routes in place). Trips cancelled or vehicles
  * unavailable since are left out. Only while the day can be re-planned.
+ * When the routes in place came with a lock change (a move), the lock it
+ * replaced is put back with the routes: the trip is not left locked on the
+ * vehicle the restored routes no longer put it on.
  */
-export async function restorePreviousPlan(isoDate: string, user: Pick<SessionUser, "id" | "role">): Promise<RunOutcome> {
+export async function restorePreviousPlan(isoDate: string, user: Actor): Promise<RunOutcome> {
   const planRun = await db.optimizationRun.findFirst({
     where: { serviceDate: fromIsoDate(isoDate), status: "SUCCESS" },
     orderBy: { startedAt: "desc" },
     select: { id: true, details: true, kpis: true },
   });
-  const previous = planRun ? readRunDetails(planRun)?.previous : undefined;
+  const planDetails = planRun ? readRunDetails(planRun) : null;
+  const previous = planDetails?.previous;
   if (!previous || previous.routes.length === 0) return { ok: false, error: "Aucun planning précédent à rétablir pour ce jour." };
+  const relock = planDetails?.lockChange ? reversed(planDetails.lockChange) : null;
 
-  const prepared = await prepareRequest(isoDate);
+  const prepared = await prepareRequest(isoDate, withLockChange(relock));
   if (!prepared.ok) return { ok: false, error: prepared.error };
   const { input, build } = prepared;
   const routes = restorableRoutes(
@@ -445,31 +592,39 @@ export async function restorePreviousPlan(isoDate: string, user: Pick<SessionUse
   if (!runId) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
   const result = await evaluate({ ...build.request, routes });
   if (!result.ok) return failRun(runId, result.error);
-  return finishRun({ kind: "restore", isoDate, user, runId, input, build, plan: result.data });
+  return finishRun({
+    kind: "restore",
+    isoDate,
+    user,
+    runId,
+    input,
+    build,
+    plan: result.data,
+    lock: relock ? { change: relock, written: false } : null,
+  });
 }
 
 /**
  * « Remplacer quand même » : saves the plan of run `runId`, waiting for
  * confirmation, if the day's data still builds the same request and the
- * routes in place are still those it was compared with. A move sets its lock
- * again, in the same transaction.
+ * routes in place are still those it was compared with. The lock the plan
+ * was computed with (a move's, a restored one) is written in the same
+ * transaction.
  */
-export async function confirmPendingRun(runId: string, user: Pick<SessionUser, "id" | "role">): Promise<RunOutcome> {
+export async function confirmPendingRun(runId: string, user: Actor): Promise<RunOutcome> {
   const run = await db.optimizationRun.findUnique({
     where: { id: runId },
     select: { id: true, serviceDate: true, status: true, finishedAt: true, details: true, kpis: true },
   });
-  if (!run || run.status !== "AWAITING_CONFIRMATION") return { ok: false, error: NOT_PENDING_ERROR };
+  if (!run || run.status !== "AWAITING_CONFIRMATION") return { ok: false, error: NOT_PENDING_ERROR, stale: true };
   const isoDate = toIsoDate(run.serviceDate);
   const pending = readPendingPlan(run.details);
   const kind = readRunDetails(run)?.kind ?? "optimize";
   if (!pending) return dropPendingRun(run.id, run.details, `${NOT_KEPT_PREFIX} : calcul illisible. Relancez l'optimisation.`);
 
-  const { move } = pending;
-  // The lock a move set was put back while the plan waited: the request is rebuilt with it.
-  const lockMove = (input: OptimizeInput): OptimizeInput =>
-    move ? { ...input, trips: input.trips.map((t) => (t.id === move.tripId ? { ...t, lockedVehicleId: move.vehicleId } : t)) } : input;
-  const prepared = await prepareRequest(isoDate, lockMove);
+  const { lockChange } = pending;
+  // The lock a move set was undone while the plan waited (a restored one is not written yet): the request is rebuilt with it.
+  const prepared = await prepareRequest(isoDate, withLockChange(lockChange));
   if (!prepared.ok) return dropPendingRun(run.id, run.details, `${NOT_KEPT_PREFIX} : ${prepared.error}`);
   const { build } = prepared;
   if (requestHash(build.request) !== pending.requestHash) return dropPendingRun(run.id, run.details, INPUT_CHANGED_ERROR);
@@ -484,12 +639,8 @@ export async function confirmPendingRun(runId: string, user: Pick<SessionUser, "
         serviceDate: isoDate,
         details: { confirmed: true },
       });
-      if (move) {
-        const { count } = await tx.trip.updateMany({
-          where: { id: move.tripId, ...notLockedOn(move.vehicleId) },
-          data: { lockedVehicleId: move.vehicleId },
-        });
-        if (count > 0) await audit(tx, user, { action: "trip.move", entity: "Trip", entityId: move.tripId, serviceDate: isoDate });
+      if (lockChange) {
+        await writeLockChange(tx, user, isoDate, lockChange, kind === "move" ? "trip.move" : lockAction(lockChange.to));
       }
     });
     saved = await savePlan(traced, {
@@ -501,6 +652,8 @@ export async function confirmPendingRun(runId: string, user: Pick<SessionUser, "
       kind,
       // The computation ended when it was put on hold, not when the regulator confirmed it.
       finishedAt: run.finishedAt ?? undefined,
+      lockChange: lockChange ?? undefined,
+      // Under the planning lock of the date, which discardPendingRun takes too: never both confirmed and discarded.
       check: async ({ tx, version }) => {
         const still = await tx.optimizationRun.findUnique({ where: { id: run.id }, select: { status: true } });
         if (still?.status !== "AWAITING_CONFIRMATION") throw new ReplaceRefused("gone", NOT_PENDING_ERROR);
@@ -508,7 +661,7 @@ export async function confirmPendingRun(runId: string, user: Pick<SessionUser, "
       },
     });
   } catch (error) {
-    if (error instanceof ReplaceRefused && error.reason === "gone") return { ok: false, error: error.message };
+    if (error instanceof ReplaceRefused && error.reason === "gone") return { ok: false, error: error.message, stale: true };
     if (error instanceof ReplaceRefused) return dropPendingRun(run.id, run.details, error.message);
     if (error instanceof PlanBlockedError) return dropPendingRun(run.id, run.details, `${NOT_KEPT_PREFIX} : ${error.message}`);
     logError("[planning] saving a confirmed plan failed", error, { runId: run.id, serviceDate: isoDate });
@@ -530,7 +683,8 @@ async function dropPendingRun(runId: string, details: Prisma.JsonValue | null, e
 /**
  * « Garder le planning actuel » : the pending plan of run `runId` is dropped
  * (FAILED), the routes in place stay. Returns false when it no longer waits.
- * The caller traces it (plan.discard) in `tx`.
+ * The caller traces it (plan.discard) in `tx`. Under the planning lock of the
+ * date: serialized with a confirmation of the same run (savePlan).
  */
 export async function discardPendingRun(
   runId: string,
@@ -538,12 +692,14 @@ export async function discardPendingRun(
 ): Promise<boolean> {
   const run = await db.optimizationRun.findUnique({ where: { id: runId }, select: { status: true, details: true, serviceDate: true } });
   if (!run || run.status !== "AWAITING_CONFIRMATION") return false;
+  const isoDate = toIsoDate(run.serviceDate);
   return db.$transaction(async (tx) => {
+    await lockPlanningDay(tx, isoDate);
     const { count } = await tx.optimizationRun.updateMany({
       where: { id: runId, status: "AWAITING_CONFIRMATION" },
       data: { status: "FAILED", error: `${NOT_KEPT_PREFIX} : le planning en place a été conservé.`, details: withoutPending(run.details) },
     });
-    if (count > 0) await trace(tx, toIsoDate(run.serviceDate));
+    if (count > 0) await trace(tx, isoDate);
     return count > 0;
   }, PLANNING_TX_OPTIONS);
 }

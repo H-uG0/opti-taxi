@@ -128,20 +128,33 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
         {issues.length > 0 ? (
           <Callout tone="warning" title={`Véhicules à revoir (${issues.length})`}>
             {issues.some((issue) => issue.changes.length > 0) ? (
-              <p>
-                Ces tournées ont été calculées avant un changement de véhicule ou d&apos;équipage : relancez
-                l&apos;optimisation depuis le{" "}
-                <Link href={`/planning?date=${date}`} className="font-medium underline">
-                  planning
-                </Link>{" "}
-                pour appliquer les équipages ci-dessous.
-              </p>
+              locked ? (
+                // Re-planning is not possible now: say why instead of asking for it.
+                <p>
+                  Des tournées ont été calculées avant un changement de véhicule ou d&apos;équipage. {locked}{" "}
+                  <Link href={`/planning?date=${date}`} className="font-medium underline">
+                    Ouvrir le planning
+                  </Link>
+                </p>
+              ) : (
+                <p>
+                  Des tournées ont été calculées avant un changement de véhicule ou d&apos;équipage : relancez
+                  l&apos;optimisation depuis le{" "}
+                  <Link href={`/planning?date=${date}`} className="font-medium underline">
+                    planning
+                  </Link>{" "}
+                  pour appliquer les équipages ci-dessous.
+                </p>
+              )
+            ) : null}
+            {issues.some((issue) => issue.compliance.length > 0) ? (
+              <p>Échéance dépassée : vérifiez le véhicule avant de le faire rouler.</p>
             ) : null}
             <ul className="list-disc space-y-0.5 pl-5">
               {issues.map((issue) => (
                 <li key={issue.vehicleId}>
                   <span className="font-medium">{issue.label}</span>
-                  {issue.hasRoute ? "" : " (sans tournée)"} : {[...issue.changes, ...issue.compliance].join(" ; ")}
+                  {issue.hasRoute ? "" : " (sans tournée)"} — {[...issue.changes, ...issue.compliance].join(" ; ")}
                 </li>
               ))}
             </ul>

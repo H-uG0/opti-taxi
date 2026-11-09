@@ -18,6 +18,7 @@ import { loadDayVersion } from "@/lib/planning/version";
 import { formatLongDate, isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
 import { DateNav } from "./date-nav";
 import { OptimizerStatus, OptimizerStatusPending } from "./optimizer-status";
+import { OptimizeHint } from "./optimize-hint";
 import { PendingPlanBanner, RestorePlanButton } from "./pending-plan";
 import { PlanningActivityBanner, PlanningActivityProvider } from "./planning-activity";
 import { PlanningBoard } from "./planning-board";
@@ -132,7 +133,10 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
         <Suspense fallback={<OptimizerStatusPending />}>
           <OptimizerStatus />
         </Suspense>
-        {view.lastRun?.pending && !past ? <PendingPlanBanner run={{ ...view.lastRun, pending: view.lastRun.pending }} /> : null}
+        {view.lastRun?.pending && !past ? (
+          // Keyed by run: a new plan waiting for confirmation takes the focus again.
+          <PendingPlanBanner key={view.lastRun.id} run={{ ...view.lastRun, pending: view.lastRun.pending }} />
+        ) : null}
         <RunBanner
           lastRun={view.lastRun}
           planRun={view.planRun}
@@ -174,7 +178,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
                 <p>
                   <span className="font-semibold">{pluralize(view.kpis.tripsTotal, "course")} à planifier</span> avec{" "}
                   {pluralize(availableVehicles, "véhicule disponible", "véhicules disponibles")}.{" "}
-                  {optimizeBlocked ?? runningReason ?? `Lancez « ${optimizeLabel} » pour obtenir les tournées.`}
+                  {optimizeBlocked ?? runningReason ?? <OptimizeHint label={optimizeLabel} />}
                 </p>
                 <LinkButton href={`/courses?date=${date}`} size="sm">
                   <ListChecks aria-hidden className="size-4" />

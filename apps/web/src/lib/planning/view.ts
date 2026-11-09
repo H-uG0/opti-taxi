@@ -26,8 +26,9 @@ import type { RunDetails } from "@/lib/optimizer/run-details";
 import { returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
 import { computeDayKpis as computeDashboardDayKpis, type KpiRoute, type KpiTrip } from "@/lib/kpis";
 import { VIOLATION_LABELS } from "@/lib/labels";
+import { formatMinute } from "@/lib/time";
 import { vehicleShade } from "./colors";
-import { resolveTripRefs } from "./move";
+import { resolveTripRefs, type TripName } from "./move";
 import type { VehicleIssue } from "./route-issues";
 import { coPassengers, computeTimeRange } from "./timeline";
 import type {
@@ -221,15 +222,37 @@ function toStopView(stop: RawStop): StopView {
   };
 }
 
+/** How a run's messages and lists name the day's trips and vehicles. */
+type RunNaming = {
+  /** For trip references in messages (resolveTripRefs). */
+  tripName: (tripId: string) => TripName | null;
+  /** « Jeanne Martin (aller, RDV 08:30) ». */
+  tripLine: (tripId: string) => string;
+  vehicleLabel: (vehicleId: string) => string | null;
+};
+
+/**
+ * A violation of a plan waiting for confirmation, named as the page names
+ * trips and vehicles (its raw message holds ids): « Hors fenêtre horaire —
+ * Taxi 1, Jeanne Martin (aller, RDV 08:30) ».
+ */
+function violationLine(v: RunDetails["violations"][number], naming: RunNaming): string {
+  const vehicle = v.vehicleId ? naming.vehicleLabel(v.vehicleId) : null;
+  const where = [vehicle, v.tripId ? naming.tripLine(v.tripId) : null].filter((part): part is string => part !== null);
+  const label = VIOLATION_LABELS[v.code] ?? v.code;
+  return where.length > 0 ? `${label} — ${where.join(", ")}` : label;
+}
+
 function runView(
   run: RawRun | null,
   details: ReadonlyMap<string, RunDetails>,
   configuredSec: number,
   now: Date,
-  patientOf: (tripId: string) => string | null,
+  naming: RunNaming,
 ): RunView | null {
   if (!run) return null;
   const found = details.get(run.id);
+  const patientOf = naming.tripName;
   return {
     id: run.id,
     status: run.status,
@@ -253,7 +276,13 @@ function runView(
     kind: found?.kind ?? null,
     pending:
       run.status === "AWAITING_CONFIRMATION" && found?.comparison && found.question
-        ? { question: resolveTripRefs(found.question, patientOf), comparison: found.comparison }
+        ? {
+            question: resolveTripRefs(found.question, patientOf),
+            comparison: found.comparison,
+            lostTrips: found.comparison.lostTripIds.map(naming.tripLine),
+            // The details of a waiting run are those of the plan it would save.
+            violations: found.violations.map((v) => violationLine(v, naming)),
+          }
         : null,
     previous: found?.previous && found.previous.routes.length > 0 ? found.previous.figures : null,
     evaluatedAt: found?.evaluatedAt ?? null,
@@ -349,8 +378,7 @@ export function dayStatusOf(activeTrips: number, routes: Array<{ status: RouteSt
 
 export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
   const now = input.now ?? new Date();
-  const patientNames = new Map(input.trips.map((t) => [t.id, personName(t.patient)]));
-  const patientOf = (tripId: string) => patientNames.get(tripId) ?? null;
+  const rawTripById = new Map(input.trips.map((t) => [t.id, t]));
   const build = buildOptimizeRequest({
     date: input.date,
     settings: input.settings,
@@ -364,6 +392,20 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
   const vehicleById = new Map(input.vehicles.map((v) => [v.id, v]));
   const routeByVehicle = new Map(input.routes.map((r) => [r.vehicleId, r]));
   const routeById = new Map(input.routes.map((r) => [r.id, r]));
+  const naming: RunNaming = {
+    tripName: (tripId) => {
+      const trip = rawTripById.get(tripId);
+      return trip ? { patient: personName(trip.patient), direction: trip.direction } : null;
+    },
+    tripLine: (tripId) => {
+      const trip = rawTripById.get(tripId);
+      if (!trip) return "Course supprimée";
+      const when =
+        trip.direction === "OUTBOUND" ? `aller, RDV ${formatMinute(trip.appointmentMinute)}` : `retour, fin ${formatMinute(trip.readyMinute)}`;
+      return `${personName(trip.patient)} (${when})`;
+    },
+    vehicleLabel: (vehicleId) => vehicleById.get(vehicleId)?.label ?? null,
+  };
 
   // Colors: index of each vehicle within its type, over the whole fleet so a
   // vehicle keeps its shade from one day to the next.
@@ -471,7 +513,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     })
     .sort((a, b) => tripTime(a) - tripTime(b));
 
-  const rawById = new Map(input.trips.map((t) => [t.id, t]));
+  const rawById = rawTripById;
   const planDetails = input.planRun ? (input.details.get(input.planRun.id) ?? null) : null;
   const optimizerReasons = new Map(planDetails?.unassigned.map((u) => [u.tripId, u.reason]) ?? []);
 
@@ -527,8 +569,8 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     tariffGaps: build.tariffGaps,
     staleTrips,
     vehicleIssues: input.vehicleIssues ?? [],
-    lastRun: runView(input.lastRun, input.details, input.settings.solverTimeLimitSec, now, patientOf),
-    planRun: runView(input.planRun, input.details, input.settings.solverTimeLimitSec, now, patientOf),
+    lastRun: runView(input.lastRun, input.details, input.settings.solverTimeLimitSec, now, naming),
+    planRun: runView(input.planRun, input.details, input.settings.solverTimeLimitSec, now, naming),
     timeRange: computeTimeRange(rows),
     dayStarted:
       input.trips.some((t) => FIELD_STATUSES.includes(t.status)) ||

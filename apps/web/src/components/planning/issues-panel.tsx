@@ -23,6 +23,8 @@ export type IssuesPanelProps = {
   returnsToCheck: string[];
   /** Routes planned before a change of vehicle or crew, overdue inspection or insurance. */
   vehicleIssues: VehicleIssue[];
+  /** Why the day cannot be re-optimized now (validated, past, started, computation running), or null. */
+  replanBlocked?: string | null;
   trips: Record<string, TripView>;
   vehicleLabels: Record<string, string>;
   planned: boolean;
@@ -98,13 +100,17 @@ function Section({
   );
 }
 
-/** What to do about vehicles to review, said once for the section. */
-function vehicleIssuesIntro(issues: readonly VehicleIssue[], date: string): ReactNode {
+/** What to do about vehicles to review, said once for the section (when re-optimizing is not possible now, why). */
+function vehicleIssuesIntro(issues: readonly VehicleIssue[], date: string, replanBlocked: string | null): ReactNode {
   const changed = issues.some((issue) => issue.changes.length > 0);
   const compliance = issues.some((issue) => issue.compliance.length > 0);
   return (
     <>
-      {changed ? "Changements survenus depuis le calcul : réoptimisez pour appliquer les équipages du jour. " : null}
+      {changed
+        ? replanBlocked
+          ? `Changements survenus depuis le calcul. ${replanBlocked} `
+          : "Changements survenus depuis le calcul : réoptimisez pour appliquer les équipages du jour. "
+        : null}
       {compliance ? "Échéance dépassée : vérifiez le véhicule avant de le faire rouler. " : null}
       <Link href={`/equipages?date=${date}`} className="font-medium text-brand-700 underline-offset-2 hover:underline">
         Équipages du jour
@@ -123,6 +129,7 @@ export function IssuesPanel({
   droppedLocks,
   returnsToCheck,
   vehicleIssues,
+  replanBlocked = null,
   trips,
   vehicleLabels,
   planned,
@@ -158,7 +165,7 @@ export function IssuesPanel({
               icon={<CarFront aria-hidden className="size-3.5" />}
               title={`Véhicules à revoir (${vehicleIssues.length})`}
               tone="red"
-              intro={vehicleIssuesIntro(vehicleIssues, date)}
+              intro={vehicleIssuesIntro(vehicleIssues, date, replanBlocked)}
             >
               {vehicleIssues.map((issue) => (
                 <li key={issue.vehicleId}>

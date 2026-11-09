@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { TriangleAlert, Clock, Info, LoaderCircle, CircleX } from "lucide-react";
 import { formatEurosRounded, formatInstant, formatSeconds, pluralize } from "@/lib/planning/format";
+import { MOVE_REFUSED_PREFIX } from "@/lib/planning/move";
 import { NOT_KEPT_PREFIX } from "@/lib/planning/plan-compare";
 import type { RunView } from "@/lib/planning/types";
 
@@ -15,11 +16,19 @@ const PLAN_RUN_LABEL: Record<NonNullable<RunView["kind"]>, string> = {
   restore: "Planning précédent rétabli",
 };
 
+/** What a run not kept was (« Calcul du … non retenu »). */
+const NOT_KEPT_LABEL: Record<NonNullable<RunView["kind"]>, string> = {
+  optimize: "Calcul",
+  move: "Déplacement",
+  restore: "Retour au planning précédent",
+};
+
 /**
  * Last optimization: when, how long, distance source, warnings, and the error
  * of a failed attempt. `restore` (« Revenir au planning précédent ») shows in
  * the card of the plan in place. A run waiting for confirmation is shown by
- * PendingPlanBanner.
+ * PendingPlanBanner. A move refused (planning unchanged) is not repeated
+ * here: the action's own answer said it, with the patients' names.
  */
 export function RunBanner({
   lastRun,
@@ -31,7 +40,8 @@ export function RunBanner({
   restore?: ReactNode;
 }) {
   if (!lastRun && !planRun) return null;
-  const failedRun = lastRun && lastRun.status === "FAILED" ? lastRun : null;
+  const refusedMove = lastRun?.status === "FAILED" && lastRun.error?.startsWith(MOVE_REFUSED_PREFIX);
+  const failedRun = lastRun && lastRun.status === "FAILED" && !refusedMove ? lastRun : null;
   // A plan the regulator chose not to keep (or that could no longer be saved) is not a failure.
   const notKept = failedRun?.error?.startsWith(NOT_KEPT_PREFIX) ? failedRun : null;
   const failed = notKept ? null : failedRun;
@@ -75,7 +85,7 @@ export function RunBanner({
         <p role="status" className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">
           <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-slate-400" />
           <span className="min-w-0 break-words">
-            Calcul du {formatInstant(notKept.startedAt)}
+            {NOT_KEPT_LABEL[notKept.kind ?? "optimize"]} du {formatInstant(notKept.startedAt)}
             {notKept.requestedBy ? ` (${notKept.requestedBy})` : ""} non retenu
             {notKept.error ? ` : ${notKept.error.slice(NOT_KEPT_PREFIX.length).replace(/^\s*:\s*/, "")}` : "."}
           </span>

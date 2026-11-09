@@ -7,11 +7,18 @@
  */
 import type { Prisma, PrismaClient, SharingStatus, StopKind, TripStatus, VehicleType } from "@prisma/client";
 import { lockPlanningDay } from "@/lib/planning/day-lock";
-import { comparePlans, planFigures, snapshotOf, type PlanComparison } from "@/lib/planning/plan-compare";
+import {
+  comparePlans,
+  isDrivable,
+  planFigures,
+  snapshotOf,
+  type PlanComparison,
+  type TodayCrew,
+} from "@/lib/planning/plan-compare";
 import { loadPlanVersion } from "@/lib/planning/version";
 import { formatLongDate, fromIsoDate } from "@/lib/time";
 import type { OptimizeRequest, PlanResponse } from "./contract";
-import { readRunDetails, runDetailsJson, type RunKind } from "./run-details";
+import { readRunDetails, runDetailsJson, type LockChange, type RunKind } from "./run-details";
 
 /** Statuses set by the field (driver) or by cancellation: the planner never overwrites them. */
 const FROZEN_STATUSES: readonly TripStatus[] = ["PICKED_UP", "DROPPED_OFF", "CANCELLED", "NO_SHOW"];
@@ -283,22 +290,32 @@ export type SavePlanCheck = {
 /**
  * The routes in place, read under savePlan's locks: their figures, the trips
  * they serve, and the violations last known for them (the latest successful
- * run, kept up to date by /evaluate after a trip left a route).
+ * run, kept up to date by /evaluate after a trip left a route). Only the
+ * routes that can still be driven as saved count (isDrivable: same vehicle
+ * and crew as today's request); the others are reported apart (undrivable).
+ * `routes` keeps them all: the snapshot for « Revenir au planning précédent ».
  */
-async function readPlanInPlace(tx: Prisma.TransactionClient, serviceDate: Date) {
+async function readPlanInPlace(tx: Prisma.TransactionClient, serviceDate: Date, todayCrews: ReadonlyMap<string, TodayCrew>) {
   const [routes, served, planRun] = await Promise.all([
     tx.route.findMany({
       where: { serviceDate },
       select: {
+        id: true,
         vehicleId: true,
+        driverId: true,
+        crewMateId: true,
         revenue: true,
         margin: true,
         distanceKm: true,
         optimizationRunId: true,
+        vehicle: { select: { label: true } },
         stops: { select: { tripId: true, kind: true, sequence: true } },
       },
     }),
-    tx.trip.findMany({ where: { serviceDate, routeId: { not: null }, status: { notIn: [...OFF_ROUTE_STATUSES] } }, select: { id: true } }),
+    tx.trip.findMany({
+      where: { serviceDate, routeId: { not: null }, status: { notIn: [...OFF_ROUTE_STATUSES] } },
+      select: { id: true, routeId: true },
+    }),
     tx.optimizationRun.findFirst({
       where: { serviceDate, status: "SUCCESS" },
       orderBy: { startedAt: "desc" },
@@ -308,11 +325,18 @@ async function readPlanInPlace(tx: Prisma.TransactionClient, serviceDate: Date) 
   if (routes.length === 0) return null;
   const details = planRun ? readRunDetails(planRun) : null;
   const violations = details ? details.violations.length : planRun?.valid === false ? null : 0;
-  const servedTripIds = served.map((t) => t.id);
+  const drivable = routes.filter((route) => isDrivable(route, todayCrews));
+  const drivableIds = new Set(drivable.map((route) => route.id));
+  const servedTripIds = served.filter((t) => t.routeId !== null && drivableIds.has(t.routeId)).map((t) => t.id);
+  const undrivable = routes.filter((route) => !drivableIds.has(route.id));
   return {
     routes,
     servedTripIds,
-    figures: planFigures(routes, servedTripIds.length, violations),
+    figures: planFigures(drivable, servedTripIds.length, violations),
+    undrivable: {
+      vehicles: undrivable.map((route) => route.vehicle?.label ?? "Véhicule supprimé"),
+      trips: served.length - servedTripIds.length,
+    },
     runId: planRun?.id ?? routes[0]?.optimizationRunId ?? null,
   };
 }
@@ -363,6 +387,8 @@ export async function savePlan(
     finishedAt?: Date;
     /** Throws to keep the routes in place (nothing written). */
     check?: (context: SavePlanCheck) => Promise<void> | void;
+    /** The trip lock changed with this plan, kept in the run's details (restoring the plan replaced undoes it). */
+    lockChange?: LockChange;
     now?: Date;
   },
 ): Promise<SavePlanResult> {
@@ -377,7 +403,6 @@ export async function savePlan(
       await lockPlanningDay(tx, isoDate);
       const blocker = replanBlockReason(isoDate, await lockReplanState(tx, isoDate, serviceDate));
       if (blocker) throw new PlanBlockedError(blocker);
-      const inPlace = await readPlanInPlace(tx, serviceDate);
 
       const [currentTrips, vehicles] = await Promise.all([
         tx.trip.findMany({
@@ -395,6 +420,14 @@ export async function savePlan(
         const crew = args.crews?.get(v.id);
         return crew ? { ...v, defaultDriverId: crew.driverId, defaultCrewMateId: crew.crewMateId } : v;
       });
+      // The crew a new route of each vehicle gets: a route in place saved with another one can no longer be driven.
+      const todayCrews = new Map<string, TodayCrew>(
+        crewed.map((v) => [
+          v.id,
+          v.type === "AMBULANCE" ? { driverId: v.defaultDriverId, crewMateId: v.defaultCrewMateId } : { driverId: v.defaultDriverId },
+        ]),
+      );
+      const inPlace = await readPlanInPlace(tx, serviceDate, todayCrews);
       const routes = planRoutes(response, new Map(crewed.map((v) => [v.id, v])), current);
       const updates = planTripUpdates(tripIds, response, routes, current, now);
       const servedTripIds = updates.filter((u) => u.vehicleId !== null).map((u) => u.tripId);
@@ -450,6 +483,7 @@ export async function savePlan(
             kind: args.kind,
             comparison,
             previous: inPlace ? snapshotOf(inPlace.runId, inPlace.routes, inPlace.figures) : undefined,
+            lockChange: args.lockChange,
           }),
         },
       });

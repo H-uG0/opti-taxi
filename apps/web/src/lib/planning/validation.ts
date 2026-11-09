@@ -32,7 +32,8 @@ export function validationIssues(view: ValidationView): string[] {
       ),
     );
   }
-  const compliance = view.vehicleIssues.filter((issue) => issue.compliance.length > 0).length;
+  // Only vehicles that drive that day: an overdue vehicle without a route stays in « À traiter » and /equipages.
+  const compliance = view.vehicleIssues.filter((issue) => issue.hasRoute && issue.compliance.length > 0).length;
   if (compliance > 0) {
     issues.push(
       plural(

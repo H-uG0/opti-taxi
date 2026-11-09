@@ -268,7 +268,8 @@ describe("buildPlanningView", () => {
         {
           runId: "run2",
           solverStatus: "OK",
-          violations: [],
+          // The violations of the plan it would save.
+          violations: [{ code: "TIME_WINDOW", message: "Course b en retard", tripId: "b", vehicleId: "v1" }],
           warnings: [],
           unassigned: [],
           kind: "move",
@@ -291,8 +292,11 @@ describe("buildPlanningView", () => {
     ]);
     const view = buildPlanningView(input({ lastRun: pendingRun, details }));
     expect(view.lastRun?.pending).toEqual({
-      question: expect.stringMatching(/^Déplacement de la course de \S+ \S+ vers Taxi 2 : ce calcul sert 1 course contre 2/),
+      question: expect.stringMatching(/^Déplacement de l'aller de Patient A vers Taxi 2 : ce calcul sert 1 course contre 2/),
       comparison,
+      // Named, with the leg and time, as the page shows them; the violation's raw message is not shown.
+      lostTrips: ["Patient B (aller, RDV 08:00)"],
+      violations: ["Hors fenêtre horaire — Taxi 1, Patient B (aller, RDV 08:00)"],
     });
     expect(view.lastRun?.kind).toBe("move");
     expect(view.planRun).toMatchObject({ kind: "restore", previous: comparison.current, pending: null });
@@ -339,7 +343,7 @@ describe("buildPlanningView", () => {
     });
     const view = buildPlanningView(input({ lastRun: failed }));
     expect(view.lastRun?.error).toBe(
-      "Déplacement refusé : l'optimiseur a placé la course de Patient C sur Taxi 2 et non sur Taxi 1. Le planning n'a pas été modifié.",
+      "Déplacement refusé : l'optimiseur a placé l'aller de Patient C sur Taxi 2 et non sur Taxi 1. Le planning n'a pas été modifié.",
     );
   });
 

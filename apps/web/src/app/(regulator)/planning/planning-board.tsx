@@ -189,6 +189,7 @@ export function PlanningBoard({
             droppedLocks={droppedLocks}
             returnsToCheck={returnsToCheck}
             vehicleIssues={vehicleIssues}
+            replanBlocked={replanBlocked}
             trips={tripsById}
             vehicleLabels={vehicleLabels}
             planned={planned}

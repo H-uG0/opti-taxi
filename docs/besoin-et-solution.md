@@ -283,6 +283,7 @@ Ajoutées après l'appel du 6 novembre (entre parenthèses, l'hypothèse retenue
 - [ ] Électrique : l'exemple Sisteron – Aix s'explique-t-il par l'autonomie, le coût, autre chose ? Où recharge-t-on ? (autonomie et coût, recharge au dépôt)
 - [ ] Préférences et affinités : lesquelles sont impératives ? (paires de collègues interdites impératives, préférences patient souhaitables)
 - [ ] Le logiciel actuel gère-t-il déjà plannings du personnel et entretien ? Si oui, les lots correspondants se réduisent à un import.
+- [ ] « Déplacer vers… » : quand le nouveau calcul fait sortir une autre course du planning (l'optimiseur en place une autre à la place), faut-il refuser le déplacement ou demander confirmation en nommant les courses perdues et gagnées ? (refus)
 
 ## Brief de démarrage pour Claude Code
 
