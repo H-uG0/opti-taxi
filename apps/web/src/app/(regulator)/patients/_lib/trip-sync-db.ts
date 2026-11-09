@@ -1,6 +1,7 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 import { audit } from "@/lib/audit";
+import { systemCancellation } from "@/lib/domain/cancellation";
 import { removeTripStops } from "@/lib/planning/detach";
 import { fromIsoDate, toIsoDate } from "@/lib/time";
 import { tripCancelEvents, tripDetachEvents, type AuditActor } from "./audit-events";
@@ -74,6 +75,10 @@ export async function loadOpenTrips(
  * recomputed once the transaction has committed (lib/planning/refresh-routes.ts).
  * Every trip cancelled is traced (one trip.cancel per trip, by `actor`) in the
  * same transaction, and so is every trip taken off its route but kept (trip.detach).
+ * A trip cancelled here is marked as cancelled by the application (origin
+ * SYSTEM, reason « synchronisation du référentiel », `options.cause` as its
+ * note, `actor` as author): it comes back by itself once the cause is gone
+ * (lib/domain/trip-generation.ts), unlike a trip a person cancelled.
  */
 export async function syncTrips(
   tx: Prisma.TransactionClient,
@@ -82,8 +87,10 @@ export async function syncTrips(
   todayIso: string,
   leftRoutes: Set<string>,
   actor: AuditActor,
+  options: SyncOptions = {},
 ): Promise<SyncSummary> {
   const summary: SyncSummary = { ...EMPTY_SYNC };
+  const cancellation = systemCancellation(actor.id, new Date(), options.cause ?? null);
   const cancelled: SyncTrip[] = [];
   const detachedOnly: SyncTrip[] = [];
   for (const trip of trips) {
@@ -95,7 +102,7 @@ export async function syncTrips(
     // Guarded on what was read: a trip started, cancelled or re-planned meanwhile is left alone.
     const { count } = await tx.trip.updateMany({
       where: { id: change.tripId, status: change.expectedStatus, routeId: trip.routeId },
-      data: change.data,
+      data: change.cancel ? { ...change.data, ...cancellation } : change.data,
     });
     if (count === 0) continue;
     if (change.detach) {
@@ -115,7 +122,12 @@ export async function syncTrips(
   return summary;
 }
 
-/** Shorthand: loads the open trips matching `where` and syncs them (see syncTrips for `leftRoutes` and `actor`). */
+export type SyncOptions = {
+  /** Why trips may be cancelled ("Patient désactivé"…): the note of their cancellation. */
+  cause?: string;
+};
+
+/** Shorthand: loads the open trips matching `where` and syncs them (see syncTrips for `leftRoutes`, `actor` and `options`). */
 export async function syncOpenTrips(
   tx: Prisma.TransactionClient,
   where: Prisma.TripWhereInput,
@@ -123,6 +135,7 @@ export async function syncOpenTrips(
   todayIso: string,
   leftRoutes: Set<string>,
   actor: AuditActor,
+  options: SyncOptions = {},
 ): Promise<SyncSummary> {
-  return syncTrips(tx, await loadOpenTrips(tx, where, todayIso), targetFor, todayIso, leftRoutes, actor);
+  return syncTrips(tx, await loadOpenTrips(tx, where, todayIso), targetFor, todayIso, leftRoutes, actor, options);
 }

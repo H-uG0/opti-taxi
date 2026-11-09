@@ -71,6 +71,14 @@ function afterSave(path: string, summary: SyncSummary, refresh: RefreshOutcome):
 
 const activeFlag = z.enum(["true", "false"]).transform((v) => v === "true");
 
+/** Note of the trips a referential change cancels (origin SYSTEM: they come back once the cause is gone). */
+const CAUSES = {
+  patientDeactivated: "patient désactivé",
+  prescriptionChanged: "prescription modifiée",
+  recurrenceChanged: "récurrence modifiée",
+  recurrenceDeactivated: "récurrence désactivée",
+} as const;
+
 const REACTIVATED_HINT =
   "Ses récurrences génèrent à nouveau des courses (« Générer la semaine » dans Courses). Les courses annulées à la désactivation se rétablissent une à une dans Courses.";
 
@@ -135,6 +143,7 @@ export async function updatePatient(patientId: string, _prev: FormState, formDat
       today,
       leftRoutes,
       user,
+      { cause: CAUSES.patientDeactivated },
     );
   }, SYNC_TX_OPTIONS);
   const refresh = await refreshLeftRoutes(leftRoutes);
@@ -161,7 +170,9 @@ export async function setPatientActive(_prev: ActionResult, formData: FormData):
     const { count } = await tx.patient.updateMany({ where: { id: patientId, active: !active }, data: { active } });
     if (count === 0) return null;
     await audit(tx, user, activationEvent("patient", patientId, active));
-    return active ? EMPTY_SYNC : syncOpenTrips(tx, { patientId }, () => CANCEL, today, leftRoutes, user);
+    return active
+      ? EMPTY_SYNC
+      : syncOpenTrips(tx, { patientId }, () => CANCEL, today, leftRoutes, user, { cause: CAUSES.patientDeactivated });
   }, SYNC_TX_OPTIONS);
   if (!summary) {
     const current = await db.patient.findUnique({ where: { id: patientId }, select: { id: true } });
@@ -253,6 +264,7 @@ export async function updatePrescription(
       today,
       leftRoutes,
       user,
+      { cause: CAUSES.prescriptionChanged },
     );
   }, SYNC_TX_OPTIONS);
   const refresh = await refreshLeftRoutes(leftRoutes);
@@ -588,6 +600,7 @@ export async function updateRecurrence(
       today,
       leftRoutes,
       user,
+      { cause: CAUSES.recurrenceChanged },
     );
   }, SYNC_TX_OPTIONS);
   const refresh = await refreshLeftRoutes(leftRoutes);
@@ -632,7 +645,9 @@ export async function setRecurrenceActive(_prev: ActionResult, formData: FormDat
     await audit(tx, user, activationEvent("recurrence", recurrence.id, active));
     return active
       ? EMPTY_SYNC
-      : syncOpenTrips(tx, { recurrenceId: recurrence.id }, () => CANCEL, today, leftRoutes, user);
+      : syncOpenTrips(tx, { recurrenceId: recurrence.id }, () => CANCEL, today, leftRoutes, user, {
+          cause: CAUSES.recurrenceDeactivated,
+        });
   }, SYNC_TX_OPTIONS);
   if (!summary) {
     const current = await db.recurrence.findUnique({ where: { id: recurrence.id }, select: { id: true } });

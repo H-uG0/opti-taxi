@@ -7,7 +7,8 @@ import { Check, ChevronDown, Lock, TriangleAlert, Undo2, UserX, Users, X } from 
 import { Badge, VEHICLE_TYPE_COLORS, VehicleTypeBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
-import { Input, Textarea } from "@/components/ui/form";
+import { Checkbox, Input, Select, Textarea } from "@/components/ui/form";
+import { CANCELLATION_NOTE_MAX, CANCELLATION_REASON_LABELS, USER_CANCELLATION_REASONS } from "@/lib/domain/cancellation";
 import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_LABEL } from "@/lib/domain/no-show";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Td } from "@/components/ui/table";
@@ -74,6 +75,12 @@ export type TripRowData = {
   outboundNoShow: boolean;
   /** Who recorded that absence on the outbound leg, and when (null when not traced). */
   outboundNoShowTrace: RecordTrace | null;
+  /** Reason of the cancellation ("Hospitalisation · tardive"), null when not cancelled. */
+  cancellation: string | null;
+  /** Who cancelled the trip and when (null when not cancelled, or not recorded). */
+  cancellationTrace: RecordTrace | null;
+  /** Outbound trip: the return of the same care, still open, that « Annuler » offers to cancel along. */
+  pairedReturn: { id: string; keyMinute: number | null } | null;
 };
 
 export const TRIP_TABLE_COLUMNS = 8;
@@ -133,6 +140,7 @@ export function TripRow({ trip }: { trip: TripRowData }) {
         <Td className="whitespace-nowrap">
           <Badge tone={TRIP_STATUS_TONES[trip.status]}>{TRIP_STATUS_LABELS[trip.status]}</Badge>
           {trip.statusTraceShort ? <TraceHint full={trip.statusTraces.at(-1)} short={trip.statusTraceShort} /> : null}
+          {trip.cancellation ? <TraceHint full={trip.cancellationTrace?.full ?? trip.cancellation} short={trip.cancellation} /> : null}
         </Td>
         <Td className={cn("whitespace-nowrap", muted)}>
           <span className={cn("flex items-center gap-1", trip.vehicleLabel ? "font-medium text-slate-800" : "text-slate-500")}>
@@ -238,6 +246,12 @@ function TripDetails({ trip }: { trip: TripRowData }) {
               </a>
             </Detail>
           ) : null}
+          {trip.cancellation ? (
+            <Detail label="Annulation">
+              {trip.cancellation}
+              {trip.cancellationTrace ? <span className="block text-xs text-slate-500">{trip.cancellationTrace.full}</span> : null}
+            </Detail>
+          ) : null}
           {trip.lockedVehicleLabel ? <Detail label="Verrou">Figée sur {trip.lockedVehicleLabel}</Detail> : null}
           {trip.directKm !== null ? (
             <Detail label="Distance">
@@ -306,28 +320,74 @@ function LifecycleForm({ trip }: { trip: TripRowData }) {
       </ActionForm>
     );
   }
-  if (canCancel(trip.status)) {
-    return (
-      <ActionForm
-        key="lifecycle"
-        action={cancelTrip}
-        hidden={{ tripId: trip.id }}
-        confirmMessage={`Annuler la course de ${trip.patientName} (${DIRECTION_LABELS[trip.direction].toLowerCase()}) ?${
-          trip.vehicleLabel ? " Elle sera retirée de sa tournée." : ""
-        }${trip.shared ? " Ses co-passagers restés seuls ne seront plus en transport partagé." : ""}`}
-        className="border-t border-slate-100 pt-3"
-      >
-        <SubmitButton variant="secondary" size="sm" className="text-red-700 hover:bg-red-50" pendingLabel="Annulation…">
-          <X aria-hidden className="size-4" />
-          Annuler la course
-        </SubmitButton>
-      </ActionForm>
-    );
-  }
+  if (canCancel(trip.status)) return <CancelForm trip={trip} />;
   return (
     <p className="border-t border-slate-100 pt-3 text-xs text-slate-500">
       Course {TRIP_STATUS_LABELS[trip.status].toLowerCase()} : elle ne peut plus être annulée.
     </p>
+  );
+}
+
+/** « Annuler la course » : a reason from the list, an optional note, and the return of the same care if any. */
+function CancelForm({ trip }: { trip: TripRowData }) {
+  const reasonId = useId();
+  const noteId = useId();
+  const back = trip.pairedReturn;
+  return (
+    <ActionForm
+      key="lifecycle"
+      action={cancelTrip}
+      hidden={{ tripId: trip.id }}
+      confirmMessage={`Annuler la course de ${trip.patientName} (${DIRECTION_LABELS[trip.direction].toLowerCase()}) ?${
+        trip.vehicleLabel ? " Elle sera retirée de sa tournée." : ""
+      }${trip.shared ? " Ses co-passagers restés seuls ne seront plus en transport partagé." : ""}`}
+      className="space-y-2 border-t border-slate-100 pt-3"
+    >
+      <div className="space-y-2">
+        <div className="space-y-1">
+          <label htmlFor={reasonId} className="block text-sm font-medium text-slate-700">
+            Motif de l&apos;annulation
+          </label>
+          <Select id={reasonId} name="reason" required defaultValue="">
+            <option value="" disabled>
+              Choisir un motif…
+            </option>
+            {USER_CANCELLATION_REASONS.map((reason) => (
+              <option key={reason} value={reason}>
+                {CANCELLATION_REASON_LABELS[reason]}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <label htmlFor={noteId} className="block text-sm font-medium text-slate-700">
+            Précision <span className="font-normal text-slate-500">(obligatoire pour « Autre »)</span>
+          </label>
+          <Input
+            id={noteId}
+            name="note"
+            maxLength={CANCELLATION_NOTE_MAX}
+            placeholder="Ex. prévenu par sa fille"
+            aria-describedby={`${noteId}-hint`}
+          />
+          <p id={`${noteId}-hint`} className="text-xs text-slate-500">
+            Aucune information médicale : le motif choisi suffit.
+          </p>
+        </div>
+      </div>
+      {back ? (
+        <Checkbox
+          name="returnTripId"
+          value={back.id}
+          defaultChecked
+          label={`Annuler aussi le retour${back.keyMinute !== null ? ` (fin de séance ${formatMinute(back.keyMinute)})` : ""}`}
+        />
+      ) : null}
+      <SubmitButton variant="secondary" size="sm" className="text-red-700 hover:bg-red-50" pendingLabel="Annulation…">
+        <X aria-hidden className="size-4" />
+        Annuler la course
+      </SubmitButton>
+    </ActionForm>
   );
 }
 

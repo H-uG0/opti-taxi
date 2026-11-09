@@ -22,6 +22,7 @@
  * Like the seed, it owns its Prisma client and imports nothing server-only.
  */
 import { PrismaClient } from "@prisma/client";
+import { DEFAULT_LATE_CANCELLATION_HOURS } from "@/lib/domain/cancellation";
 import { planTripsFromRecurrences, type RecurrenceForGeneration } from "@/lib/domain/trip-generation";
 import { computeKpisByDay, summarizePeriod } from "@/lib/kpis";
 import { loadKpiRows } from "@/lib/kpis-load";
@@ -165,6 +166,7 @@ async function main(): Promise<void> {
   });
   if (!regulator) throw new HistoryError("Aucun compte régulateur actif : lancez d'abord pnpm db:seed.");
   const driverAccounts = await prisma.user.findMany({ where: { driverId: { not: null } }, select: { id: true, driverId: true } });
+  const settings = await prisma.appSettings.findUnique({ where: { id: 1 }, select: { lateCancellationHours: true } });
 
   console.log(
     "• Simulation jour par jour, chaque jour remplaçant sa simulation précédente " +
@@ -179,6 +181,7 @@ async function main(): Promise<void> {
     budgetSec: options.budgetSec,
     regulatorId: regulator.id,
     driverAccounts: new Map(driverAccounts.flatMap((user) => (user.driverId ? [[user.driverId, user.id] as const] : []))),
+    lateCancellationHours: settings?.lateCancellationHours ?? DEFAULT_LATE_CANCELLATION_HOURS,
   };
   const reports: DayReport[] = [];
   const removed: ClearedRows = { trips: 0, routes: 0, runs: 0, events: 0 };

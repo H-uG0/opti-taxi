@@ -21,6 +21,7 @@
  *   outbound drop-offs over the seeded days.
  */
 import type { StopKind, TripDirection, TripStatus } from "@prisma/client";
+import type { UserCancellationReason } from "@/lib/domain/cancellation";
 import { isSameEpisode } from "@/lib/domain/no-show";
 import type { Rng } from "../seed/random";
 import { unitFromKey } from "./hash";
@@ -76,6 +77,21 @@ export function cancellationsBeforePlanning(trips: readonly { id: string; patien
   }
   return cancelled;
 }
+
+/**
+ * Why a patient's session was cancelled (the day before or in the morning), as
+ * the regulator records it in « Annuler la course »: the patient's own call
+ * about half the time, a hospitalisation, or a session cancelled by the facility.
+ */
+export function patientCancellationReason(isoDate: string, patientId: string): UserCancellationReason {
+  const unit = unitFromKey(`cancel-reason:${isoDate}:${patientId}`);
+  if (unit < 0.5) return "PATIENT";
+  return unit < 0.8 ? "HOSPITALIZATION" : "FACILITY";
+}
+
+/** A return cancelled because its outbound was declared absent: the regulation's decision, not the patient's call. */
+export const AFTER_NO_SHOW_REASON: UserCancellationReason = "REGULATION";
+export const AFTER_NO_SHOW_NOTE = "aller : patient absent";
 
 export type DayTrip = {
   id: string;

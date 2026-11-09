@@ -8,6 +8,7 @@ import {
   generationMessage,
   hasActiveFilters,
   normalizeSearch,
+  pairedReturns,
   parseTripFilters,
   patientDisplayName,
   plural,
@@ -202,5 +203,31 @@ describe("formatting", () => {
     expect(generationMessage({ planned: 1, created: 0 }, "2026-11-02", "2026-11-08")).toBe(
       "Semaine du 02/11/2026 au 08/11/2026 : 0 course créée (1 déjà existante).",
     );
+  });
+});
+
+describe("pairedReturns", () => {
+  const leg = (id: string, direction: "OUTBOUND" | "RETURN", overrides: Record<string, unknown> = {}) => ({
+    id,
+    direction,
+    status: "PLANNED" as const,
+    patientId: "p1",
+    recurrenceId: "rec1",
+    facilityId: "f1",
+    readyMinute: direction === "RETURN" ? 690 : null,
+    ...overrides,
+  });
+
+  it("pairs an open outbound trip with the open return of the same care", () => {
+    const pairs = pairedReturns([leg("a1", "OUTBOUND"), leg("r1", "RETURN"), leg("r2", "RETURN", { patientId: "p2" })]);
+    expect(pairs).toEqual(new Map([["a1", { id: "r1", keyMinute: 690 }]]));
+  });
+
+  it("offers nothing for a return already cancelled or started, nor for an outbound trip already cancelled", () => {
+    expect(pairedReturns([leg("a1", "OUTBOUND"), leg("r1", "RETURN", { status: "CANCELLED" })]).size).toBe(0);
+    expect(pairedReturns([leg("a1", "OUTBOUND"), leg("r1", "RETURN", { status: "PICKED_UP" })]).size).toBe(0);
+    expect(pairedReturns([leg("a1", "OUTBOUND", { status: "CANCELLED" }), leg("r1", "RETURN")]).size).toBe(0);
+    // Another care of the same patient (another recurrence): not the same episode.
+    expect(pairedReturns([leg("a1", "OUTBOUND"), leg("r1", "RETURN", { recurrenceId: "rec2" })]).size).toBe(0);
   });
 });

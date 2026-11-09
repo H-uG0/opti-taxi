@@ -118,6 +118,23 @@ describe("syncOpenTrips: trace of the trips cancelled", () => {
     });
   });
 
+  it("marks each cancellation as the application's, with its cause and author, so it can be brought back", async () => {
+    const { tx, tripUpdateMany } = fakeTx([tripRow("t1", "2026-11-04")]);
+
+    await syncOpenTrips(tx, { patientId: "p1" }, () => CANCEL, TODAY, new Set(), ACTOR, { cause: "patient désactivé" });
+
+    expect(tripUpdateMany.mock.calls[0]?.[0]).toMatchObject({
+      data: {
+        status: "CANCELLED",
+        cancellationReason: "REFERENTIAL_SYNC",
+        cancellationOrigin: "SYSTEM",
+        cancellationNote: "patient désactivé",
+        cancelledById: "u1",
+        lateCancellation: false,
+      },
+    });
+  });
+
   it("writes no event when every guarded write was lost", async () => {
     const { tx, createMany } = fakeTx([tripRow("t1", "2026-11-04")], { lostWrites: ["t1"] });
 

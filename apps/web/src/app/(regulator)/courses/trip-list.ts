@@ -4,6 +4,7 @@
  * No server-only import so vitest can cover them.
  */
 import type { SharingStatus, TripDirection, TripStatus } from "@prisma/client";
+import { isSameEpisode, type LegKey } from "@/lib/domain/no-show";
 import { formatShortDate, TIME_ZONE } from "@/lib/time";
 import { keyMinute, sharingConflict } from "./trip-rules";
 
@@ -243,6 +244,26 @@ export function formatInstant(instant: Date | null | undefined): string | null {
 /** French plural: 0 and 1 take the singular. */
 export function plural(count: number, singular: string, pluralForm: string): string {
   return `${count} ${count > 1 ? pluralForm : singular}`;
+}
+
+export type PairedReturn = { id: string; keyMinute: number | null };
+
+/**
+ * For each outbound trip still open, the return of the same care that day
+ * (same patient, recurrence or facility), still open too: « Annuler la course »
+ * offers to cancel it along.
+ */
+export function pairedReturns(
+  trips: readonly (LegKey & { id: string; direction: TripDirection; status: TripStatus; readyMinute: number | null })[],
+): Map<string, PairedReturn> {
+  const open = (status: TripStatus) => status === "PLANNED" || status === "ASSIGNED";
+  const pairs = new Map<string, PairedReturn>();
+  for (const outbound of trips) {
+    if (outbound.direction !== "OUTBOUND" || !open(outbound.status)) continue;
+    const back = trips.find((t) => t.direction === "RETURN" && open(t.status) && isSameEpisode(outbound, t));
+    if (back) pairs.set(outbound.id, { id: back.id, keyMinute: back.readyMinute });
+  }
+  return pairs;
 }
 
 /** Feedback of the "Générer les courses" action. */

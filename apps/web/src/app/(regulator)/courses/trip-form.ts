@@ -5,6 +5,7 @@
 import type { Payer, Prisma, PrescribedMode, SharingScope, TripDirection } from "@prisma/client";
 import { z } from "zod";
 import { LAT_RANGE, LNG_RANGE } from "@/components/address/address-utils";
+import { CANCELLATION_NOTE_MAX, USER_CANCELLATION_REASONS } from "@/lib/domain/cancellation";
 import { allowedVehicleTypesFor, formatAddress, initialSharingStatus, sharingAllowedFor } from "@/lib/domain/rules";
 import { fromIsoDate, isIsoDate, isoWeekday, parseMinute, toIsoDate } from "@/lib/time";
 import { prescriptionValidOn } from "./trip-rules";
@@ -271,6 +272,26 @@ export function prescriptionUsableOn(
 export const tripIdSchema = requiredId("Course introuvable.");
 
 export const scheduleSchema = z.object({ tripId: tripIdSchema, time: minuteField });
+
+export const CANCEL_TRIP_FIELDS = ["tripId", "reason", "note", "returnTripId"] as const;
+
+/**
+ * « Annuler la course » : a reason from the list (a free note is required with
+ * « Autre motif »), and the return of the same care when the box « annuler
+ * aussi le retour » is ticked (its id, only sent when ticked).
+ */
+export const cancelTripSchema = z
+  .object({
+    tripId: tripIdSchema,
+    reason: z.enum(USER_CANCELLATION_REASONS, { error: "Choisissez le motif de l'annulation." }),
+    note: optionalText(CANCELLATION_NOTE_MAX, `Précision trop longue (${CANCELLATION_NOTE_MAX} caractères au plus).`),
+    returnTripId: optionalId,
+  })
+  .superRefine((value, ctx) => {
+    if (value.reason === "OTHER" && !value.note) {
+      ctx.addIssue({ code: "custom", path: ["note"], message: "Précisez le motif de l'annulation." });
+    }
+  });
 
 export const sharingDecisionSchema = z.object({
   tripId: tripIdSchema,

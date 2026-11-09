@@ -62,6 +62,32 @@ enum TripStatus {
   NO_SHOW
 }
 
+/// Motif d'annulation d'une course.
+enum CancellationReason {
+  /// Demande du patient.
+  PATIENT
+  /// Séance annulée ou déplacée par l'établissement.
+  FACILITY
+  HOSPITALIZATION
+  /// Le patient se rend aux soins par ses propres moyens.
+  OWN_MEANS
+  DECEASED
+  /// Course confiée à un confrère (sous-traitance).
+  PARTNER
+  /// Annulée par la synchronisation du référentiel (patient, prescription ou récurrence modifiés).
+  REFERENTIAL_SYNC
+  /// Décision de la régulation.
+  REGULATION
+  OTHER
+}
+
+/// Qui a annulé : une personne (« Annuler la course ») ou l'application (synchronisation du référentiel).
+/// Seule une annulation SYSTEM est relancée d'office quand sa cause disparaît.
+enum CancellationOrigin {
+  USER
+  SYSTEM
+}
+
 /// Traçabilité du transport partagé (décret 2025-202).
 enum SharingStatus {
   NOT_ELIGIBLE
@@ -285,6 +311,16 @@ model Trip {
   detourKm             Float?
   estimatedRevenue     Float?
 
+  /// Annulation : motif, origine, précision libre (non médicale), instant et compte dont l'action a
+  /// annulé la course. Vidés quand la course est rétablie.
+  cancellationReason CancellationReason?
+  cancellationOrigin CancellationOrigin?
+  cancellationNote   String?
+  cancelledAt        DateTime?
+  cancelledById      String?
+  /// Annulée par une personne moins de AppSettings.lateCancellationHours avant la prise en charge prévue.
+  lateCancellation   Boolean             @default(false)
+
   notes     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -296,6 +332,7 @@ model Trip {
   lockedVehicle      Vehicle?      @relation("TripLockedVehicle", fields: [lockedVehicleId], references: [id], onDelete: SetNull)
   route              Route?        @relation(fields: [routeId], references: [id], onDelete: SetNull)
   sharingRespondedBy User?         @relation("TripSharingRespondedBy", fields: [sharingRespondedById], references: [id], onDelete: SetNull)
+  cancelledBy        User?         @relation("TripCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
   stops              RouteStop[]
 
   @@unique([recurrenceId, serviceDate, direction])
@@ -593,6 +630,8 @@ model AppSettings {
   replanMaxServedLoss        Int      @default(0)
   /// Baisse de marge acceptée sans confirmation, en fraction du CA du planning en place (0.1 = 10 %).
   replanMaxMarginLoss        Float    @default(0.1)
+  /// Une annulation saisie moins de N heures avant la prise en charge prévue est tardive.
+  lateCancellationHours      Int      @default(2)
   updatedAt                  DateTime @updatedAt
 }
 
@@ -660,6 +699,7 @@ model User {
   optimizationRuns OptimizationRun[]
   completedStops   RouteStop[]       @relation("RouteStopCompletedBy")
   sharingResponses Trip[]            @relation("TripSharingRespondedBy")
+  cancelledTrips   Trip[]            @relation("TripCancelledBy")
   auditEvents      AuditEvent[]
 }
 

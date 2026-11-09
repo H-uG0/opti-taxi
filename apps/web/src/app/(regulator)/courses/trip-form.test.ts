@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildNewTripData,
+  cancelTripSchema,
   formValues,
   generateWeekSchema,
   parseNewTrip,
@@ -222,6 +223,26 @@ describe("row action schemas", () => {
     expect(sharingDecisionSchema.safeParse({ tripId: "t1", decision: "NOT_ELIGIBLE" }).success).toBe(false);
     // The proposal is timestamped by the optimization, never recorded by hand.
     expect(sharingDecisionSchema.safeParse({ tripId: "t1", decision: "PROPOSED" }).success).toBe(false);
+  });
+
+  it("requires a reason to cancel a trip, and a note with « Autre motif »", () => {
+    expect(cancelTripSchema.parse({ tripId: "t1", reason: "HOSPITALIZATION", note: " ", returnTripId: "" })).toEqual({
+      tripId: "t1",
+      reason: "HOSPITALIZATION",
+      note: undefined,
+      returnTripId: undefined,
+    });
+    expect(cancelTripSchema.parse({ tripId: "t1", reason: "PATIENT", returnTripId: "t2" }).returnTripId).toBe("t2");
+    expect(cancelTripSchema.safeParse({ tripId: "t1", reason: "" }).error?.issues[0]?.message).toBe(
+      "Choisissez le motif de l'annulation.",
+    );
+    expect(cancelTripSchema.safeParse({ tripId: "t1", reason: "OTHER", note: "" }).error?.issues[0]?.message).toBe(
+      "Précisez le motif de l'annulation.",
+    );
+    expect(cancelTripSchema.safeParse({ tripId: "t1", reason: "OTHER", note: "Grève des transports" }).success).toBe(true);
+    // The sync's own reason is never chosen by hand.
+    expect(cancelTripSchema.safeParse({ tripId: "t1", reason: "REFERENTIAL_SYNC" }).success).toBe(false);
+    expect(cancelTripSchema.safeParse({ tripId: "t1", reason: "PATIENT", note: "x".repeat(201) }).success).toBe(false);
   });
 
   it("generates weeks starting on a Monday only", () => {

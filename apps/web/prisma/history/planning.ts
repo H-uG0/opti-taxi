@@ -8,11 +8,13 @@
  *   the cap gives the day up rather than validating a plan that shares a
  *   patient who refused).
  * - Trips the last optimization could not place are handed over to a partner
- *   company (« confrère ») before validation: recorded in « Courses » with a
- *   note, then « Annuler », so no past day ends with a patient silently left
- *   without transport.
+ *   company (« confrère ») before validation: « Annuler la course » with the
+ *   reason « Confiée à un confrère », so no past day ends with a patient
+ *   silently left without transport, and the dashboard can tell them from the
+ *   patients' cancellations.
  */
 import type { TripStatus } from "@prisma/client";
+import { userCancellation, type CancellationFields } from "@/lib/domain/cancellation";
 
 /** Safety cap on the optimizations of one day (one refusal after another). */
 export const MAX_RUNS_PER_DAY = 6;
@@ -25,13 +27,9 @@ export function nextPlanningStep(runs: number, refused: number): PlanningStep {
   return runs < MAX_RUNS_PER_DAY ? "reoptimize" : "give-up";
 }
 
-/** Note written on a trip handed over to a partner company. */
-export const HANDOVER_NOTE = "Course confiée à un confrère la veille : non placée par l'optimisation.";
-
-/** Trip notes after the hand-over: the existing note is kept, the hand-over is added below. */
-export function handOverNotes(existing: string | null): string {
-  const kept = existing?.trim();
-  return kept ? `${kept}\n${HANDOVER_NOTE}` : HANDOVER_NOTE;
+/** The cancellation of a trip handed over to a partner company the day before, by the regulator: never late. */
+export function handOverCancellation(regulatorId: string, at: Date): CancellationFields {
+  return userCancellation({ reason: "PARTNER", note: null, actorId: regulatorId, now: at, late: false });
 }
 
 /** Trips that are still to be carried by V. */

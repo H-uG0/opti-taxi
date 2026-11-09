@@ -20,6 +20,7 @@
  * server-only.
  */
 import type { Prisma, PrismaClient, TripStatus } from "@prisma/client";
+import { isLateCancellation, userCancellation } from "@/lib/domain/cancellation";
 import { isSameEpisode } from "@/lib/domain/no-show";
 import { planTripsFromRecurrences, type RecurrenceForGeneration } from "@/lib/domain/trip-generation";
 import { buildOptimizeRequest, loadOptimizeInput } from "@/lib/optimizer/build-request";
@@ -44,12 +45,21 @@ import {
   validationInstant,
 } from "./calendar";
 import { DayAuditTrail, sharingAuditAction, stopAuditAction, type AuditActor } from "./audit";
-import { cancellationsBeforePlanning, decideDayEvents, fieldStatusUpdates, simulateRouteTimes, stopRecorder } from "./field";
+import {
+  AFTER_NO_SHOW_NOTE,
+  AFTER_NO_SHOW_REASON,
+  cancellationsBeforePlanning,
+  decideDayEvents,
+  fieldStatusUpdates,
+  patientCancellationReason,
+  simulateRouteTimes,
+  stopRecorder,
+} from "./field";
 import { rngFor } from "./hash";
 import { historyRunId, historyTripId } from "./ids";
 import { withTimeLimit, type OptimizerClient } from "./optimizer";
 import { foreignRowsWhere, simulatedRowsWhere } from "./ownership";
-import { handOverNotes, MAX_RUNS_PER_DAY, nextPlanningStep, unplacedTripIds } from "./planning";
+import { handOverCancellation, MAX_RUNS_PER_DAY, nextPlanningStep, unplacedTripIds } from "./planning";
 import { emptyDayReport, type DayReport, type ForeignRowCounts } from "./report";
 import { answerData, isHabitualRefuser, knownRefusal, sharingAnswer, UNANSWERED } from "./sharing";
 
@@ -76,6 +86,8 @@ export type DayContext = {
   regulatorId: string;
   /** Driver id -> id of its user account: who taps the statuses (stopRecorder). */
   driverAccounts: ReadonlyMap<string, string>;
+  /** Setting lateCancellationHours: a cancellation closer than this to the pickup is late. */
+  lateCancellationHours: number;
 };
 
 export type RowCounts = { trips: number; routes: number; runs: number };
@@ -276,23 +288,26 @@ async function handOverUnplaced(
 ): Promise<{ handedOver: number; lastAt: Date | null }> {
   const trips = await prisma.trip.findMany({
     where: simulatedRowsWhere(serviceDate).trips,
-    select: { id: true, status: true, routeId: true, notes: true },
+    select: { id: true, status: true, routeId: true },
   });
   const ids = unplacedTripIds(trips);
   if (ids.length === 0) return { handedOver: 0, lastAt: null };
+  const regulatorId = actor.id;
+  if (!regulatorId) throw new Error("Remise à un confrère sans compte régulateur");
   const byId = new Map(trips.map((trip) => [trip.id, trip]));
   const instants = handOverInstants(after, ids.length, rng);
-  // Each cancellation is traced like « Annuler » (trip.cancel), only when it applied.
+  // Each cancellation is traced like « Annuler » (trip.cancel), only when it applied, with the reason « confiée à un confrère ».
   await prisma.$transaction(
     async (tx) => {
       const events: Prisma.AuditEventCreateManyInput[] = [];
       for (const [index, id] of ids.entries()) {
         const trip = byId.get(id);
+        const at = instants[index] ?? after;
         const { count } = await tx.trip.updateMany({
           where: { id, status: trip?.status, routeId: null },
-          data: { ...CLEARED_PLANNING, status: "CANCELLED", notes: handOverNotes(trip?.notes ?? null) },
+          data: { ...CLEARED_PLANNING, status: "CANCELLED", ...handOverCancellation(regulatorId, at) },
         });
-        if (count > 0) events.push(trail.event(actor, "trip.cancel", id, instants[index] ?? after));
+        if (count > 0) events.push(trail.event(actor, "trip.cancel", id, at));
       }
       if (events.length > 0) await tx.auditEvent.createMany({ data: events });
     },
@@ -321,6 +336,7 @@ async function simulateField(ctx: DayContext, trail: DayAuditTrail, isoDate: str
       routeId: true,
       appointmentMinute: true,
       readyMinute: true,
+      plannedPickupMinute: true,
     },
     orderBy: { id: "asc" },
   });
@@ -336,10 +352,18 @@ async function simulateField(ctx: DayContext, trail: DayAuditTrail, isoDate: str
   for (const trip of trips) {
     const reason = events.cancellations.get(trip.id);
     if (!reason) continue;
+    // A return after an absence is cancelled once the absence is known; its instant is refined below for the trail.
+    const fields = userCancellation({
+      reason: reason === "AFTER_NO_SHOW" ? AFTER_NO_SHOW_REASON : patientCancellationReason(isoDate, trip.patientId),
+      note: reason === "AFTER_NO_SHOW" ? AFTER_NO_SHOW_NOTE : null,
+      actorId: ctx.regulatorId,
+      now: morning,
+      late: isLateCancellation({ ...trip, serviceDate: isoDate }, morning, ctx.lateCancellationHours),
+    });
     const detached = await prisma.$transaction(async (tx) => {
       const updated = await tx.trip.updateMany({
         where: { id: trip.id, status: trip.status },
-        data: { ...CLEARED_PLANNING, status: "CANCELLED" },
+        data: { ...CLEARED_PLANNING, status: "CANCELLED", ...fields },
       });
       if (updated.count === 0) return null;
       if (reason === "AFTER_NO_SHOW") cancelledAfterNoShow.push(trip.id);
@@ -396,12 +420,17 @@ async function simulateField(ctx: DayContext, trail: DayAuditTrail, isoDate: str
       if (time.kind === "PICKUP" && events.noShows.has(time.tripId)) absentAt.set(time.tripId, completedAt);
     }
   }
-  // Returns cancelled after their outbound's absence: traced 3 minutes after « Patient absent ».
+  // Returns cancelled after their outbound's absence: traced, and dated, 3 minutes after « Patient absent ».
   for (const id of cancelledAfterNoShow) {
     const back = timing.get(id);
     const outbound = back && trips.find((t) => t.direction === "OUTBOUND" && absentAt.has(t.id) && isSameEpisode(t, back));
     const absent = outbound ? absentAt.get(outbound.id) : undefined;
-    audits.push(trail.event(regulator(ctx), "trip.cancel", id, absent ? new Date(absent.getTime() + 3 * 60_000) : morning));
+    const at = absent ? new Date(absent.getTime() + 3 * 60_000) : morning;
+    audits.push(trail.event(regulator(ctx), "trip.cancel", id, at));
+    if (back) {
+      const late = isLateCancellation({ ...back, serviceDate: isoDate }, at, ctx.lateCancellationHours);
+      writes.push(prisma.trip.update({ where: { id }, data: { cancelledAt: at, lateCancellation: late } }));
+    }
   }
   for (const update of fieldStatusUpdates(droppedOff, events.noShows)) writes.push(prisma.trip.updateMany(update));
   if (audits.length > 0) writes.push(prisma.auditEvent.createMany({ data: audits }));
@@ -434,13 +463,31 @@ export async function simulateDay(ctx: DayContext, isoDate: string): Promise<Day
   const cancelledBefore = cancellationsBeforePlanning(trips, isoDate);
   const firstRunAt = firstRunStart(isoDate, planning);
   if (cancelledBefore.size > 0) {
-    const cancelled = [...cancelledBefore];
+    const cancelled = trips.filter((trip) => cancelledBefore.has(trip.id));
+    const instantOf = (index: number) => new Date(firstRunAt.getTime() - (cancelled.length - index) * 60_000);
     await prisma.$transaction([
-      prisma.trip.updateMany({ where: { id: { in: cancelled } }, data: { ...CLEARED_PLANNING, status: "CANCELLED" } }),
+      ...cancelled.map((trip, index) =>
+        prisma.trip.update({
+          where: { id: trip.id },
+          data: {
+            ...CLEARED_PLANNING,
+            status: "CANCELLED",
+            ...userCancellation({
+              reason: patientCancellationReason(isoDate, trip.patientId),
+              note: null,
+              actorId: ctx.regulatorId,
+              now: instantOf(index),
+              late: isLateCancellation(
+                { ...trip, serviceDate: isoDate, plannedPickupMinute: null, appointmentMinute: trip.appointmentMinute ?? null, readyMinute: trip.readyMinute ?? null },
+                instantOf(index),
+                ctx.lateCancellationHours,
+              ),
+            }),
+          },
+        }),
+      ),
       prisma.auditEvent.createMany({
-        data: cancelled.map((id, index) =>
-          trail.event(regulator(ctx), "trip.cancel", id, new Date(firstRunAt.getTime() - (cancelled.length - index) * 60_000)),
-        ),
+        data: cancelled.map((trip, index) => trail.event(regulator(ctx), "trip.cancel", trip.id, instantOf(index))),
       }),
     ]);
   }

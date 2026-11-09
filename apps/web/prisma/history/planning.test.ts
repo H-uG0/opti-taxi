@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HANDOVER_NOTE, handOverNotes, MAX_RUNS_PER_DAY, nextPlanningStep, unplacedTripIds } from "./planning";
+import { handOverCancellation, MAX_RUNS_PER_DAY, nextPlanningStep, unplacedTripIds } from "./planning";
 
 describe("nextPlanningStep", () => {
   it("validates as soon as a round brings no refusal", () => {
@@ -38,12 +38,15 @@ describe("hand-over to a partner company", () => {
     expect(unplacedTripIds([...trips].reverse())).toEqual(["t1", "t3", "t6"]);
   });
 
-  it("writes the hand-over in the trip note, keeping an existing note", () => {
-    expect(handOverNotes(null)).toBe(HANDOVER_NOTE);
-    expect(handOverNotes("  ")).toBe(HANDOVER_NOTE);
-    expect(handOverNotes("Fauteuil roulant")).toBe(`Fauteuil roulant\n${HANDOVER_NOTE}`);
-    expect(HANDOVER_NOTE).toMatch(/confrère/);
-    // The trip form accepts notes of 500 characters at most.
-    expect(HANDOVER_NOTE.length).toBeLessThan(500);
+  it("records a hand-over as cancelled by the regulator, reason « confiée à un confrère », never late", () => {
+    const at = new Date("2026-11-02T17:12:00.000Z");
+    expect(handOverCancellation("reg_1", at)).toEqual({
+      cancellationReason: "PARTNER",
+      cancellationOrigin: "USER",
+      cancellationNote: null,
+      cancelledAt: at,
+      cancelledById: "reg_1",
+      lateCancellation: false,
+    });
   });
 });

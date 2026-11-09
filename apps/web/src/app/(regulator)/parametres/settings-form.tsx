@@ -263,6 +263,19 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
         </div>
       </Fieldset>
 
+      <Fieldset legend="Courses">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Annulation tardive (h avant la prise en charge)"
+            htmlFor="lateCancellationHours"
+            error={errors.lateCancellationHours}
+            hint="2 h par défaut : une course annulée moins de 2 h avant sa prise en charge prévue est comptée comme annulation tardive sur la fiche du patient."
+          >
+            <NumberInput name="lateCancellationHours" unit="h" integer values={values} errors={errors} />
+          </Field>
+        </div>
+      </Fieldset>
+
       <Fieldset legend="Régulation">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field

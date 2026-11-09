@@ -4,7 +4,7 @@
  * built with the shared wording of @/lib/record-trace.
  * Pure: no server-only import so vitest can cover it.
  */
-import type { SharingStatus, StopKind, TripDirection, TripStatus } from "@prisma/client";
+import type { CancellationOrigin, SharingStatus, StopKind, TripDirection, TripStatus } from "@prisma/client";
 import { isSameEpisode, type LegKey } from "@/lib/domain/no-show";
 import { recordTrace, sharingAnswerWords, type RecordTrace } from "@/lib/record-trace";
 
@@ -69,4 +69,21 @@ export function outboundNoShowTrace(returnTrip: LegKey, dayTrips: readonly DayTr
     if (pickup?.completedAt) return recordTrace("Absence à l'aller enregistrée", pickup.completedAt, pickup.completedBy?.name);
   }
   return null;
+}
+
+/**
+ * Who cancelled the trip and when: a person (« Annuler la course »), or the
+ * application after a change of the referential made by that person. Null
+ * when the trip is not cancelled or the instant is unknown (cancelled before
+ * it was recorded).
+ */
+export function cancellationTrace(trip: {
+  status: TripStatus;
+  cancellationOrigin: CancellationOrigin | null;
+  cancelledAt: Date | null;
+  cancelledBy: { name: string } | null;
+}): RecordTrace | null {
+  if (trip.status !== "CANCELLED" || !trip.cancelledAt) return null;
+  const what = trip.cancellationOrigin === "SYSTEM" ? "Annulation automatique (modification du référentiel)" : "Annulation enregistrée";
+  return recordTrace(what, trip.cancelledAt, trip.cancelledBy?.name);
 }

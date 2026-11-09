@@ -8,6 +8,13 @@ import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
+  cancellationLabel,
+  DEFAULT_LATE_CANCELLATION_HOURS,
+  PATIENT_HISTORY_DAYS,
+  patientCancellationStats,
+  patientHistoryStart,
+} from "@/lib/domain/cancellation";
+import {
   DIRECTION_LABELS,
   MOBILITY_LABELS,
   PRESCRIBED_MODE_LABELS,
@@ -84,7 +91,7 @@ export default async function PatientPage({
   const today = todayIso();
   const lastDay = addDays(today, UPCOMING_DAYS - 1);
 
-  const [patient, trips, openTrips] = await Promise.all([
+  const [patient, trips, openTrips, pastTrips] = await Promise.all([
     db.patient.findUnique({
       where: { id },
       include: {
@@ -107,10 +114,22 @@ export default async function PatientPage({
       include: { facility: { select: { name: true } } },
     }),
     countOpenTripsByRecurrence({ patientId: id }, today),
+    // Absences and cancellations of the last days (PATIENT_HISTORY_DAYS), counted on the record.
+    db.trip.findMany({
+      where: {
+        patientId: id,
+        serviceDate: { gte: fromIsoDate(patientHistoryStart(today)), lte: fromIsoDate(today) },
+        status: { in: ["NO_SHOW", "CANCELLED"] },
+      },
+      select: { status: true, cancellationOrigin: true, cancellationReason: true, lateCancellation: true },
+    }),
   ]);
   if (!patient) notFound();
   // Health data shown: the read is traced (never breaks the page).
   await auditRead(user, { action: "patient.view", entity: "Patient", entityId: patient.id });
+  // Read only: a page never creates the settings row.
+  const settings = await db.appSettings.findUnique({ where: { id: 1 }, select: { lateCancellationHours: true } });
+  const lateHours = settings?.lateCancellationHours ?? DEFAULT_LATE_CANCELLATION_HOURS;
 
   const prescriptions = patient.prescriptions.map((p) => {
     const dates = { validFrom: toIsoDate(p.validFrom), validTo: toIsoDate(p.validTo) };
@@ -138,6 +157,7 @@ export default async function PatientPage({
         (b.plannedPickupMinute ?? b.appointmentMinute ?? b.readyMinute ?? 0),
   );
   const fullName = `${patient.lastName.toUpperCase()} ${patient.firstName}`;
+  const history = patientCancellationStats(pastTrips);
 
   return (
     <div className="space-y-6">
@@ -202,6 +222,25 @@ export default async function PatientPage({
               <span className="tabular">{patient.postalCode}</span> {patient.city}
               <span className="tabular mt-0.5 block text-xs text-slate-500">
                 {formatCoordinate(patient.lat)}, {formatCoordinate(patient.lng)}
+              </span>
+            </Item>
+            <Item label={`Sur ${PATIENT_HISTORY_DAYS} jours`} className="sm:col-span-2 lg:col-span-4">
+              <span className="tabular flex flex-wrap gap-x-3 gap-y-1">
+                <span className={history.noShows > 0 ? "font-medium text-red-800" : undefined}>
+                  {history.noShows} absence{history.noShows > 1 ? "s" : ""} (patient absent)
+                </span>
+                <span aria-hidden className="text-slate-300">·</span>
+                <span className={history.lateCancellations > 0 ? "font-medium text-amber-800" : undefined}>
+                  {history.lateCancellations} annulation{history.lateCancellations > 1 ? "s" : ""} tardive
+                  {history.lateCancellations > 1 ? "s" : ""}
+                </span>
+                <span aria-hidden className="text-slate-300">·</span>
+                <span>
+                  {history.cancellations} annulation{history.cancellations > 1 ? "s" : ""} en tout
+                </span>
+              </span>
+              <span className="mt-0.5 block text-xs text-slate-500">
+                Annulations demandées pour le patient ; tardive : moins de {lateHours} h avant la prise en charge prévue.
               </span>
             </Item>
             <Item label="Notes d'accès" className="sm:col-span-2 lg:col-span-4">
@@ -564,6 +603,9 @@ export default async function PatientPage({
                     <Td>{t.facility?.name ?? <span className="text-slate-400">—</span>}</Td>
                     <Td>
                       <Badge tone={TRIP_STATUS_TONES[t.status]}>{TRIP_STATUS_LABELS[t.status]}</Badge>
+                      {t.status === "CANCELLED" ? (
+                        <span className="mt-0.5 block text-xs text-slate-500">{cancellationLabel(t)}</span>
+                      ) : null}
                     </Td>
                     <Td className="whitespace-nowrap">
                       {t.shared ? (

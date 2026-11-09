@@ -6,6 +6,7 @@ import { FormMessage } from "@/components/ui/form";
 import { Card, CardBody, EmptyState, PageHeader, Stat } from "@/components/ui/layout";
 import { Table, TBody, THead, Th } from "@/components/ui/table";
 import { auditRead } from "@/lib/audit";
+import { cancellationLabel } from "@/lib/domain/cancellation";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { OUTBOUND_NO_SHOW_ADVICE, returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
@@ -13,7 +14,7 @@ import { formatPercent, PRESCRIBED_MODE_LABELS, SHARING_SCOPE_LABELS } from "@/l
 import { addDays, formatLongDate, formatShortDate, fromIsoDate, isIsoDate, startOfIsoWeek, tomorrowIso } from "@/lib/time";
 import { DayNav } from "./day-nav";
 import { GenerateTripsForm } from "./generate-trips-form";
-import { outboundNoShowTrace, sharingAnswerTrace, stopStatusTraces } from "./record-trace";
+import { cancellationTrace, outboundNoShowTrace, sharingAnswerTrace, stopStatusTraces } from "./record-trace";
 import { TripFiltersForm } from "./trip-filters";
 import {
   coPassengersFromStops,
@@ -22,6 +23,7 @@ import {
   filtersToParams,
   filterTrips,
   formatInstant,
+  pairedReturns,
   hasActiveFilters,
   parseTripFilters,
   patientDisplayName,
@@ -80,6 +82,12 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
         sharingNote: true,
         notes: true,
         recurrenceId: true,
+        cancellationReason: true,
+        cancellationOrigin: true,
+        cancellationNote: true,
+        cancelledAt: true,
+        lateCancellation: true,
+        cancelledBy: { select: { name: true } },
         patient: { select: { firstName: true, lastName: true, phone: true } },
         facility: { select: { name: true } },
         prescription: { select: { mode: true, sharing: true } },
@@ -109,10 +117,12 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
   const coPassengers = coPassengersFromStops(stops);
   const shortNames = new Map(trips.map((trip) => [trip.id, shortPatientName(trip.patient)]));
   const visible = sortTrips(filterTrips(dayTrips, filters));
+  const returns = pairedReturns(trips);
 
   const rows: TripRowData[] = visible.map((trip) => {
     const answer = sharingAnswerTrace(trip);
     const statusTraces = stopStatusTraces(trip.status, trip.stops);
+    const cancelled = trip.status === "CANCELLED";
     return {
       id: trip.id,
       direction: trip.direction,
@@ -155,6 +165,9 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       outboundNoShow: trip.outboundNoShow,
       // Read from the whole day: the outbound trip may be filtered out of the list.
       outboundNoShowTrace: trip.outboundNoShow ? outboundNoShowTrace(trip, trips) : null,
+      cancellation: cancelled ? cancellationLabel(trip) : null,
+      cancellationTrace: cancellationTrace(trip),
+      pairedReturn: returns.get(trip.id) ?? null,
     };
   });
 

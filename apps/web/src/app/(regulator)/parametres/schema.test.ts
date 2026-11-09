@@ -14,6 +14,7 @@ const defaults = {
   solverTimeLimitSec: "10",
   replanMaxServedLoss: "0",
   replanMaxMarginLoss: "10",
+  lateCancellationHours: "2",
   regulatorPhone: "",
 };
 
@@ -37,6 +38,7 @@ describe("settingsSchema", () => {
       solverTimeLimitSec: 10,
       replanMaxServedLoss: 0,
       replanMaxMarginLoss: 0.1,
+      lateCancellationHours: 2,
       regulatorPhone: null,
     });
   });

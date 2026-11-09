@@ -82,7 +82,16 @@ function context(prisma: PrismaClient, plan: Partial<PlanResponse> = {}): DayCon
     baseUrl: "http://optimizer.test",
     optimize: vi.fn(async () => ({ status: "SUCCESS", meta: { wallTimeMs: 12_000, matrixSource: "haversine" }, ...plan })),
   } as unknown as OptimizerClient;
-  return { prisma, seed: 1, recurrences: [], optimizer, budgetSec: null, regulatorId: "regulator-1", driverAccounts: new Map() };
+  return {
+    prisma,
+    seed: 1,
+    recurrences: [],
+    optimizer,
+    budgetSec: null,
+    regulatorId: "regulator-1",
+    driverAccounts: new Map(),
+    lateCancellationHours: 2,
+  };
 }
 
 const eventsOf = (writes: Write[]) =>

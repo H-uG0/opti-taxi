@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cancellationTrace,
   formatDayTime,
   outboundNoShowTrace,
   recordTrace,
@@ -134,5 +135,23 @@ describe("outboundNoShowTrace", () => {
     expect(outboundNoShowTrace(leg, [{ ...absentOutbound, stops: [] }, later])?.full).toBe(
       "Absence à l'aller enregistrée par Paul Roux le 04/11 à 08:05",
     );
+  });
+});
+
+describe("cancellationTrace", () => {
+  const cancelled = { status: "CANCELLED" as const, cancelledAt: AT, cancelledBy: { name: "Marie Durand" } };
+
+  it("says who cancelled the trip and when, or that the application did after their change", () => {
+    expect(cancellationTrace({ ...cancelled, cancellationOrigin: "USER" })?.full).toBe(
+      "Annulation enregistrée par Marie Durand le 03/11 à 08:12",
+    );
+    expect(cancellationTrace({ ...cancelled, cancellationOrigin: "SYSTEM" })?.full).toBe(
+      "Annulation automatique (modification du référentiel) par Marie Durand le 03/11 à 08:12",
+    );
+  });
+
+  it("is null for a trip not cancelled, or cancelled before the instant was recorded", () => {
+    expect(cancellationTrace({ ...cancelled, status: "PLANNED", cancellationOrigin: null })).toBeNull();
+    expect(cancellationTrace({ ...cancelled, cancelledAt: null, cancellationOrigin: null })).toBeNull();
   });
 });

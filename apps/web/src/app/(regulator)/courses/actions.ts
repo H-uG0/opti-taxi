@@ -7,6 +7,8 @@ import { LOW_GEOCODE_SCORE } from "@/components/address/address-utils";
 import { audit, type AuditEntry } from "@/lib/audit";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { CANCELLATION_REASON_LABELS, isLateCancellation, NO_CANCELLATION, userCancellation } from "@/lib/domain/cancellation";
+import { isSameEpisode } from "@/lib/domain/no-show";
 import { formatAddress } from "@/lib/domain/rules";
 import { getSettings } from "@/lib/domain/settings";
 import { generateTrips } from "@/lib/domain/trip-generation";
@@ -24,6 +26,8 @@ import {
 import { formatMinute, addDays, todayIso, toIsoDate } from "@/lib/time";
 import {
   buildNewTripData,
+  CANCEL_TRIP_FIELDS,
+  cancelTripSchema,
   firstErrorMessage,
   formValues,
   generateWeekSchema,
@@ -278,37 +282,102 @@ function validatedHint(routeStatus: RouteStatus | null | undefined): string {
   return routeStatus === "VALIDATED" ? " Le planning est validé : rouvrez-le avant de réoptimiser." : "";
 }
 
+/** A trip the cancellation reads: its state, its route and when it is picked up (lateness). */
+const CANCEL_SELECT = {
+  id: true,
+  status: true,
+  serviceDate: true,
+  direction: true,
+  patientId: true,
+  recurrenceId: true,
+  facilityId: true,
+  routeId: true,
+  plannedPickupMinute: true,
+  appointmentMinute: true,
+  readyMinute: true,
+  route: { select: { status: true } },
+} satisfies Prisma.TripSelect;
+
+type CancelledTrip = Prisma.TripGetPayload<{ select: typeof CANCEL_SELECT }>;
+
+/** The return of the same care (same patient, day and recurrence or facility) that an outbound cancellation may take along. */
+function isReturnOf(back: CancelledTrip, outbound: CancelledTrip): boolean {
+  return (
+    outbound.direction === "OUTBOUND" &&
+    back.direction === "RETURN" &&
+    back.serviceDate.getTime() === outbound.serviceDate.getTime() &&
+    isSameEpisode(outbound, back)
+  );
+}
+
+/**
+ * « Annuler la course » : a reason is required; the cancellation keeps who,
+ * when and whether it came late (less than lateCancellationHours before the
+ * pickup). Cancelling an outbound trip may take the return of the same care
+ * along (box ticked in the form).
+ */
 export async function cancelTrip(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
   const user = await requireUser("REGULATOR");
-  const parsed = tripIdSchema.safeParse(formData.get("tripId"));
-  if (!parsed.success) return failure("Course introuvable.");
+  const parsed = cancelTripSchema.safeParse(formValues(formData, CANCEL_TRIP_FIELDS));
+  if (!parsed.success) return failure(firstErrorMessage(parsed.error));
+  const { tripId, reason, note, returnTripId } = parsed.data;
 
-  const trip = await db.trip.findUnique({
-    where: { id: parsed.data },
-    select: { id: true, status: true, serviceDate: true, routeId: true, route: { select: { status: true } } },
-  });
+  const [trip, back, settings] = await Promise.all([
+    db.trip.findUnique({ where: { id: tripId }, select: CANCEL_SELECT }),
+    returnTripId ? db.trip.findUnique({ where: { id: returnTripId }, select: CANCEL_SELECT }) : null,
+    getSettings(db),
+  ]);
   if (!trip) return failure("Course introuvable.");
   if (!canCancel(trip.status)) return failure("Seule une course pas encore commencée peut être annulée.");
+  if (returnTripId && (!back || !isReturnOf(back, trip))) return failure("Le retour à annuler ne correspond pas à cet aller : rechargez la page.");
+  // A return already started, cancelled or closed meanwhile is left as it is: the outbound trip is still cancelled.
+  const trips = back && canCancel(back.status) ? [trip, back] : [trip];
 
-  // Guarded on the status read above so a concurrent change is not overwritten;
-  // the stops are removed only when the trip really leaves its route.
-  const detached = await detachInTransaction(async (tx) => {
-    const updated = await tx.trip.updateMany({
-      where: { id: trip.id, status: trip.status },
-      data: { ...CLEARED_PLANNING, status: "CANCELLED" },
+  const now = new Date();
+  const fieldsOf = (t: CancelledTrip) =>
+    userCancellation({
+      reason,
+      note: note ?? null,
+      actorId: user.id,
+      now,
+      late: isLateCancellation({ ...t, serviceDate: toIsoDate(t.serviceDate) }, now, settings.lateCancellationHours),
     });
-    if (updated.count === 0) return null;
-    await audit(tx, user, tripEvent("trip.cancel", trip));
-    return removeTripStops(tx, trip.id);
+
+  // Guarded on the statuses read above so a concurrent change is not overwritten;
+  // the stops are removed only when a trip really leaves its route.
+  const detached = await detachInTransaction(async (tx) => {
+    const result: DetachResult = { nowAlone: 0, routeIds: [] };
+    for (const t of trips) {
+      const updated = await tx.trip.updateMany({
+        where: { id: t.id, status: t.status },
+        data: { ...CLEARED_PLANNING, status: "CANCELLED", ...fieldsOf(t) },
+      });
+      // The trip asked for changed meanwhile: nothing is cancelled. A return that changed is left alone.
+      if (updated.count === 0) {
+        if (t === trip) return null;
+        continue;
+      }
+      // The reason stays on the trip only: « hospitalisation » or « décès » are health data, kept out of the trail.
+      await audit(tx, user, tripEvent("trip.cancel", t));
+      const removed = await removeTripStops(tx, t.id);
+      result.nowAlone += removed.nowAlone;
+      result.routeIds.push(...removed.routeIds.filter((id) => !result.routeIds.includes(id)));
+    }
+    return result;
   });
   if (!detached) return failure(CONCURRENT_CHANGE);
 
   const refresh = await refreshLeftRoutes(detached.routeIds);
   revalidateTripViews();
-  if (!trip.routeId && detached.routeIds.length === 0) return { ok: true, message: "Course annulée." };
+  const both = trips.length > 1;
+  const why = ` (${CANCELLATION_REASON_LABELS[reason].toLowerCase()})`;
+  const late = trips.some((t) => fieldsOf(t).lateCancellation) ? " Annulation tardive." : "";
+  const routed = trips.some((t) => t.routeId !== null) || detached.routeIds.length > 0;
+  if (!routed) return { ok: true, message: `${both ? "Aller et retour annulés" : "Course annulée"}${why}.${late}` };
+  const left = both ? "Aller et retour annulés et retirés de leur tournée" : "Course annulée et retirée de sa tournée";
   return {
     ok: true,
-    message: `Course annulée et retirée de sa tournée.${aloneMessage(detached.nowAlone)}${noticeOf(refresh)}${adviceOf(refresh, trip.route?.status)}`,
+    message: `${left}${why}.${late}${aloneMessage(detached.nowAlone)}${noticeOf(refresh)}${adviceOf(refresh, trip.route?.status ?? back?.route?.status)}`,
   };
 }
 
@@ -324,7 +393,7 @@ export async function restoreTrip(_prev: ActionResult, formData: FormData): Prom
   const detached = await detachInTransaction(async (tx) => {
     const updated = await tx.trip.updateMany({
       where: { id: trip.id, status: "CANCELLED" },
-      data: { ...CLEARED_PLANNING, status: "PLANNED" },
+      data: { ...CLEARED_PLANNING, ...NO_CANCELLATION, status: "PLANNED" },
     });
     if (updated.count === 0) return null;
     await audit(tx, user, tripEvent("trip.restore", trip));
