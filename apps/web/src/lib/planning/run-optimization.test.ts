@@ -260,6 +260,49 @@ describe("the routes in place as the optimizer's start", () => {
     expect(fake.optimize.mock.calls[1]![0]).not.toHaveProperty("initialRoutes");
     expect(outcome.ok).toBe(true);
   });
+
+  const stops = (tripId: string) => [
+    { tripId, kind: "PICKUP", sequence: 1 },
+    { tripId, kind: "DROPOFF", sequence: 2 },
+  ];
+
+  it("says so when the computation gave back the routes in place", async () => {
+    // planIgnoringTheMove: taxi_mrs takes t1, as in place.
+    fake.db.route.findMany.mockResolvedValue([{ vehicleId: "taxi_mrs", stops: stops("t1") }]);
+    fake.savePlan.mockResolvedValue({ routes: 1, served: 1, unassigned: 1 });
+    const outcome = await runOptimization(DATE, REGULATOR);
+    expect(outcome).toMatchObject({
+      ok: true,
+      message: expect.stringMatching(/^Planning en place conservé, aucun meilleur trouvé : 1\/2 courses servies · 1 tournée · calcul/),
+    });
+  });
+
+  it("names how many routes changed, and those taken off", async () => {
+    const route = (vehicleId: string, tripId: string) => ({
+      vehicleId,
+      stops: [
+        { tripId, kind: "PICKUP" },
+        { tripId, kind: "DROPOFF" },
+      ],
+    });
+    fake.optimize.mockResolvedValue({ ok: true, data: { ...planIgnoringTheMove(), routes: [route("taxi_mrs", "t1"), route("vsl_gre", "t2")] } });
+    fake.db.route.findMany.mockResolvedValue([{ vehicleId: "taxi_mrs", stops: stops("t1") }]);
+    fake.savePlan.mockResolvedValue({ routes: 2, served: 2, unassigned: 0 });
+    const changed = await runOptimization(DATE, REGULATOR);
+    expect(changed).toMatchObject({ ok: true, message: expect.stringMatching(/^Planning optimisé : 2\/2 courses servies · 2 tournées dont 1 modifiée · calcul/) });
+
+    fake.optimize.mockResolvedValue({ ok: true, data: { ...planIgnoringTheMove(), routes: [route("taxi_mrs", "t1")] } });
+    fake.db.route.findMany.mockResolvedValue([
+      { vehicleId: "taxi_mrs", stops: stops("t1") },
+      { vehicleId: "vsl_gre", stops: stops("t2") },
+    ]);
+    fake.savePlan.mockResolvedValue({ routes: 1, served: 1, unassigned: 1 });
+    const removed = await runOptimization(DATE, REGULATOR);
+    expect(removed).toMatchObject({
+      ok: true,
+      message: expect.stringMatching(/^Planning optimisé : 1\/2 courses servies · 1 tournée inchangée · 1 tournée retirée · calcul/),
+    });
+  });
 });
 
 describe("two computations of the same date", () => {

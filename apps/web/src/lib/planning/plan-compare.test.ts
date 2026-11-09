@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  changedRoutes,
   comparePlans,
   comparisonQuestion,
   figuresLine,
@@ -216,5 +217,38 @@ describe("routesInPlace (start of a re-optimization)", () => {
     expect(routesInPlace([], request)).toBeNull();
     expect(routesInPlace([{ vehicleId: "v2", stops: [] }], request)).toBeNull();
     expect(routesInPlace([{ vehicleId: "v1", stops: [{ tripId: "x", kind: "PICKUP", sequence: 0 }] }], request)).toBeNull();
+  });
+});
+
+describe("changedRoutes", () => {
+  const stored = (vehicleId: string, ...trips: string[]) => ({
+    vehicleId,
+    // Stored in any order: read by sequence.
+    stops: trips
+      .flatMap((tripId) => [
+        { tripId, kind: "PICKUP" as const },
+        { tripId, kind: "DROPOFF" as const },
+      ])
+      .map((stop, sequence) => ({ ...stop, sequence }))
+      .reverse(),
+  });
+  const planned = (vehicleId: string, ...trips: string[]) => ({
+    vehicleId,
+    stops: trips.flatMap((tripId) => [
+      { tripId, kind: "PICKUP" as const },
+      { tripId, kind: "DROPOFF" as const },
+    ]),
+  });
+
+  it("finds the routes in place given back unchanged", () => {
+    const inPlace = [stored("v1", "a", "b"), stored("v2", "c"), { vehicleId: "v3", stops: [] }];
+    expect(changedRoutes(inPlace, [planned("v1", "a", "b"), planned("v2", "c")])).toEqual({ changed: 0, removed: 0, total: 2 });
+  });
+
+  it("counts the routes reordered, moved or new, and those taken off", () => {
+    const inPlace = [stored("v1", "a", "b"), stored("v2", "c"), stored("v3", "d")];
+    const next = [planned("v1", "b", "a"), planned("v2", "c"), planned("v4", "d")];
+    expect(changedRoutes(inPlace, next)).toEqual({ changed: 2, removed: 1, total: 3 });
+    expect(changedRoutes([], next)).toEqual({ changed: 3, removed: 0, total: 3 });
   });
 });

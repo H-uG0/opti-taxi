@@ -35,7 +35,7 @@ import {
   type VehicleType,
 } from "@prisma/client";
 import { buildOptimizeRequest, loadOptimizeInput } from "@/lib/optimizer/build-request";
-import type { EvaluateRequest, OptimizeRequest, PlanResponse, ViolationCode } from "@/lib/optimizer/contract";
+import type { DayRequest, EvaluateRequest, OptimizeRequest, PlanResponse, ViolationCode } from "@/lib/optimizer/contract";
 import {
   FIELD_TRIP_STATUSES,
   planRoutes,
@@ -218,10 +218,17 @@ export function stopKey(tripId: string, kind: StopKind): string {
 /**
  * The day's request plus the stored stop sequence of every route of the day,
  * so that the cross-route rules (a patient's total wait) are checked too.
+ * Only the day's fields are copied: the routes in place of an optimization
+ * (`initialRoutes`) would make /evaluate refuse the request (strict schema).
  */
-export function buildEvaluateRequest(request: OptimizeRequest, routes: readonly StoredRoute[]): EvaluateRequest {
+export function buildEvaluateRequest(request: DayRequest, routes: readonly StoredRoute[]): EvaluateRequest {
+  const { date, settings, vehicles, trips, tariffs } = request;
   return {
-    ...request,
+    date,
+    settings,
+    vehicles,
+    trips,
+    tariffs,
     routes: routes
       .filter((route) => route.stops.length > 0)
       .map((route) => ({

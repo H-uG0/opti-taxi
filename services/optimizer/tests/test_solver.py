@@ -37,7 +37,10 @@ def route_of(plan: PlanResponse, vehicle_id: str) -> Route:
 
 @pytest.fixture(scope="module")
 def fixture_plan() -> PlanResponse:
+    """The fixture solved from scratch: its routes in place (`initialRoutes`, there for the contract
+    tests) would make it a warm start (see test_fixture_warm_start_gives_the_same_checks)."""
     raw = load_fixture("optimize-request.json")
+    raw.pop("initialRoutes", None)
     raw["settings"]["timeLimitSec"] = 1
     return optimize(raw)
 
@@ -67,6 +70,20 @@ def test_fixture_neighbours_share_the_taxi(fixture_plan: PlanResponse) -> None:
     results = {t.trip_id: t for t in fixture_plan.trips}
     assert results["trip_1"].co_passenger_trip_ids == ["trip_3"]
     assert results["trip_1"].revenue < results["trip_1"].direct_km * 1.12 + 13  # sharing discount applied
+
+
+def test_fixture_warm_start_gives_the_same_checks() -> None:
+    """The fixture as sent on a planned date, from its routes in place (taxi_1: trip_1 then trip_2;
+    ambulance: trip_5): the same plan checks hold."""
+    raw = load_fixture("optimize-request.json")
+    assert raw["initialRoutes"]
+    raw["settings"]["timeLimitSec"] = 1
+    plan = optimize(raw)
+    assert plan.validation.valid, plan.validation.violations
+    assert plan.kpis.trips_served == 7
+    results = {t.trip_id: t for t in plan.trips}
+    assert all(results[trip_id].vehicle_id == "veh_amb_1" and not results[trip_id].shared for trip_id in ("trip_5", "trip_6"))
+    assert results["trip_7"].vehicle_id == "veh_vsl_1"
 
 
 @pytest.fixture(scope="module")

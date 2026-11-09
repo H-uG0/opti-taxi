@@ -239,13 +239,18 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   exclusif, détour, temps et attente à bord, horaires, 6 h sans pause : la course fautive sort ;
   pause placée ; courses sorties ou non servies réinsérées), s'en sert comme départ (étape 1.a), et,
   après la vérification finale, compare le planning de la recherche à ce planning réparé (passé
-  par la même vérification) : le meilleur au sens de l'objectif (`_DayModel.plan_score` : courses
-  non affectées, patients dont l'aller et le retour ne sont pas tous deux servis, puis marge
-  recalculée comme la réponse, abattement de partage compris) est renvoyé. Réoptimiser une date
-  où rien n'a changé rend donc un planning au moins aussi bon que celui en place
-  (`test_reoptimizing_a_planned_day_without_change_is_at_least_as_good`), et le web ne pose plus
-  « Remplacer quand même ? » dans ce cas. Réparer le planning en place prend quelques
-  millisecondes à 60 courses.
+  par la même vérification, dans le même budget de 5 + 3 s ; ni l'un ni l'autre quand la
+  recherche a rendu le planning en place lui-même, ni quand OR-Tools l'a refusé comme départ) : le
+  meilleur au sens de l'objectif est renvoyé (`_DayModel.plan_score` : la pénalité de
+  non-affectation par course non affectée et par patient dont l'aller et le retour ne sont pas
+  tous deux servis, moins la marge recalculée comme la réponse, abattement de partage compris).
+  C'est une somme pondérée, comme l'objectif d'OR-Tools, pas un ordre strict : une course servie de
+  plus vaut un patient à moitié servi de moins, et la marge départage. Réoptimiser une date où rien
+  n'a changé rend donc un planning au moins aussi bon pour l'objectif que celui en place
+  (`test_reoptimizing_a_planned_day_without_change_is_at_least_as_good`) ; le web ne pose plus
+  « Remplacer quand même ? » dans ce cas, sauf si le planning rendu sert une course de moins en
+  échange d'un patient à moitié servi de moins, ou perd plus de marge que le seuil en servant
+  davantage. Réparer le planning en place prend quelques millisecondes à 60 courses.
 - **Première solution coupée par sa limite** (grande flotte : à 120 véhicules et 300 voyages, aucune
   course placée en 33 s) : le départ Python, moins coûteux, l'emporte. Avant que ce départ passe en
   premier, la réponse était un planning vide.
@@ -378,7 +383,8 @@ les horaires (minutes entières, calcul exact).
   arrive après ce délai, plus le calcul de la matrice, au plus 5 s de plus si le départ Python
   n'a pas fini dans le budget, 5 s si la première solution non plus, et encore au plus 5 s si
   elle a échoué, plus la vérification finale et les patients à moitié servis quand il y en a
-  (au plus 5 + 3 s ; le web attend `timeLimitSec` + 30 s).
+  (au plus 5 + 3 s en tout, planning en place compris : 23 s au pire ; le web attend
+  `timeLimitSec` + 30 s).
 - **Grande flotte.** Matrices et modèle sont construits en Python en O(n²), n comptant aussi les
   lieux de pause (jusqu'à 24 par véhicule). À l'échelle annoncée par V (120 véhicules ; `fleet_day()`
   des tests, distances à vol d'oiseau, 1,5 cœur), au budget envoyé par le web :

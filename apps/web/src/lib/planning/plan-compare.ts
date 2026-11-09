@@ -276,7 +276,8 @@ export function restorableRoutes(
  * The routes in place of a date as the start of its re-optimization (contract
  * `initialRoutes`): their stop sequences in order, on the vehicles and trips
  * of the request (restorableRoutes). The optimizer repairs them to the rules
- * of the request and never returns a worse plan; null when there are none.
+ * of the request and never returns a plan that scores worse under its
+ * objective (contract/README.md, « Planning en place »); null when there are none.
  */
 export function routesInPlace(
   routes: ReadonlyArray<Pick<RouteFigures, "vehicleId" | "stops">>,
@@ -292,4 +293,40 @@ export function routesInPlace(
     new Set(request.trips.map((t) => t.id)),
   );
   return kept.length > 0 ? kept : null;
+}
+
+/** How a new plan's routes differ from the routes in place (changedRoutes). */
+export type RouteChanges = {
+  /** Routes of the new plan whose stop sequence is not that of the vehicle's route in place (new ones included). */
+  changed: number;
+  /** Routes in place whose vehicle has no route in the new plan. */
+  removed: number;
+  /** Routes of the new plan. */
+  total: number;
+};
+
+/**
+ * Routes a new plan changes, vehicle by vehicle, against the routes in place
+ * as stored (stops by sequence; routes without stops ignored). A
+ * re-optimization of an unchanged day often gives back the plan in place: the
+ * regulator is told so rather than shown it as a new result.
+ */
+export function changedRoutes(
+  inPlace: ReadonlyArray<Pick<RouteFigures, "vehicleId" | "stops">>,
+  next: ReadonlyArray<{ vehicleId: string; stops: ReadonlyArray<{ tripId: string; kind: StopKind }> }>,
+): RouteChanges {
+  const sequence = (stops: ReadonlyArray<{ tripId: string; kind: StopKind }>) =>
+    stops.map((stop) => `${stop.tripId}/${stop.kind}`).join(" ");
+  const before = new Map(
+    inPlace
+      .filter((route) => route.stops.length > 0)
+      .map((route) => [route.vehicleId, sequence([...route.stops].sort((a, b) => a.sequence - b.sequence))]),
+  );
+  const after = next.filter((route) => route.stops.length > 0);
+  const kept = new Set(after.map((route) => route.vehicleId));
+  return {
+    changed: after.filter((route) => before.get(route.vehicleId) !== sequence(route.stops)).length,
+    removed: [...before.keys()].filter((vehicleId) => !kept.has(vehicleId)).length,
+    total: after.length,
+  };
 }

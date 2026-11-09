@@ -174,8 +174,9 @@ const dayRequestSchema = z.strictObject({
 export const optimizeRequestSchema = dayRequestSchema.extend({
   /**
    * The routes in place of the date, a start of the search: the plan returned
-   * is never worse than them once repaired to the rules of the request
-   * (contract/README.md, « Planning en place »). Absent or null: none.
+   * never scores worse than them, once repaired to the rules of the request,
+   * under the optimizer's objective (contract/README.md, « Planning en
+   * place »). Absent or null: none.
    */
   initialRoutes: z.array(routePlanSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} tournées au plus en place`).nullish(),
 });
@@ -290,6 +291,8 @@ export type OptimizerSettings = z.infer<typeof settingsSchema>;
 export type OptimizerVehicle = z.input<typeof vehicleSchema>;
 export type OptimizerTrip = z.input<typeof tripSchema>;
 export type OptimizerTariff = z.input<typeof tariffSchema>;
+/** The day part of a request (no `initialRoutes`, no `routes`): what /optimize and /evaluate share. */
+export type DayRequest = z.input<typeof dayRequestSchema>;
 export type OptimizeRequest = z.input<typeof optimizeRequestSchema>;
 export type EvaluateRequest = z.input<typeof evaluateRequestSchema>;
 export type RoutePlan = z.infer<typeof routePlanSchema>;

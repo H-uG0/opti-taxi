@@ -17,7 +17,9 @@ client = TestClient(app)
 
 
 def _fast_body() -> dict:
+    """The fixture solved from scratch (no routes in place)."""
     body = load_fixture("optimize-request.json")
+    body.pop("initialRoutes", None)
     body["settings"]["timeLimitSec"] = 1
     return body
 

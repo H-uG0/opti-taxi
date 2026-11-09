@@ -56,6 +56,7 @@ import {
   type TripName,
 } from "./move";
 import {
+  changedRoutes,
   comparisonQuestion,
   DEFAULT_REPLACE_THRESHOLDS,
   NOT_KEPT_PREFIX,
@@ -63,6 +64,8 @@ import {
   restorableRoutes,
   routesInPlace,
   type PlanComparison,
+  type RouteChanges,
+  type RouteFigures,
 } from "./plan-compare";
 import { loadPlanVersion, requestHash } from "./version";
 
@@ -298,21 +301,27 @@ async function prepareRequest(
   return { ok: true, input, build };
 }
 
+/** The routes in place of a date: as stored, and as sent to the optimizer (null: none, a start from scratch). */
+type RoutesInPlace = { stored: RouteSequences; sent: RoutePlan[] | null };
+type RouteSequences = Pick<RouteFigures, "vehicleId" | "stops">[];
+
 /**
  * The routes in place of isoDate as the optimizer's start (routesInPlace): a
- * re-optimization never returns a plan worse than them under the same rules,
- * so recomputing a day where nothing changed asks no « Remplacer quand
- * même ? ». Not part of the request's hash (lib/planning/version.ts): the plan
- * version guards the routes in place. A failure to read them is logged and
- * the computation starts from scratch.
+ * re-optimization never returns a plan that scores worse than them under the
+ * same rules and objective, so recomputing a day where nothing changed seldom
+ * asks « Remplacer quand même ? » (still when the plan returned trades a trip
+ * served for a patient no longer half-served, or a better margin for a trip).
+ * Not part of the request's hash (lib/planning/version.ts): the plan version
+ * guards the routes in place. A failure to read them is logged and the
+ * computation starts from scratch.
  */
-async function loadRoutesInPlace(isoDate: string, request: OptimizeRequest): Promise<RoutePlan[] | null> {
+async function loadRoutesInPlace(isoDate: string, request: OptimizeRequest): Promise<RoutesInPlace | null> {
   try {
-    const routes = await db.route.findMany({
+    const stored = await db.route.findMany({
       where: { serviceDate: fromIsoDate(isoDate) },
       select: { vehicleId: true, stops: { select: { tripId: true, kind: true, sequence: true } } },
     });
-    return routesInPlace(routes, request);
+    return { stored, sent: routesInPlace(stored, request) };
   } catch (error) {
     logError("[planning] reading the routes in place before the optimization failed", error, { serviceDate: isoDate });
     return null;
@@ -406,9 +415,24 @@ const AUDIT_ACTION: Record<RunKind, "plan.optimize" | "plan.restore"> = {
   restore: "plan.restore",
 };
 
-/** "Planning optimisé : 62/64 courses servies · 10 tournées · calcul 10 s · …". */
-function successMessage(kind: RunKind, saved: SavePlanResult, plan: PlanResponse, build: BuildResult): string {
-  const parts = [`${saved.served}/${saved.served + saved.unassigned} courses servies`, plural(saved.routes, "tournée")];
+/**
+ * "Planning optimisé : 62/64 courses servies · 10 tournées dont 2 modifiées · calcul 10 s · …";
+ * « Planning en place conservé, aucun meilleur trouvé : … » when the computation gave back the
+ * routes in place (`changes`: against them, null when unknown).
+ */
+function successMessage(
+  kind: RunKind,
+  saved: SavePlanResult,
+  plan: PlanResponse,
+  build: BuildResult,
+  changes: RouteChanges | null = null,
+): string {
+  const kept = kind === "optimize" && changes !== null && changes.changed === 0 && changes.removed === 0 && changes.total > 0;
+  let routes = plural(saved.routes, "tournée");
+  if (changes && !kept && changes.changed === 0) routes += saved.routes > 1 ? " inchangées" : " inchangée";
+  else if (changes && !kept && changes.changed < changes.total) routes += ` dont ${plural(changes.changed, "modifiée")}`;
+  const parts = [`${saved.served}/${saved.served + saved.unassigned} courses servies`, routes];
+  if (changes && changes.removed > 0) parts.push(plural(changes.removed, "tournée retirée", "tournées retirées"));
   if (kind !== "restore") parts.push(`calcul ${seconds(plan.meta.wallTimeMs)}`);
   if (plan.meta.matrixSource === "haversine") parts.push("distances estimées à vol d'oiseau");
   if (plan.meta.trafficSource !== "none") parts.push("trafic pris en compte");
@@ -416,7 +440,8 @@ function successMessage(kind: RunKind, saved: SavePlanResult, plan: PlanResponse
   if (tariffNote) parts.push(tariffNote);
   const violations = plan.validation.violations.length;
   if (violations > 0) parts.push(`${plural(violations, "violation")} à vérifier`);
-  const what = kind === "restore" ? "Planning précédent rétabli" : "Planning optimisé";
+  const what =
+    kind === "restore" ? "Planning précédent rétabli" : kept ? "Planning en place conservé, aucun meilleur trouvé" : "Planning optimisé";
   return `${what} : ${parts.join(" · ")}.`;
 }
 
@@ -444,6 +469,8 @@ async function finishRun(args: {
    * confirmation), or written with the routes (a restoration).
    */
   lock?: { change: LockChange; written: boolean } | null;
+  /** The routes in place when the computation started, as stored: the message says how many it changed. */
+  inPlace?: RouteSequences | null;
 }): Promise<RunOutcome> {
   const { kind, isoDate, user, runId, build, plan, move } = args;
   const lock = args.lock ?? null;
@@ -564,7 +591,8 @@ async function finishRun(args: {
     logError("[planning] saving the plan failed", error, { runId, serviceDate: isoDate });
     return failRun(runId, "Le planning calculé n'a pas pu être enregistré (erreur de base de données). Relancez l'optimisation.", meta);
   }
-  return { ok: true, runId, message: successMessage(kind, saved, plan, build) };
+  const changes = args.inPlace ? changedRoutes(args.inPlace, plan.routes) : null;
+  return { ok: true, runId, message: successMessage(kind, saved, plan, build, changes) };
 }
 
 /**
@@ -593,9 +621,9 @@ export async function runOptimization(isoDate: string, user: Actor, options: Run
 
   const runId = await startRun(isoDate, user, build.request, input.settings.solverTimeLimitSec);
   if (!runId) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
-  const initialRoutes = await loadRoutesInPlace(isoDate, build.request);
+  const inPlace = await loadRoutesInPlace(isoDate, build.request);
   const result: OptimizerResult<PlanResponse> = await optimize(
-    initialRoutes ? { ...build.request, initialRoutes } : build.request,
+    inPlace?.sent ? { ...build.request, initialRoutes: inPlace.sent } : build.request,
   );
   if (!result.ok) return failRun(runId, result.error);
   return finishRun({
@@ -608,6 +636,7 @@ export async function runOptimization(isoDate: string, user: Actor, options: Run
     plan: result.data,
     move,
     lock: moveLock ? { change: moveLock, written: true } : null,
+    inPlace: inPlace?.stored,
   });
 }
 

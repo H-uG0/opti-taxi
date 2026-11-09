@@ -94,9 +94,12 @@ whenever the model is feasible; when it comes from a Python start for one of the
 trips left out get the time-limit reason (a re-run may place them), with
 WARNING_FIRST_SOLUTION_FAILED.
 After the search, the final check (guarded) and the pair repair (restore_pairs) run on the plan,
-and on the plan in place repaired when there is one: the one with the lower plan_score (trips left
-out, half-served patients, margin as the response reports it) is returned, so that re-optimizing
-a date never gives a plan worse than the one in place under the same rules.
+and on the plan in place repaired when there is one, the routing model accepted it and the search
+returned another plan, all within one budget (GUARD_SEC + PAIR_REPAIR_SEC): the one with the lower
+plan_score is returned, so that re-optimizing a date never gives a plan worse than the one in place
+under the same rules and the same objective. plan_score weighs like the objective (the penalty per
+trip left out and per patient not served both ways, minus the margin as the response reports it):
+one more trip served can be traded for one fewer half-served patient, the margin deciding.
 
 Determinism: nodes, candidates and every Python step iterate lists and insertion-ordered dicts
 (never sets), so the model and, under a solution limit, the plan do not depend on PYTHONHASHSEED.
@@ -164,9 +167,10 @@ FIRST_SOLUTION_GRACE_SEC = 5
 leaves most trips unplaced (none of 160 with a 1 s budget). The web client waits the budget + 30 s."""
 FALLBACK_SEARCH_SEC = 5
 """Least time of the local search from the insertion when the first solution failed (see
-_search_without_first_solution). The response then comes at most 2 x FIRST_SOLUTION_GRACE_SEC +
-FALLBACK_SEARCH_SEC after the budget (the insertion and the first solution may each use the
-grace)."""
+_search_without_first_solution). The search then ends at most 2 x FIRST_SOLUTION_GRACE_SEC +
+FALLBACK_SEARCH_SEC after the budget (the Python starts and the first solution may each use the
+grace), and the final passes take GUARD_SEC + PAIR_REPAIR_SEC more at most (solve): 23 s, plus the
+matrix and the response, within the 30 s the web adds to the budget."""
 MIN_SEARCH_SEC = 1.0
 """Least search budget once the model build is taken out of settings.timeLimitSec (see solve())."""
 MAX_BREAK_MOVES = 30
@@ -178,9 +182,11 @@ FIRST_SOLUTION_SEC_PER_NODE3 = 8e-9
 """Measured time law of the OR-Tools first solution: about 8e-9 x nodes^3 s (0.9 s for the 476
 nodes of the busy day, 60 s for the 2 000 nodes of 120 vehicles and 300 trips; README)."""
 GUARD_SEC = 5.0
-"""Most time the final check of the scheduled routes (_guarded) may spend reinserting trips."""
+"""Most time the final check of the scheduled routes (guarded) may spend reinserting trips."""
 PAIR_REPAIR_SEC = 3.0
-"""Most time the final pass that gives a half-served patient their other leg may take (restore_pairs)."""
+"""Most time the final pass that gives a half-served patient their other leg may take (restore_pairs).
+With GUARD_SEC, the budget of every final pass after the search, those on the plan in place
+included (solve)."""
 PAIR_REPAIR_SLACK_MIN = 90
 """A trip is in the way of a missing leg when its ride comes this close to the leg's reference minutes."""
 STATUS_INSERTION = "INSERTION"
@@ -378,8 +384,8 @@ class _DayModel:
         self.initial_routes = initial_routes
         """The plan in place sent by the web (contract `initialRoutes`), a start of the search."""
         self.warm_routes: list[list[int]] | None = None
-        """The plan in place repaired (_from_plan), when there was one: the plan returned is never
-        worse than it (solve, plan_score)."""
+        """The plan in place repaired (_from_plan), when there was one and the routing model accepted
+        it: the plan returned never scores worse than it (solve, plan_score)."""
         self.start_label = ""
         """The start the plan comes from (logs, tests)."""
         self.nodes: list[Node] = []
@@ -773,9 +779,13 @@ class _DayModel:
         if self.initial_routes:
             began = time.monotonic()
             routes = self._from_plan(self.initial_routes, last_deadline)
-            self.warm_routes = [list(route) for route in routes]
             logger.info("solver: plan in place repaired %.2f s (%d trips placed)", time.monotonic() - began, self._placed_in(routes))
-            starts.extend(self._confirmed("plan in place", routes))
+            confirmed = self._confirmed("plan in place", routes)
+            if confirmed:
+                # Only a plan the routing model accepted may be returned instead of the search's
+                # (solve): the final comparison does not look at the rules.
+                self.warm_routes = [list(route) for route in routes]
+            starts.extend(confirmed)
         began = time.monotonic()
         routes = self._built_from_breaks(last_deadline)
         spent = time.monotonic() - began
@@ -1007,8 +1017,10 @@ class _DayModel:
     def plan_score(self, routes: Sequence[Sequence[int]]) -> float:
         """What the objective weighs, in euros, on the times and revenue the response will report
         (plan.plan_margin: sharing discount included): the penalty of every trip left out (twice for
-        a locked one), that of every patient whose outbound and return are not both served, minus
-        the margin. Lower is better."""
+        a locked one), that of every patient whose outbound and return are not both served (both
+        legs left out included, as the pair disjunction counts it), minus the margin. Lower is
+        better. A weighted sum, like the objective, not a strict order: one more trip served weighs
+        as much as one fewer half-served patient, and the margin then decides."""
         margin, served = plan_margin(self.ctx, self.sequences(routes))
         penalty = self.ctx.request.settings.unassigned_penalty
         dropped = sum(
@@ -1157,8 +1169,10 @@ class _DayModel:
         """Final check of the plan on the times the response will report (schedule.py): the trips
         that break the ride limit, the wait at the facility or the work time are taken out of
         `routes` (changed in place) and reinserted where they pass the same check, within
-        `seconds`. Returns the trips left out with their reason. The routing model only bounds
-        these rules through the time cumuls it picks, and the Python steps on close times (_packed)."""
+        `seconds`. Returns the trips left out with their reason. The routing model does not bound
+        the time on board nor the wait on board (since OPT-08), and bounds the work time only as a
+        span of the time cumuls it picks: before this check, only the Python steps hold these rules,
+        on close times (_packed)."""
         removed: dict[str, str] = {}
         for v in range(len(self.fleet)):
             while breaches := self._scheduled_reasons(v, routes[v]):
@@ -1290,9 +1304,10 @@ class _DayModel:
     def _repaired(self, solution: pywrapcp.Assignment, insertion_deadline: float) -> tuple[pywrapcp.Assignment, int]:
         """The solution with a break for every vehicle that needs one, without the trips whose
         patient would ride too long or wait on board at the facility beyond their window (the
-        routing model only bounds the time on board), and with the trips left out reinserted; and
-        the number of trips kept by the repair alone. The solution as it is if the routing model
-        rejects the result (the local search then inserts the missing breaks itself)."""
+        routing model bounds neither: only the Python steps and the final check do), and with the
+        trips left out reinserted; and the number of trips kept by the repair alone. The solution
+        as it is if the routing model rejects the result (the local search then inserts the
+        missing breaks itself)."""
         routes = self._routes(solution)
         missing = [v for v in self.break_nodes if not any(self.node_at(index).role is Role.BREAK for index in routes[v])]
         if missing:
@@ -1675,6 +1690,11 @@ class _DayModel:
         return result
 
 
+def _seconds_left(deadline: float, most: float) -> float:
+    """Time a final pass may take: what is left before `deadline`, at most `most`, never below 0."""
+    return max(0.0, min(most, deadline - time.monotonic()))
+
+
 def _lawful_work_time(schedule: RouteSchedule) -> bool:
     """Route of at most 6 hours, or with a break of at least 20 min inside it (art. L. 3121-16)."""
     if schedule.duration_min <= MAX_WORK_WITHOUT_BREAK_MIN:
@@ -1692,8 +1712,9 @@ def solve(ctx: PlanContext, initial_routes: Sequence[RoutePlan] = ()) -> SolveOu
     """Routes of the day: stop sequences per vehicle and a reason for every unassigned trip.
 
     `initial_routes`, the plan in place (contract `initialRoutes`), is repaired to the rules of
-    the request and used as a start; the plan returned is never worse than that repaired plan
-    (plan_score: trips left out, half-served patients, then margin)."""
+    the request and used as a start; the plan returned never scores worse than that repaired plan
+    under the objective (plan_score: the penalty per trip left out and per patient not served both
+    ways, minus the margin)."""
     fleet, warnings = usable_fleet(ctx)
     unassigned: dict[str, str] = {}
     routable: list[tuple[Trip, list[int]]] = []
@@ -1717,8 +1738,9 @@ def solve(ctx: PlanContext, initial_routes: Sequence[RoutePlan] = ()) -> SolveOu
         len(model.nodes),
         build_sec,
     )
-    # The model build counts in the budget: on a large fleet it takes tens of seconds (13 s for
-    # 120 vehicles and 300 trips, 28 s for 480), which the web's response margin cannot absorb.
+    # The model build counts in the budget: on a large fleet it takes many seconds (9 s for 120
+    # vehicles and 300 trips, 18 s for 480; 13 s and 28 s before November 9), which the web's
+    # response margin cannot absorb.
     time_limit_sec = ctx.request.settings.time_limit_sec
     solution = model.search(max(time_limit_sec - build_sec, MIN_SEARCH_SEC))
     status_name = model.search_status
@@ -1728,19 +1750,27 @@ def solve(ctx: PlanContext, initial_routes: Sequence[RoutePlan] = ()) -> SolveOu
         return SolveOutcome({}, unassigned, "NO_SOLUTION", status_name, None, warnings)
 
     routes = model.routes_of(solution)
-    left_out = model.guarded(routes)
-    model.restore_pairs(routes)
-    if model.warm_routes is not None:
+    # One budget for every final pass, those on the plan in place included (FALLBACK_SEARCH_SEC:
+    # the bound of the response time). When the search returned the plan in place itself, as on a
+    # re-optimization without change, the same passes would give the same plan: not run twice.
+    finish_by = time.monotonic() + GUARD_SEC + PAIR_REPAIR_SEC
+    warm = None if model.warm_routes is None or model.warm_routes == routes else [list(r) for r in model.warm_routes]
+    left_out = model.guarded(routes, GUARD_SEC)
+    model.restore_pairs(routes, _seconds_left(finish_by, PAIR_REPAIR_SEC))
+    if warm is not None:
         # The search started from the plan in place among others, but what it returns can still
         # lose to it once the final checks took trips out, or on the sharing discount (outside
         # the objective): the regulator never gets a re-optimization worse than the plan in place.
-        warm = [list(route) for route in model.warm_routes]
-        warm_left_out = model.guarded(warm)
-        model.restore_pairs(warm)
+        insertion_cut_short = model.insertion_cut_short
+        warm_left_out = model.guarded(warm, _seconds_left(finish_by, GUARD_SEC))
+        model.restore_pairs(warm, _seconds_left(finish_by, PAIR_REPAIR_SEC))
         if model.plan_score(warm) < model.plan_score(routes):
             logger.info("solver: plan in place (repaired) kept: the search found nothing better")
             routes, left_out = warm, warm_left_out
             model.start_label = "plan in place"
+        else:
+            # Time running out on the plan not returned says nothing of the one returned.
+            model.insertion_cut_short = insertion_cut_short
     sequences = model.sequences(routes)
     served = {ref.trip_id for refs in sequences.values() for ref in refs}
     dropped = [trip for trip, _ in routable if trip.id not in served]

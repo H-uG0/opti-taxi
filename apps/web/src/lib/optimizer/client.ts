@@ -31,7 +31,15 @@ export const EVALUATE_TIMEOUT_MS = 30_000;
  */
 export type OptimizerFailureReason = "unreachable" | "timeout" | "error";
 
-export type OptimizerResult<T> = { ok: true; data: T } | { ok: false; error: string; reason?: OptimizerFailureReason };
+export type OptimizerResult<T> =
+  | { ok: true; data: T }
+  | {
+      ok: false;
+      error: string;
+      reason?: OptimizerFailureReason;
+      /** HTTP status of an error the service answered (absent: no answer, or refused before sending). */
+      status?: number;
+    };
 export type OptimizerHealth = z.infer<typeof healthSchema>;
 
 export function optimizerUrl(): string {
@@ -100,7 +108,7 @@ async function call<S extends z.ZodType>(
 
   if (!response.ok) {
     const detail = await readErrorDetail(response);
-    return { ok: false, error: optimizerHttpErrorMessage(response.status, detail), reason: "error" };
+    return { ok: false, error: optimizerHttpErrorMessage(response.status, detail), reason: "error", status: response.status };
   }
 
   let json: unknown;
@@ -124,17 +132,25 @@ function timeoutFor(timeLimitSec: number): number {
   return (timeLimitSec + RESPONSE_MARGIN_SEC) * 1000;
 }
 
-/** POST /optimize: routes of a day. */
+/**
+ * POST /optimize: routes of a day. An optimizer older than the routes in place
+ * (`initialRoutes`, OPT-08: web redeployed first) refuses that field with a
+ * 422: the day is then computed again from scratch, rather than every
+ * re-optimization of a planned date failing until the optimizer is redeployed.
+ */
 export async function optimize(request: OptimizeRequest): Promise<OptimizerResult<PlanResponse>> {
   const body = optimizeRequestSchema.safeParse(request);
   if (!body.success) {
     return { ok: false, error: `Requête d'optimisation invalide : ${formatIssues(body.error)}` };
   }
-  return call("/optimize", planResponseSchema, {
-    method: "POST",
-    body: body.data,
-    timeoutMs: timeoutFor(body.data.settings.timeLimitSec),
-  });
+  const timeoutMs = timeoutFor(body.data.settings.timeLimitSec);
+  const result = await call("/optimize", planResponseSchema, { method: "POST", body: body.data, timeoutMs });
+  if (result.ok || result.status !== 422 || !body.data.initialRoutes || !result.error.includes("initialRoutes")) {
+    return result;
+  }
+  console.warn("[optimizer] routes in place refused (optimizer older than the web): computed from scratch");
+  // JSON.stringify leaves an undefined field out of the body.
+  return call("/optimize", planResponseSchema, { method: "POST", body: { ...body.data, initialRoutes: undefined }, timeoutMs });
 }
 
 /** POST /evaluate: times, km, revenue and violations of a given plan (no solver: short timeout). */

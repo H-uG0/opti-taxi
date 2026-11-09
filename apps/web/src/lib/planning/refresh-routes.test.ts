@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
-import type { OptimizeRequest, PlanResponse, PlanRoute, TripResult } from "@/lib/optimizer/contract";
+import { evaluateRequestSchema, type OptimizeRequest, type PlanResponse, type PlanRoute, type TripResult } from "@/lib/optimizer/contract";
 import type { RouteRow } from "@/lib/optimizer/persist";
 import {
   buildEvaluateRequest,
@@ -208,6 +208,14 @@ describe("buildEvaluateRequest", () => {
         { vehicleId: "veh_2", stops: [{ tripId: "C", kind: "PICKUP" }, { tripId: "C", kind: "DROPOFF" }] },
       ],
     });
+  });
+
+  it("leaves out the routes in place of an optimization request (/evaluate refuses them)", () => {
+    const base = optimizeRequest();
+    const withRoutesInPlace = { ...base, initialRoutes: [{ vehicleId: "veh_1", stops: [{ tripId: "A", kind: "PICKUP" as const }] }] };
+    const request = buildEvaluateRequest(withRoutesInPlace, []);
+    expect(request).not.toHaveProperty("initialRoutes");
+    expect(evaluateRequestSchema.safeParse(request).success).toBe(true);
   });
 });
 

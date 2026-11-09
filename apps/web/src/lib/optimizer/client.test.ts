@@ -93,6 +93,35 @@ describe("optimizer client: OPTIMIZER_TOKEN", () => {
   });
 });
 
+describe("optimizer client: routes in place sent to an older optimizer", () => {
+  const inPlace = [{ vehicleId: "veh_1", stops: [{ tripId: "t", kind: "PICKUP" as const }] }];
+  const refused = () =>
+    json({ detail: [{ type: "extra_forbidden", loc: ["body", "initialRoutes"], msg: "Extra inputs are not permitted" }] }, 422);
+  const sentBody = (call: number) => JSON.parse(String(fetchMock.mock.calls[call]?.[1].body)) as Record<string, unknown>;
+
+  it("computes from scratch when the optimizer refuses initialRoutes (422)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(refused()).mockResolvedValueOnce(json({ detail: "after" }, 500));
+    const result = await optimize({ ...request, initialRoutes: inPlace });
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sentBody(0)).toHaveProperty("initialRoutes");
+    expect(sentBody(1)).not.toHaveProperty("initialRoutes");
+    expect(sentBody(1).date).toBe(request.date);
+    // The answer of the second call is the result.
+    expect(result).toMatchObject({ ok: false, status: 500 });
+  });
+
+  it("does not retry another 422, nor a request without routes in place", async () => {
+    fetchMock.mockResolvedValueOnce(json({ detail: [{ loc: ["body", "trips", 0, "appointmentMin"] }] }, 422));
+    expect(await optimize({ ...request, initialRoutes: inPlace })).toMatchObject({ ok: false, status: 422 });
+    fetchMock.mockResolvedValueOnce(refused());
+    expect(await optimize(request)).toMatchObject({ ok: false, status: 422 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("token helpers", () => {
   it("reads a trimmed token, blank meaning none", () => {
     expect(optimizerToken({ OPTIMIZER_TOKEN: " abc " })).toBe("abc");

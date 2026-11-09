@@ -117,13 +117,20 @@ tournée (même forme que `routes` de `/evaluate`, au plus 300 tournées). L'opt
    ou dure plus de 6 h sans pause) ; il place la pause ; il réinsère enfin là où elles tiennent les
    courses retirées et celles que le planning ne servait pas ;
 2. s'en sert comme **point de départ** de la recherche, avec ses propres départs ;
-3. ne renvoie **jamais un planning moins bon** que ce planning réparé : moins de courses non
-   affectées, puis moins de patients dont l'aller et le retour ne sont pas servis tous les deux
-   (pénalité de non-affectation chacun), puis meilleure marge (abattement de partage compris).
+3. ne renvoie **jamais un planning moins bon au sens de l'objectif** que ce planning réparé (quand
+   OR-Tools l'a accepté comme départ) : chaque course non affectée (deux fois si figée) et chaque
+   patient dont l'aller et le retour ne sont pas servis tous les deux coûtent une fois la pénalité
+   de non-affectation (`unassignedPenalty`), moins la marge (abattement de partage compris). C'est
+   une somme pondérée, pas un ordre strict : une course servie de plus peut s'échanger contre un
+   patient à moitié servi de moins, la marge départageant.
 
 Réoptimiser une date où rien n'a changé rend donc un planning au moins aussi bon que celui en
-place. Le champ n'entre pas dans l'empreinte de la requête qu'enregistre le web pour un calcul en
-attente de confirmation (`requestHash`) : la version du planning en place le couvre déjà.
+place pour l'objectif, le plus souvent ce planning lui-même. Le web peut encore demander
+« Remplacer quand même ? » : quand le planning rendu sert une course de moins en échange d'un
+patient à moitié servi de moins, ou perd plus de marge que le seuil en servant davantage. Le champ
+n'entre pas dans l'empreinte de la requête qu'enregistre le web pour un calcul en attente de
+confirmation (`requestHash`) : la version du planning en place le couvre déjà. Un optimizer
+antérieur à ce champ le refuse (422) : le web relance alors le calcul sans lui (départ de zéro).
 
 ### Budget de calcul envoyé par le web (`settings.timeLimitSec`)
 
@@ -134,8 +141,8 @@ le réglage de /parametres (1 à 120 s), relevé à 1 s par tranche de 8 courses
 journée ne soit pas coupée court.
 
 Ce budget comprend la construction du modèle par l'optimizer (depuis le 7 novembre 2026) : à
-120 véhicules, elle prend 13 s pour 300 courses, 28 s pour 480, que la marge du web (budget + 30 s)
-ne pouvait pas absorber en plus. Le calcul de la matrice reste en dehors.
+120 véhicules, elle prenait 13 s pour 300 courses, 28 s pour 480 (9 s et 18 s depuis le 9 novembre),
+que la marge du web (budget + 30 s) ne pouvait pas absorber en plus. Le calcul de la matrice reste en dehors.
 
 ### Trafic (`settings.traffic`)
 

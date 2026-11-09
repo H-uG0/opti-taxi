@@ -179,14 +179,16 @@ def test_vehicles_without_a_route_in_place_still_take_their_break() -> None:
 # --------------------------------------------------------------------------- never worse than the plan in place
 
 
+def breaks_alone(self: solver._DayModel, starts: Any, deadline: float) -> Any:
+    """A search (_portfolio) that only finds the breaks alone."""
+    return self.routing.ReadAssignmentFromRoutes(self._breaks_only_routes(), True)
+
+
 def test_the_plan_in_place_is_returned_when_the_search_finds_worse(monkeypatch: pytest.MonkeyPatch) -> None:
     """With a search that only finds the breaks alone, the plan in place (repaired) comes back."""
     raw = generated_day(time_limit_sec=2)
     in_place = service.optimize(OptimizeRequest.model_validate(raw))
     assert in_place.validation.valid and in_place.kpis.trips_served >= 50
-
-    def breaks_alone(self: solver._DayModel, starts: Any, deadline: float) -> Any:
-        return self.routing.ReadAssignmentFromRoutes(self._breaks_only_routes(), True)
 
     monkeypatch.setattr(solver._DayModel, "_portfolio", breaks_alone)
     assert service.optimize(OptimizeRequest.model_validate(raw)).kpis.trips_served == 0
@@ -200,9 +202,70 @@ def test_the_plan_in_place_is_returned_when_the_search_finds_worse(monkeypatch: 
         assert [stop for stop in kept[vehicle_id] if stop in stops] == stops
 
 
+def test_a_plan_in_place_the_routing_model_rejects_is_never_returned(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The final comparison does not look at the rules: a plan in place the routing model refused
+    as a start is not a candidate either, even against a search that only finds the breaks alone."""
+    raw = generated_day(time_limit_sec=2)
+    in_place = service.optimize(OptimizeRequest.model_validate(raw))
+    confirmed = solver._DayModel._confirmed
+
+    def refused_in_place(self: solver._DayModel, label: str, routes: list[list[int]]) -> list[solver._Start]:
+        return [] if label == "plan in place" else confirmed(self, label, routes)
+
+    monkeypatch.setattr(solver._DayModel, "_confirmed", refused_in_place)
+    monkeypatch.setattr(solver._DayModel, "_portfolio", breaks_alone)
+    again = service.optimize(OptimizeRequest.model_validate({**raw, "initialRoutes": routes_of(in_place)}))
+    assert again.kpis.trips_served == 0
+    model = day_model({**raw, "initialRoutes": routes_of(in_place)})
+    model._python_starts(time.monotonic() + 60, time.monotonic() + 60)
+    assert model.warm_routes is None
+
+
+def test_the_final_passes_run_once_when_the_search_returns_the_plan_in_place(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Re-optimizing without change usually ends on the plan in place itself: its final check and
+    pair repair are not run a second time (they would give the same plan, and cost up to 8 s)."""
+    raw = generated_day(time_limit_sec=2)
+    in_place = service.optimize(OptimizeRequest.model_validate(raw))
+
+    def the_plan_in_place(self: solver._DayModel, starts: Any, deadline: float) -> Any:
+        return next(start.solution for start in starts if start.label == "plan in place")
+
+    # (pass, when it started, when its own time limit ends)
+    passes: list[tuple[str, float, float]] = []
+    guarded, restore_pairs = solver._DayModel.guarded, solver._DayModel.restore_pairs
+
+    def timed_guard(self: solver._DayModel, routes: list[list[int]], seconds: float = solver.GUARD_SEC) -> dict[str, str]:
+        now = time.monotonic()
+        passes.append(("guard", now, now + seconds))
+        return guarded(self, routes, seconds)
+
+    def timed_pairs(self: solver._DayModel, routes: list[list[int]], seconds: float = solver.PAIR_REPAIR_SEC) -> int:
+        now = time.monotonic()
+        passes.append(("pairs", now, now + seconds))
+        return restore_pairs(self, routes, seconds)
+
+    monkeypatch.setattr(solver._DayModel, "_portfolio", the_plan_in_place)
+    monkeypatch.setattr(solver._DayModel, "guarded", timed_guard)
+    monkeypatch.setattr(solver._DayModel, "restore_pairs", timed_pairs)
+    again = service.optimize(OptimizeRequest.model_validate({**raw, "initialRoutes": routes_of(in_place)}))
+    assert again.kpis.trips_served >= in_place.kpis.trips_served
+    assert [name for name, _, _ in passes] == ["guard", "pairs"]
+    # Against another plan, both get their passes, all within one budget.
+    passes.clear()
+    monkeypatch.setattr(solver._DayModel, "_portfolio", breaks_alone)
+    service.optimize(OptimizeRequest.model_validate({**raw, "initialRoutes": routes_of(in_place)}))
+    assert [name for name, _, _ in passes] == ["guard", "pairs", "guard", "pairs"]
+    first = passes[0][1]
+    assert all(ends <= first + solver.GUARD_SEC + solver.PAIR_REPAIR_SEC + 0.1 for _, _, ends in passes)
+    assert solver._seconds_left(time.monotonic() - 1, 3.0) == 0.0
+    assert solver._seconds_left(time.monotonic() + 10, 3.0) == 3.0
+
+
 def test_reoptimizing_a_planned_day_without_change_is_at_least_as_good() -> None:
     """The acceptance rule of OPT-08: re-optimizing a date that has routes, nothing changed, never
-    serves fewer trips and never scores worse (trips left out, half-served patients, margin)."""
+    scores worse under the objective (unassignedPenalty per trip left out and per patient not served
+    both ways, minus the margin). That is a weighted sum, not a strict order: one more trip served
+    may be traded for one fewer half-served patient. This day serves as many trips again."""
     raw = generated_day(time_limit_sec=2)
     first = service.optimize(OptimizeRequest.model_validate(raw))
     again = service.optimize(OptimizeRequest.model_validate({**raw, "initialRoutes": routes_of(first)}))
