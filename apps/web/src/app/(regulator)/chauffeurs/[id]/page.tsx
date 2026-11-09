@@ -281,8 +281,9 @@ export default async function EditDriverPage({
             <CardBody className="text-sm">
               {driver.active && plannedSeats > 1 ? (
                 <Callout tone="warning" className="mb-3">
-                  Dans l&apos;équipage par défaut de {plannedSeats} véhicules actifs : un seul pourra être planifié
-                  chaque jour. Affectez une autre personne aux autres véhicules.
+                  Dans l&apos;équipage par défaut de {plannedSeats} véhicules actifs : une personne ne roule que sur un
+                  véhicule par jour, les autres reçoivent un remplaçant s&apos;il y en a un de libre (page Équipages), sinon
+                  restent au dépôt. Affectez une autre personne aux autres véhicules.
                 </Callout>
               ) : null}
               {assignments.length === 0 ? (

@@ -2,6 +2,7 @@ import type { SharingScope, SharingStatus, TripDirection } from "@prisma/client"
 import { describe, expect, it } from "vitest";
 import {
   allowedVehicleTypesFor,
+  crewHoldsRequired,
   DEFAULT_CAPACITY,
   formatAddress,
   initialSharingStatus,
@@ -109,8 +110,23 @@ describe("vehicle constants", () => {
     expect(REQUIRED_QUALIFICATIONS.TAXI.crewMate).toBeNull();
     expect(REQUIRED_QUALIFICATIONS.VSL.driver).toEqual(expect.arrayContaining(["AUXILIARY", "DEA"]));
     expect(REQUIRED_QUALIFICATIONS.VSL.crewMate).toBeNull();
-    expect(REQUIRED_QUALIFICATIONS.AMBULANCE.driver).toEqual(["DEA"]);
+    // R. 6312-10: an auxiliary may drive the ambulance; the DEA rule is on the whole crew.
+    expect(REQUIRED_QUALIFICATIONS.AMBULANCE.driver).toEqual(expect.arrayContaining(["AUXILIARY", "DEA"]));
     expect(REQUIRED_QUALIFICATIONS.AMBULANCE.crewMate).toEqual(expect.arrayContaining(["AUXILIARY", "DEA"]));
+  });
+});
+
+describe("crewHoldsRequired", () => {
+  it("needs a DEA in an ambulance crew, at the wheel or beside the patient", () => {
+    expect(crewHoldsRequired("AMBULANCE", [["AUXILIARY"], ["DEA"]])).toBe(true);
+    expect(crewHoldsRequired("AMBULANCE", [["DEA", "AUXILIARY"], ["AUXILIARY"]])).toBe(true);
+    expect(crewHoldsRequired("AMBULANCE", [["DEA"], ["DEA"]])).toBe(true);
+    expect(crewHoldsRequired("AMBULANCE", [["AUXILIARY"], ["AUXILIARY", "TAXI_CARD"]])).toBe(false);
+  });
+
+  it("asks nothing more of a taxi or a VSL", () => {
+    expect(crewHoldsRequired("TAXI", [["TAXI_CARD"]])).toBe(true);
+    expect(crewHoldsRequired("VSL", [["AUXILIARY"]])).toBe(true);
   });
 });
 

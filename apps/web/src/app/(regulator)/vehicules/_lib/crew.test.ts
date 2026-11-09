@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { VehicleType } from "@prisma/client";
-import { otherSeats, plannedSeatCount, seatsByPerson, sharedCrewWarning, type CrewSeat } from "./crew";
+import type { Qualification, VehicleType } from "@prisma/client";
+import {
+  crewQualificationErrors,
+  otherSeats,
+  plannedSeatCount,
+  qualificationScope,
+  seatsByPerson,
+  sharedCrewWarning,
+  type CrewSeat,
+} from "./crew";
 
 function vehicle(
   id: string,
@@ -51,8 +59,9 @@ describe("sharedCrewWarning", () => {
   });
 
   it("names the other vehicle and the role held there", () => {
+    // The other vehicle is not left out: it gets a replacement (crews of the day).
     expect(sharedCrewWarning("Anna Roux", [{ vehicleId: "v2", label: "VSL 2", role: "driver" }])).toBe(
-      "Anna Roux est déjà chauffeur par défaut de « VSL 2 » : un seul des deux véhicules pourra être planifié chaque jour.",
+      "Anna Roux est déjà chauffeur par défaut de « VSL 2 » : une personne ne roule que sur un véhicule par jour, l'autre recevra un remplaçant s'il y en a un de libre (page Équipages).",
     );
   });
 
@@ -62,7 +71,7 @@ describe("sharedCrewWarning", () => {
       { vehicleId: "a1", label: "Ambulance 1", role: "crewMate" },
     ];
     expect(sharedCrewWarning("Anna Roux", others)).toBe(
-      "Anna Roux est déjà chauffeur par défaut de « VSL 2 » et équipier de « Ambulance 1 » : un seul des 3 véhicules pourra être planifié chaque jour.",
+      "Anna Roux est déjà chauffeur par défaut de « VSL 2 » et équipier de « Ambulance 1 » : une personne ne roule que sur un véhicule par jour, les autres recevront un remplaçant s'il y en a un de libre (page Équipages).",
     );
   });
 });
@@ -80,5 +89,44 @@ describe("plannedSeatCount", () => {
       ),
     ).toBe(2);
     expect(plannedSeatCount([], [])).toBe(0);
+  });
+});
+
+describe("crewQualificationErrors", () => {
+  const member = (firstName: string, qualifications: Qualification[]) => ({
+    firstName,
+    lastName: "Roux",
+    qualifications,
+  });
+
+  it("accepts an auxiliary at the wheel of an ambulance with a DEA crew mate (R. 6312-10)", () => {
+    expect(crewQualificationErrors("AMBULANCE", member("Inès", ["AUXILIARY"]), member("Laurent", ["DEA"]))).toEqual({});
+    expect(crewQualificationErrors("AMBULANCE", member("Laurent", ["DEA"]), member("Inès", ["AUXILIARY"]))).toEqual({});
+    expect(crewQualificationErrors("AMBULANCE", member("Inès", ["AUXILIARY"]), null)).toEqual({});
+  });
+
+  it("refuses an ambulance crew without any DEA, on the crew mate field", () => {
+    expect(crewQualificationErrors("AMBULANCE", member("Inès", ["AUXILIARY"]), member("Paul", ["AUXILIARY", "TAXI_CARD"]))).toEqual({
+      defaultCrewMateId:
+        "Il faut au moins un Ambulancier DE dans l'équipage d'ambulance, au volant ou auprès du patient : ni Inès Roux ni Paul Roux ne l'est.",
+    });
+  });
+
+  it("still checks each seat first", () => {
+    expect(crewQualificationErrors("AMBULANCE", member("Julien", ["TAXI_CARD"]), member("Laurent", ["DEA"]))).toEqual({
+      defaultDriverId:
+        "Julien Roux n'a pas la qualification requise pour conduire une ambulance (Auxiliaire ambulancier ou Ambulancier DE).",
+    });
+    expect(crewQualificationErrors("VSL", member("Julien", ["TAXI_CARD"]), null).defaultDriverId).toMatch(/conduire un VSL/);
+  });
+});
+
+describe("qualificationScope", () => {
+  it("says what each qualification allows, the DEA rule included", () => {
+    expect(qualificationScope("TAXI_CARD")).toBe("Conduite : taxi");
+    expect(qualificationScope("AUXILIARY")).toBe(
+      "Conduite : VSL, ambulance · Équipier : ambulance · En ambulance, avec un Ambulancier DE",
+    );
+    expect(qualificationScope("DEA")).toBe("Conduite : VSL, ambulance · Équipier : ambulance · Au moins un dans chaque équipage d'ambulance");
   });
 });

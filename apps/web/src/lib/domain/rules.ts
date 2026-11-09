@@ -5,6 +5,7 @@
 import type {
   Payer,
   PrescribedMode,
+  Qualification,
   SharingScope,
   SharingStatus,
   TripDirection,
@@ -53,12 +54,46 @@ export const DEFAULT_CAPACITY: Record<VehicleType, number> = {
   AMBULANCE: 1,
 };
 
-/** Qualifications needed to drive (and crew) each vehicle type. */
+/**
+ * Qualifications accepted on each seat of a vehicle type ("any of"), and the
+ * one the whole crew must hold at least once (CREW_REQUIRED_ONE_OF).
+ *
+ * Ambulance (vehicles of categories A and C): article R. 6312-10 of the code
+ * de la santé publique asks for a crew of two people (up to three for a
+ * bariatric transport), at least one of whom holds the diplôme d'État
+ * d'ambulancier (1° of art. R. 6312-7), without saying who drives. The arrêté
+ * of 11 April 2022 (training of the ambulancier and of the auxiliaire
+ * ambulancier, JORF of 17 April 2022), art. 2: « L'auxiliaire ambulancier est
+ * habilité à assurer la conduite du véhicule sanitaire léger et de
+ * l'ambulance. Il peut également être l'équipier de l'ambulancier dans
+ * l'ambulance. » No text found requires the DEA to sit beside the patient
+ * (checked on Légifrance, 9 November 2026): two AUXILIARY or DEA, at least one
+ * DEA, whoever drives. The usual crew of V (auxiliary at the wheel, DEA beside
+ * the patient) is the one the automatic proposals prefer (lib/staff/day-crews.ts).
+ */
 export const REQUIRED_QUALIFICATIONS = {
   TAXI: { driver: ["TAXI_CARD"], crewMate: null },
   VSL: { driver: ["AUXILIARY", "DEA"], crewMate: null },
-  AMBULANCE: { driver: ["DEA"], crewMate: ["AUXILIARY", "DEA"] },
-} as const satisfies Record<VehicleType, { driver: readonly string[]; crewMate: readonly string[] | null }>;
+  AMBULANCE: { driver: ["AUXILIARY", "DEA"], crewMate: ["AUXILIARY", "DEA"] },
+} as const satisfies Record<VehicleType, { driver: readonly Qualification[]; crewMate: readonly Qualification[] | null }>;
+
+/** Qualification one member of the crew at least must hold, whatever their seat (ambulance: a DEA). */
+export const CREW_REQUIRED_ONE_OF = {
+  TAXI: null,
+  VSL: null,
+  AMBULANCE: ["DEA"],
+} as const satisfies Record<VehicleType, readonly Qualification[] | null>;
+
+/**
+ * Whether a complete crew (the qualifications of each person on board) holds
+ * what its vehicle type needs once: true for a taxi or a VSL, true for an
+ * ambulance with a DEA at the wheel or beside the patient.
+ */
+export function crewHoldsRequired(type: VehicleType, members: readonly (readonly Qualification[])[]): boolean {
+  const required: readonly Qualification[] | null = CREW_REQUIRED_ONE_OF[type];
+  if (!required) return true;
+  return members.some((qualifications) => qualifications.some((q) => required.includes(q)));
+}
 
 export function formatAddress(place: { address: string; postalCode: string; city: string }): string {
   return `${place.address}, ${place.postalCode} ${place.city}`;

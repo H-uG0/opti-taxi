@@ -69,8 +69,14 @@ export async function updateDriver(driverId: string, _state: FormState, formData
     select: {
       id: true,
       depotId: true,
-      defaultForVehicles: { where: { active: true }, select: { label: true, type: true } },
-      crewMateForVehicles: { where: { active: true }, select: { label: true, type: true } },
+      defaultForVehicles: {
+        where: { active: true },
+        select: { label: true, type: true, defaultCrewMate: { select: { qualifications: true } } },
+      },
+      crewMateForVehicles: {
+        where: { active: true },
+        select: { label: true, type: true, defaultDriver: { select: { qualifications: true } } },
+      },
     },
   });
   if (!current) return messageState(DRIVER_GONE);
@@ -82,10 +88,17 @@ export async function updateDriver(driverId: string, _state: FormState, formData
   const depotError = await depotChoiceError(parsed.data.depotId, current.depotId);
   if (depotError) return errorState({ depotId: depotError }, values);
 
+  // The other member of an ambulance's default crew: the pair must keep its DEA.
   const conflicts = assignmentConflicts(
     parsed.data.qualifications,
-    current.defaultForVehicles,
-    current.crewMateForVehicles.filter((v) => v.type === "AMBULANCE"),
+    current.defaultForVehicles.map((v) => ({
+      label: v.label,
+      type: v.type,
+      partner: v.type === "AMBULANCE" ? (v.defaultCrewMate?.qualifications ?? null) : null,
+    })),
+    current.crewMateForVehicles
+      .filter((v) => v.type === "AMBULANCE")
+      .map((v) => ({ label: v.label, type: v.type, partner: v.defaultDriver?.qualifications ?? null })),
   );
   if (conflicts.length > 0) {
     return errorState(

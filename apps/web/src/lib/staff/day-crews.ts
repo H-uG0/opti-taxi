@@ -27,9 +27,9 @@
  * reason shows on the person's own sheet alone (absenceText).
  */
 import type { AbsenceKind, Qualification, VehicleType } from "@prisma/client";
-import { REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
+import { CREW_REQUIRED_ONE_OF, crewHoldsRequired, REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
 import { unavailabilityOn, unavailabilityText, type DatedVehicleUnavailability } from "@/lib/fleet/availability";
-import { ABSENCE_KIND_LABELS } from "@/lib/labels";
+import { ABSENCE_KIND_LABELS, QUALIFICATION_LABELS } from "@/lib/labels";
 import { formatShortDate, isoWeekday, WEEKDAY_LABELS } from "@/lib/time";
 
 export type StaffPerson = {
@@ -120,6 +120,26 @@ export function seatRequirement(type: VehicleType, seat: Seat): readonly Qualifi
 export function isQualified(person: Pick<StaffPerson, "qualifications">, type: VehicleType, seat: Seat): boolean {
   const required = seatRequirement(type, seat);
   return required !== null && person.qualifications.some((q) => required.includes(q));
+}
+
+/**
+ * Can `person` complete a crew whose other member is `other` (null: the other
+ * seat is empty)? An ambulance needs a DEA at the wheel or beside the patient
+ * (rules.ts, R. 6312-10): with an auxiliary already on board, the second
+ * person must be a DEA.
+ */
+export function completesCrew(
+  person: Pick<StaffPerson, "qualifications">,
+  other: Pick<StaffPerson, "qualifications"> | null | undefined,
+  type: VehicleType,
+): boolean {
+  return !other || crewHoldsRequired(type, [person.qualifications, other.qualifications]);
+}
+
+/** "Ambulancier DE" for an ambulance: what one member of its crew must hold. */
+function oneOfLabel(type: VehicleType): string | null {
+  const oneOf: readonly Qualification[] | null = CREW_REQUIRED_ONE_OF[type];
+  return oneOf ? oneOf.map((q) => QUALIFICATION_LABELS[q]).join(" ou ") : null;
 }
 
 /** The absence covering the date, if any (the earliest one when several overlap). */
@@ -215,6 +235,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
     if (holder) return `déjà sur ${holder}`;
     if (!isQualified(person, vehicle.type, seat)) return "qualification manquante";
     if (other && areIncompatible(other, person.id, incompatibilities)) return "incompatible avec le chauffeur";
+    if (other && !completesCrew(person, people.get(other), vehicle.type)) return `aucun ${oneOfLabel(vehicle.type)} dans l'équipage`;
     return null;
   };
 
@@ -256,7 +277,8 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
           proposable(p) &&
           !taken.has(p.id) &&
           isQualified(p, vehicle.type, seat) &&
-          !(other && areIncompatible(other, p.id, incompatibilities)),
+          !(other && areIncompatible(other, p.id, incompatibilities)) &&
+          completesCrew(p, other ? people.get(other) : null, vehicle.type),
       );
       const pick = candidates.find((p) => p.depotId === vehicle.depotId) ?? candidates[0];
       if (!pick) continue;
@@ -325,6 +347,15 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
         message: `${a ? staffName(a) : "Le chauffeur"} et ${b ? staffName(b) : "l'équipier"} ne doivent pas travailler ensemble`,
       });
     }
+    const driver = draft.driverId ? people.get(draft.driverId) : undefined;
+    const mate = draft.crewMateId ? people.get(draft.crewMateId) : undefined;
+    if (saved && driver && mate && draft.driverId !== draft.crewMateId && !completesCrew(driver, mate, vehicle.type)) {
+      issues.push({
+        level: "error",
+        seat: "crewMate",
+        message: `Il faut au moins un ${oneOfLabel(vehicle.type)} dans l'équipage, au volant ou auprès du patient`,
+      });
+    }
     if (draft.driverId === null) {
       issues.push({
         level: "error",
@@ -332,7 +363,9 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
         message: saved ? "Pas de chauffeur ce jour (choix du régulateur)" : "Aucun chauffeur disponible",
       });
     } else if (vehicle.type === "AMBULANCE" && draft.crewMateId === null) {
-      issues.push({ level: "error", seat: "crewMate", message: saved ? "Ambulance sans équipier ce jour" : "Aucun équipier disponible" });
+      // With an auxiliary at the wheel, only a DEA completes the crew.
+      const needed = driver && !crewHoldsRequired(vehicle.type, [driver.qualifications]) ? ` ${oneOfLabel(vehicle.type)}` : "";
+      issues.push({ level: "error", seat: "crewMate", message: saved ? "Ambulance sans équipier ce jour" : `Aucun équipier${needed} disponible` });
     }
     const blocked = issues.find((i) => i.level === "error")?.message ?? null;
     crews.push({

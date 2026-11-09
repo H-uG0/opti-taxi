@@ -112,11 +112,11 @@ export default async function DriversPage({
             {drivers.map((driver) => {
               const name = `${driver.lastName.toUpperCase()} ${driver.firstName}`;
               const breakText = describeBreak(driver);
-              // The optimisation gives a person one vehicle a day.
+              // A person works on one vehicle a day: the others get a replacement (crews of the day).
               const plannedSeats = plannedSeatCount(driver.defaultForVehicles, driver.crewMateForVehicles);
               const multiSeatText =
                 driver.active && plannedSeats > 1
-                  ? `Dans l'équipage par défaut de ${plannedSeats} véhicules actifs : un seul pourra être planifié chaque jour.`
+                  ? `Dans l'équipage par défaut de ${plannedSeats} véhicules actifs : ne roule que sur un par jour, les autres reçoivent un remplaçant s'il y en a un de libre (page Équipages).`
                   : null;
               return (
                 <tr key={driver.id} className={driver.active ? "hover:bg-slate-50" : "bg-slate-50/60 text-slate-500"}>

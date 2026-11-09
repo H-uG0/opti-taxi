@@ -333,7 +333,8 @@ type VehicleDef = {
 export const VEHICLES: readonly VehicleDef[] = [
   { label: "Taxi 1 (Marseille)", registration: "GH-218-PZ", type: "TAXI", depot: "marseille", costPerKm: 0.31, driver: "julien", crewMate: null },
   { label: "VSL 1 (Marseille)", registration: "FK-547-TR", type: "VSL", depot: "marseille", costPerKm: 0.34, driver: "elodie", crewMate: null },
-  { label: "Ambulance 1 (Marseille)", registration: "GA-903-MB", type: "AMBULANCE", depot: "marseille", costPerKm: 0.44, driver: "laurent", crewMate: "ines" },
+  // The usual crew of V: the auxiliary drives, the DEA rides beside the patient (R. 6312-10 allows either way).
+  { label: "Ambulance 1 (Marseille)", registration: "GA-903-MB", type: "AMBULANCE", depot: "marseille", costPerKm: 0.44, driver: "ines", crewMate: "laurent" },
   { label: "Taxi 2 (Manosque)", registration: "FV-162-LD", type: "TAXI", depot: "manosque", costPerKm: 0.3, driver: "sophie", crewMate: null, energy: "ELECTRIC" },
   { label: "VSL 2 (Manosque)", registration: "GC-775-HN", type: "VSL", depot: "manosque", costPerKm: 0.33, driver: "mathieu", crewMate: null },
   { label: "Taxi 3 (Sisteron)", registration: "FS-384-KE", type: "TAXI", depot: "sisteron", costPerKm: 0.29, driver: "thomas", crewMate: null },

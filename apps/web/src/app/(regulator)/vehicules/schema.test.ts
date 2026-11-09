@@ -122,7 +122,12 @@ describe("crew qualifications", () => {
     expect(crewQualificationErrors("TAXI", auxiliary, null).defaultDriverId).toBe(
       "Léa Martin n'a pas la qualification requise pour conduire un taxi (Carte professionnelle taxi).",
     );
-    expect(crewQualificationErrors("AMBULANCE", auxiliary, dea).defaultDriverId).toMatch(/une ambulance \(Ambulancier DE\)/);
+    // R. 6312-10: an auxiliary may drive the ambulance when the crew mate is a DEA.
+    expect(crewQualificationErrors("AMBULANCE", auxiliary, dea)).toEqual({});
+    expect(crewQualificationErrors("AMBULANCE", taxiDriver, dea).defaultDriverId).toMatch(
+      /une ambulance \(Auxiliaire ambulancier ou Ambulancier DE\)/,
+    );
+    expect(crewQualificationErrors("AMBULANCE", auxiliary, auxiliary).defaultCrewMateId).toMatch(/au moins un Ambulancier DE/);
     expect(crewQualificationErrors("AMBULANCE", dea, taxiDriver).defaultCrewMateId).toBe(
       "Marc Durand n'a pas la qualification requise pour être équipier d'ambulance (Auxiliaire ambulancier ou Ambulancier DE).",
     );
@@ -130,7 +135,7 @@ describe("crew qualifications", () => {
 
   it("describes requirements and scopes in French", () => {
     expect(qualificationRequirement(["AUXILIARY", "DEA"])).toBe("Auxiliaire ambulancier ou Ambulancier DE");
-    expect(qualificationScope("DEA")).toBe("Conduite : VSL, ambulance · Équipier : ambulance");
+    expect(qualificationScope("DEA")).toBe("Conduite : VSL, ambulance · Équipier : ambulance · Au moins un dans chaque équipage d'ambulance");
     expect(qualificationScope("TAXI_CARD")).toBe("Conduite : taxi");
   });
 });

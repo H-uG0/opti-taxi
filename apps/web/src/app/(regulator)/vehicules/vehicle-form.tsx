@@ -7,7 +7,10 @@ import { DEFAULT_CAPACITY } from "@/lib/domain/rules";
 import { ENERGY_LABELS, VEHICLE_TYPE_LABELS } from "@/lib/labels";
 import { ENERGY_TYPES } from "./fleet-schema";
 import {
+  crewCompositionError,
   crewMateRequirement,
+  crewOneOfRequirement,
+  crewRuleSuffix,
   driverRequirement,
   hasRequiredQualification,
   qualificationRequirement,
@@ -98,7 +101,13 @@ function VehicleFields({
 
   // Most important message first: a missing qualification blocks the save,
   // a person shared with another vehicle only warns.
-  const driverRequired = `Requis pour conduire ${VEHICLE_TYPE_WITH_ARTICLE[type]} : ${qualificationRequirement(driverRule)}.`;
+  const driverRequired = `Requis pour conduire ${VEHICLE_TYPE_WITH_ARTICLE[type]} : ${qualificationRequirement(driverRule)}${crewRuleSuffix(type)}.`;
+  const oneOf = crewOneOfRequirement(type);
+  /** The person chosen on one seat lacks the DEA the pair needs: the other seat must bring it. */
+  const lacksOneOf = (person: DriverOption | undefined) =>
+    oneOf !== null && person !== undefined && !hasRequiredQualification(person.qualifications, oneOf);
+  const composition =
+    isAmbulance && crewMateId !== driverId ? crewCompositionError(type, selectedDriver ?? null, selectedCrewMate ?? null) : null;
   const driverShared = selectedDriver ? sharedCrewWarning(selectedDriver.name, selectedDriver.seats) : null;
   let driverHint: ReactNode = driverRequired;
   if (selectedDriver && !hasRequiredQualification(selectedDriver.qualifications, driverRule)) {
@@ -126,12 +135,14 @@ function VehicleFields({
           l&apos;enregistrement sera refusé.
         </InlineWarning>
       );
+    } else if (composition) {
+      crewMateHint = <InlineWarning>{composition} L&apos;enregistrement sera refusé.</InlineWarning>;
     } else if (crewMateShared) {
       crewMateHint = <InlineWarning>{crewMateShared}</InlineWarning>;
     } else if (crewMateId === "") {
-      crewMateHint = `Une ambulance part à deux : sans équipier par défaut, elle n'est planifiée que si un équipier qualifié reste libre ce jour-là (page Équipages). Requis : ${qualificationRequirement(crewRule)}.`;
+      crewMateHint = `Une ambulance part à deux : sans équipier par défaut, elle n'est planifiée que si un équipier qualifié reste libre ce jour-là (page Équipages). Requis : ${qualificationRequirement(crewRule)}${lacksOneOf(selectedDriver) ? `, et ${qualificationRequirement(oneOf ?? [])} puisque le chauffeur ne l'est pas` : ""}.`;
     } else {
-      crewMateHint = `Une ambulance part à deux. Requis : ${qualificationRequirement(crewRule)}.`;
+      crewMateHint = `Une ambulance part à deux, avec au moins un ${qualificationRequirement(oneOf ?? [])} au volant ou auprès du patient. Requis : ${qualificationRequirement(crewRule)}.`;
     }
   }
 

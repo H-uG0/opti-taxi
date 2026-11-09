@@ -1,10 +1,12 @@
 /**
- * Crew qualification rules (REQUIRED_QUALIFICATIONS in rules.ts): who may drive
- * or crew each vehicle type. Each requirement list is "any of".
- * Pure module, shared by the vehicle and driver forms.
+ * Crew qualification rules (REQUIRED_QUALIFICATIONS and CREW_REQUIRED_ONE_OF
+ * in rules.ts): who may drive or crew each vehicle type, and what the whole
+ * crew must hold (an ambulance: a DEA, at the wheel or beside the patient).
+ * Each requirement list is "any of". Pure module, shared by the vehicle and
+ * driver forms.
  */
 import type { Qualification, VehicleType } from "@prisma/client";
-import { REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
+import { CREW_REQUIRED_ONE_OF, crewHoldsRequired, REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
 import { QUALIFICATION_LABELS } from "@/lib/labels";
 
 export const VEHICLE_TYPE_WITH_ARTICLE: Record<VehicleType, string> = {
@@ -44,6 +46,39 @@ export function crewMateRequirement(type: VehicleType): readonly Qualification[]
   return REQUIRED_QUALIFICATIONS[type].crewMate;
 }
 
+/** What one member of the crew must hold whatever their seat, or null (ambulance: ["DEA"]). */
+export function crewOneOfRequirement(type: VehicleType): readonly Qualification[] | null {
+  return CREW_REQUIRED_ONE_OF[type];
+}
+
+/** " avec au moins un Ambulancier DE dans l'équipage" for an ambulance, "" otherwise. */
+export function crewRuleSuffix(type: VehicleType): string {
+  const oneOf = crewOneOfRequirement(type);
+  return oneOf ? ` avec au moins un ${qualificationRequirement(oneOf)} dans l'équipage` : "";
+}
+
+/**
+ * Message when a complete crew lacks what its vehicle type needs once (an
+ * ambulance without any DEA), or null. Both seats must be filled: with one
+ * empty seat, the person put there later must make up for it.
+ */
+export function crewCompositionError(
+  type: VehicleType,
+  driver: NamedMember | null,
+  crewMate: NamedMember | null,
+): string | null {
+  const oneOf = crewOneOfRequirement(type);
+  if (!oneOf || !driver || !crewMate) return null;
+  if (crewHoldsRequired(type, [driver.qualifications, crewMate.qualifications])) return null;
+  return `Il faut au moins un ${qualificationRequirement(oneOf)} dans l'équipage d'${VEHICLE_TYPE_WITH_ARTICLE[type].replace(/^une? /, "")}, au volant ou auprès du patient : ni ${driver.name} ni ${crewMate.name} ne l'est.`;
+}
+
+/** A crew member as the forms show it. */
+export type NamedMember = { name: string; qualifications: readonly Qualification[] };
+
+const named = (member: CrewMember | null): NamedMember | null =>
+  member ? { name: crewMemberName(member), qualifications: member.qualifications } : null;
+
 /**
  * Field errors when the default driver / crew mate of a vehicle lacks the
  * qualification its type requires. Empty object when the crew is valid.
@@ -62,6 +97,9 @@ export function crewQualificationErrors(
   if (crewMate && crewRule && !hasRequiredQualification(crewMate.qualifications, crewRule)) {
     errors.defaultCrewMateId = `${crewMemberName(crewMate)} n'a pas la qualification requise pour être équipier d'${VEHICLE_TYPE_WITH_ARTICLE[type].replace(/^une? /, "")} (${qualificationRequirement(crewRule)}).`;
   }
+  // Each seat is fine: the pair still needs its DEA (R. 6312-10).
+  const composition = Object.keys(errors).length === 0 && crewRule ? crewCompositionError(type, named(driver), named(crewMate)) : null;
+  if (composition) errors.defaultCrewMateId = composition;
   return errors;
 }
 
@@ -124,18 +162,22 @@ function describeSeats(seats: readonly CrewSeat[]): string {
 
 /**
  * Warning when a person chosen for a vehicle is already in the default crew of
- * other active vehicles: the optimisation gives each person one vehicle a day
- * (the first one in display order), the others are left out of the plan.
- * A warning, not a block, so spare vehicles stay possible. Null when no overlap.
+ * other active vehicles: a person works on one vehicle a day (crews of the
+ * day, lib/staff/day-crews.ts), the first one in display order keeps them and
+ * the others get a replacement when someone qualified is free, or stay at the
+ * depot. A warning, not a block, so spare vehicles stay possible. Null when no
+ * overlap.
  */
 export function sharedCrewWarning(name: string, others: readonly CrewSeat[]): string | null {
   if (others.length === 0) return null;
-  const total = others.length + 1;
-  const which = total === 2 ? "des deux véhicules" : `des ${total} véhicules`;
-  return `${name} est déjà ${describeSeats(others)} : un seul ${which} pourra être planifié chaque jour.`;
+  const many = others.length > 1;
+  return `${name} est déjà ${describeSeats(others)} : une personne ne roule que sur un véhicule par jour, ${many ? "les autres recevront" : "l'autre recevra"} un remplaçant s'il y en a un de libre (page Équipages).`;
 }
 
-/** What a qualification allows, derived from the rules: "Conduite : VSL, ambulance · Équipier : ambulance". */
+/**
+ * What a qualification allows, derived from the rules: "Conduite : VSL,
+ * ambulance · Équipier : ambulance · Requis dans chaque équipage d'ambulance".
+ */
 export function qualificationScope(qualification: Qualification): string {
   const types = Object.keys(REQUIRED_QUALIFICATIONS) as VehicleType[];
   const names: Record<VehicleType, string> = { TAXI: "taxi", VSL: "VSL", AMBULANCE: "ambulance" };
@@ -147,5 +189,11 @@ export function qualificationScope(qualification: Qualification): string {
   const parts: string[] = [];
   if (drive.length > 0) parts.push(`Conduite : ${drive.map((t) => names[t]).join(", ")}`);
   if (crew.length > 0) parts.push(`Équipier : ${crew.map((t) => names[t]).join(", ")}`);
+  for (const t of types) {
+    const oneOf = crewOneOfRequirement(t);
+    if (!oneOf) continue;
+    if (oneOf.includes(qualification)) parts.push(`Au moins un dans chaque équipage d'${names[t]}`);
+    else if (drive.includes(t) || crew.includes(t)) parts.push(`En ${names[t]}, avec un ${qualificationRequirement(oneOf)}`);
+  }
   return parts.join(" · ");
 }

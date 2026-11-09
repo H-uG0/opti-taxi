@@ -122,12 +122,24 @@ describe("driverSchema", () => {
 describe("assignmentConflicts", () => {
   it("lists vehicles whose default crew would lose its qualification", () => {
     expect(assignmentConflicts(["DEA"], [{ label: "Ambulance 1", type: "AMBULANCE" }], [])).toEqual([]);
-    expect(assignmentConflicts(["AUXILIARY"], [{ label: "Ambulance 1", type: "AMBULANCE" }], [])).toEqual([
-      "chauffeur par défaut de « Ambulance 1 » (requis : Ambulancier DE)",
+    expect(assignmentConflicts(["AUXILIARY"], [{ label: "VSL 1", type: "VSL" }], [])).toEqual([]);
+    expect(assignmentConflicts(["TAXI_CARD"], [{ label: "VSL 1", type: "VSL" }], [])).toEqual([
+      "chauffeur par défaut de « VSL 1 » (requis : Auxiliaire ambulancier ou Ambulancier DE)",
     ]);
     expect(assignmentConflicts(["TAXI_CARD"], [], [{ label: "Ambulance 2", type: "AMBULANCE" }])).toEqual([
       "équipier par défaut de « Ambulance 2 » (requis : Auxiliaire ambulancier ou Ambulancier DE)",
     ]);
+  });
+
+  it("keeps a DEA in each ambulance crew, whoever drives (R. 6312-10)", () => {
+    // An auxiliary drives, the DEA is the crew mate: valid.
+    expect(assignmentConflicts(["AUXILIARY"], [{ label: "Ambulance 1", type: "AMBULANCE", partner: ["DEA"] }], [])).toEqual([]);
+    // The DEA of the pair loses the diploma: the pair has none left.
+    expect(assignmentConflicts(["AUXILIARY"], [], [{ label: "Ambulance 1", type: "AMBULANCE", partner: ["AUXILIARY"] }])).toEqual([
+      "équipier par défaut de « Ambulance 1 » (l'équipage doit compter un Ambulancier DE)",
+    ]);
+    // No partner yet: the crew mate of the day will have to be a DEA, nothing to refuse here.
+    expect(assignmentConflicts(["AUXILIARY"], [{ label: "Ambulance 1", type: "AMBULANCE", partner: null }], [])).toEqual([]);
   });
 });
 

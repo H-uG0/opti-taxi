@@ -12,6 +12,7 @@ import { PrismaClient, type PrescribedMode, type SharingScope, type TripDirectio
 import { hashPassword } from "@/lib/auth/password";
 import {
   allowedVehicleTypesFor,
+  crewHoldsRequired,
   DEFAULT_CAPACITY,
   formatAddress,
   initialSharingStatus,
@@ -243,6 +244,10 @@ async function seedVehicles(
     }
     if (required.crewMate && (!crewMate || !hasOneOf(crewMate.def, required.crewMate))) {
       throw new Error(`${vehicle.label} : équipier absent ou non qualifié`);
+    }
+    // An ambulance needs a DEA at the wheel or beside the patient (R. 6312-10).
+    if (crewMate && !crewHoldsRequired(vehicle.type, [driver.def.qualifications, crewMate.def.qualifications])) {
+      throw new Error(`${vehicle.label} : aucun ambulancier DE dans l'équipage`);
     }
     if (!required.crewMate && crewMate) throw new Error(`${vehicle.label} : pas d'équipier pour ce type de véhicule`);
 

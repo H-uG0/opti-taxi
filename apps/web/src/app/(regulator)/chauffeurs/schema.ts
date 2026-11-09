@@ -6,8 +6,10 @@ import { z } from "zod";
 import type { Driver, Prisma, Qualification, VehicleType } from "@prisma/client";
 import { REVOKE_SESSIONS } from "@/lib/auth/revoke";
 import { formatDuration, formatMinute } from "@/lib/time";
+import { crewHoldsRequired } from "@/lib/domain/rules";
 import {
   crewMateRequirement,
+  crewOneOfRequirement,
   driverRequirement,
   hasRequiredQualification,
   qualificationRequirement,
@@ -190,11 +192,17 @@ export function describeBreak(driver: Pick<Driver, "breakWindowStartMinute" | "b
   return `${formatDuration(driver.breakMinutes)} entre ${formatMinute(driver.breakWindowStartMinute)} et ${formatMinute(driver.breakWindowEndMinute)}`;
 }
 
-type AssignedVehicle = { label: string; type: VehicleType };
+/**
+ * A vehicle whose default crew the person belongs to; `partner`: the
+ * qualifications of the other member of an ambulance's default crew (null
+ * when that seat is empty).
+ */
+type AssignedVehicle = { label: string; type: VehicleType; partner?: readonly Qualification[] | null };
 
 /**
  * Vehicles whose default crew would become unqualified with these
- * qualifications (the vehicle form enforces the same rule from the other side).
+ * qualifications: the seat itself, or the pair of an ambulance left without a
+ * DEA (the vehicle form enforces the same rules from the other side).
  */
 export function assignmentConflicts(
   qualifications: readonly Qualification[],
@@ -202,17 +210,20 @@ export function assignmentConflicts(
   asCrewMate: readonly AssignedVehicle[],
 ): string[] {
   const conflicts: string[] = [];
-  for (const vehicle of asDriver) {
-    const rule = driverRequirement(vehicle.type);
-    if (!hasRequiredQualification(qualifications, rule)) {
-      conflicts.push(`chauffeur par défaut de « ${vehicle.label} » (requis : ${qualificationRequirement(rule)})`);
+  const check = (vehicle: AssignedVehicle, rule: readonly Qualification[] | null, role: string) => {
+    if (rule && !hasRequiredQualification(qualifications, rule)) {
+      conflicts.push(`${role} par défaut de « ${vehicle.label} » (requis : ${qualificationRequirement(rule)})`);
+      return;
     }
-  }
+    const oneOf = crewOneOfRequirement(vehicle.type);
+    if (oneOf && vehicle.partner && !crewHoldsRequired(vehicle.type, [qualifications, vehicle.partner])) {
+      conflicts.push(`${role} par défaut de « ${vehicle.label} » (l'équipage doit compter un ${qualificationRequirement(oneOf)})`);
+    }
+  };
+  for (const vehicle of asDriver) check(vehicle, driverRequirement(vehicle.type), "chauffeur");
   for (const vehicle of asCrewMate) {
     const rule = crewMateRequirement(vehicle.type);
-    if (rule && !hasRequiredQualification(qualifications, rule)) {
-      conflicts.push(`équipier par défaut de « ${vehicle.label} » (requis : ${qualificationRequirement(rule)})`);
-    }
+    if (rule) check(vehicle, rule, "équipier");
   }
   return conflicts;
 }
