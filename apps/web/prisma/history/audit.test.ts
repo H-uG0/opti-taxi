@@ -23,6 +23,18 @@ describe("DayAuditTrail", () => {
     expect(validation).toMatchObject({ id: "hist-20261012-ev0002", entity: "Route", entityId: null });
   });
 
+  it("writes the app's details of a creation (ids, kind and dates only), dated with the simulated day", () => {
+    const trail = new DayAuditTrail("2026-10-12");
+    const details = { vehicleId: "veh-1", kind: "REPAIR", startDate: "2026-10-12", endDate: "2026-10-13" };
+    expect(trail.event(regulator, "vehicle_unavailability.create", "hist-20261012-una01", at, details)).toMatchObject({
+      action: "vehicle_unavailability.create",
+      entity: "VehicleUnavailability",
+      details,
+      serviceDate: new Date("2026-10-12T00:00:00.000Z"),
+    });
+    expect(trail.event(regulator, "trip.generate", "hist-20261012-rec1-out", at)).not.toHaveProperty("details");
+  });
+
   it("numbers the events of a day without repeating an id, and the re-run filter matches them", () => {
     const trail = new DayAuditTrail("2026-10-12");
     const events = Array.from({ length: 300 }, (_, i) =>
@@ -36,6 +48,13 @@ describe("DayAuditTrail", () => {
 
   it("names the entity of each simulated action as the app does", () => {
     expect(SIMULATED_ACTIONS).toEqual({
+      // The creation of the day's health data: a trip of a recurrence, a one-off care and its prescription,
+      // the absences and vehicles off the road (« Générer », « Nouvelle course », « Patients », « Chauffeurs », « Véhicules »).
+      "trip.generate": "Trip",
+      "trip.create": "Trip",
+      "prescription.create": "Prescription",
+      "staff_absence.create": "StaffAbsence",
+      "vehicle_unavailability.create": "VehicleUnavailability",
       "plan.optimize": "OptimizationRun",
       "plan.validate": "Route",
       "trip.sharing_accept": "Trip",

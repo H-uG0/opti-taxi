@@ -4,10 +4,12 @@ import { ArrowLeft, Building2, Info, Phone, Printer, TriangleAlert } from "lucid
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
 import { Card, EmptyState, PageHeader } from "@/components/ui/layout";
+import { SimulatedDayBadge } from "@/components/planning/simulated-day-badge";
 import { Table, TBody, Td, THead, Th } from "@/components/ui/table";
 import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { isSimulatedDay } from "@/lib/simulated-day";
 import { formatAddress, isShareable } from "@/lib/domain/rules";
 import { FACILITY_TYPE_LABELS } from "@/lib/labels";
 import { formatLongDate, formatMinute, fromIsoDate, isIsoDate, tomorrowIso } from "@/lib/time";
@@ -50,7 +52,7 @@ export default async function SharedArrivalsPage({
 
   // Every trip in a route is read: whether it is shared comes from the stops
   // (co-passengers on board), not from the stored flag (see groupSharedTransports).
-  const [trips, stops, routeCount] = await Promise.all([
+  const [trips, stops, routeCount, simulated] = await Promise.all([
     db.trip.findMany({
       where: {
         serviceDate,
@@ -86,6 +88,7 @@ export default async function SharedArrivalsPage({
       select: { routeId: true, tripId: true, kind: true, sequence: true },
     }),
     db.route.count({ where: { serviceDate } }),
+    isSimulatedDay(date),
     // Trace of the read (patients' names and care facilities of the day); never breaks the page.
     // A facility's sheet (handed to its reception desk) names that facility.
     auditRead(
@@ -133,7 +136,12 @@ export default async function SharedArrivalsPage({
     <div>
       <style>{PRINT_CSS}</style>
       <PageHeader
-        title={sheet ? `Transports partagés · ${sheet.facility.name}` : "Arrivées partagées"}
+        title={
+          <span className="flex flex-wrap items-center gap-2">
+            <span>{sheet ? `Transports partagés · ${sheet.facility.name}` : "Arrivées partagées"}</span>
+            {simulated ? <SimulatedDayBadge /> : null}
+          </span>
+        }
         description={
           facilityFilter
             ? `Fiche pour l'accueil de l'établissement · ${longDate}`

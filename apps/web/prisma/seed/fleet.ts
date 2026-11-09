@@ -31,11 +31,29 @@ export const FLEET_VEHICLE_MIX: Record<FleetDepotKey, Record<VehicleType, number
   grenoble: { TAXI: 9, VSL: 6, AMBULANCE: 3 },
 };
 
-/** Replacement staff of each depot in total (default driver of no vehicle): one taxi/auxiliary, one DEA/auxiliary. */
+/**
+ * Replacement staff of each depot in total (default driver of no vehicle): one
+ * taxi/auxiliary, one DEA/auxiliary. The first qualification names the kind.
+ */
 export const FLEET_REPLACEMENTS: readonly (readonly Qualification[])[] = [
   ["TAXI_CARD", "AUXILIARY"],
   ["DEA", "AUXILIARY"],
 ];
+
+/**
+ * The replacements a depot still needs, given the qualifications of those it
+ * already has: each kind of FLEET_REPLACEMENTS that none of them covers (a
+ * replacement covers one kind, the first it holds).
+ */
+export function missingReplacements(existing: readonly (readonly Qualification[])[]): (readonly Qualification[])[] {
+  const used = new Set<number>();
+  return FLEET_REPLACEMENTS.filter(([kind]) => {
+    const index = existing.findIndex((qualifications, i) => !used.has(i) && kind !== undefined && qualifications.includes(kind));
+    if (index === -1) return true;
+    used.add(index);
+    return false;
+  });
+}
 
 /** Staggered shifts (minutes since midnight), as in fleet_day: early, day, late, short. */
 export const FLEET_SHIFTS: readonly (readonly [number, number])[] = [
@@ -104,7 +122,8 @@ function drawWorkDays(rng: Rng): number[] {
 /**
  * The vehicles and people to add. `existing` lists the vehicles of the small
  * data set (by depot and type: they count in FLEET_VEHICLE_MIX) and the
- * replacements it already has per depot; `depotLabels` names the depots in
+ * qualifications of the replacements it already has per depot (only the kinds
+ * they do not cover are added); `depotLabels` names the depots in
  * the vehicle labels; numbering goes on after `nextNumber` of each type.
  */
 export function planFleet(
@@ -112,7 +131,7 @@ export function planFleet(
   names: NameFactory,
   existing: {
     vehicles: readonly { type: VehicleType; depot: FleetDepotKey }[];
-    replacements: Partial<Record<FleetDepotKey, number>>;
+    replacements: Partial<Record<FleetDepotKey, readonly (readonly Qualification[])[]>>;
     registrations: readonly string[];
   },
   depotLabels: Record<FleetDepotKey, string>,
@@ -167,7 +186,7 @@ export function planFleet(
         });
       }
     }
-    for (const qualifications of FLEET_REPLACEMENTS.slice(existing.replacements[depot] ?? 0)) {
+    for (const qualifications of missingReplacements(existing.replacements[depot] ?? [])) {
       person(depot, [...qualifications], [360, 1140], rng.chance(0.5) ? MON_FRI : TUE_SAT);
     }
   }

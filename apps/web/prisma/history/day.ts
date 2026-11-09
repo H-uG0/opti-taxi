@@ -29,7 +29,7 @@ import { savePlan } from "@/lib/optimizer/persist";
 import { withBeforeCommit } from "@/lib/planning/before-commit";
 import { removeTripStops } from "@/lib/planning/detach";
 import { refreshRoutes } from "@/lib/planning/refresh-routes";
-import { fromIsoDate, toIsoDate } from "@/lib/time";
+import { addDays, fromIsoDate, toIsoDate } from "@/lib/time";
 import { liftAuditGuard, restoreAuditGuard } from "../audit-guard";
 import type { Rng } from "../seed/random";
 import {
@@ -41,6 +41,7 @@ import {
   parisInstant,
   rerunStart,
   runFinish,
+  staffRecordInstants,
   tripGenerationInstant,
   validationInstant,
 } from "./calendar";
@@ -62,7 +63,7 @@ import { historyRunId, historyTripId } from "./ids";
 import { withTimeLimit, type OptimizerClient } from "./optimizer";
 import { planOneOffDay, type DestinationRow, type PoolPatientRow } from "./one-off";
 import { foreignRowsWhere, simulatedRowsWhere } from "./ownership";
-import { planStaffEvents, type StaffMember } from "./staff";
+import { LONGEST_EVENT_DAYS, planStaffEvents, type CoveredRange, type StaffMember } from "./staff";
 import { tripsToLock } from "./tweaks";
 import { handOverCancellation, MAX_RUNS_PER_DAY, nextPlanningStep, unplacedTripIds } from "./planning";
 import { emptyDayReport, type DayReport, type ForeignRowCounts } from "./report";
@@ -99,6 +100,8 @@ export type DayContext = {
   /** Active people and vehicles: absences and vehicles off the road of the day (staff.ts). */
   staff: readonly StaffMember[];
   vehicleIds: readonly string[];
+  /** Dates this run simulates: the only later dates a week of leave or a repair may cover (staff.ts). */
+  simulatedDates: ReadonlySet<string>;
 };
 
 export type RowCounts = { trips: number; routes: number; runs: number };
@@ -333,9 +336,10 @@ async function handOverUnplaced(
 /**
  * « Figer » after the first plan: the trips of the patients who ask for their
  * usual driver stay on the vehicle the plan gave them (tweaks.ts), traced
- * trip.lock like the planning's action, a minute or two after the plan.
+ * trip.lock like the planning's action, a minute or two after the plan, only
+ * when the trip is still on that vehicle and not frozen yet (exported for day.test.ts).
  */
-async function lockPreferredDrivers(ctx: DayContext, trail: DayAuditTrail, serviceDate: Date, after: Date, rng: Rng): Promise<number> {
+export async function lockPreferredDrivers(ctx: DayContext, trail: DayAuditTrail, serviceDate: Date, after: Date, rng: Rng): Promise<number> {
   const { prisma } = ctx;
   const trips = await prisma.trip.findMany({
     where: { serviceDate, status: "ASSIGNED", routeId: { not: null } },
@@ -493,6 +497,29 @@ async function simulateField(ctx: DayContext, trail: DayAuditTrail, isoDate: str
 
 // ---------------------------------------------------------------------------
 
+/** Absences and vehicles off the road already stored over the dates a row starting on `isoDate` could cover. */
+async function storedStaffEvents(
+  prisma: PrismaClient,
+  isoDate: string,
+): Promise<{ absences: CoveredRange[]; unavailabilities: CoveredRange[] }> {
+  const where = { startDate: { lte: fromIsoDate(addDays(isoDate, LONGEST_EVENT_DAYS - 1)) }, endDate: { gte: fromIsoDate(isoDate) } };
+  const select = { id: true, startDate: true, endDate: true } as const;
+  const [absences, unavailabilities] = await Promise.all([
+    prisma.staffAbsence.findMany({ where, select: { ...select, driverId: true } }),
+    prisma.vehicleUnavailability.findMany({ where, select: { ...select, vehicleId: true } }),
+  ]);
+  const range = (row: { id: string; startDate: Date; endDate: Date }, ownerId: string): CoveredRange => ({
+    rowId: row.id,
+    ownerId,
+    from: toIsoDate(row.startDate),
+    to: toIsoDate(row.endDate),
+  });
+  return {
+    absences: absences.map((row) => range(row, row.driverId)),
+    unavailabilities: unavailabilities.map((row) => range(row, row.vehicleId)),
+  };
+}
+
 /** Simulates `isoDate` (a past date the caller has cleared of a previous simulation). */
 export async function simulateDay(ctx: DayContext, isoDate: string): Promise<DayReport> {
   const { prisma } = ctx;
@@ -500,28 +527,70 @@ export async function simulateDay(ctx: DayContext, isoDate: string): Promise<Day
   const planning = rngFor(ctx.seed, isoDate, "planning");
   const trail = new DayAuditTrail(isoDate);
 
-  // 1. Trips generated from the recurrences.
+  // 1. Trips generated from the recurrences (traced trip.generate, as « Générer la semaine »).
   const generatedAt = tripGenerationInstant(isoDate, rngFor(ctx.seed, isoDate, "generation"));
   const trips: (Prisma.TripCreateManyInput & { id: string })[] = planTripsFromRecurrences(ctx.recurrences, isoDate, isoDate).map((trip) => {
     if (!trip.recurrenceId) throw new Error("Course générée sans récurrence");
     return { ...trip, id: historyTripId(isoDate, trip.recurrenceId, trip.direction), createdAt: generatedAt, updatedAt: generatedAt };
   });
-  // The one-off care booked for the day (occasional patients), each with its one-off prescription.
+  // The one-off care booked for the day (occasional patients), each with its one-off prescription
+  // (traced prescription.create and trip.create, as in « Patients » and « Nouvelle course »).
   const oneOff = planOneOffDay(ctx.seed, isoDate, ctx.pool, ctx.facilities);
   trips.push(...oneOff.trips.map((trip) => ({ ...trip, createdAt: generatedAt, updatedAt: generatedAt })));
   if (trips.length === 0) return emptyDayReport(isoDate, "aucune course prévue par les récurrences");
-  if (oneOff.prescriptions.length > 0) await prisma.prescription.createMany({ data: oneOff.prescriptions });
-  await prisma.trip.createMany({ data: trips });
+  // A prescription of a previous simulation that a trip created in the app uses was kept (ownership.ts): not written again.
+  const kept = await prisma.prescription.findMany({ where: { id: { in: oneOff.prescriptions.map((p) => String(p.id)) } }, select: { id: true } });
+  const keptIds = new Set(kept.map((p) => p.id));
+  const prescriptions = oneOff.prescriptions
+    .filter((p) => !keptIds.has(String(p.id)))
+    .map((p) => ({ ...p, createdAt: generatedAt, updatedAt: generatedAt }));
+  const created = [
+    ...prescriptions.map((p) => trail.event(regulator(ctx), "prescription.create", String(p.id), generatedAt)),
+    ...trips.map((trip) => trail.event(regulator(ctx), trip.recurrenceId ? "trip.generate" : "trip.create", trip.id, generatedAt)),
+  ];
+  await prisma.$transaction([
+    ...(prescriptions.length > 0 ? [prisma.prescription.createMany({ data: prescriptions })] : []),
+    prisma.trip.createMany({ data: trips }),
+    prisma.auditEvent.createMany({ data: created }),
+  ]);
 
-  // Absences and vehicles off the road that start today, known before the planning (staff.ts).
-  const staff = planStaffEvents(isoDate, ctx.staff, ctx.vehicleIds);
-  if (staff.absences.length > 0) await prisma.staffAbsence.createMany({ data: staff.absences });
-  if (staff.unavailabilities.length > 0) await prisma.vehicleUnavailability.createMany({ data: staff.unavailabilities });
+  // Absences and vehicles off the road that start today, recorded before the planning (staff.ts),
+  // traced as in « Chauffeurs » and « Véhicules ».
+  const firstRunAt = firstRunStart(isoDate, planning);
+  const staff = planStaffEvents(isoDate, ctx.staff, ctx.vehicleIds, {
+    mayCover: (date) => ctx.simulatedDates.has(date),
+    ...(await storedStaffEvents(prisma, isoDate)),
+  });
+  const recordedAt = staffRecordInstants(firstRunAt, staff.absences.length + staff.unavailabilities.length, rngFor(ctx.seed, isoDate, "staff"));
+  const absences = staff.absences.map((row, index) => ({ ...row, createdAt: recordedAt[index] ?? firstRunAt }));
+  const unavailabilities = staff.unavailabilities.map((row, index) => ({
+    ...row,
+    createdAt: recordedAt[staff.absences.length + index] ?? firstRunAt,
+  }));
+  const staffEvents = [
+    ...absences.map((row) =>
+      trail.event(regulator(ctx), "staff_absence.create", String(row.id), row.createdAt, { driverId: row.driverId }),
+    ),
+    ...unavailabilities.map((row) =>
+      trail.event(regulator(ctx), "vehicle_unavailability.create", String(row.id), row.createdAt, {
+        vehicleId: row.vehicleId,
+        kind: row.kind,
+        startDate: toIsoDate(new Date(row.startDate)),
+        endDate: toIsoDate(new Date(row.endDate)),
+      }),
+    ),
+  ];
+  if (staffEvents.length > 0) {
+    await prisma.$transaction([
+      ...(absences.length > 0 ? [prisma.staffAbsence.createMany({ data: absences })] : []),
+      ...(unavailabilities.length > 0 ? [prisma.vehicleUnavailability.createMany({ data: unavailabilities })] : []),
+      prisma.auditEvent.createMany({ data: staffEvents }),
+    ]);
+  }
 
   // 2. The day before: cancellations by phone (traced trip.cancel, a minute apart
   // before the first optimization), then the refusals the regulator already knows.
   const cancelledBefore = cancellationsBeforePlanning(trips, isoDate);
-  const firstRunAt = firstRunStart(isoDate, planning);
   if (cancelledBefore.size > 0) {
     const cancelled = trips.filter((trip) => cancelledBefore.has(trip.id));
     const instantOf = (index: number) => new Date(firstRunAt.getTime() - (cancelled.length - index) * 60_000);

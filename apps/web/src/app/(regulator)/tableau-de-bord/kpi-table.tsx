@@ -207,7 +207,7 @@ export function KpiTable({
               {day.simulated ? (
                 <span
                   className="ml-1.5 rounded-sm bg-violet-100 px-1 py-px text-[11px] font-semibold text-violet-800"
-                  title="Journée produite par la simulation d'historique (pnpm db:history) : retards et temps de planification sont des paramètres, pas des mesures"
+                  title="Journée simulée pour la démonstration : retards et temps de planification sont des paramètres de la simulation, pas des mesures"
                 >
                   simulé
                 </span>

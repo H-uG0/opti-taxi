@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { TOWNS, type TownKey } from "./data";
+import { addDays } from "@/lib/time";
+import { OCCASIONAL_POOL_SIZE, ONE_OFF_EPISODES_PER_WEEKDAY, TOWNS, type TownKey } from "./data";
 import {
   bookedShare,
   CATCHMENTS,
+  DISCHARGE_TRIP_NOTE,
   drawEpisodes,
   drawOccasionalMobility,
   episodeCount,
   episodePrescription,
   episodeTrips,
   hubOf,
+  planOneOffDays,
   PRIVATE_PLACES,
+  privateClientEpisode,
   SLOTS,
   type OccasionalPatient,
 } from "./one-off";
@@ -38,6 +42,59 @@ describe("volumes", () => {
     expect(episodeCount(20, "2026-11-14", new Rng(2))).toBeLessThanOrEqual(7);
     expect(episodeCount(20, "2026-11-15", new Rng(3))).toBe(0);
     expect(episodeCount(20, "2026-11-09", new Rng(4), 0.25)).toBeLessThanOrEqual(6);
+  });
+});
+
+describe("one-off trips of the seeded fortnight", () => {
+  // The small data set's pool (its random generators: one per `today`).
+  const legsOn = (days: ReturnType<typeof planOneOffDays>, date: string) =>
+    days.find((d) => d.date === date)?.episodes.reduce((sum, e) => sum + e.legs.length, 0) ?? 0;
+
+  it("give J+1 about ONE_OFF_EPISODES_PER_WEEKDAY episodes, never more than the 10 vehicles take on top of the series", () => {
+    const tomorrowLegs: number[] = [];
+    // Every weekday of four weeks as « today »: J+1 from Tuesday to Saturday, then Monday.
+    for (let offset = 0; offset < 28; offset++) {
+      const today = addDays("2026-11-02", offset);
+      const tomorrow = addDays(today, 1);
+      const window = { from: addDays(today, -3), to: addDays(today, 10), today };
+      const days = planOneOffDays(new Rng(offset + 1), pool(OCCASIONAL_POOL_SIZE), window, ONE_OFF_EPISODES_PER_WEEKDAY);
+      const episodes = days.find((d) => d.date === tomorrow)?.episodes.length ?? 0;
+      expect(episodes).toBeLessThanOrEqual(Math.round(ONE_OFF_EPISODES_PER_WEEKDAY * 1.15));
+      tomorrowLegs.push(legsOn(days, tomorrow));
+    }
+    // About 8 trips a weekday at J+1 (12 at most): 13 with 8 episodes pushed 8 legs of the series out of the plan.
+    expect(Math.max(...tomorrowLegs)).toBeLessThanOrEqual(12);
+    const weekdays = tomorrowLegs.filter((legs) => legs > 0);
+    expect(weekdays.reduce((sum, legs) => sum + legs, 0) / weekdays.length).toBeLessThan(10);
+  });
+
+  it("count the episodes a day already has (the private clients of tomorrow) in its volume, without moving the other days' draws", () => {
+    const today = "2026-11-09";
+    const window = { from: today, to: addDays(today, 6), today };
+    const plain = planOneOffDays(new Rng(8), pool(OCCASIONAL_POOL_SIZE), window, ONE_OFF_EPISODES_PER_WEEKDAY);
+    const booked = planOneOffDays(new Rng(8), pool(OCCASIONAL_POOL_SIZE), window, ONE_OFF_EPISODES_PER_WEEKDAY, new Map([["2026-11-10", 2]]));
+    const count = (days: typeof plain, date: string) => days.find((d) => d.date === date)?.episodes.length ?? 0;
+    expect(count(booked, "2026-11-10")).toBe(count(plain, "2026-11-10") - 2);
+    expect(count(booked, "2026-11-09")).toBe(count(plain, "2026-11-09"));
+    const client = { direction: "OUTBOUND" as const, place: PRIVATE_PLACES.aix[0]!, minute: 580, notes: "Client privé — train de 10 h 05." };
+    const [trip] = episodeTrips(privateClientEpisode("p-1", client), HOME, { id: null, ...client.place }, "2026-11-10", null);
+    expect(trip).toMatchObject({
+      payer: "PRIVATE",
+      appointmentMinute: 580,
+      allowedVehicleTypes: ["TAXI"],
+      notes: client.notes,
+      prescriptionId: null,
+    });
+  });
+
+  it("book fewer trips for the days further ahead, in the same draw whatever the days' order", () => {
+    const today = "2026-11-09";
+    const days = planOneOffDays(new Rng(3), pool(OCCASIONAL_POOL_SIZE), { from: today, to: addDays(today, 13), today }, 20);
+    expect(days).toHaveLength(14);
+    expect(days.find((d) => d.date === "2026-11-15")?.episodes).toEqual([]);
+    const count = (date: string) => days.find((d) => d.date === date)?.episodes.length ?? 0;
+    expect(count("2026-11-10")).toBeGreaterThan(count("2026-11-20"));
+    expect(planOneOffDays(new Rng(3), pool(OCCASIONAL_POOL_SIZE), { from: today, to: addDays(today, 13), today }, 20)).toEqual(days);
   });
 });
 
@@ -125,6 +182,20 @@ describe("rows", () => {
       if (trip.direction === "OUTBOUND") expect(trip.pickupLat).toBe(HOME.lat);
       else expect(trip.dropoffLat).toBe(HOME.lat);
     }
+  });
+
+  it("keeps the reason of the care on the prescription, never in the trips' note the crew reads", () => {
+    const episodes = drawEpisodes(pool(400, "SEATED"), 400, new Rng(13));
+    const medical = /consultation|cardio|rhumato|pneumo|ophtalmo|neuro|imagerie|examen|hospitalisation|chirurgie|médecine/i;
+    for (const episode of episodes) {
+      const place = episode.place ?? FACILITY;
+      for (const trip of episodeTrips(episode, HOME, { id: episode.place ? null : FACILITY.id, ...place }, "2026-11-10", "rx-1")) {
+        if (trip.notes) expect(trip.notes).not.toMatch(medical);
+      }
+      if (episode.kind === "PRIVATE") continue;
+      expect(episodePrescription(episode, "2026-11-10")?.notes).toMatch(medical);
+    }
+    expect(episodes.some((e) => e.kind === "DISCHARGE" && e.tripNote === DISCHARGE_TRIP_NOTE)).toBe(true);
   });
 
   it("sends a private client by taxi, without prescription nor sharing", () => {

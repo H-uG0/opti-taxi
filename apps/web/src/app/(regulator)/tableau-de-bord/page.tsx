@@ -65,18 +65,18 @@ export default async function DashboardPage({
       {period.simulatedDays > 0 ? (
         <div role="note" className="mb-6 rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
           <p className="font-medium">
-            {period.simulatedDays === period.days
+            {/* Compared with the days that have routes: a Sunday or a day without planning is never simulated. */}
+            {period.simulatedDays >= period.plannedDays
               ? "Toute la période est simulée"
               : `${plural(period.simulatedDays, "jour simulé", "jours simulés")} sur la période`}{" "}
-            (badge « simulé »)
+            (marqués « simulé » dans le détail par jour)
           </p>
           <p className="mt-1">
-            Ces journées ont été produites par la simulation d&apos;historique des données de démonstration (pnpm
-            db:history), avec le vrai optimiseur. Leurs retards et leur temps de planification sont des paramètres
-            de la simulation (incidents de circulation tirés au hasard, validation 15 à 60 min après le premier
-            calcul), pas des mesures, comme les absences, les annulations et la part d&apos;équipages qui saisissent
-            leurs statuts (environ 85 %). Les kilomètres, le partage et la marge viennent du calcul des tournées sur
-            ces données fictives.
+            Ces journées ont été simulées pour la démonstration, avec le vrai optimiseur. Les retards (incidents de
+            circulation tirés au hasard), le temps de planification (validation 15 à 60 min après le premier calcul),
+            les absences, les annulations et la part d&apos;équipages qui saisissent leurs statuts (environ 85 %) sont
+            des paramètres de la simulation, pas des mesures. Les kilomètres, le partage et la marge viennent du
+            calcul des tournées sur ces données fictives.
           </p>
         </div>
       ) : null}

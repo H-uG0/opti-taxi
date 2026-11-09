@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+import { SimulatedDayBadge } from "@/components/planning/simulated-day-badge";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/components/ui/cn";
 import { Stat } from "@/components/ui/layout";
@@ -88,7 +89,7 @@ export function Headline({
         </h2>
         {focus.date === tomorrow ? <Badge tone="brand">J+1</Badge> : null}
         {focus.date === today ? <Badge tone="info">Aujourd&apos;hui</Badge> : null}
-        {focus.simulated ? <Badge tone="simulated">Journée simulée</Badge> : null}
+        {focus.simulated ? <SimulatedDayBadge /> : null}
         {focus.planningStatus === "VALIDATED" ? (
           <Badge tone="success">Planning validé</Badge>
         ) : focus.planningStatus === "NOT_VALIDATED" ? (

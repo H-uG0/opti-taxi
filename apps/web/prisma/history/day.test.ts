@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanResponse } from "@/lib/optimizer/contract";
 import { Rng } from "../seed/random";
 import { DayAuditTrail } from "./audit";
-import { answerProposals, optimizeOnce, type DayContext } from "./day";
+import { answerProposals, clearSimulatedDay, lockPreferredDrivers, optimizeOnce, type DayContext } from "./day";
 import type { OptimizerClient } from "./optimizer";
+import { simulatedRowsWhere } from "./ownership";
 import { isHabitualRefuser } from "./sharing";
+import { asksForSameDriver } from "./tweaks";
 
 /** What savePlan does to the run in its transaction, and whether it then fails (a blocked day, a database error). */
 const savePlanState = vi.hoisted(() => ({ fails: false }));
@@ -34,9 +36,11 @@ type Write = { model: string; op: string; args: Record<string, unknown>; tx: num
 /**
  * In-memory stand-in for the Prisma client: records the writes that commit.
  * The writes of an interactive transaction are kept only when its work
- * resolves (rollback otherwise); a batch transaction is not expected here.
+ * resolves (rollback otherwise). The statements of a batch transaction are
+ * recorded when they are built (as Prisma builds them before the batch) and
+ * given the batch's transaction number.
  */
-function fakePrisma(options: { proposed?: object[]; savedTrip?: (id: string) => boolean } = {}) {
+function fakePrisma(options: { proposed?: object[]; savedTrip?: (id: string) => boolean; deleted?: number } = {}) {
   const committed: Write[] = [];
   let transactions = 0;
   const models = (sink: Write[], tx: number | null) => {
@@ -46,6 +50,7 @@ function fakePrisma(options: { proposed?: object[]; savedTrip?: (id: string) => 
         return result(args);
       };
     };
+    const deleteMany = (model: string) => record(model, "deleteMany", () => ({ count: options.deleted ?? 0 }));
     return {
       trip: {
         findMany: async () => options.proposed ?? [],
@@ -53,21 +58,36 @@ function fakePrisma(options: { proposed?: object[]; savedTrip?: (id: string) => 
           const id = String((args.where as { id: string }).id);
           return { count: (options.savedTrip?.(id) ?? true) ? 1 : 0 };
         }),
+        deleteMany: deleteMany("trip"),
       },
+      route: { deleteMany: deleteMany("route") },
+      prescription: { deleteMany: deleteMany("prescription") },
+      staffAbsence: { deleteMany: deleteMany("staffAbsence") },
+      vehicleUnavailability: { deleteMany: deleteMany("vehicleUnavailability") },
       optimizationRun: {
         create: record("optimizationRun", "create", () => ({})),
         update: record("optimizationRun", "update", () => ({})),
+        deleteMany: deleteMany("optimizationRun"),
       },
       auditEvent: {
         createMany: record("auditEvent", "createMany", (args) => ({ count: (args.data as unknown[]).length })),
+        deleteMany: deleteMany("auditEvent"),
+      },
+      $executeRawUnsafe: async (sql: string) => {
+        sink.push({ model: "raw", op: sql, args: {}, tx });
+        return 0;
       },
     };
   };
   const client = {
     ...models(committed, null),
     $transaction: async (work: unknown) => {
-      if (typeof work !== "function") throw new Error("unexpected batch transaction");
       const id = ++transactions;
+      if (Array.isArray(work)) {
+        // Built just before the call: the last statements recorded are the batch's.
+        for (const write of committed.slice(-work.length)) write.tx = id;
+        return Promise.all(work);
+      }
       const pending: Write[] = [];
       const result: unknown = await (work as (tx: unknown) => Promise<unknown>)(models(pending, id));
       committed.push(...pending);
@@ -95,6 +115,7 @@ function context(prisma: PrismaClient, plan: Partial<PlanResponse> = {}): DayCon
     facilities: new Map(),
     staff: [],
     vehicleIds: [],
+    simulatedDates: new Set(),
   };
 }
 
@@ -203,5 +224,93 @@ describe("answerProposals", () => {
     const result = await answerProposals(context(prisma), new DayAuditTrail("2026-10-12"), new Date(), proposedAt, new Rng(3));
     expect(result).toEqual({ refused: 0, lastAt: null });
     expect(committed).toEqual([]);
+  });
+});
+
+describe("lockPreferredDrivers", () => {
+  const planAt = new Date("2026-10-11T15:02:00.000Z");
+  const patient = (asks: boolean, skip = 0) => {
+    let found = 0;
+    for (let i = 0; i < 10_000; i++) if (asksForSameDriver(`p${i}`) === asks && found++ === skip) return `p${i}`;
+    throw new Error("no such patient");
+  };
+  const trip = (id: string, patientId: string, vehicleId: string, extra: object = {}) => ({
+    id,
+    patientId,
+    recurrenceId: "rec-1",
+    lockedVehicleId: null,
+    route: { vehicleId },
+    ...extra,
+  });
+
+  it("freezes the series trips of the patients who ask for their driver, on the vehicle the route still holds", async () => {
+    const asks = patient(true);
+    const other = patient(true, 1);
+    const trips = [
+      trip("hist-a", asks, "veh-1"),
+      trip("hist-b", patient(false), "veh-2"),
+      // A one-off trip, and a trip already frozen: never frozen again.
+      trip("hist-c", asks, "veh-1", { recurrenceId: null }),
+      trip("hist-d", asks, "veh-1", { lockedVehicleId: "veh-1" }),
+      // Moved to another vehicle in the meantime: the guarded update changes nothing.
+      trip("hist-e", other, "veh-3"),
+    ];
+    const { prisma, committed } = fakePrisma({ proposed: trips, savedTrip: (id) => id !== "hist-e" });
+    const serviceDate = new Date("2026-10-12T00:00:00Z");
+    const locked = await lockPreferredDrivers(context(prisma), new DayAuditTrail("2026-10-12"), serviceDate, planAt, new Rng(5));
+
+    expect(locked).toBe(1);
+    const updates = committed.filter((w) => w.op === "updateMany");
+    expect(updates.map((w) => w.args)).toEqual([
+      { where: { id: "hist-a", lockedVehicleId: null, route: { is: { vehicleId: "veh-1" } } }, data: { lockedVehicleId: "veh-1" } },
+      { where: { id: "hist-e", lockedVehicleId: null, route: { is: { vehicleId: "veh-3" } } }, data: { lockedVehicleId: "veh-3" } },
+    ]);
+    // One trip.lock per lock actually saved, in the same transaction, after the plan.
+    const events = eventsOf(committed);
+    expect(events.map((e) => [e.entityId, e.action, e.userId])).toEqual([["hist-a", "trip.lock", "regulator-1"]]);
+    expect((events[0]?.at as Date).getTime()).toBeGreaterThan(planAt.getTime());
+    expect(new Set(committed.map((w) => w.tx))).toEqual(new Set([1]));
+  });
+
+  it("writes nothing when no patient asks for their driver", async () => {
+    const { prisma, committed } = fakePrisma({ proposed: [trip("hist-b", patient(false), "veh-2")] });
+    const locked = await lockPreferredDrivers(context(prisma), new DayAuditTrail("2026-10-12"), new Date(), planAt, new Rng(5));
+    expect(locked).toBe(0);
+    expect(committed).toEqual([]);
+  });
+});
+
+describe("clearSimulatedDay", () => {
+  it("deletes the date's own rows in one transaction, its audit events with the guard lifted for it alone", async () => {
+    const { prisma, committed } = fakePrisma({ deleted: 2 });
+    const cleared = await clearSimulatedDay(prisma, "2026-10-12");
+    expect(cleared).toEqual({ trips: 2, routes: 2, runs: 2, events: 2 });
+
+    expect(committed.map((w) => `${w.model}.${w.model === "raw" ? (w.op.includes("DISABLE") ? "disable" : "enable") : w.op}`)).toEqual([
+      "raw.disable",
+      "route.deleteMany",
+      "trip.deleteMany",
+      "prescription.deleteMany",
+      "staffAbsence.deleteMany",
+      "vehicleUnavailability.deleteMany",
+      "optimizationRun.deleteMany",
+      "auditEvent.deleteMany",
+      "raw.enable",
+    ]);
+    expect(new Set(committed.map((w) => w.tx))).toEqual(new Set([1]));
+
+    // Only what the simulation owns (ownership.ts): trips before their prescriptions, so a prescription
+    // still used by a trip or a recurrence created in the app is kept.
+    const own = simulatedRowsWhere(new Date("2026-10-12T00:00:00.000Z"));
+    const where = (model: string) => committed.find((w) => w.model === model)?.args.where;
+    expect(where("trip")).toEqual(own.trips);
+    expect(where("prescription")).toEqual({
+      id: { startsWith: "hist-20261012-" },
+      trips: { every: { id: { startsWith: "hist-" } } },
+      recurrences: { none: {} },
+    });
+    expect(where("staffAbsence")).toEqual({ id: { startsWith: "hist-20261012-" } });
+    expect(where("vehicleUnavailability")).toEqual({ id: { startsWith: "hist-20261012-" } });
+    expect(where("auditEvent")).toEqual(own.events);
   });
 });

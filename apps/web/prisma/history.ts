@@ -54,7 +54,7 @@ import {
   type RowCounts,
 } from "./history/day";
 import { HistoryError } from "./history/errors";
-import { dailyKm, nominalKm, rebuildFuelLog } from "./history/fuel";
+import { dailyKm, fuelDecision, nominalKm, rebuildFuelLog } from "./history/fuel";
 import { rngFor } from "./history/hash";
 import { historyFuelLogId, isHistoryId } from "./history/ids";
 import type { DestinationRow } from "./history/one-off";
@@ -164,11 +164,16 @@ const DEFAULT_DAILY_KM = 90;
 
 /**
  * Rebuilds each vehicle's fill-ups of the window (fuel.ts) from the km of
- * its routes on the simulated days. Only fill-ups the seed or a simulation
- * wrote are replaced; a vehicle with a fill-up recorded in the app in the
- * window is left as it is.
+ * its routes on the days whose routes are stored (the simulated days, of this
+ * run or an earlier one). Only fill-ups the seed or a simulation wrote are
+ * replaced (fuelDecision): a vehicle with a fill-up recorded in the app in
+ * the window, or with none the seed or a simulation wrote (an older seed's),
+ * is left as it is and counted in the report.
  */
-async function rebuildFuelLogs(simulated: ReadonlySet<string>, today: string): Promise<{ vehicles: number; fills: number; leftAlone: number }> {
+async function rebuildFuelLogs(
+  simulated: ReadonlySet<string>,
+  today: string,
+): Promise<{ vehicles: number; fills: number; appFillUps: number; notOwned: number }> {
   const sorted = [...simulated].sort();
   const yesterday = addDays(today, -1);
   const defaultFrom = [addDays(today, -FUEL_WINDOW_DAYS), addDays(sorted[0] ?? today, -7)].sort()[0] ?? addDays(today, -FUEL_WINDOW_DAYS);
@@ -184,37 +189,36 @@ async function rebuildFuelLogs(simulated: ReadonlySet<string>, today: string): P
     where: { serviceDate: { gte: fromIsoDate(earliest), lte: fromIsoDate(yesterday) }, stops: { some: {} } },
     select: { vehicleId: true, serviceDate: true, distanceKm: true },
   });
+  // Days whose planned km are known: those with stored routes (an earlier run's too), and this run's.
+  const plannedDays = new Set([...simulated, ...routes.map((route) => toIsoDate(route.serviceDate))]);
   let rebuilt = 0;
   let written = 0;
-  let leftAlone = 0;
+  let appFillUps = 0;
+  let notOwned = 0;
   for (const vehicle of vehicles) {
-    const all = fills.filter((f) => f.vehicleId === vehicle.id);
-    const own = all.filter((f) => owned(f.id));
-    if (own.length === 0) continue;
-    const from = own.reduce((min, f) => (toIsoDate(f.date) < min ? toIsoDate(f.date) : min), defaultFrom);
-    if (all.some((f) => !owned(f.id) && toIsoDate(f.date) >= from)) {
-      leftAlone++;
-      continue;
-    }
+    const stored = fills.filter((f) => f.vehicleId === vehicle.id).map((f) => ({ id: f.id, date: toIsoDate(f.date), odometerKm: f.odometerKm }));
+    const decision = fuelDecision(stored, owned, defaultFrom);
+    if (decision.kind === "app-fill-up") appFillUps++;
+    if (decision.kind === "not-owned") notOwned++;
+    if (decision.kind !== "rebuild") continue;
     const days: string[] = [];
-    for (let day = from; day <= yesterday; day = addDays(day, 1)) days.push(day);
+    for (let day = decision.from; day <= yesterday; day = addDays(day, 1)) days.push(day);
     const routeKm = new Map<string, number>();
     for (const route of routes.filter((r) => r.vehicleId === vehicle.id)) {
       const date = toIsoDate(route.serviceDate);
       routeKm.set(date, (routeKm.get(date) ?? 0) + route.distanceKm);
     }
     const km = dailyKm(days, {
-      simulated,
+      plannedDays,
       routeKm,
       nominalKm: nominalKm(routeKm, DEFAULT_DAILY_KM),
       isSunday: (date) => isoWeekday(date) === 7,
     });
-    // The last reading stays: the deadlines by km (oil change…) keep their meaning.
-    const finalOdometer = Math.max(...own.map((f) => f.odometerKm));
     const electric = vehicle.energy === "ELECTRIC";
-    const plan = rebuildFuelLog(km, finalOdometer, fuelProfileOf(vehicle.type, vehicle.energy), electric, rngFor(RANDOM_SEED, "fuel", vehicle.id));
+    const profile = fuelProfileOf(vehicle.type, vehicle.energy);
+    const plan = rebuildFuelLog(km, decision.finalOdometerKm, profile, electric, rngFor(RANDOM_SEED, "fuel", vehicle.id));
     await prisma.$transaction([
-      prisma.fuelLog.deleteMany({ where: { id: { in: own.map((f) => f.id) } } }),
+      prisma.fuelLog.deleteMany({ where: { id: { in: decision.ownedIds } } }),
       prisma.fuelLog.createMany({
         data: plan.map((fill, index) => ({
           id: historyFuelLogId(vehicle.id, index + 1),
@@ -229,7 +233,7 @@ async function rebuildFuelLogs(simulated: ReadonlySet<string>, today: string): P
     rebuilt++;
     written += plan.length;
   }
-  return { vehicles: rebuilt, fills: written, leftAlone };
+  return { vehicles: rebuilt, fills: written, appFillUps, notOwned };
 }
 
 /** The fill-ups the seed writes go 42 days back: the rebuilt window covers them, and the simulated days. */
@@ -295,6 +299,7 @@ async function main(): Promise<void> {
     regulatorId: regulator.id,
     driverAccounts: new Map(driverAccounts.flatMap((user) => (user.driverId ? [[user.driverId, user.id] as const] : []))),
     lateCancellationHours: settings?.lateCancellationHours ?? DEFAULT_LATE_CANCELLATION_HOURS,
+    simulatedDates: new Set(dates),
     ...(await loadDayResources()),
   };
   const reports: DayReport[] = [];
@@ -329,9 +334,17 @@ async function main(): Promise<void> {
   if (simulatedDates.size > 0) {
     const fuel = await rebuildFuelLogs(simulatedDates, today);
     console.log(
-      `• Pleins et relevés de compteur reconstruits d'après les km simulés : ${plural(fuel.vehicles, "véhicule")}, ${plural(fuel.fills, "plein")}` +
-        (fuel.leftAlone > 0 ? ` (${plural(fuel.leftAlone, "véhicule laissé", "véhicules laissés")} tels quels : pleins saisis dans l'application)` : ""),
+      `• Pleins et relevés de compteur reconstruits d'après les km simulés : ${plural(fuel.vehicles, "véhicule")}, ${plural(fuel.fills, "plein")}`,
     );
+    if (fuel.appFillUps > 0) {
+      console.log(`  ${plural(fuel.appFillUps, "véhicule laissé", "véhicules laissés")} tels quels : pleins saisis dans l'application`);
+    }
+    if (fuel.notOwned > 0) {
+      console.log(
+        `  ${plural(fuel.notOwned, "véhicule laissé", "véhicules laissés")} tels quels : aucun plein du seed actuel ni de la simulation ` +
+          "(pleins d'un ancien seed ou de l'application), non reconstruits",
+      );
+    }
   }
 
   const days = computeKpisByDay(first, last, await loadKpiRows(prisma, first, last), today);

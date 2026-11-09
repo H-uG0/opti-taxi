@@ -133,8 +133,9 @@ inchangé (générateurs séparés).
 défaut) avec les modules de l'application : génération des courses et courses ponctuelles, absences et
 véhicules au garage, optimisation, courses figées pour les patients qui demandent leur chauffeur, réponses
 de partage, courses non placées confiées à un confrère, annulations, absences, horaires réels saisis par
-environ 85 % des équipages, validation, journal d'audit, puis pleins et relevés de compteur recalculés
-d'après les km simulés. Le tableau de bord et le planning marquent ces jours « simulé ». Il ne touche jamais
+environ 85 % des équipages, validation, journal d'audit (créations comprises), puis pleins et relevés de
+compteur recalculés d'après les km simulés. Le tableau de bord, le planning, Courses, Équipages et Arrivées
+partagées marquent ces jours « simulé » (« Journée simulée »). Il ne touche jamais
 aujourd'hui ni les jours suivants, laisse tels quels les jours qui contiennent des données qu'il n'a pas
 créées (les jours du seed, un jour planifié dans l'application) et remonte d'autant, et peut être
 relancé (il remplace sa simulation précédente). Comme le seed, il refuse une base qui n'est pas locale
@@ -283,12 +284,20 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
   affectées : relancer « Optimiser demain » ou augmenter le temps dans Paramètres.
 - **Marge estimée** : c'est une marge sur coûts variables (CA − km × coût/km − heures de tournée ×
   coût horaire), avant frais fixes. Sur les données fictives recalibrées (journal des améliorations,
-  lot 8), elle est légèrement positive sur une journée type (+550 € sur 4 jours pour les 10 véhicules
-  du jeu de base, +2 000 à +2 300 € par jour pour la grande flotte), mais reste négative pour les
-  ambulances du petit jeu et pour les VSL en ville : la grille ne connaît pas encore les suppléments
-  « trajet court », « grande ville » ni les majorations (lot tarifaire à venir), et le coût horaire
-  est compté sur toute l'amplitude de la tournée. Les vrais coûts et grilles se saisissent dans
-  Tarifs, Véhicules et Chauffeurs.
+  lot 8), le planning J+1 calculé est légèrement positif (+1 156 € sur 4 jours de semaine pour les
+  10 véhicules du jeu de base, 24 tournées positives sur 40 ; +2 000 à +2 500 € par jour pour la
+  grande flotte). **Les journées simulées par `pnpm db:history`, que le tableau de bord montre
+  d'abord, ne le sont pas** : sur 20 jours, +261 € pour les 16 jours de semaine (67 tournées positives
+  sur 152 ; taxis +5 635 €, VSL −1 681 €, ambulances −3 693 €) et −2 265 € pour les 4 samedis
+  (5 tournées positives sur 24), soit −2 004 € ; la période par défaut du tableau de bord (14 jours,
+  dont 2 samedis) affiche −590 €. Le samedi, 6 véhicules restent mobilisés de 6 h à 18 h pour une
+  vingtaine de courses de dialyse ; en semaine, les plannings validés ne dégagent que +499 € sur 16 jours
+  et les annulations du jour en retirent 238 € ; ambulances et VSL en ville font surtout des courses de
+  3 à 4 km au forfait. La grille ne connaît pas encore les suppléments « trajet court »,
+  « grande ville » ni les majorations (lot tarifaire TAR-01), et le coût horaire est compté sur toute
+  l'amplitude de la tournée : **jusqu'à ce lot, la marge de la période reste négative sur le tableau de
+  bord de la démonstration.** Les vrais coûts et grilles se saisissent dans Tarifs, Véhicules et
+  Chauffeurs (le coût d'un chauffeur est celui d'une heure de tournée, amplitude entière).
 - **Limites de débit** (connexion, géocodage) : en mémoire, valables pour une seule instance du web.
   Sur l'hébergeur HDS, les compléter au niveau du proxy : nginx `limit_req` sur toutes les requêtes
   POST (une Server Action répond à n'importe quelle URL de page, une règle sur `POST /login` seule se

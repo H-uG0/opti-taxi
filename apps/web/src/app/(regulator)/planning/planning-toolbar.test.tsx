@@ -63,14 +63,19 @@ describe("PlanningToolbar (barre d'outils)", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 
-  it("closes the question with « Annuler » or Escape without validating", async () => {
+  it("closes the question with « Annuler » or Escape without validating, the focus back on « Valider le planning »", async () => {
     renderToolbar();
-    fireEvent.click(screen.getByRole("button", { name: /Valider le planning/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Annuler" }));
+    const validateButton = screen.getByRole("button", { name: /Valider le planning/ });
+    fireEvent.click(validateButton);
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("Valider quand même"));
+    fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
     expect(screen.queryByRole("alertdialog")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Valider le planning/ }));
-    fireEvent.keyDown(await screen.findByRole("alertdialog"), { key: "Escape" });
+    expect(document.activeElement).toBe(validateButton);
+    fireEvent.click(validateButton);
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("Valider quand même"));
+    fireEvent.keyDown(screen.getByRole("alertdialog"), { key: "Escape" });
     expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(document.activeElement).toBe(validateButton);
     expect(actions.validateDay).toHaveBeenCalledTimes(2);
   });
 

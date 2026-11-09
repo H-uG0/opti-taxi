@@ -30,7 +30,9 @@ export type OwnershipFilters = {
 /**
  * Rows of `serviceDate` created by the simulation (what a re-run deletes; stops go with routes and trips):
  * also the one-off prescriptions of its trips, and the absences and vehicles off the road that start on
- * the date, found by the date in their id (they have no service date).
+ * the date, found by the date in their id (they have no service date). A one-off prescription that a trip
+ * or a recurrence created in the app now uses is kept (deleted after the trips of the date, so only such
+ * trips remain): deleting it would unlink that trip and delete that recurrence.
  */
 export function simulatedRowsWhere(serviceDate: Date): OwnershipFilters & {
   events: Prisma.AuditEventWhereInput;
@@ -44,7 +46,7 @@ export function simulatedRowsWhere(serviceDate: Date): OwnershipFilters & {
     routes: { serviceDate, optimizationRunId: ownId },
     runs: { serviceDate, id: ownId },
     events: { serviceDate, id: ownId },
-    prescriptions: { id: ofDate },
+    prescriptions: { id: ofDate, trips: { every: { id: ownId } }, recurrences: { none: {} } },
     absences: { id: ofDate },
     unavailabilities: { id: ofDate },
   };

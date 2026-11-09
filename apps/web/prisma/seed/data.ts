@@ -635,7 +635,7 @@ export const PATIENTS: readonly PatientSpec[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// One-off trips for tomorrow.
+// Private clients of tomorrow (counted in tomorrow's one-off episodes, seed/one-off.ts).
 
 export type PrivateClientSpec = {
   area: AreaKey;
@@ -662,23 +662,6 @@ export const PRIVATE_CLIENTS: readonly PrivateClientSpec[] = [
     notes: "Client privé — retour de vol, attente en zone arrivées.",
   },
 ];
-
-/** A CPAM patient with a one-off consultation tomorrow (both legs, no recurrence). */
-export const ONE_OFF_CONSULTATION: {
-  area: AreaKey;
-  facility: FacilityKey;
-  appointment: string;
-  ready: string;
-  prescriber: string;
-  notes: string;
-} = {
-  area: "aixSud",
-  facility: "hospitalMarseille",
-  appointment: "14:30",
-  ready: "16:00",
-  prescriber: "Dr Hugo Ferrier — cardiologie",
-  notes: "Consultation de cardiologie (ponctuelle).",
-};
 
 // ---------------------------------------------------------------------------
 // Occasional patients (one-off trips, seed/one-off.ts).
@@ -717,6 +700,17 @@ export const OCCASIONAL_AREAS: readonly (readonly [AreaKey, number])[] = [
   ["veynes", 5],
 ];
 
-/** Size of the pool of occasional patients and one-off episodes per weekday (small seed). */
+/**
+ * Size of the pool of occasional patients and one-off episodes per weekday
+ * (small seed; at J+1 the two PRIVATE_CLIENTS count in it). Five episodes
+ * (about 8 trips) is what the 10 vehicles take on top of the series: with 8
+ * (about 13 trips, plus 4 written by hand), J+1 had 12 trips without a
+ * vehicle, 8 of them legs of the series; with 5, 3 (the series alone leave
+ * 2). Measured in the journal, lot 8.
+ */
 export const OCCASIONAL_POOL_SIZE = 120;
-export const ONE_OFF_EPISODES_PER_WEEKDAY = 8;
+export const ONE_OFF_EPISODES_PER_WEEKDAY = 5;
+
+/** Pool of occasional patients the large fleet (--fleet) adds, and its one-off episodes per weekday. */
+export const FLEET_OCCASIONAL_POOL_SIZE = 600;
+export const FLEET_ONE_OFF_EPISODES_PER_WEEKDAY = 45;

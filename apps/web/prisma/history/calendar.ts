@@ -92,6 +92,20 @@ export function runFinish(startedAt: Date, wallTimeMs: number, rng: Rng): Date {
   return new Date(startedAt.getTime() + wallTimeMs + rng.int(600, 2_500));
 }
 
+/**
+ * The absences and vehicles off the road that start on the day are recorded
+ * from 40 to 90 min before the first run, 30 to 90 s apart.
+ */
+export function staffRecordInstants(firstRunAt: Date, count: number, rng: Rng): Date[] {
+  let at = plusSeconds(firstRunAt, -rng.int(40 * 60, 90 * 60));
+  const instants: Date[] = [];
+  for (let i = 0; i < count; i++) {
+    instants.push(at);
+    at = plusSeconds(at, rng.int(30, 90));
+  }
+  return instants;
+}
+
 /** Refusals already known (patients who never share) are recorded 5 to 25 min before the first run, 30 to 90 s apart. */
 export function knownRefusalInstants(firstRunAt: Date, count: number, rng: Rng): Date[] {
   let at = plusSeconds(firstRunAt, -rng.int(300, 1_500));

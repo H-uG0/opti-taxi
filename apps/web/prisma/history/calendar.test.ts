@@ -10,6 +10,7 @@ import {
   parisInstant,
   parisOffsetMinutes,
   pickSimulationDates,
+  staffRecordInstants,
   tripGenerationInstant,
   validationInstant,
 } from "./calendar";
@@ -104,6 +105,16 @@ describe("eve-of-day planning instants", () => {
     const answers = answerInstants(run, 5, rng);
     expect(answers[0]!.getTime() - run.getTime()).toBeGreaterThanOrEqual(60_000);
     for (let i = 1; i < answers.length; i++) expect(answers[i]!.getTime()).toBeGreaterThan(answers[i - 1]!.getTime());
+  });
+
+  it("records the day's absences and vehicles off the road from 40 to 90 min before the first run, one after the other", () => {
+    const run = new Date("2026-10-11T14:50:00Z");
+    expect(staffRecordInstants(run, 0, new Rng(2))).toEqual([]);
+    const recorded = staffRecordInstants(run, 4, new Rng(2));
+    expect(run.getTime() - recorded[0]!.getTime()).toBeGreaterThanOrEqual(40 * 60_000);
+    expect(run.getTime() - recorded[0]!.getTime()).toBeLessThanOrEqual(90 * 60_000);
+    for (let i = 1; i < recorded.length; i++) expect(recorded[i]!.getTime()).toBeGreaterThan(recorded[i - 1]!.getTime());
+    expect(recorded.at(-1)!.getTime()).toBeLessThan(run.getTime() - 25 * 60_000);
   });
 
   it("hands unplaced trips over one call after the other, 2 to 5 min apart", () => {

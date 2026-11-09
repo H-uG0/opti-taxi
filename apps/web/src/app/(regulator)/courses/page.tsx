@@ -17,6 +17,8 @@ import { currentHorizon, inHorizon } from "@/lib/trips/completion";
 import { loadRecurrencesWithoutTrip } from "@/lib/trips/missing-load";
 import { generationStateOf, MissingRecurrencesNote } from "@/components/trips/missing-recurrences";
 import { TripCompletion } from "@/components/trips/trip-completion";
+import { SimulatedDayBadge } from "@/components/planning/simulated-day-badge";
+import { isSimulatedDay } from "@/lib/simulated-day";
 import { DayNav } from "./day-nav";
 import { GenerateTripsForm } from "./generate-trips-form";
 import { cancellationTrace, outboundNoShowTrace, sharingAnswerTrace, stopStatusTraces } from "./record-trace";
@@ -59,7 +61,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
   // The day's patients, phones, addresses and notes are on screen (auditRead never throws).
   const traced = auditRead(user, { action: "trip_list.view", entity: "Trip", entityId: null, serviceDate: date });
   const today = todayIso();
-  const [trips, stops, horizon, missing] = await Promise.all([
+  const [trips, stops, horizon, missing, simulated] = await Promise.all([
     db.trip.findMany({
       where: { serviceDate },
       select: {
@@ -116,6 +118,8 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
     // Read only: the trips of a date of the horizon are completed by <TripCompletion> once the page is shown.
     currentHorizon(db, today),
     date >= today ? loadRecurrencesWithoutTrip(date) : Promise.resolve([]),
+    // Its statuses and sharing answers are simulated: said in the header, as on the planning.
+    isSimulatedDay(date),
   ]);
   await traced;
   const completing = inHorizon(date, horizon);
@@ -196,7 +200,12 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
   return (
     <div>
       <PageHeader
-        title="Courses"
+        title={
+          <span className="flex flex-wrap items-center gap-2">
+            <span>Courses</span>
+            {simulated ? <SimulatedDayBadge /> : null}
+          </span>
+        }
         description={capitalize(formatLongDate(date))}
         actions={
           <LinkButton href={`/courses/nouvelle?date=${date}`} variant="primary">

@@ -2,13 +2,25 @@
  * One-off trips of a simulated day (pure, unit-tested): consultations,
  * imaging, admissions, discharges and private clients of the seed's
  * occasional patients (ids "occasional-…", seed/one-off.ts), as on the seeded
- * days. Each care gets its one-off prescription; trips and prescriptions get
- * ids of the date (ids.ts) so that a re-run replaces them. The volume follows
- * the size of the pool: ONE_OFF_EPISODES_PER_WEEKDAY for the small data set's
- * OCCASIONAL_POOL_SIZE patients, proportionally more with --fleet.
+ * days. Each care gets its one-off prescription, valid up to the day of the
+ * care only (never offered for a trip created in the app afterwards); trips
+ * and prescriptions get ids of the date (ids.ts) so that a re-run replaces
+ * them. The volume follows
+ * the size of the pool, at the seed's rates: ONE_OFF_EPISODES_PER_WEEKDAY for
+ * the small data set's OCCASIONAL_POOL_SIZE patients, and those of --fleet
+ * for the patients it adds.
  */
 import type { Mobility, Prisma } from "@prisma/client";
-import { OCCASIONAL_POOL_SIZE, ONE_OFF_EPISODES_PER_WEEKDAY, TOWNS, type AnyFacilityKey, type TownKey } from "../seed/data";
+import { fromIsoDate } from "@/lib/time";
+import {
+  FLEET_OCCASIONAL_POOL_SIZE,
+  FLEET_ONE_OFF_EPISODES_PER_WEEKDAY,
+  OCCASIONAL_POOL_SIZE,
+  ONE_OFF_EPISODES_PER_WEEKDAY,
+  TOWNS,
+  type AnyFacilityKey,
+  type TownKey,
+} from "../seed/data";
 import { drawEpisodes, episodeCount, episodePrescription, episodeTrips, OCCASIONAL_ID_PREFIX } from "../seed/one-off";
 import { rngFor } from "./hash";
 import { historyOneOffTripId, historyPrescriptionId } from "./ids";
@@ -40,9 +52,17 @@ export function isOccasionalPatient(id: string): boolean {
   return id.startsWith(OCCASIONAL_ID_PREFIX);
 }
 
-/** Episodes a weekday for a pool of `poolSize` patients (the small data set's rate). */
+/**
+ * Episodes a weekday for a pool of `poolSize` patients, as the seed draws
+ * them: the small data set's rate for its first OCCASIONAL_POOL_SIZE patients,
+ * the large fleet's for the others.
+ */
 export function episodesPerWeekday(poolSize: number): number {
-  return Math.round((poolSize * ONE_OFF_EPISODES_PER_WEEKDAY) / OCCASIONAL_POOL_SIZE);
+  const small = Math.min(poolSize, OCCASIONAL_POOL_SIZE);
+  const fleet = Math.max(0, poolSize - OCCASIONAL_POOL_SIZE);
+  return Math.round(
+    (small * ONE_OFF_EPISODES_PER_WEEKDAY) / OCCASIONAL_POOL_SIZE + (fleet * FLEET_ONE_OFF_EPISODES_PER_WEEKDAY) / FLEET_OCCASIONAL_POOL_SIZE,
+  );
 }
 
 /**
@@ -72,7 +92,9 @@ export function planOneOffDay(
     const number = index + 1;
     const prescription = episodePrescription(episode, isoDate);
     const prescriptionId = prescription ? historyPrescriptionId(isoDate, number) : null;
-    if (prescription && prescriptionId) result.prescriptions.push({ ...prescription, id: prescriptionId, patientId: episode.patientId });
+    if (prescription && prescriptionId) {
+      result.prescriptions.push({ ...prescription, validTo: fromIsoDate(isoDate), id: prescriptionId, patientId: episode.patientId });
+    }
     for (const trip of episodeTrips(episode, home, destination, isoDate, prescriptionId)) {
       result.trips.push({ ...trip, id: historyOneOffTripId(isoDate, number, trip.direction) });
     }

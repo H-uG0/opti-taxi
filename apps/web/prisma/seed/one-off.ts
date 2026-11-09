@@ -49,7 +49,13 @@ export type OneOffEpisode = {
   /** Days before the date the one-off prescription was written, and days it stays valid after. */
   writtenDaysBefore: number;
   validDaysAfter: number;
-  note: string;
+  /** The care (« Consultation de cardiologie »): written on the one-off prescription only, never on a trip. */
+  careNote: string | null;
+  /**
+   * Note of the trips, shown to the crew on the roadmap: logistics only, never
+   * the reason of the care (a trip note holds no medical information).
+   */
+  tripNote: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -205,6 +211,9 @@ const SPECIALTIES = [
 const GENERAL_PRACTITIONERS = ["Dr Agnès Rolland — médecine générale", "Dr Paul Siméon — médecine générale", "Dr Nora Benali — médecine générale"] as const;
 const HOSPITAL_SERVICES = ["Service de chirurgie orthopédique", "Service de cardiologie", "Service de médecine interne", "Service de chirurgie digestive"] as const;
 
+/** Where the crew picks up a patient going home from a stay (logistics, not the reason of the stay). */
+export const DISCHARGE_TRIP_NOTE = "Prise en charge dans le service : se présenter à l'accueil.";
+
 function weighted<T>(rng: Rng, items: readonly (readonly [T, number])[]): T {
   const total = items.reduce((sum, [, weight]) => sum + weight, 0);
   let draw = rng.float(0, total);
@@ -288,7 +297,8 @@ function drawEpisode(rng: Rng, patient: OccasionalPatient): OneOffEpisode {
       prescriber: null,
       writtenDaysBefore: 0,
       validDaysAfter: 0,
-      note: direction === "OUTBOUND" ? "Client privé — départ en voyage, bagages." : "Client privé — retour de voyage, attente à l'arrivée.",
+      careNote: null,
+      tripNote: direction === "OUTBOUND" ? "Client privé — départ en voyage, bagages." : "Client privé — retour de voyage, attente à l'arrivée.",
     };
   }
 
@@ -313,7 +323,8 @@ function drawEpisode(rng: Rng, patient: OccasionalPatient): OneOffEpisode {
         appointmentMinute: appointment,
         readyMinute: appointment + rng.pick([45, 60, 75, 90]),
         prescriber: specialty.prescriber,
-        note: `Consultation de ${specialty.label} (ponctuelle).`,
+        careNote: `Consultation de ${specialty.label} (ponctuelle).`,
+        tripNote: null,
       };
     }
     case "IMAGING": {
@@ -325,7 +336,8 @@ function drawEpisode(rng: Rng, patient: OccasionalPatient): OneOffEpisode {
         appointmentMinute: appointment,
         readyMinute: appointment + rng.pick([30, 45, 60]),
         prescriber: rng.pick(GENERAL_PRACTITIONERS),
-        note: "Examen d'imagerie (ponctuel).",
+        careNote: "Examen d'imagerie (ponctuel).",
+        tripNote: null,
       };
     }
     case "ADMISSION":
@@ -336,7 +348,8 @@ function drawEpisode(rng: Rng, patient: OccasionalPatient): OneOffEpisode {
         appointmentMinute: slot(rng, rng.chance(MORNING_SHARE) ? SLOTS.admissionMorning : SLOTS.admissionAfternoon),
         readyMinute: null,
         prescriber: rng.pick(GENERAL_PRACTITIONERS),
-        note: "Entrée en hospitalisation (aller simple).",
+        careNote: "Entrée en hospitalisation (aller simple).",
+        tripNote: null,
       };
     case "DISCHARGE":
       return {
@@ -347,7 +360,8 @@ function drawEpisode(rng: Rng, patient: OccasionalPatient): OneOffEpisode {
         appointmentMinute: null,
         readyMinute: slot(rng, referral ? SLOTS.referral : SLOTS.discharge),
         prescriber: rng.pick(HOSPITAL_SERVICES),
-        note: "Sortie d'hospitalisation (retour à domicile).",
+        careNote: "Sortie d'hospitalisation (retour à domicile).",
+        tripNote: DISCHARGE_TRIP_NOTE,
       };
   }
 }
@@ -389,6 +403,54 @@ export function drawOccasionalMobility(rng: Rng, town: TownKey, lyingShare?: num
   ]);
 }
 
+/**
+ * The episodes of every day from `from` to `to` (the seeded fortnight), drawn
+ * in date order from `rng`: all of them up to tomorrow, fewer for the days
+ * further ahead (not booked yet, bookedShare). `alreadyBooked` counts the
+ * episodes a day already has (the seed's two private clients of tomorrow):
+ * they are part of its volume, so J+1 gets about `perWeekday` episodes in
+ * all, no more.
+ */
+export function planOneOffDays(
+  rng: Rng,
+  pool: readonly OccasionalPatient[],
+  dates: { from: string; to: string; today: string },
+  perWeekday: number,
+  alreadyBooked: ReadonlyMap<string, number> = new Map(),
+): { date: string; episodes: OneOffEpisode[] }[] {
+  const days: { date: string; episodes: OneOffEpisode[] }[] = [];
+  for (let day = dates.from; day <= dates.to; day = addDays(day, 1)) {
+    const daysAhead = Math.round((fromIsoDate(day).getTime() - fromIsoDate(dates.today).getTime()) / 86_400_000);
+    const count = Math.max(0, episodeCount(perWeekday, day, rng, bookedShare(daysAhead)) - (alreadyBooked.get(day) ?? 0));
+    days.push({ date: day, episodes: drawEpisodes(pool, count, rng) });
+  }
+  return days;
+}
+
+/** A private client's trip written by hand (seed/data.ts PRIVATE_CLIENTS) as an episode, for episodeTrips. */
+export function privateClientEpisode(
+  patientId: string,
+  client: { direction: TripDirection; place: Place; minute: number; notes: string },
+): OneOffEpisode {
+  return {
+    patientId,
+    kind: "PRIVATE",
+    facilityKey: null,
+    place: client.place,
+    legs: [client.direction],
+    appointmentMinute: client.direction === "OUTBOUND" ? client.minute : null,
+    readyMinute: client.direction === "RETURN" ? client.minute : null,
+    payer: "PRIVATE",
+    mode: null,
+    sharing: null,
+    prescriber: null,
+    writtenDaysBefore: 0,
+    validDaysAfter: 0,
+    careNote: null,
+    tripNote: client.notes,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Rows
 
@@ -405,7 +467,7 @@ export function episodePrescription(
     validTo: fromIsoDate(addDays(isoDate, episode.validDaysAfter)),
     isSeries: false,
     prescriber: episode.prescriber,
-    notes: `PMT ponctuelle. ${episode.note}`,
+    notes: episode.careNote ? `PMT ponctuelle. ${episode.careNote}` : "PMT ponctuelle.",
   };
 }
 
@@ -445,7 +507,7 @@ export function episodeTrips(
       readyMinute: direction === "RETURN" ? episode.readyMinute : null,
       sharingAllowed,
       sharingStatus: initialSharingStatus(sharingAllowed),
-      notes: episode.note,
+      notes: episode.tripNote,
     };
   });
 }

@@ -11,6 +11,7 @@ import { EmptyState, PageHeader } from "@/components/ui/layout";
 import { AvailabilityNotes } from "@/components/planning/availability-notes";
 import { KpiStrip } from "@/components/planning/kpi-strip";
 import { RunBanner } from "@/components/planning/run-banner";
+import { SimulatedDayBadge } from "@/components/planning/simulated-day-badge";
 import { TariffGapBanner } from "@/components/planning/tariff-gap-banner";
 import { formatDayMonth, formatInstant, pluralize } from "@/lib/planning/format";
 import { loadPlanningDay } from "@/lib/planning/load";
@@ -132,13 +133,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
             {view.dayStatus === "VALIDATED" ? <Badge tone="success">Validé</Badge> : null}
             {view.dayStatus === "PROPOSED" ? <Badge tone="info">Proposé</Badge> : null}
             {view.dayStatus === "MIXED" ? <Badge tone="warning">Partiellement validé</Badge> : null}
-            {isSimulatedId(view.planRun?.id ?? view.lastRun?.id) ? (
-              <Badge tone="simulated">
-                <span title="Journée produite par la simulation d'historique (pnpm db:history) : données fictives, statuts et retards simulés">
-                  Journée simulée
-                </span>
-              </Badge>
-            ) : null}
+            {isSimulatedId(view.planRun?.id ?? view.lastRun?.id) ? <SimulatedDayBadge /> : null}
           </span>
         }
         description={headerDescription(view, availableVehicles)}

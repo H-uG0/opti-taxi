@@ -222,10 +222,10 @@ export function DriverForm({
 
       <Fieldset legend="Coût">
         <Field
-          label="Coût horaire chargé (€/h)"
+          label="Coût d'une heure de tournée (€/h)"
           htmlFor="hourlyCost"
           error={errors.hourlyCost}
-          hint="Salaire et charges : utilisé par l'optimiseur pour calculer la marge des tournées."
+          hint="L'optimiseur multiplie ce coût par toute la durée de la tournée, du départ au retour au dépôt, pause comprise. Saisissez le coût chargé (salaire, charges, congés, heures supplémentaires) ramené à cette durée : par exemple 17,50 € pour un salarié qui coûte 18,60 € par heure travaillée et dont 94 % de la tournée est payée."
         >
           <UnitInput
             id="hourlyCost"
@@ -233,7 +233,7 @@ export function DriverForm({
             required
             inputMode="decimal"
             autoComplete="off"
-            placeholder="24"
+            placeholder="18"
             unit="€/h"
             className="sm:max-w-48"
             defaultValue={valueOf(values, "hourlyCost")}

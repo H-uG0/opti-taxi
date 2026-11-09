@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { crewHoldsRequired, REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
-import { area, DEPOTS, FLEET_DEPOTS, REPLACEMENT_DRIVER_DEPOTS, VEHICLES, type FleetDepotKey } from "./data";
-import { drawRegistration, FLEET_VEHICLE_MIX, planFleet, planFleetAbsences, planFleetPatients } from "./fleet";
+import type { Qualification } from "@prisma/client";
+import { area, DEPOTS, DRIVERS, FLEET_DEPOTS, REPLACEMENT_DRIVER_DEPOTS, VEHICLES, type DriverKey, type FleetDepotKey } from "./data";
+import { drawRegistration, FLEET_VEHICLE_MIX, missingReplacements, planFleet, planFleetAbsences, planFleetPatients } from "./fleet";
 import { NameFactory, STAFF_FIRST_NAMES } from "./identity";
 import { hubOf } from "./one-off";
 import { Rng } from "./random";
@@ -9,8 +10,10 @@ import { Rng } from "./random";
 const labels = Object.fromEntries(
   Object.entries({ ...DEPOTS, ...FLEET_DEPOTS }).map(([key, def]) => [key, def.label]),
 ) as Record<FleetDepotKey, string>;
-const replacements: Partial<Record<FleetDepotKey, number>> = {};
-for (const depot of Object.values(REPLACEMENT_DRIVER_DEPOTS)) if (depot) replacements[depot] = (replacements[depot] ?? 0) + 1;
+const replacements: Partial<Record<FleetDepotKey, Qualification[][]>> = {};
+for (const [key, depot] of Object.entries(REPLACEMENT_DRIVER_DEPOTS)) {
+  if (depot) replacements[depot] = [...(replacements[depot] ?? []), [...DRIVERS[key as DriverKey].qualifications]];
+}
 
 function plan(seed = 1) {
   return planFleet(
@@ -59,6 +62,24 @@ describe("large fleet", () => {
     expect(new Set(plates).size).toBe(plates.length);
     expect(new Set(plan().people.map((p) => p.shift.join("-"))).size).toBeGreaterThanOrEqual(4);
     expect(plan(1)).toEqual(plan(1));
+  });
+
+  it("ends with one taxi-card and one DEA replacement at every depot, whatever kind the small data set already has", () => {
+    const { people, vehicles } = plan();
+    const crews = new Set(vehicles.flatMap((v) => [v.driver, v.crewMate]));
+    for (const depot of Object.keys(FLEET_VEHICLE_MIX) as FleetDepotKey[]) {
+      const added = people.filter((p, index) => p.depot === depot && !crews.has(index)).map((p) => p.qualifications);
+      const all = [...(replacements[depot] ?? []), ...added];
+      expect(all).toHaveLength(2);
+      expect(all.filter((q) => q.includes("TAXI_CARD"))).toHaveLength(1);
+      expect(all.filter((q) => q.includes("DEA"))).toHaveLength(1);
+    }
+    // Gap already has Sabrina (DEA): only the taxi-card replacement is added there.
+    expect(replacements.gap).toEqual([["DEA", "AUXILIARY"]]);
+    expect(missingReplacements([["DEA", "AUXILIARY"]])).toEqual([["TAXI_CARD", "AUXILIARY"]]);
+    expect(missingReplacements([["TAXI_CARD", "AUXILIARY"]])).toEqual([["DEA", "AUXILIARY"]]);
+    expect(missingReplacements([])).toHaveLength(2);
+    expect(missingReplacements([["TAXI_CARD"], ["DEA"]])).toEqual([]);
   });
 
   it("draws registrations in the French format, never one already taken", () => {

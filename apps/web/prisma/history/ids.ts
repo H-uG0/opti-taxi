@@ -2,8 +2,9 @@
  * Ids of the rows the history script creates. Trips, one-off prescriptions,
  * optimization runs, audit events, absences, vehicles off the road and
  * rebuilt fill-ups get an id with the HISTORY_ID_PREFIX (routes are found
- * through their run, stops go with their route): a re-run deletes exactly
- * these rows and nothing else. Ids stay under the 64 characters the forms accept.
+ * through their run, stops go with their route): a re-run deletes only these
+ * rows (and keeps a one-off prescription that a trip created in the app uses,
+ * ownership.ts). Ids stay under the 64 characters the forms accept.
  */
 import type { TripDirection } from "@prisma/client";
 import { isSimulatedId, SIMULATED_ID_PREFIX } from "@/lib/simulated";

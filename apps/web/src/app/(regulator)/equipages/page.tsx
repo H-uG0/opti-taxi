@@ -2,10 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import type { VehicleType } from "@prisma/client";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
+import { SimulatedDayBadge } from "@/components/planning/simulated-day-badge";
 import { FormMessage } from "@/components/ui/form";
 import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { isSimulatedDay } from "@/lib/simulated-day";
 import { loadDayCrewContext } from "@/lib/optimizer/build-request";
 import { vehicleIssues } from "@/lib/planning/route-issues";
 import { replanBlocker } from "@/lib/planning/run-optimization";
@@ -30,12 +32,13 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
   const tomorrow = tomorrowIso();
   const date = isIsoDate(requested) ? requested : tomorrow;
 
-  const [context, vehicles, depots, locked, routes] = await Promise.all([
+  const [context, vehicles, depots, locked, routes, simulated] = await Promise.all([
     loadDayCrewContext(db, date),
     db.vehicle.findMany({ where: { active: true }, select: { id: true, label: true, type: true, registration: true, depotId: true } }),
     db.depot.findMany({ select: { id: true, name: true } }),
     replanBlocker(date),
     db.route.findMany({ where: { serviceDate: fromIsoDate(date) }, select: { vehicleId: true, driverId: true, crewMateId: true } }),
+    isSimulatedDay(date),
     // Everyone's absences of the day are on screen.
     auditRead(user, { action: "day_crew.view", entity: "DayCrew", entityId: null, serviceDate: date }),
   ]);
@@ -131,7 +134,12 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
   return (
     <>
       <PageHeader
-        title={`Équipages du ${formatLongDate(date)}`}
+        title={
+          <span className="flex flex-wrap items-center gap-2">
+            <span>Équipages du {formatLongDate(date)}</span>
+            {simulated ? <SimulatedDayBadge /> : null}
+          </span>
+        }
         description={summary.join(" · ")}
         actions={<DateNav date={date} tomorrow={tomorrow} basePath="/equipages" />}
       />

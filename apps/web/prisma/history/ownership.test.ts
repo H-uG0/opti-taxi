@@ -6,7 +6,7 @@ import { foreignRowsWhere, simulatedRowsWhere } from "./ownership";
  * with SQL's three-valued logic: a comparison with NULL is unknown (null), and
  * NOT of unknown stays unknown, so the row is not matched.
  */
-type Row = Record<string, string | Date | null>;
+type Row = { [key: string]: string | Date | null | Row[] };
 type Truth = boolean | null;
 
 function evaluate(where: object, row: Row): Truth {
@@ -24,6 +24,11 @@ function evaluate(where: object, row: Row): Truth {
     } else if (key === "OR") {
       const parts = (condition as object[]).map((part) => evaluate(part, row));
       value = parts.includes(true) ? true : parts.includes(null) ? null : false;
+    } else if (typeof condition === "object" && condition !== null && ("every" in condition || "none" in condition)) {
+      // A to-many relation: `every` holds on each related row (true when there is none), `none` on no row.
+      const related = (row[key] ?? []) as Row[];
+      if ("every" in condition) value = related.every((other) => evaluate(condition.every as object, other) === true);
+      else value = !related.some((other) => evaluate(condition.none as object, other) === true);
     } else {
       const cell = row[key];
       if (condition === null) value = cell === null;
@@ -121,12 +126,23 @@ describe("rows of the date found by their id", () => {
   const own = simulatedRowsWhere(day);
 
   it("deletes the one-off prescriptions, absences and vehicles off the road the simulation wrote for the date", () => {
-    expect(matches(own.prescriptions, { id: "hist-20261012-rx07" })).toBe(true);
-    expect(matches(own.prescriptions, { id: "hist-20261013-rx07" })).toBe(false);
-    expect(matches(own.prescriptions, { id: "cmvziv4z5003obers45zpe61a" })).toBe(false);
+    expect(matches(own.prescriptions, { id: "hist-20261012-rx07", trips: [], recurrences: [] })).toBe(true);
+    expect(matches(own.prescriptions, { id: "hist-20261012-rx07", trips: [{ id: "hist-20261012-oneoff07-out" }], recurrences: [] })).toBe(true);
+    expect(matches(own.prescriptions, { id: "hist-20261013-rx07", trips: [], recurrences: [] })).toBe(false);
+    expect(matches(own.prescriptions, { id: "cmvziv4z5003obers45zpe61a", trips: [], recurrences: [] })).toBe(false);
     expect(matches(own.absences, { id: "hist-20261012-abs03" })).toBe(true);
     expect(matches(own.absences, { id: "hist-20261013-abs03" })).toBe(false);
     expect(matches(own.unavailabilities, { id: "hist-20261012-una01" })).toBe(true);
     expect(matches(own.unavailabilities, { id: "cmvzuna" })).toBe(false);
+  });
+
+  it("keeps a simulated prescription that a trip or a recurrence created in the app uses", () => {
+    // Tomorrow's trip created in « Nouvelle course » on a one-off PMT of a simulated day.
+    const appTrip = { id: "cmvzapptrip" };
+    expect(matches(own.prescriptions, { id: "hist-20261012-rx07", trips: [appTrip], recurrences: [] })).toBe(false);
+    expect(matches(own.prescriptions, { id: "hist-20261012-rx07", trips: [{ id: "hist-20261012-oneoff07-out" }, appTrip], recurrences: [] })).toBe(
+      false,
+    );
+    expect(matches(own.prescriptions, { id: "hist-20261012-rx07", trips: [], recurrences: [{ id: "cmvzrec" }] })).toBe(false);
   });
 });

@@ -3,7 +3,8 @@
  * (patients, facilities, fleet, staff, tariffs, accounts and two weeks of
  * trips) for the Marseille – Grenoble axis.
  *
- * Run with `pnpm db:seed` (prisma db seed -> tsx prisma/seed.ts). It must not
+ * Run with `pnpm db:seed [--fleet]` (tsx prisma/seed.ts; `prisma migrate reset`
+ * runs the same script through package.json#prisma.seed). It must not
  * import "@/lib/db" or anything marked "server-only": it owns its client.
  * Development only: it refuses a database that is not on this machine or that
  * holds accounts it did not create (prisma/safety.ts, SEED_ALLOW_WIPE=1 to force).
@@ -13,20 +14,13 @@ import {
   type EnergyType,
   type PrescribedMode,
   type Prisma,
+  type Qualification,
   type SharingScope,
   type TripDirection,
   type VehicleType,
 } from "@prisma/client";
 import { hashPassword } from "@/lib/auth/password";
-import {
-  allowedVehicleTypesFor,
-  crewHoldsRequired,
-  DEFAULT_CAPACITY,
-  formatAddress,
-  initialSharingStatus,
-  REQUIRED_QUALIFICATIONS,
-  sharingAllowedFor,
-} from "@/lib/domain/rules";
+import { crewHoldsRequired, DEFAULT_CAPACITY, formatAddress, REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
 import { generateTrips } from "@/lib/domain/trip-generation";
 import { logError } from "@/lib/log";
 import {
@@ -50,9 +44,10 @@ import {
   REPLACEMENT_DRIVER_DEPOTS,
   FACILITIES,
   facilityLocation,
+  FLEET_OCCASIONAL_POOL_SIZE,
+  FLEET_ONE_OFF_EPISODES_PER_WEEKDAY,
   OCCASIONAL_AREAS,
   OCCASIONAL_POOL_SIZE,
-  ONE_OFF_CONSULTATION,
   ONE_OFF_EPISODES_PER_WEEKDAY,
   ONE_OFF_FACILITIES,
   PATIENTS,
@@ -74,15 +69,14 @@ import {
 import { FLEET_PATIENT_AREAS, FLEET_VEHICLE_MIX, planFleet, planFleetAbsences, planFleetPatients } from "./seed/fleet";
 import { costPerKmFor, FUEL_LOG_SEED_PREFIX, fuelProfileOf, hourlyCostFor } from "./seed/costs";
 import {
-  bookedShare,
-  drawEpisodes,
   drawOccasionalMobility,
-  episodeCount,
   episodePrescription,
   episodeTrips,
   FLEET_LYING_SHARE,
   hubOf,
   OCCASIONAL_ID_PREFIX,
+  planOneOffDays,
+  privateClientEpisode,
   type OccasionalPatient,
 } from "./seed/one-off";
 import { liftAuditGuard, restoreAuditGuard } from "./audit-guard";
@@ -621,110 +615,24 @@ async function seedPrescriptionFollowUp(rng: Rng, facilities: Map<FacilityKey, C
 }
 
 // ---------------------------------------------------------------------------
-// One-off trips for tomorrow and sharing refusals.
+// Private clients of tomorrow and sharing refusals.
 
-function legPlaces(direction: TripDirection, home: Place, care: { address: string; lat: number; lng: number }) {
-  const homePlace = { address: formatAddress(home), lat: home.lat, lng: home.lng };
-  const [pickup, dropoff] = direction === "OUTBOUND" ? [homePlace, care] : [care, homePlace];
-  return {
-    pickupAddress: pickup.address,
-    pickupLat: pickup.lat,
-    pickupLng: pickup.lng,
-    dropoffAddress: dropoff.address,
-    dropoffLat: dropoff.lat,
-    dropoffLng: dropoff.lng,
-  };
-}
-
-/** Two private taxi clients and one CPAM consultation (both legs): 4 trips outside any recurrence. */
-async function seedOneOffTrips(
-  rng: Rng,
-  names: NameFactory,
-  facilities: Map<FacilityKey, CreatedFacility>,
-  dates: Dates,
-): Promise<number> {
-  const serviceDate = fromIsoDate(dates.tomorrow);
-  let created = 0;
-
+/**
+ * Two private taxi clients tomorrow, with hand-written notes (station, airport):
+ * one-off episodes counted in tomorrow's volume (seedOneOffDays). Returns how many.
+ */
+async function seedPrivateClients(rng: Rng, names: NameFactory, dates: Dates): Promise<number> {
   for (const client of PRIVATE_CLIENTS) {
     const home = homeIn(rng, client.area);
+    // Paying on board follows from the payer (PRIVATE): the roadmap says it, not the access notes.
     const patient = await prisma.patient.create({
-      data: {
-        ...names.next(),
-        phone: fictitiousMobile(rng),
-        ...home,
-        mobility: "SEATED",
-        // Paying on board follows from the payer (PRIVATE): the roadmap says it, not the access notes.
-      },
+      data: { ...names.next(), phone: fictitiousMobile(rng), ...home, mobility: "SEATED" },
+      select: { id: true },
     });
-    const sharingAllowed = sharingAllowedFor(null, client.direction, null, "PRIVATE");
-    await prisma.trip.create({
-      data: {
-        serviceDate,
-        direction: client.direction,
-        patientId: patient.id,
-        payer: "PRIVATE",
-        allowedVehicleTypes: allowedVehicleTypesFor(null, "PRIVATE"),
-        ...legPlaces(client.direction, home, client.place),
-        appointmentMinute: client.direction === "OUTBOUND" ? minute(client.time) : null,
-        readyMinute: client.direction === "RETURN" ? minute(client.time) : null,
-        sharingAllowed,
-        sharingStatus: initialSharingStatus(sharingAllowed),
-        notes: client.notes,
-      },
-    });
-    created++;
+    const episode = privateClientEpisode(patient.id, { ...client, minute: minute(client.time) });
+    await prisma.trip.createMany({ data: episodeTrips(episode, home, { id: null, ...client.place }, dates.tomorrow, null) });
   }
-
-  const consultation = ONE_OFF_CONSULTATION;
-  const facility = lookup(facilities, consultation.facility, "Établissement");
-  const home = homeIn(rng, consultation.area);
-  const patient = await prisma.patient.create({
-    data: {
-      ...names.next(),
-      phone: fictitiousMobile(rng),
-      ...home,
-      mobility: "SEATED",
-      prescriptions: {
-        create: {
-          mode: "TAP",
-          sharing: "BOTH",
-          validFrom: fromIsoDate(dates.today),
-          validTo: fromIsoDate(addDays(dates.today, 30)),
-          isSeries: false,
-          prescriber: consultation.prescriber,
-          notes: consultation.notes,
-        },
-      },
-    },
-    select: { id: true, prescriptions: { select: { id: true, mode: true, sharing: true } } },
-  });
-  const prescription = patient.prescriptions[0];
-  if (!prescription) throw new Error("Prescription non créée");
-
-  const care = { address: formatAddress(facility), lat: facility.lat, lng: facility.lng };
-  for (const direction of ["OUTBOUND", "RETURN"] as const) {
-    const sharingAllowed = sharingAllowedFor(prescription.sharing, direction, prescription.mode, "CPAM");
-    await prisma.trip.create({
-      data: {
-        serviceDate,
-        direction,
-        patientId: patient.id,
-        prescriptionId: prescription.id,
-        facilityId: facility.id,
-        payer: "CPAM",
-        allowedVehicleTypes: allowedVehicleTypesFor(prescription.mode, "CPAM"),
-        ...legPlaces(direction, home, care),
-        appointmentMinute: direction === "OUTBOUND" ? minute(consultation.appointment) : null,
-        readyMinute: direction === "RETURN" ? minute(consultation.ready) : null,
-        sharingAllowed,
-        sharingStatus: initialSharingStatus(sharingAllowed),
-        notes: consultation.notes,
-      },
-    });
-    created++;
-  }
-  return created;
+  return PRIVATE_CLIENTS.length;
 }
 
 const REFUSAL_NOTES: Record<TripDirection, string> = {
@@ -858,9 +766,9 @@ async function seedOccasionalPatients(
 }
 
 /**
- * One-off trips of every day of the seeded fortnight: all of them up to
- * tomorrow, fewer for the days further ahead (not booked yet, bookedShare).
- * Each care gets its one-off prescription.
+ * One-off trips of every day of the seeded fortnight (planOneOffDays): all of
+ * them up to tomorrow, fewer for the days further ahead. Each care gets its
+ * one-off prescription.
  */
 async function seedOneOffDays(
   rng: Rng,
@@ -868,14 +776,15 @@ async function seedOneOffDays(
   facilities: Map<AnyFacilityKey, CreatedFacility>,
   dates: Dates,
   perWeekday: number,
+  options: { alreadyBooked?: ReadonlyMap<string, number> } = {},
 ): Promise<{ episodes: number; trips: number }> {
   const homeOf = new Map(pool.map((p) => [p.id, p.home]));
   let episodes = 0;
   let trips = 0;
-  for (let day = dates.monday; day <= dates.lastDay; day = addDays(day, 1)) {
-    const daysAhead = Math.round((fromIsoDate(day).getTime() - fromIsoDate(dates.today).getTime()) / 86_400_000);
-    const count = episodeCount(perWeekday, day, rng, bookedShare(daysAhead));
-    for (const episode of drawEpisodes(pool, count, rng)) {
+  const window = { from: dates.monday, to: dates.lastDay, today: dates.today };
+  const days = planOneOffDays(rng, pool, window, perWeekday, options.alreadyBooked);
+  for (const { date: day, episodes: planned } of days) {
+    for (const episode of planned) {
       const home = lookup(homeOf, episode.patientId, "Patient occasionnel");
       const facility = episode.facilityKey ? lookup(facilities, episode.facilityKey, "Établissement") : null;
       const destination = facility
@@ -899,10 +808,8 @@ async function seedOneOffDays(
 
 /** Generators of the large fleet: none of the small data set's draws changes with --fleet. */
 const FLEET_SEED = RANDOM_SEED + 20;
-/** Patients of the series added by --fleet, and one-off care a weekday for its pool of occasional patients. */
+/** Patients of the series added by --fleet (its occasional patients: FLEET_OCCASIONAL_POOL_SIZE in seed/data.ts). */
 const FLEET_SERIES_PATIENTS = 130;
-const FLEET_OCCASIONAL_POOL_SIZE = 600;
-const FLEET_ONE_OFF_EPISODES_PER_WEEKDAY = 45;
 
 type FleetSummary = { depots: number; vehicles: number; people: number; absences: number; unavailabilities: number; patients: number };
 
@@ -939,8 +846,10 @@ async function seedLargeFleet(
   ) as Record<FleetDepotKey, string>;
 
   const existingDrivers = await prisma.driver.findMany({ select: { firstName: true, lastName: true } });
-  const replacements: Partial<Record<FleetDepotKey, number>> = {};
-  for (const depot of Object.values(REPLACEMENT_DRIVER_DEPOTS)) if (depot) replacements[depot] = (replacements[depot] ?? 0) + 1;
+  const replacements: Partial<Record<FleetDepotKey, Qualification[][]>> = {};
+  for (const [key, depot] of Object.entries(REPLACEMENT_DRIVER_DEPOTS)) {
+    if (depot) replacements[depot] = [...(replacements[depot] ?? []), [...DRIVERS[key as DriverKey].qualifications]];
+  }
   const plan = planFleet(
     new Rng(FLEET_SEED),
     new NameFactory(new Rng(FLEET_SEED + 1), existingDrivers, { firstNames: STAFF_FIRST_NAMES, extended: true }),
@@ -1212,15 +1121,16 @@ async function main(): Promise<void> {
   console.log(`• Courses générées du ${formatShortDate(dates.monday)} au ${formatShortDate(dates.lastDay)}`);
   const generated = await generateTrips(prisma, dates.monday, dates.lastDay);
   console.log(`  ${generated.created} courses créées (${generated.planned} prévues par les récurrences)`);
-  console.log("• Courses ponctuelles de demain et refus de partage");
-  const oneOff = await seedOneOffTrips(rng, names, facilities, dates);
-  console.log(`  ${oneOff} courses ponctuelles`);
+  console.log("• Clients privés et refus de partage de demain");
+  const privateClients = await seedPrivateClients(rng, names, dates);
   const refusals = await seedSharingRefusals(dates, regulatorId);
   console.log(`• Patients occasionnels et leurs courses ponctuelles du ${formatShortDate(dates.monday)} au ${formatShortDate(dates.lastDay)}`);
   // Own generators: the patients and trips drawn above stay those of the earlier seeds.
   const pool = await seedOccasionalPatients(new Rng(RANDOM_SEED + 7), OCCASIONAL_POOL_SIZE, OCCASIONAL_AREAS);
   const allFacilities = new Map<AnyFacilityKey, CreatedFacility>([...facilities, ...oneOffFacilities]);
-  const episodes = await seedOneOffDays(new Rng(RANDOM_SEED + 8), pool, allFacilities, dates, ONE_OFF_EPISODES_PER_WEEKDAY);
+  const episodes = await seedOneOffDays(new Rng(RANDOM_SEED + 8), pool, allFacilities, dates, ONE_OFF_EPISODES_PER_WEEKDAY, {
+    alreadyBooked: new Map([[dates.tomorrow, privateClients]]),
+  });
   console.log(`  ${pool.length} patients occasionnels, ${episodes.episodes} soins ponctuels, ${episodes.trips} courses`);
   if (fleet) {
     console.log("• Grande flotte (--fleet) : dépôts, personnel, véhicules, absences, patients et courses");
