@@ -160,8 +160,9 @@ Chaque soir, le moteur affecte chaque course à un véhicule et ordonne les arr�
 
 - Une course = une paire prise en charge → dépose, avec une fenêtre horaire (arriver avant le RDV, repartir après la séance).
 - Un véhicule part de son dépôt et y revient, avec un type (taxi, VSL, ambulance), une capacité (1 ou 2) et un chauffeur aux horaires connus.
-- Contraintes dures : type compatible, capacité, fenêtres horaires, détour ≤ 10 km pour un patient partagé, attente ≤ 45 min au lieu de soins, patients non partageables seuls à bord, horaires et pauses des chauffeurs.
+- Contraintes dures : type compatible, capacité, fenêtres horaires, détour ≤ 10 km pour un patient partagé, attente ≤ 45 min au lieu de soins (attente à bord du véhicule garé devant l'établissement comprise), temps à bord ≤ trajet direct + 30 min (réglable), patients non partageables seuls à bord, horaires et pauses des chauffeurs, pas de tournée de plus de 6 h sans pause de 20 min (Code du travail, art. L3121-16).
 - Attente de 45 min : en V1, découper ce budget en deux paramètres réglables (une marge avant le RDV, une après la séance), dont la somme ne dépasse pas 45 min.
+- Temps d'arrêt : par mode de transport (ambulance, ou taxi et VSL), plus une majoration par mobilité du patient (fauteuil, allongé) et par établissement.
 
 **Objectif.** Maximiser la marge estimée, avec une forte pénalité par course non affectée pour que le régulateur la voie tout de suite. Le cas Hexaly vise plutôt le chiffre d'affaires par heure travaillée, une variante à tester.
 
@@ -213,8 +214,12 @@ La recherche locale apporte peu à cette taille (moins de 1 % de km en moins apr
 2. Mesuré et écarté (7 novembre) — solveur : limiter les lieux de pause candidats par véhicule (12 aujourd'hui) n'améliore pas les tournées. À 30 et 60 véhicules, on perd des courses (147 servies avec 12 lieux, 146 avec 6, 143 avec 2 sur 160 courses ; 287, 287 puis 275 sur 300). À 120 véhicules, avec 6 ou 4 lieux, les écarts vont dans les deux sens (−3 % à +1 % de km) : c'est du bruit de l'heuristique, pas un gain. Avec 2 lieux, la construction d'OR-Tools a enfin le temps de finir, mais les tournées sont plus longues de 5 % (17 538 km contre 16 675) et, à 480 voyages, 3 courses de moins sont servies.
 3. Fait (7 novembre) — web : un planning qui ne sert aucune course alors que des courses étaient envoyées n'est plus enregistré. L'optimisation échoue avec le motif le plus fréquent, et le planning en place est conservé.
 4. Fait (7 novembre), côté optimiseur — la construction du modèle est comptée dans le budget, que la marge du web (budget plus 30 s) n'avait pas à absorber en plus.
+5. Fait (9 novembre) — solveur : la construction initiale d'OR-Tools n'est plus lancée quand sa loi de temps (environ 8·10⁻⁹ × nœuds³ s) dit qu'elle ne peut pas finir dans le temps restant ; le planning Python part aussitôt.
+6. Fait (9 novembre) — solveur : le coût au km propre à chaque véhicule passe sur la dimension distance ; les arcs ne gardent qu'une matrice par grille tarifaire (au plus une par type de véhicule et département) au lieu d'une par coût au km. Indispensable avant le coût par énergie (lot 5).
 
 **Après les correctifs 1 et 4,** au budget envoyé par le web : 297 voyages placés sur 297 en 49 s pour 300 voyages (le web attend jusqu'à 68 s), 474 sur 476 en 74 s pour 480 voyages (jusqu'à 90 s). La construction d'OR-Tools n'a toujours pas le temps de finir à cette taille : le planning est celui de l'insertion Python, sans recherche locale, ce qui coûte environ 1 % de kilomètres d'après les mesures ci-dessus. Sur les journées plus petites (60 à 300 courses, 10 à 60 véhicules), avant et après donnent le même nombre de courses servies (une de plus sur l'une d'elles) et les mêmes kilomètres à 0,1 % près.
+
+**Après les correctifs 5 et 6 (9 novembre),** au même budget : réponse en 15 s pour 300 voyages (297 sur 297, 0,32 Go de mémoire au lieu de 1,9 Go) et en 31 s pour 480 voyages (473 sur 476, 0,56 Go au lieu de 4,0 Go). Avec les règles d'avant, le planning est exactement le même qu'au 7 novembre (en 14 et 29 s) : les écarts de courses et de partage viennent des règles ajoutées le même jour (attente à bord devant le lieu de soins comptée dans les 45 min, temps à bord limité, 6 h au plus sans pause), que les plannings d'avant ne respectaient pas. Le web attend toujours le budget plus 30 s.
 
 **Une piste métier, à vérifier sur l'historique réel.** Sur ce jeu fictif, environ 300 voyages tiennent sur 61 à 77 véhicules (4 à 5 voyages par véhicule utilisé), contre environ 2,5 annoncés par véhicule chez V. L'écart vient peut-être des hypothèses du jeu : distances à vol d'oiseau, aucun véhicule ni chauffeur indisponible, rendez-vous répartis sur la journée, trajets plus courts que les vrais. C'est précisément ce que l'historique de V permettra de trancher (Feuille de route, phase 1). Les montants de marge du jeu fictif ne disent rien : les coûts y sont inventés.
 
@@ -285,6 +290,10 @@ Ajoutées après l'appel du 6 novembre (entre parenthèses, l'hypothèse retenue
 - [ ] Préférences et affinités : lesquelles sont impératives ? (paires de collègues interdites impératives, préférences patient souhaitables)
 - [ ] Le logiciel actuel gère-t-il déjà plannings du personnel et entretien ? Si oui, les lots correspondants se réduisent à un import.
 - [ ] « Déplacer vers… » : quand le nouveau calcul fait sortir une autre course du planning (l'optimiseur en place une autre à la place), faut-il refuser le déplacement ou demander confirmation en nommant les courses perdues ? (confirmation, en attendant l'insertion locale qui ne touchera pas aux autres tournées)
+- [ ] Temps à bord : combien de minutes au plus en plus du trajet direct pour un patient transporté avec d'autres ? (30 min, réglable dans Paramètres ; sur le banc de 300 voyages, 30 min font passer le partage de 43 % à 38 % par rapport à une limite de 3 h)
+- [ ] Quand tout ne tient pas : un patient conduit au centre sans retour prévu compte-t-il comme deux courses non servies ? (oui : laisser un aller ou un retour seul coûte une pénalité de plus, payée une fois par patient ; la priorité par type de soin reste à fixer)
+- [ ] Pause de 20 min dès 6 h de travail (art. L3121-16) : les chauffeurs de V sont-ils salariés, artisans ou les deux, et quel accord s'applique (accord-cadre du 4 mai 2000 pour le transport sanitaire) ? Faut-il en plus interdire plus de 6 h de travail d'affilée avant la pause ? (une pause d'au moins 20 min dans toute tournée de plus de 6 h, où qu'elle tombe ; un horaire de plus de 6 h sans pause valable est bloqué sur Équipages)
+- [ ] Temps d'arrêt : combien de minutes pour une prise en charge et une dépose en ambulance, pour un patient en fauteuil ou allongé, et quels établissements sont longs à desservir ? (5 min partout par défaut, comme avant ; le jeu de démonstration met 10 min en ambulance et 5 min de plus à l'hôpital des Calanques)
 
 ## Brief de démarrage pour Claude Code
 
