@@ -9,7 +9,7 @@
  * own): the client is passed in, nothing here is server-only. The row
  * mapping (toKpiData) is pure and unit-tested.
  */
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, VehicleType } from "@prisma/client";
 import { SERVED_TRIP_STATUSES, type KpiData, type KpiRoute, type KpiTrip } from "@/lib/kpis";
 import { isSimulatedId } from "@/lib/simulated";
 import { fromIsoDate, toIsoDate } from "@/lib/time";
@@ -26,10 +26,13 @@ export type KpiQueryRows = {
   })[];
   /** Routes on which the crew recorded at least one status. */
   recorded: { routeId: string }[];
-  trips: (Omit<KpiTrip, "serviceDate" | "dropoffCompletedAt"> & {
+  trips: (Omit<KpiTrip, "serviceDate" | "dropoffCompletedAt" | "exceptionalAmbulance"> & {
     serviceDate: Date;
     /** Completed DROPOFF stops of the trip. */
     stops: { completedAt: Date | null }[];
+    /** Exceptional ambulance proposed for this seated trip, and the type of the vehicle of its route. */
+    exceptionalAmbulanceAt?: Date | null;
+    route?: { vehicle: { type: VehicleType } } | null;
   })[];
   runs: { id: string; serviceDate: Date; startedAt: Date }[];
 };
@@ -70,6 +73,8 @@ export async function loadKpiRows(prisma: KpiClient, from: string, to: string): 
         appointmentMinute: true,
         plannedDropoffMinute: true,
         stops: { where: { kind: "DROPOFF", completedAt: { not: null } }, select: { completedAt: true } },
+        exceptionalAmbulanceAt: true,
+        route: { select: { vehicle: { select: { type: true } } } },
       },
     }),
     prisma.optimizationRun.findMany({
@@ -92,9 +97,11 @@ export function toKpiData({ routes, recorded, trips, runs }: KpiQueryRows): KpiD
       stopCount: _count.stops,
       hasRecordedStatus: recordedRouteIds.has(id),
     })),
-    trips: trips.map(({ stops, serviceDate: date, ...trip }) => ({
+    trips: trips.map(({ stops, serviceDate: date, exceptionalAmbulanceAt, route, ...trip }) => ({
       ...trip,
       serviceDate: toIsoDate(date),
+      // Counted while the proposal holds: the trip is in an ambulance's route.
+      exceptionalAmbulance: Boolean(exceptionalAmbulanceAt) && route?.vehicle.type === "AMBULANCE",
       // One drop-off stop per trip; keep the latest timestamp if there were several.
       dropoffCompletedAt: stops.reduce<Date | null>(
         (latest, stop) => (stop.completedAt && (!latest || stop.completedAt > latest) ? stop.completedAt : latest),

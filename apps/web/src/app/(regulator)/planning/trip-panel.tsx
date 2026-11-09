@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useId, useState, type ReactNode } from "react";
-import { ExternalLink, Lock, LockOpen, MoveRight, UserX, X } from "lucide-react";
+import { Ambulance, ExternalLink, Lock, LockOpen, MoveRight, UserX, X } from "lucide-react";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
 import { Card } from "@/components/ui/layout";
 import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_LABEL } from "@/lib/domain/no-show";
+import { exceptionalAmbulanceIssue } from "@/lib/planning/exceptional-ambulance";
 import { fieldRecordLabel, fieldRecordText, sharingAnswerText } from "@/lib/planning/format";
 import type { TripView, VehicleRowView, ViolationView } from "@/lib/planning/types";
 import {
@@ -19,7 +20,7 @@ import {
   TRIP_STATUS_LABELS,
 } from "@/lib/labels";
 import { formatDuration, formatMinute } from "@/lib/time";
-import { lockTrip, moveTrip, unlockTrip } from "./actions";
+import { lockTrip, moveTrip, proposeExceptionalAmbulance, unlockTrip } from "./actions";
 import { usePlanningActivity } from "./planning-activity";
 
 export type TripPanelProps = {
@@ -66,7 +67,9 @@ export function TripPanel({
 }: TripPanelProps) {
   const { busy, run, optimizerOffline } = usePlanningActivity();
   const selectId = useId();
+  const ambulanceSelectId = useId();
   const [target, setTarget] = useState("");
+  const [ambulance, setAmbulance] = useState("");
 
   const vehicleById = new Map(vehicles.map((v) => [v.id, v]));
   const current = trip.vehicleId ? vehicleById.get(trip.vehicleId) : undefined;
@@ -83,6 +86,12 @@ export function TripPanel({
       ? "Course déjà commencée."
       : (replanBlocked ?? optimizerOffline);
   const outbound = trip.direction === "OUTBOUND";
+  // « Recours exceptionnel » (TAR-03): only for an unassigned seated trip, never proposed by the optimizer itself.
+  const exceptionalOffer =
+    trip.vehicleId === null &&
+    exceptionalAmbulanceIssue({ status: trip.status, payer: trip.payer, allowedVehicleTypes: trip.allowedVehicleTypes, assigned: false }) === null;
+  const ambulances = vehicles.filter((v) => v.available && v.type === "AMBULANCE");
+  const ambulanceValid = ambulances.some((v) => v.id === ambulance);
   const sharingAnswerLine = trip.sharingAnswer ? sharingAnswerText(trip.sharingAnswer, trip.sharingStatus) : null;
 
   return (
@@ -96,6 +105,7 @@ export function TripPanel({
             <Badge tone="brand">{DIRECTION_LABELS[trip.direction]}</Badge>
             <Badge tone={cancelled ? "danger" : trip.vehicleId ? "success" : "warning"}>{TRIP_STATUS_LABELS[trip.status]}</Badge>
             {trip.payer === "PRIVATE" ? <Badge>{PAYER_LABELS.PRIVATE}</Badge> : null}
+            {trip.exceptionalAmbulance ? <Badge tone="warning">Recours exceptionnel</Badge> : null}
             {trip.allowedVehicleTypes.map((t) => (
               <VehicleTypeBadge key={t} type={t} />
             ))}
@@ -200,6 +210,9 @@ export function TripPanel({
           </Row>
           <Row label="CA estimé">
             <span className="tabular font-medium">{formatEuros(trip.estimatedRevenue)}</span>
+            {trip.exceptionalAmbulance ? (
+              <span className="mt-0.5 block text-xs text-slate-500">Ambulance pour un transport assis : tarif VSL.</span>
+            ) : null}
           </Row>
         </div>
 
@@ -299,6 +312,52 @@ export function TripPanel({
               "La course est figée sur ce véhicule, puis le reste de la journée est réoptimisé. Si ce véhicule ne peut pas la servir, ou si d'autres courses restaient sans véhicule, le planning reste inchangé."}
           </p>
         </form>
+
+        {exceptionalOffer ? (
+          <form
+            aria-labelledby={`${ambulanceSelectId}-title`}
+            className="space-y-1.5 border-t border-slate-200 pt-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!ambulanceValid) return;
+              const label = vehicleById.get(ambulance)?.label ?? "";
+              run(`Recours exceptionnel à ${label} et réoptimisation…`, () => proposeExceptionalAmbulance(trip.id, ambulance), { long: true });
+              setAmbulance("");
+            }}
+          >
+            <p id={`${ambulanceSelectId}-title`} className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
+              <Ambulance aria-hidden className="size-4 text-slate-500" />
+              Recours exceptionnel à une ambulance
+            </p>
+            <p className="text-xs text-slate-500">
+              Aucun taxi ni VSL ne peut la prendre ? Une ambulance peut faire ce transport assis, facturé au tarif VSL. À
+              réserver aux cas sans autre solution : le motif est tracé sur la course et compté au tableau de bord.
+            </p>
+            <div className="flex gap-2">
+              <label htmlFor={ambulanceSelectId} className="sr-only">
+                Ambulance proposée
+              </label>
+              <Select
+                id={ambulanceSelectId}
+                value={ambulanceValid ? ambulance : ""}
+                onChange={(e) => setAmbulance(e.currentTarget.value)}
+                disabled={busy || moveBlocked !== null || ambulances.length === 0}
+                className="min-w-0 flex-1"
+              >
+                <option value="">{ambulances.length === 0 ? "Aucune ambulance disponible ce jour" : "Choisir une ambulance"}</option>
+                {ambulances.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                    {v.route ? ` — ${v.route.tripCount} course${v.route.tripCount > 1 ? "s" : ""}` : " — libre"}
+                  </option>
+                ))}
+              </Select>
+              <Button type="submit" variant="secondary" disabled={busy || moveBlocked !== null || !ambulanceValid}>
+                Proposer
+              </Button>
+            </div>
+          </form>
+        ) : null}
       </div>
     </Card>
   );

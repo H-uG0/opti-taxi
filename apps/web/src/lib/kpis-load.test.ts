@@ -53,6 +53,21 @@ const rows: KpiQueryRows = {
       appointmentMinute: null,
       plannedDropoffMinute: 760,
       stops: [],
+      // Proposed in an ambulance, then moved back to a taxi: no longer counted.
+      exceptionalAmbulanceAt: new Date("2026-10-11T16:00:00.000Z"),
+      route: { vehicle: { type: "TAXI" } },
+    },
+    {
+      serviceDate: day,
+      status: "ASSIGNED",
+      routeId: "r1",
+      direction: "OUTBOUND",
+      shared: false,
+      appointmentMinute: 600,
+      plannedDropoffMinute: 590,
+      stops: [],
+      exceptionalAmbulanceAt: new Date("2026-10-11T16:00:00.000Z"),
+      route: { vehicle: { type: "AMBULANCE" } },
     },
   ],
   runs: [
@@ -101,6 +116,7 @@ describe("toKpiData", () => {
           plannedDropoffMinute: 470,
           // The latest of the completed drop-off stops.
           dropoffCompletedAt: new Date("2026-10-12T05:58:30.000Z"),
+          exceptionalAmbulance: false,
         },
         {
           serviceDate: "2026-10-12",
@@ -111,6 +127,18 @@ describe("toKpiData", () => {
           appointmentMinute: null,
           plannedDropoffMinute: 760,
           dropoffCompletedAt: null,
+          exceptionalAmbulance: false,
+        },
+        {
+          serviceDate: "2026-10-12",
+          status: "ASSIGNED",
+          routeId: "r1",
+          direction: "OUTBOUND",
+          shared: false,
+          appointmentMinute: 600,
+          plannedDropoffMinute: 590,
+          dropoffCompletedAt: null,
+          exceptionalAmbulance: true,
         },
       ],
       // A run of the history simulation (id "hist-…") is flagged: its day shows « simulé ».

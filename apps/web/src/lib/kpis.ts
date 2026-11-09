@@ -45,6 +45,11 @@ export type KpiTrip = {
   plannedDropoffMinute: number | null;
   /** Real drop-off instant entered by the driver (completedAt of the trip's DROPOFF stop). */
   dropoffCompletedAt: Date | null;
+  /**
+   * A seated trip carried by an ambulance on a regulator's proposal (« recours
+   * exceptionnel », billed at the VSL tariff); absent: false.
+   */
+  exceptionalAmbulance?: boolean;
 };
 
 /** `simulated`: a run of the history simulation (pnpm db:history), whose day is marked « simulé ». */
@@ -93,6 +98,8 @@ export type KpiTotals = {
   /** Of which the plan already drops the patient after the appointment (should be 0). */
   plannedLateArrivals: number;
   optimizationRuns: number;
+  /** Served seated trips carried by an ambulance as an exceptional measure (protocol of 24 September 2025). */
+  exceptionalAmbulanceTrips: number;
   revenue: number;
   cost: number;
   margin: number;
@@ -239,6 +246,7 @@ function emptyTotals(): KpiTotals {
     plannedOutbound: 0,
     plannedLateArrivals: 0,
     optimizationRuns: 0,
+    exceptionalAmbulanceTrips: 0,
     revenue: 0,
     cost: 0,
     margin: 0,
@@ -267,6 +275,7 @@ function addTotals(sum: KpiTotals, day: KpiTotals): KpiTotals {
     plannedOutbound: sum.plannedOutbound + day.plannedOutbound,
     plannedLateArrivals: sum.plannedLateArrivals + day.plannedLateArrivals,
     optimizationRuns: sum.optimizationRuns + day.optimizationRuns,
+    exceptionalAmbulanceTrips: sum.exceptionalAmbulanceTrips + day.exceptionalAmbulanceTrips,
     revenue: sum.revenue + day.revenue,
     cost: sum.cost + day.cost,
     margin: sum.margin + day.margin,
@@ -323,6 +332,7 @@ export function computeDayKpis(
     if (!isServedTrip(trip)) continue;
     totals.servedTrips += 1;
     if (trip.shared) totals.sharedTrips += 1;
+    if (trip.exceptionalAmbulance) totals.exceptionalAmbulanceTrips += 1;
 
     const outboundWithAppointment = trip.direction === "OUTBOUND" && trip.appointmentMinute !== null;
     if (outboundWithAppointment && trip.plannedDropoffMinute !== null) {

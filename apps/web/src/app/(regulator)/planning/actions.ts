@@ -25,6 +25,7 @@ import {
   runOptimization,
   type RunOutcome,
 } from "@/lib/planning/run-optimization";
+import { exceptionalAmbulanceIssue } from "@/lib/planning/exceptional-ambulance";
 import { validationIssues, validationQuestion } from "@/lib/planning/validation";
 import { checkRouteCrewChange, remainingPart } from "@/lib/staff/route-crew";
 import { loadPlanVersion, STALE_PLAN_ERROR } from "@/lib/planning/version";
@@ -206,6 +207,108 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
     if (!outcome.ok && (outcome.moveRejected || outcome.needsConfirmation)) return toResult(outcome);
     if (!outcome.ok) return { ok: false, error: `${lockedThere} : ${outcome.error}` };
     return { ok: true, message: `Course de ${who} déplacée et figée sur ${target.label}. ${outcome.message}` };
+  });
+}
+
+/**
+ * « Recours exceptionnel à une ambulance » (TAR-03, protocol of 24 September
+ * 2025): an unassigned seated (TAP) trip goes to an ambulance of the day,
+ * billed at the VSL tariff, the reason traced on the trip. Never automatic:
+ * the regulator picks the trip and the ambulance; the trip is locked on it,
+ * then the day is re-optimized as for « Déplacer vers… ». When the optimizer
+ * cannot serve it there, the lock and the proposal are both withdrawn.
+ */
+export async function proposeExceptionalAmbulance(tripId: string, vehicleId: string): Promise<PlanningActionResult> {
+  const user = await requireUser("REGULATOR");
+  return guarded("proposeExceptionalAmbulance", async () => {
+    const ids = z.object({ tripId: idSchema, vehicleId: idSchema }).safeParse({ tripId, vehicleId });
+    if (!ids.success) return { ok: false, error: "Course ou véhicule invalide." };
+
+    const trip = await db.trip.findUnique({
+      where: { id: ids.data.tripId },
+      select: {
+        id: true,
+        serviceDate: true,
+        status: true,
+        payer: true,
+        allowedVehicleTypes: true,
+        lockedVehicleId: true,
+        routeId: true,
+        direction: true,
+        exceptionalAmbulanceAt: true,
+        exceptionalAmbulanceById: true,
+        patient: { select: { firstName: true, lastName: true } },
+      },
+    });
+    if (!trip) return UNKNOWN_TRIP;
+    const issue = exceptionalAmbulanceIssue({ ...trip, assigned: trip.routeId !== null });
+    if (issue) return { ok: false, error: issue };
+
+    const isoDate = toIsoDate(trip.serviceDate);
+    const past = pastDateError(isoDate);
+    if (past) return past;
+    const blocker = await replanBlocker(isoDate);
+    if (blocker) return { ok: false, error: blocker };
+    const { available, skipped } = resolveVehicleAvailability(await loadDayVehicleInputs(db, isoDate), isoDate);
+    const target = available.find((v) => v.id === ids.data.vehicleId);
+    if (!target || target.type !== "AMBULANCE") {
+      const skip = skipped.find((s) => s.vehicleId === ids.data.vehicleId);
+      return { ok: false, error: skip ? `${skip.label} est indisponible ce jour : ${skip.reason}.` : "Ambulance introuvable ou indisponible ce jour." };
+    }
+    if (await optimizationInProgress(isoDate)) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
+
+    const who = personName(trip.patient);
+    const traced = { entity: "Trip", entityId: trip.id, serviceDate: isoDate } as const;
+    // Still unassigned when written: the proposal and the lock together, traced with the ambulance.
+    const proposed = await db.$transaction(async (tx) => {
+      const { count } = await tx.trip.updateMany({
+        where: { id: trip.id, routeId: null, status: { in: ["PLANNED", "ASSIGNED"] } },
+        data: { exceptionalAmbulanceAt: new Date(), exceptionalAmbulanceById: user.id, lockedVehicleId: target.id },
+      });
+      if (count > 0) {
+        await audit(tx, user, { action: "trip.exceptional_ambulance", ...traced, details: { vehicleId: target.id } });
+      }
+      return count > 0;
+    }, PLANNING_TX_OPTIONS);
+    if (!proposed) return { ok: false, error: "Cette course a changé entre-temps : rechargez la page.", stale: true };
+
+    const withdraw = () =>
+      db.$transaction(async (tx) => {
+        const { count } = await tx.trip.updateMany({
+          where: { id: trip.id, routeId: null },
+          data: { exceptionalAmbulanceAt: trip.exceptionalAmbulanceAt, exceptionalAmbulanceById: trip.exceptionalAmbulanceById },
+        });
+        if (count > 0) await audit(tx, user, { action: "trip.exceptional_ambulance_withdrawn", ...traced });
+      }, PLANNING_TX_OPTIONS);
+    let outcome: RunOutcome;
+    try {
+      // A refused move puts the previous lock back (runOptimization); the proposal goes with it below.
+      outcome = await runOptimization(isoDate, user, {
+        move: {
+          tripId: trip.id,
+          vehicleId: target.id,
+          vehicleLabel: target.label,
+          patientName: who,
+          direction: trip.direction,
+          previousLock: trip.lockedVehicleId,
+        },
+      });
+    } catch (error) {
+      logError("[planning] proposeExceptionalAmbulance failed after the lock", error);
+      refreshPages();
+      return {
+        ok: false,
+        error: `Recours à ${target.label} interrompu : la course est peut-être restée figée sur l'ambulance. Rechargez la page pour voir l'état réel du planning.`,
+        stale: true,
+      };
+    }
+    if (!outcome.ok && outcome.moveRejected) await withdraw();
+    refreshPages();
+    if (!outcome.ok) return toResult(outcome);
+    return {
+      ok: true,
+      message: `Course de ${who} confiée à ${target.label} : recours exceptionnel, facturé au tarif VSL. ${outcome.message}`,
+    };
   });
 }
 

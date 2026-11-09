@@ -11,6 +11,7 @@ const actions = vi.hoisted(() => ({
   lockTrip: vi.fn(async () => ({ ok: true, message: "Course figée." })),
   unlockTrip: vi.fn(async () => ({ ok: true, message: "Course défigée." })),
   moveTrip: vi.fn(async () => ({ ok: true, message: "Course déplacée." })),
+  proposeExceptionalAmbulance: vi.fn(async () => ({ ok: true, message: "Course confiée à l'ambulance." })),
 }));
 vi.mock("./actions", () => actions);
 
@@ -89,6 +90,35 @@ describe("TripPanel (panneau course)", () => {
     renderPanel({ ...planningFixture().trips["trip-a"]!, status: "CANCELLED" });
     expect(screen.getByText("Course annulée.")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Déplacer" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("offers an exceptional ambulance for an unassigned seated trip only, and sends the one chosen", async () => {
+    const unassigned = { ...planningFixture().trips["trip-a"]!, vehicleId: null, coPassengerTripIds: [], shared: false };
+    renderPanel(unassigned);
+    const select = screen.getByLabelText("Ambulance proposée") as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(["Choisir une ambulance", "Ambulance 1 (Marseille) — libre"]);
+    const propose = screen.getByRole("button", { name: "Proposer" }) as HTMLButtonElement;
+    expect(propose.disabled).toBe(true);
+    fireEvent.change(select, { target: { value: "amb-1" } });
+    fireEvent.click(propose);
+    await waitFor(() => expect(actions.proposeExceptionalAmbulance).toHaveBeenCalledWith("trip-a", "amb-1"));
+    cleanup();
+
+    // Served, prescribed in ambulance or private: no offer.
+    renderPanel(planningFixture().trips["trip-a"]!);
+    expect(screen.queryByText("Recours exceptionnel à une ambulance")).toBeNull();
+    cleanup();
+    renderPanel({ ...unassigned, allowedVehicleTypes: ["AMBULANCE"] });
+    expect(screen.queryByText("Recours exceptionnel à une ambulance")).toBeNull();
+    cleanup();
+    renderPanel({ ...unassigned, payer: "PRIVATE", allowedVehicleTypes: ["TAXI"] });
+    expect(screen.queryByText("Recours exceptionnel à une ambulance")).toBeNull();
+  });
+
+  it("shows a trip carried by an ambulance as an exceptional measure, at the VSL tariff", () => {
+    renderPanel({ ...planningFixture().trips["trip-a"]!, vehicleId: "amb-1", lockedVehicleId: "amb-1", exceptionalAmbulance: true });
+    expect(screen.getByText("Recours exceptionnel")).toBeTruthy();
+    expect(screen.getByText("Ambulance pour un transport assis : tarif VSL.")).toBeTruthy();
   });
 
   it("closes from its button", () => {

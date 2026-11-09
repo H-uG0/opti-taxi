@@ -97,6 +97,19 @@ describe("helpers", () => {
 });
 
 describe("computeDayKpis", () => {
+  it("counts the served seated trips carried by an ambulance as an exceptional measure", () => {
+    const kpis = day({
+      trips: [
+        trip({ exceptionalAmbulance: true }),
+        trip({ exceptionalAmbulance: true, status: "CANCELLED" }),
+        trip({ exceptionalAmbulance: false }),
+        trip(),
+      ],
+    });
+    expect(kpis.exceptionalAmbulanceTrips).toBe(1);
+    expect(summarizePeriod([kpis, kpis]).exceptionalAmbulanceTrips).toBe(2);
+  });
+
   it("handles a day without any route, trip or run", () => {
     const kpis = day({});
     expect(kpis).toMatchObject({

@@ -97,6 +97,21 @@ export default async function DashboardPage({
         <>
           {focus ? <Headline focus={focus} previous={previous} today={today} tomorrow={tomorrow} /> : null}
 
+          <p
+            role="note"
+            className={
+              period.exceptionalAmbulanceTrips > 0
+                ? "mb-8 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                : "mb-8 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+            }
+          >
+            <span className="font-medium">Recours exceptionnel à une ambulance pour un transport assis</span> (facturé au tarif VSL,
+            protocole du 24 septembre 2025) :{" "}
+            {period.exceptionalAmbulanceTrips > 0
+              ? `${plural(period.exceptionalAmbulanceTrips, "course servie", "courses servies")} sur la période, à garder exceptionnel.`
+              : "aucun sur la période."}
+          </p>
+
           <section aria-labelledby="trends-title" className="mb-8">
             <h2 id="trends-title" className="mb-3 text-base font-semibold text-slate-900">
               Évolution sur la période
