@@ -1,10 +1,12 @@
 /**
  * Every server action that writes to the database must write its audit event
- * (lib/audit.ts) too. Static check of the source: for each function exported
- * by a "use server" file, the function and the same-file helpers it calls
- * either contain no write (`db.x.create(`, `tx.x.updateMany(`…), or call
- * `audit(`. A write delegated to another module (runOptimization,
- * syncOpenTrips…) is that module's to trace and is not seen here.
+ * (lib/audit.ts) too, and so must every route handler (a route.ts file under app/, e.g.
+ * the driver's status route). Static check of the source: for each function
+ * exported by a "use server" file, and each HTTP method exported by a route
+ * handler, the function and the same-file helpers it calls either contain no
+ * write (`db.x.create(`, `tx.x.updateMany(`…), or call `audit(`. A write
+ * delegated to another module (runOptimization, syncOpenTrips…) is that
+ * module's to trace and is not seen here.
  *
  * The check is per action, not per branch: an action that traces one of its
  * writes passes. An action that writes without a trace on purpose goes in
@@ -40,6 +42,13 @@ function sourceFiles(dir: string): string[] {
 
 function isServerActionFile(source: string): boolean {
   return /^\s*["']use server["'];/.test(source);
+}
+
+const HTTP_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
+
+function isRouteHandlerFile(file: string): boolean {
+  const relative = path.relative(SRC, file).split(path.sep);
+  return relative[0] === "app" && /^route\.tsx?$/.test(relative.at(-1) ?? "");
 }
 
 /** Exports the scan cannot read as functions: values, default and re-exports (`export type` is erased). */
@@ -95,14 +104,16 @@ function closure(start: TopLevelFunction, all: readonly TopLevelFunction[]): Top
 
 type ActionReport = { key: string; writes: boolean; audits: boolean };
 
+/** Exported server actions, and the HTTP methods of route handlers. */
 function serverActions(): ActionReport[] {
   return sourceFiles(SRC).flatMap((file) => {
     const source = fs.readFileSync(file, "utf8");
-    if (!isServerActionFile(source)) return [];
+    const routeHandler = isRouteHandlerFile(file);
+    if (!isServerActionFile(source) && !routeHandler) return [];
     const functions = topLevelFunctions(source);
     const relative = path.relative(SRC, file).split(path.sep).join("/");
     return functions
-      .filter((fn) => fn.exported)
+      .filter((fn) => fn.exported && (!routeHandler || HTTP_METHODS.has(fn.name)))
       .map((fn) => {
         const reached = closure(fn, functions);
         return {
@@ -117,10 +128,13 @@ function serverActions(): ActionReport[] {
 describe("server actions and the audit trail", () => {
   const actions = serverActions();
 
-  it("finds the server actions (the scan is not vacuous)", () => {
+  it("finds the server actions and the route handlers (the scan is not vacuous)", () => {
     expect(new Set(actions.map((a) => a.key.split("#")[0])).size).toBeGreaterThanOrEqual(15);
     expect(actions.filter((a) => a.writes).length).toBeGreaterThanOrEqual(40);
     expect(actions.map((a) => a.key)).toContain("app/(regulator)/parametres/actions.ts#saveSettings");
+    // The driver's status route writes the stop and the trip: it is scanned like an action.
+    expect(actions.find((a) => a.key === "app/api/chauffeur/stops/[id]/status/route.ts#POST")).toMatchObject({ writes: true, audits: true });
+    expect(actions.map((a) => a.key)).toContain("app/api/chauffeur/session/route.ts#POST");
   });
 
   it("every \"use server\" file exports its actions as function declarations the scan can read", () => {
@@ -133,7 +147,7 @@ describe("server actions and the audit trail", () => {
     expect(unreadable).toEqual([]);
   });
 
-  it("every action that writes also writes its audit event", () => {
+  it("every action and route handler that writes also writes its audit event", () => {
     const missing = actions.filter((a) => a.writes && !a.audits && !(a.key in AUDIT_EXEMPT)).map((a) => a.key);
     expect(missing).toEqual([]);
   });

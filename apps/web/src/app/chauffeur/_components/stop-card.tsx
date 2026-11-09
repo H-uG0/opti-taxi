@@ -12,7 +12,6 @@ import {
   Info,
   MapPin,
   MessageSquareText,
-  Phone,
   TriangleAlert,
   UserX,
   Users,
@@ -21,9 +20,12 @@ import { cn } from "@/components/ui/cn";
 import { formatMinute } from "@/lib/time";
 import { MOBILITY_LABELS, STOP_KIND_LABELS } from "@/lib/labels";
 import type { RegulatorContact } from "../_lib/links";
+import { latenessShown, type RecordedLateness } from "../_lib/punctuality";
 import type { StopView } from "../_lib/view";
 import { NavLinks } from "./nav-links";
-import { CallRegulator } from "./regulator-call";
+import { NextStopTiming } from "./next-stop-timing";
+import { PhoneLink } from "./phone-link";
+import { RegulatorCallBlock } from "./regulator-call";
 import { StopActions, UndoStatus } from "./stop-actions";
 
 const KIND_STYLES = {
@@ -58,21 +60,6 @@ function MobilityBadge({ mobility }: { mobility: StopView["mobility"] }) {
       <Icon aria-hidden className="size-4" />
       {MOBILITY_LABELS[mobility]}
     </Pill>
-  );
-}
-
-function PhoneLink({ href, label, number }: { href: string; label: string; number: string }) {
-  return (
-    <a
-      href={href}
-      className="flex min-h-12 touch-manipulation items-center gap-3 rounded-xl border border-slate-300 bg-white px-3 py-1.5 hover:bg-slate-50 active:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
-    >
-      <Phone aria-hidden className="size-5 shrink-0 text-brand-700" />
-      <span className="min-w-0">
-        <span className="block text-xs font-medium text-slate-600">{label}</span>
-        <span className="tabular block truncate text-base font-semibold text-slate-900">{number}</span>
-      </span>
-    </a>
   );
 }
 
@@ -160,12 +147,14 @@ function StopDetails({ stop }: { stop: StopView }) {
 /** Return pickup of a patient absent on the outbound leg: check before driving to the facility. */
 function OutboundNoShowWarning({ regulator }: { regulator: RegulatorContact | null }) {
   return (
-    <div role="note" className="flex items-start gap-2 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-red-950">
-      <TriangleAlert aria-hidden className="mt-0.5 size-5 shrink-0 text-red-700" />
-      <p className="text-base">
-        <span className="font-bold">Aller : patient absent.</span>{" "}
-        <CallRegulator regulator={regulator}>Appelez la régulation</CallRegulator> avant d&apos;aller le chercher.
+    <div role="note" className="space-y-2 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-red-950">
+      <p className="flex items-start gap-2 text-base">
+        <TriangleAlert aria-hidden className="mt-0.5 size-5 shrink-0 text-red-700" />
+        <span>
+          <span className="font-bold">Aller : patient absent.</span> Appelez la régulation avant d&apos;aller le chercher.
+        </span>
       </p>
+      <RegulatorCallBlock regulator={regulator} />
     </div>
   );
 }
@@ -194,6 +183,15 @@ function OpenStopCard({ stop, total, regulator }: { stop: StopView; total: numbe
             Arrêt {stop.position}/{total}
           </span>
         </div>
+
+        {stop.timing ? (
+          <NextStopTiming
+            plannedArrivalMinute={stop.plannedArrivalMinute}
+            plannedMinute={stop.plannedMinute}
+            anchorArrivalMinute={stop.timing.anchorArrivalMinute}
+            appointmentMinute={stop.timing.appointmentMinute}
+          />
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-xl font-semibold text-slate-950">{stop.patient}</h3>
@@ -224,6 +222,7 @@ function OpenStopCard({ stop, total, regulator }: { stop: StopView; total: numbe
           <StopActions
             key={`${stop.id}-${stop.state}`}
             stopId={stop.id}
+            pickupStopId={stop.pickupStopId}
             primary={controls.primary}
             blockedReason={controls.blockedReason}
             noShow={controls.noShow}
@@ -249,11 +248,19 @@ function ClosedIcon({ state }: { state: StopView["state"] }) {
   return <CircleSlash aria-hidden className="size-6 shrink-0 text-slate-400" />;
 }
 
-function Lateness({ minutes }: { minutes: number | null }) {
-  if (minutes === null || Math.abs(minutes) < 5) return null;
+/** Lateness of a recorded stop: against the appointment on an outbound dropoff, the planned time otherwise. */
+function Lateness({ lateness }: { lateness: RecordedLateness | null }) {
+  if (!lateness || !latenessShown(lateness)) return null;
+  const { minutes, reference } = lateness;
+  const text = minutes > 0 ? `+${minutes} min` : `−${-minutes} min`;
   return (
-    <span className={cn("tabular ml-2 rounded px-1.5 py-0.5 text-xs font-semibold", minutes > 0 ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-700")}>
-      {minutes > 0 ? `+${minutes}` : `−${-minutes}`} min
+    <span
+      className={cn(
+        "tabular ml-2 rounded px-1.5 py-0.5 text-xs font-semibold",
+        minutes > 0 ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-700",
+      )}
+    >
+      {reference === "appointment" ? `${text} après le RDV` : text}
     </span>
   );
 }
@@ -292,7 +299,7 @@ function ClosedStopCard({ stop }: { stop: StopView }) {
                 {" "}
                 · saisie à <span className="tabular font-semibold">{formatMinute(stop.completedMinute)}</span>
                 {stop.recordedBy ? <> par {stop.recordedBy}</> : null}
-                <Lateness minutes={stop.lateMinutes} />
+                <Lateness lateness={stop.lateness} />
               </>
             ) : null}
           </p>

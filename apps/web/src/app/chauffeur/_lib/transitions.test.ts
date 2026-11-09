@@ -141,21 +141,24 @@ describe("decideStopAction: undo", () => {
 
 describe("stopWrite", () => {
   const USER = "user_1";
+  const RECEIVED = new Date("2026-11-03T08:25:00Z");
   const applied = (action: StopAction, stop: StopSnapshot) => {
     const decision = decideStopAction(action, stop, NOW);
     if (decision.type !== "apply") throw new Error(`${action} should apply`);
-    return stopWrite(decision, USER);
+    return stopWrite(decision, USER, RECEIVED);
   };
 
-  it("records who set the status with its time", () => {
-    expect(applied("PICKUP", snapshot("PICKUP", "ASSIGNED"))).toEqual({ completedAt: NOW, completedById: USER });
-    expect(applied("DROPOFF", snapshot("DROPOFF", "PICKED_UP"))).toEqual({ completedAt: NOW, completedById: USER });
-    expect(applied("NO_SHOW", snapshot("PICKUP", "ASSIGNED"))).toEqual({ completedAt: NOW, completedById: USER });
+  it("records who set the status with the time of the gesture and the time it reached the server", () => {
+    const recorded = { completedAt: NOW, completedById: USER, completedReceivedAt: RECEIVED };
+    expect(applied("PICKUP", snapshot("PICKUP", "ASSIGNED"))).toEqual(recorded);
+    expect(applied("DROPOFF", snapshot("DROPOFF", "PICKED_UP"))).toEqual(recorded);
+    expect(applied("NO_SHOW", snapshot("PICKUP", "ASSIGNED"))).toEqual(recorded);
   });
 
-  it("clears the author with the time on undo", () => {
-    expect(applied("UNDO", snapshot("PICKUP", "PICKED_UP", EARLIER, true))).toEqual({ completedAt: null, completedById: null });
-    expect(applied("UNDO", snapshot("DROPOFF", "DROPPED_OFF", EARLIER, true))).toEqual({ completedAt: null, completedById: null });
+  it("clears the author and both times on undo", () => {
+    const cleared = { completedAt: null, completedById: null, completedReceivedAt: null };
+    expect(applied("UNDO", snapshot("PICKUP", "PICKED_UP", EARLIER, true))).toEqual(cleared);
+    expect(applied("UNDO", snapshot("DROPOFF", "DROPPED_OFF", EARLIER, true))).toEqual(cleared);
   });
 });
 

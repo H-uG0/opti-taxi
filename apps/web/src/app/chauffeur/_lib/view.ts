@@ -6,13 +6,13 @@
 import type { Mobility, RouteStatus, StopKind, VehicleType } from "@prisma/client";
 import { minuteOfDay } from "@/lib/time";
 import type { DriverRoute } from "./load";
-import { telHref } from "./links";
+import { phoneContact, telHref, type PhoneContact } from "./links";
+import { recordedLateness, type RecordedLateness } from "./punctuality";
 import {
   buildTimeline,
   coPassengers,
   isFacilityStop,
   latestCompletedStopId,
-  minutesLate,
   nextStopId,
   displayName,
   routeProgress,
@@ -32,10 +32,23 @@ export type StopView = {
   state: StopState;
   isNext: boolean;
   plannedMinute: number;
+  /** Planned arrival (before any planned wait), minutes since midnight. */
+  plannedArrivalMinute: number;
   /** Real time of the recorded status, minutes since midnight Europe/Paris. */
   completedMinute: number | null;
-  /** Real minus planned time, null when not recorded. */
-  lateMinutes: number | null;
+  /**
+   * Real time against the appointment (outbound dropoff with one) or the
+   * planned time (any other stop), null when not recorded.
+   */
+  lateness: RecordedLateness | null;
+  /**
+   * Live early / on time / late reading, on the next stop of today's route
+   * only: the appointment of an outbound dropoff, and the earliest arrival
+   * given the latest status recorded before it (null before the first one).
+   */
+  timing: { appointmentMinute: number | null; anchorArrivalMinute: number | null } | null;
+  /** On a dropoff: the pickup stop of the same trip on the route (a pickup still on the phone unlocks the dropoff). */
+  pickupStopId: string | null;
   /**
    * First name of the other crew member when they recorded the status (pickup,
    * dropoff or absence); null when the signed-in driver did, or when unknown.
@@ -89,6 +102,8 @@ export type RouteView = {
   role: "DRIVER" | "CREW_MATE";
   /** The other crew member, if any. */
   partner: string | null;
+  /** Phone of the other crew member (employee data), to call them from the roadmap. */
+  partnerPhone: PhoneContact | null;
   progress: { closed: number; total: number };
   stops: StopView[];
   nextStop: StopView | null;
@@ -131,6 +146,8 @@ export function buildRouteView(
   }));
   const nextId = nextStopId(like);
   const latestId = latestCompletedStopId(like);
+  const pickupOfTrip = new Map(route.stops.filter((stop) => stop.kind === "PICKUP").map((stop) => [stop.tripId, stop.id]));
+  const latestStop = route.stops.find((stop) => stop.id === latestId) ?? null;
   const shared = coPassengers(like);
   const onBoard = onBoardAfterStops(like);
   const nameOfTrip = new Map(route.stops.map((stop) => [stop.tripId, displayName(stop.trip.patient)]));
@@ -147,6 +164,14 @@ export function buildRouteView(
       const careStop = isFacilityStop(stop.kind, trip.direction);
       const facilityStop = careStop && trip.facility !== null;
       const state = stopState({ kind: stop.kind, completedAt: stop.completedAt, tripStatus: trip.status });
+      // The appointment an outbound dropoff is judged against.
+      const appointmentMinute = trip.direction === "OUTBOUND" && stop.kind === "DROPOFF" ? trip.appointmentMinute : null;
+      const completedMinute = stop.completedAt ? minuteOfDay(stop.completedAt) : null;
+      // The latest status recorded before this stop: its real time plus the planned time from it to here.
+      const anchorArrivalMinute =
+        latestStop?.completedAt && latestStop.sequence < stop.sequence
+          ? minuteOfDay(latestStop.completedAt) + (stop.arrivalMinute - latestStop.startMinute)
+          : null;
       return {
         id: stop.id,
         position: index + 1,
@@ -154,8 +179,14 @@ export function buildRouteView(
         state,
         isNext: stop.id === nextId,
         plannedMinute: stop.startMinute,
-        completedMinute: stop.completedAt ? minuteOfDay(stop.completedAt) : null,
-        lateMinutes: stop.completedAt ? minutesLate(stop.startMinute, stop.completedAt) : null,
+        plannedArrivalMinute: stop.arrivalMinute,
+        completedMinute,
+        lateness:
+          completedMinute !== null
+            ? recordedLateness({ completedMinute, plannedMinute: stop.startMinute, appointmentMinute })
+            : null,
+        timing: editable && stop.id === nextId ? { appointmentMinute, anchorArrivalMinute } : null,
+        pickupStopId: stop.kind === "DROPOFF" ? (pickupOfTrip.get(stop.tripId) ?? null) : null,
         recordedBy:
           (state === "done" || state === "no_show") && partnerId && stop.completedBy?.driverId === partnerId
             ? partnerFirstName
@@ -224,6 +255,7 @@ export function buildRouteView(
     breakWindow,
     role: isDriver ? "DRIVER" : "CREW_MATE",
     partner: partner ? displayName(partner) : null,
+    partnerPhone: partner ? phoneContact(partner.phone) : null,
     progress: routeProgress(like),
     stops,
     nextStop: stops.find((stop) => stop.isNext) ?? null,

@@ -40,10 +40,18 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
           depot: { select: { name: true, address: true, lat: true, lng: true, notes: true } },
         },
       },
+      // Phones: the crew calls each other (one goes up for the patient, the other stays with the vehicle).
       driver: {
-        select: { firstName: true, lastName: true, breakMinutes: true, breakWindowStartMinute: true, breakWindowEndMinute: true },
+        select: {
+          firstName: true,
+          lastName: true,
+          phone: true,
+          breakMinutes: true,
+          breakWindowStartMinute: true,
+          breakWindowEndMinute: true,
+        },
       },
-      crewMate: { select: { firstName: true, lastName: true } },
+      crewMate: { select: { firstName: true, lastName: true, phone: true } },
       stops: {
         orderBy: { sequence: "asc" },
         select: {
@@ -54,6 +62,8 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
           lat: true,
           lng: true,
           address: true,
+          // Planned arrival (before any wait) and start: the live early / late reading of the next stop.
+          arrivalMinute: true,
           startMinute: true,
           loadAfter: true,
           completedAt: true,

@@ -5,7 +5,7 @@
  */
 import type { StopKind, TripDirection, TripStatus } from "@prisma/client";
 import { isStopClosed, stopState } from "@/lib/domain/stops";
-import { addDays, isIsoDate, minuteOfDay } from "@/lib/time";
+import { addDays, isIsoDate } from "@/lib/time";
 
 /**
  * The days a driver can open: today (statuses are recorded) and tomorrow
@@ -123,11 +123,6 @@ export function stopKeyTime(stop: {
     return { label: "Fin de séance", minute: stop.readyMinute };
   }
   return null;
-}
-
-/** Real time (Europe/Paris) minus planned time, in minutes; positive when late. */
-export function minutesLate(plannedMinute: number, completedAt: Date): number {
-  return minuteOfDay(completedAt) - plannedMinute;
 }
 
 /** "Jeanne MARTIN": first name, then the family name in capitals as on medical paperwork (patients and crew). */

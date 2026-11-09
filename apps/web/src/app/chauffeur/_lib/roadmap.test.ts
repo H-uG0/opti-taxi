@@ -8,7 +8,6 @@ import {
   isReadableRoadmapDate,
   isSameEpisode,
   latestCompletedStopId,
-  minutesLate,
   nextStopId,
   displayName,
   returnTripsAfterOutboundNoShow,
@@ -190,12 +189,6 @@ describe("stop details", () => {
       minute: 690,
     });
     expect(stopKeyTime({ kind: "DROPOFF", direction: "RETURN", appointmentMinute: null, readyMinute: 690 })).toBeNull();
-  });
-
-  it("computes lateness in Europe/Paris time", () => {
-    // 2026-11-02 is in winter time (UTC+1): 07:42 UTC = 08:42 in Paris.
-    expect(minutesLate(510, new Date("2026-11-02T07:42:00Z"))).toBe(12);
-    expect(minutesLate(510, new Date("2026-11-02T07:25:00Z"))).toBe(-5);
   });
 
   it("formats patient names with the family name in capitals", () => {

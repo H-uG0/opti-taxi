@@ -579,8 +579,12 @@ model RouteStop {
   startMinute     Int
   departureMinute Int
   loadAfter       Int
-  /// Horodatage réel « pris en charge » / « déposé » saisi par le chauffeur.
+  /// Horodatage réel « pris en charge » / « déposé » : l'heure du geste sur le téléphone (heure du
+  /// téléphone corrigée de son décalage avec le serveur), même pour un statut envoyé plus tard depuis
+  /// la file hors ligne ; bornée par le serveur (au plus 3 h avant la réception, jamais après).
   completedAt     DateTime?
+  /// Réception du statut par le serveur (égale à completedAt, à quelques secondes près, hors file).
+  completedReceivedAt DateTime?
   /// Compte (chauffeur ou équipier) qui a saisi completedAt.
   completedById   String?
 

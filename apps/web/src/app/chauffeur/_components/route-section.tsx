@@ -7,6 +7,7 @@ import { formatDuration, formatMinute } from "@/lib/time";
 import type { RegulatorContact } from "../_lib/links";
 import type { RouteView, StopView } from "../_lib/view";
 import { NavLinks } from "./nav-links";
+import { PhoneLink } from "./phone-link";
 import { StopCard } from "./stop-card";
 
 function HeaderFigure({ label, children }: { label: string; children: ReactNode }) {
@@ -67,6 +68,13 @@ function RouteHeader({ route, titleId }: { route: RouteView; titleId: string }) 
           <p>
             {route.role === "DRIVER" ? "Équipier" : "Conducteur"} : <span className="font-semibold text-slate-900">{route.partner}</span>
           </p>
+        ) : null}
+        {route.partner && route.partnerPhone ? (
+          <PhoneLink
+            href={route.partnerPhone.href}
+            label={route.role === "DRIVER" ? "Appeler l'équipier" : "Appeler le conducteur"}
+            number={route.partnerPhone.number}
+          />
         ) : null}
         <p>
           Dépôt : <span className="font-semibold text-slate-900">{vehicle.depot.name}</span>

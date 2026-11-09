@@ -410,10 +410,13 @@ async function simulateField(ctx: DayContext, trail: DayAuditTrail, isoDate: str
     const result = simulateRouteTimes(route.stops, timing, events.noShows, rngFor(ctx.seed, isoDate, "field", route.vehicleId));
     late += result.lateTripIds.length;
     for (const time of result.times) {
-      // The status keeps who tapped it, as the roadmap's action writes it (stopWrite), with its audit event.
+      // The status keeps who tapped it, as the roadmap's status route writes it (stopWrite), with its
+      // audit event; simulated statuses are sent live (received when tapped).
       const completedAt = parisInstant(isoDate, time.minute, time.second);
       const completedById = stopRecorder(route, ctx.driverAccounts, time.tripId, time.kind);
-      writes.push(prisma.routeStop.update({ where: { id: time.stopId }, data: { completedAt, completedById } }));
+      writes.push(
+        prisma.routeStop.update({ where: { id: time.stopId }, data: { completedAt, completedById, completedReceivedAt: completedAt } }),
+      );
       const action = stopAuditAction(time.kind, events.noShows.has(time.tripId));
       audits.push(trail.event({ id: completedById, role: "DRIVER" }, action, time.tripId, completedAt));
       if (time.kind === "DROPOFF") droppedOff.add(time.tripId);

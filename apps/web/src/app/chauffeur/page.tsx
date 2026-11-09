@@ -11,7 +11,9 @@ import { isReadableRoadmapDate } from "./_lib/roadmap";
 import { buildRouteView } from "./_lib/view";
 import { DaySwitch } from "./_components/day-switch";
 import { RefreshControl } from "./_components/refresh-control";
-import { CallRegulator } from "./_components/regulator-call";
+import { ServerRenderMark } from "./_components/driver-app";
+import { SessionLine } from "./_components/field-status";
+import { RegulatorCallBlock } from "./_components/regulator-call";
 import { RouteSection } from "./_components/route-section";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -20,19 +22,17 @@ const bigLink =
   "inline-flex min-h-12 touch-manipulation items-center justify-center rounded-xl px-6 text-base font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600";
 
 function NoRoute({ date, tomorrow, regulator }: { date: string; tomorrow: string; regulator: RegulatorContact | null }) {
-  const call = <CallRegulator regulator={regulator}>appelez la régulation</CallRegulator>;
   return (
     <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-10 text-center">
       <CalendarX aria-hidden className="mx-auto size-10 text-slate-400" />
       <p className="mt-3 text-lg font-semibold text-slate-900">Aucune tournée {date === tomorrow ? "demain" : "aujourd'hui"}</p>
       <p className="mt-1 text-sm text-slate-600">
-        {date === tomorrow ? (
-          <>La tournée de demain n&apos;est pas encore planifiée. Revenez plus tard ou {call}.</>
-        ) : (
-          <>Aucune course ne vous est affectée ce jour-là. En cas de doute, {call}.</>
-        )}
+        {date === tomorrow
+          ? "La tournée de demain n'est pas encore planifiée. Revenez plus tard ou appelez la régulation."
+          : "Aucune course ne vous est affectée ce jour-là. En cas de doute, appelez la régulation."}
       </p>
-      <div className="mt-5 flex justify-center">
+      <RegulatorCallBlock regulator={regulator} className="mt-5" />
+      <div className="mt-3 flex justify-center">
         {date === tomorrow ? (
           <Link href="/chauffeur" className={cn(bigLink, "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50")}>
             Revenir à aujourd&apos;hui
@@ -82,6 +82,8 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
 
   return (
     <div className="space-y-4">
+      {/* Statuses sent before this render are now shown by the page itself. */}
+      <ServerRenderMark at={now.getTime()} />
       <DaySwitch date={date} today={today} tomorrow={tomorrow} />
 
       <div className="space-y-2">
@@ -100,14 +102,15 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
         </div>
       )}
 
-      <p className="border-t border-slate-200 pt-3 text-center">
+      <div className="space-y-1 border-t border-slate-200 pt-3 text-center">
+        <SessionLine />
         <Link
           href={PASSWORD_PAGE}
           className="inline-flex min-h-11 items-center px-3 text-sm font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900"
         >
           Changer mon mot de passe
         </Link>
-      </p>
+      </div>
     </div>
   );
 }

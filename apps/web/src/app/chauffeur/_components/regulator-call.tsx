@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
 import { Phone } from "lucide-react";
+import { cn } from "@/components/ui/cn";
 import type { RegulatorContact } from "../_lib/links";
 
 /**
@@ -30,17 +30,26 @@ export function RegulatorCallButton({ regulator }: { regulator: RegulatorContact
 }
 
 /**
- * « appelez la régulation » inside a sentence: a tel: link followed by the
- * number when one is set in Paramètres, the plain words otherwise.
+ * « Appeler la régulation » under a message that asks for it (patient absent
+ * on the outbound leg, no route): a full-width button of at least 48 px, easy
+ * to hit in a moving vehicle, with the number written. Nothing when no number
+ * is set in Paramètres (the message then says it in words).
  */
-export function CallRegulator({ regulator, children }: { regulator: RegulatorContact | null; children: ReactNode }) {
-  if (!regulator) return <>{children}</>;
+export function RegulatorCallBlock({ regulator, className }: { regulator: RegulatorContact | null; className?: string }) {
+  if (!regulator) return null;
   return (
     <a
       href={regulator.href}
-      className="touch-manipulation rounded-sm py-1.5 font-semibold underline decoration-2 underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+      className={cn(
+        "flex min-h-12 w-full touch-manipulation items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 py-2 text-base font-semibold text-white shadow-sm hover:bg-brand-800 active:bg-brand-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
+        className,
+      )}
     >
-      {children} au <span className="tabular whitespace-nowrap">{regulator.number}</span>
+      <Phone aria-hidden className="size-5 shrink-0" />
+      <span className="flex flex-col items-start leading-tight">
+        <span>Appeler la régulation</span>
+        <span className="tabular text-sm font-medium whitespace-nowrap text-brand-100">{regulator.number}</span>
+      </span>
     </a>
   );
 }

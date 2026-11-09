@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { isValidPoint, navigationLinks, regulatorContact, telHref } from "./links";
+import { isValidPoint, navigationLinks, phoneContact, regulatorContact, telHref } from "./links";
 
 describe("navigationLinks", () => {
-  it("builds Google Maps, Waze and geo: links to the coordinates", () => {
+  it("builds Google Maps, Waze, geo: and Apple Plans links to the coordinates", () => {
     expect(navigationLinks({ lat: 43.2965, lng: 5.3698 })).toEqual({
       googleMaps: "https://www.google.com/maps/dir/?api=1&destination=43.2965,5.3698&travelmode=driving",
       waze: "https://waze.com/ul?ll=43.2965,5.3698&navigate=yes",
       geo: "geo:43.2965,5.3698?q=43.2965,5.3698",
+      // Driving directions in Plans: the iPhone's own navigation (iOS ignores geo:).
+      appleMaps: "https://maps.apple.com/?daddr=43.2965,5.3698&dirflg=d",
     });
   });
 
@@ -49,5 +51,14 @@ describe("regulatorContact", () => {
     expect(regulatorContact(undefined)).toBeNull();
     expect(regulatorContact("")).toBeNull();
     expect(regulatorContact("  ")).toBeNull();
+  });
+});
+
+describe("phoneContact", () => {
+  it("gives the trimmed number and its tel: link, or null without a usable number", () => {
+    expect(phoneContact(" 06 11 22 33 44 ")).toEqual({ number: "06 11 22 33 44", href: "tel:0611223344" });
+    expect(phoneContact("")).toBeNull();
+    expect(phoneContact(null)).toBeNull();
+    expect(phoneContact("—")).toBeNull();
   });
 });

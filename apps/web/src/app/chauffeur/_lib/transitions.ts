@@ -1,7 +1,9 @@
 /**
  * Status transitions the crew records from the roadmap. Pure rules shared by
- * the server actions (which re-check them against the database) and the page
- * (which shows only the buttons that would succeed).
+ * the status route handler (api/chauffeur/stops/[id]/status, which re-checks
+ * them against the database) and the page (which shows only the buttons that
+ * would succeed). "Now" is the time of the gesture on the phone, bounded by
+ * the server (observed-time.ts), not the time the server receives it.
  *
  * - "Pris en charge" (PICKUP) on a pickup stop: stop completed now, trip PICKED_UP.
  * - "Déposé" (DROPOFF) on a dropoff stop: stop completed now, trip DROPPED_OFF.
@@ -137,13 +139,20 @@ export function decideStopAction(action: StopAction, stop: StopSnapshot, now: Da
 
 /**
  * Stop fields written for an applied decision: the account that records a
- * status goes with its time (RouteStop.completedById), and an undo clears both.
+ * status and the moment the server received it go with its time (the
+ * gesture, see observed-time.ts), and an undo clears all three.
  */
 export function stopWrite(
   decision: Pick<Extract<StopDecision, { type: "apply" }>, "completedAt">,
   userId: string,
-): { completedAt: Date | null; completedById: string | null } {
-  return { completedAt: decision.completedAt, completedById: decision.completedAt ? userId : null };
+  receivedAt: Date,
+): { completedAt: Date | null; completedById: string | null; completedReceivedAt: Date | null } {
+  const recorded = decision.completedAt !== null;
+  return {
+    completedAt: decision.completedAt,
+    completedById: recorded ? userId : null,
+    completedReceivedAt: recorded ? receivedAt : null,
+  };
 }
 
 /** Buttons of a stop on the roadmap. */

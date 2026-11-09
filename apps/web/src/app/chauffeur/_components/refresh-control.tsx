@@ -6,35 +6,22 @@
  * by the regulator show up without reloading.
  *
  * A failed router refresh makes Next.js fall back to a full page load, which
- * would replace the roadmap with the browser's offline page. A tiny probe of a
- * static file is made first, and nothing is refreshed while it fails.
+ * would replace the roadmap with the offline page. A tiny probe of a static
+ * file is made first (serverReachable), and nothing is refreshed while it fails.
  */
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { RotateCcw } from "lucide-react";
 import { cn } from "@/components/ui/cn";
+import { serverReachable } from "../_lib/reachability";
+import { useDriverApp } from "./driver-app";
 
-const PROBE_URL = "/icons/icon.svg";
-const PROBE_TIMEOUT_MS = 5000;
 /** Automatic refreshes are spaced by at least this much. */
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
 
-async function serverReachable(): Promise<boolean> {
-  if (navigator.onLine === false) return false;
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
-  try {
-    const response = await fetch(PROBE_URL, { method: "HEAD", cache: "no-store", signal: controller.signal });
-    return response.ok;
-  } catch {
-    return false;
-  } finally {
-    window.clearTimeout(timer);
-  }
-}
-
 export function RefreshControl({ renderedAt }: { renderedAt: string }) {
   const router = useRouter();
+  const { sendNow } = useDriverApp();
   const [isPending, startTransition] = useTransition();
   const [checking, setChecking] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -52,9 +39,11 @@ export function RefreshControl({ renderedAt }: { renderedAt: string }) {
       }
       lastRefresh.current = Date.now();
       setMessage(null);
+      // « Actualiser » also sends the statuses waiting on the phone and renews the session if it is close to its end.
+      if (manual) sendNow();
       startTransition(() => router.refresh());
     },
-    [router],
+    [router, sendNow],
   );
 
   useEffect(() => {

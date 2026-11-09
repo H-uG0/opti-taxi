@@ -9,8 +9,10 @@ export type NavigationLinks = {
   googleMaps: string;
   /** Waze, navigation started at once. */
   waze: string;
-  /** geo: URI, lets Android pick any installed navigation app. */
+  /** geo: URI, lets Android pick any installed navigation app. iOS ignores it: appleMaps instead. */
   geo: string;
+  /** Apple Plans, driving directions: the phone's own navigation on an iPhone (no geo: there). */
+  appleMaps: string;
 };
 
 /** Coordinates with 6 decimals (about 10 cm), trailing zeros dropped, never in exponent notation. */
@@ -37,6 +39,7 @@ export function navigationLinks(point: { lat: number; lng: number }): Navigation
     googleMaps: `https://www.google.com/maps/dir/?api=1&destination=${latLng}&travelmode=driving`,
     waze: `https://waze.com/ul?ll=${latLng}&navigate=yes`,
     geo: `geo:${latLng}?q=${latLng}`,
+    appleMaps: `https://maps.apple.com/?daddr=${latLng}&dirflg=d`,
   };
 }
 
@@ -53,11 +56,19 @@ export function telHref(phone: string | null | undefined): string | null {
   return `tel:${trimmed.startsWith("+") ? "+" : ""}${digits}`;
 }
 
-/** Regulation phone number as the roadmap shows it and dials it. */
-export type RegulatorContact = { number: string; href: string };
+/** A phone number as the roadmap shows it and dials it. */
+export type PhoneContact = { number: string; href: string };
 
-/** Contact of the regulation (Paramètres), or null when no usable number is set. */
-export function regulatorContact(phone: string | null | undefined): RegulatorContact | null {
+/** The number and its tel: link, or null when the number is not usable. */
+export function phoneContact(phone: string | null | undefined): PhoneContact | null {
   const href = telHref(phone);
   return phone && href ? { number: phone.trim(), href } : null;
+}
+
+/** Regulation phone number (Paramètres). */
+export type RegulatorContact = PhoneContact;
+
+/** Contact of the regulation, or null when no usable number is set. */
+export function regulatorContact(phone: string | null | undefined): RegulatorContact | null {
+  return phoneContact(phone);
 }
