@@ -11,9 +11,20 @@ decides the order of the stops, every reported time, km and load is recomputed h
    as possible without delaying the first stop (never before the shift start).
 3. Driver break: tried before the depot departure, on every leg driven empty (no patient on
    board, depot legs included) and after the return. The placement with the least lateness, then
-   the shortest route, then the earliest break wins. On a leg the driver may drive first and rest
-   at the next stop, or rest on the way when the window closes before the arrival. A break that
-   would make patients later than without it is not placed (reported as a missing break).
+   one that keeps a route of more than 6 hours legal (a break of at least 20 min inside it, Code du
+   travail art. L3121-16), then the shortest route, then the earliest break wins. On a leg the
+   driver may drive first and rest at the next stop, or rest on the way when the window closes
+   before the arrival. A break that would make patients later than without it is not placed
+   (reported as a missing break).
+4. A route still longer than 6 hours without a legal break inside it (no break rule, or one that
+   falls before the departure or after the return) is timed compact instead: every stop as late as
+   the next one allows, from the earliest return back, so that the depot departure is as late as
+   possible. The solver caps such routes at 6 hours on that timing (model.work_limit_min).
+
+The vehicle may still wait with a patient on board where a window closes before the next one
+opens (a return picked up at the end of its window, the next patient of the same facility ready
+later): the validator counts that wait at the facility in the patient's wait (TOTAL_WAIT) and the
+time on board against the direct drive (RIDE_TIME); the solver keeps both within their limits.
 
 Lateness (service after the window close, return after the shift end) is not hidden: it is kept in
 the times so that the validator reports it.
@@ -26,7 +37,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from app.matrix import TravelMatrix
-from app.model import Window
+from app.model import MAX_WORK_WITHOUT_BREAK_MIN, MIN_LEGAL_BREAK_MIN, Window
 from app.schemas import BreakRule, LatLng, StopKind, Trip, Vehicle
 from app.traffic import stop_reference_minute
 
@@ -142,10 +153,23 @@ class _Run:
     break_slot: tuple[int, int] | None
     lateness_min: int
 
-    def rank(self, order: int) -> tuple[int, int, int, int]:
-        """Least lateness, then shortest route, then earliest break."""
+    @property
+    def lawful(self) -> bool:
+        """At most MAX_WORK_WITHOUT_BREAK_MIN of route, or a break of MIN_LEGAL_BREAK_MIN inside it."""
+        if self.end_min - self.start_min <= MAX_WORK_WITHOUT_BREAK_MIN:
+            return True
+        slot = self.break_slot
+        return (
+            slot is not None
+            and slot[1] - slot[0] >= MIN_LEGAL_BREAK_MIN
+            and self.start_min <= slot[0]
+            and slot[1] <= self.end_min
+        )
+
+    def rank(self, order: int) -> tuple[int, int, int, int, int]:
+        """Least lateness, then lawful work time, then shortest route, then earliest break."""
         begin = self.break_slot[0] if self.break_slot else 0
-        return (self.lateness_min, self.end_min - self.start_min, begin, order)
+        return (self.lateness_min, 0 if self.lawful else 1, self.end_min - self.start_min, begin, order)
 
 
 class _Timing:
@@ -198,8 +222,12 @@ class _Timing:
             return min(next_start - travel - rule.duration_min, rule.window_end_min - rule.duration_min)
         return next_start - travel
 
-    def run(self, placement: _Placement, loads: Sequence[int]) -> _Run | None:
-        """Times of the sequence with the break at `placement`, None if it cannot go there."""
+    def run(self, placement: _Placement, loads: Sequence[int], *, compact: bool = False) -> _Run | None:
+        """Times of the sequence with the break at `placement`, None if it cannot go there.
+
+        `compact` (never with a break on a leg): every stop as late as the next one allows, from the
+        earliest return back, so that the route is as short as its windows allow.
+        """
         forward = self._forward(placement)
         if forward is None:
             return None
@@ -209,11 +237,14 @@ class _Timing:
         # Backward pass across loaded legs only: a stop followed by a patient on board is delayed
         # so that the vehicle does not wait with them; facility arrivals keep their margin.
         starts = list(earliest)
-        for k in reversed(range(count - 1)):
-            if loads[k] == 0:
+        for k in reversed(range(count)):
+            if k == count - 1 and not compact:
+                continue
+            if loads[k] == 0 and not compact:
                 continue
             stop = self.stops[k]
-            latest_start = min(stop.window.close, self._latest_departure(placement, k + 1, starts[k + 1]) - stop.service_min)
+            following = starts[k + 1] if k + 1 < count else end
+            latest_start = min(stop.window.close, self._latest_departure(placement, k + 1, following) - stop.service_min)
             starts[k] = max(earliest[k], latest_start)
 
         lower = self.vehicle.shift_start_min
@@ -258,6 +289,21 @@ class _Timing:
         return arrival, ready, (begin, begin + rule.duration_min)
 
 
+def _compact_if_lawful(timing: _Timing, chosen: _Run, candidates: Sequence[_Placement], loads: Sequence[int]) -> _Run:
+    """The compact timing of a route too long without a legal break, when it makes the route
+    lawful without more lateness (the break, if any, before the departure or after the return)."""
+    off_route = [_Placement(_Where.NONE), *(p for p in candidates if p.where is not _Where.LEG)]
+    lawful = [
+        (run, order)
+        for order, placement in enumerate(off_route)
+        if (run := timing.run(placement, loads, compact=True)) and run.lawful and run.lateness_min <= chosen.lateness_min
+    ]
+    if not lawful:
+        return chosen
+    # A break rule placed off-route beats no break at all (rank: earliest break last, NONE first).
+    return min(lawful, key=lambda item: (item[0].lateness_min, item[0].break_slot is None, item[1]))[0]
+
+
 def schedule_route(vehicle: Vehicle, stops: Sequence[PlannedStop], matrix: TravelMatrix) -> RouteSchedule:
     """Times, loads and legs of `stops` driven in this order by `vehicle` from and to its depot."""
     points = [vehicle.depot, *(stop.location for stop in stops), vehicle.depot]
@@ -285,6 +331,8 @@ def schedule_route(vehicle: Vehicle, stops: Sequence[PlannedStop], matrix: Trave
         # placed (the validator then reports the missing break).
         if best.lateness_min <= without_break.lateness_min:
             chosen = best
+    if not chosen.lawful:
+        chosen = _compact_if_lawful(timing, chosen, candidates, loads)
     return RouteSchedule(
         vehicle=vehicle,
         stops=chosen.stops,

@@ -58,7 +58,7 @@ def checked_plan(model: solver._DayModel, ctx: PlanContext, routes: list[list[in
     assignment = model.routing.ReadAssignmentFromRoutes(routes, True)
     assert assignment is not None, "routes rejected by the routing model"
     outcome = PlanOutcome(
-        sequences=model.sequences(assignment),
+        sequences=model.sequences(model.routes_of(assignment)),
         unassigned_reasons={},
         default_reason="-",
         status="OK",
@@ -85,9 +85,10 @@ def test_regret_insertion_order() -> None:
         "only_one": {2: (500.0, [])},
         "picky": {0: (50.0, []), 1: (300.0, [])},
     }
-    assert solver._DayModel._next_insertion(options) == ("only_one", 2)
+    model, _ = day_model(request([vehicle("taxi", MARSEILLE)], []))
+    assert model._next_insertion(options, set()) == ("only_one", 2)
     del options["only_one"]
-    assert solver._DayModel._next_insertion(options) == ("picky", 0)
+    assert model._next_insertion(options, set()) == ("picky", 0)
 
 
 def test_reinsertion_moves_the_break_when_the_trip_needs_its_slot() -> None:

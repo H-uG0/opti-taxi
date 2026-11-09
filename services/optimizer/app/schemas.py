@@ -28,6 +28,7 @@ ViolationCode = Literal[
     "EXCLUSIVE_RIDE",
     "TIME_WINDOW",
     "TOTAL_WAIT",
+    "RIDE_TIME",
     "DETOUR",
     "SHIFT",
     "BREAK",
@@ -35,6 +36,10 @@ ViolationCode = Literal[
 
 MINUTES_PER_DAY = 24 * 60
 DayMinute = Annotated[int, Field(ge=0, le=2 * MINUTES_PER_DAY)]
+ServiceMinutes = Annotated[int, Field(ge=0, le=120)]
+"""Stop duration of one trip (contract Trip.pickupServiceMin / dropoffServiceMin)."""
+DEFAULT_MAX_RIDE_EXTRA_MIN = 30
+"""Settings.maxRideExtraMin when the request leaves it out (same default in contract.ts)."""
 
 # Bounds of a request (a 120-vehicle day is about 1 000 trips): beyond, 422 before any work.
 # Same values in contract.ts (MAX_VEHICLES, MAX_TRIPS, MAX_TARIFFS).
@@ -104,6 +109,8 @@ class Settings(ContractModel):
     dropoff_service_min: int = Field(ge=0, le=60)
     unassigned_penalty: float = Field(ge=0)
     time_limit_sec: int = Field(ge=1, le=600)
+    max_ride_extra_min: int = Field(default=DEFAULT_MAX_RIDE_EXTRA_MIN, ge=0, le=180)
+    """Time on board (end of the pickup to start of the dropoff) above the direct drive allowed to a patient."""
     traffic: TrafficSettings | None = None
 
 
@@ -151,6 +158,10 @@ class Trip(ContractModel):
     allowed_vehicle_types: list[VehicleType] = Field(min_length=1)
     shareable: bool
     locked_vehicle_id: str | None = None
+    pickup_service_min: ServiceMinutes | None = None
+    """Stop duration at this trip's pickup; None: settings.pickupServiceMin."""
+    dropoff_service_min: ServiceMinutes | None = None
+    """Stop duration at this trip's dropoff; None: settings.dropoffServiceMin."""
 
     @model_validator(mode="after")
     def _times_match_direction(self) -> Trip:

@@ -227,7 +227,7 @@ def test_break_repair_rechecks_the_detour_of_shared_rides() -> None:
     (pn, dn), (pf, df) = (tuple(model.manager.NodeToIndex(n) for n in model.trip_nodes[t]) for t in ("near", "far"))
     assert model._detour_breaches([pn, dn, pf, df]) == set()
     assert model._detour_breaches([pn, pf, dn, df]) == {"near"}  # 25 km east and back: far beyond 10 km
-    assert model._without_trips([pn, pf, dn, df], {"far"}) == [pn, dn]
+    assert model._without_trips([pn, pf, dn, df], {"far"}, 0) == [pn, dn]
 
 
 def test_time_limit_advice() -> None:

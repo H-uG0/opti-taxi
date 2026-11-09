@@ -51,7 +51,7 @@ def main() -> None:
             {
                 "nodes": [[n.role.value, n.point, n.trip.id if n.trip else None, n.vehicle] for n in model.nodes],
                 "candidates": [[trip.id, candidates] for trip, candidates in routable],
-                "plan": {vid: [[ref.trip_id, ref.kind] for ref in refs] for vid, refs in model.sequences(solution).items()},
+                "plan": {vid: [[ref.trip_id, ref.kind] for ref in refs] for vid, refs in model.sequences(model.routes_of(solution)).items()},
                 "objective": solution.ObjectiveValue(),
             }
         )

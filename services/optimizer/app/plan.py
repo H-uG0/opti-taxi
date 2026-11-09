@@ -77,7 +77,7 @@ def planned_stop(ctx: PlanContext, ref: StopRef) -> PlannedStop:
         trip=trip,
         kind=ref.kind,
         location=trip.pickup if ref.kind == "PICKUP" else trip.dropoff,
-        service_min=service_minutes(ctx.request.settings, ref.kind),
+        service_min=service_minutes(ctx.request.settings, trip, ref.kind),
         window=ctx.windows[trip.id].for_kind(ref.kind),
     )
 

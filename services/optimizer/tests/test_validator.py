@@ -164,8 +164,65 @@ def test_total_wait() -> None:
     strict = OptimizeRequest.model_validate(scenario(maxTotalWaitMin=20))
     a_dropoff = route_of(routes, "taxi_1").stops[2]
     assert a_dropoff.start_min <= 460  # 20+ min before the 08:00 appointment
-    found = validate(strict, routes, matrix)
-    assert [v.trip_id for v in found if v.code == "TOTAL_WAIT"] == ["a_ret"]
+    found = {v.trip_id: v.message for v in validate(strict, routes, matrix) if v.code == "TOTAL_WAIT"}
+    assert "aller" in found["a_ret"] and "retour" in found["a_ret"]  # the pair of patient A
+    # Patient B has no return that day: their outbound alone is checked against the total.
+    assert "avant le rendez-vous" in found["b_out"]
+
+
+def dialysis_returns(**settings: Any) -> tuple[OptimizeRequest, list[Route], TravelMatrix]:
+    """Patients A and B leave the same dialysis center in one taxi: A is ready at 11:00, B at 11:30.
+    A, picked up at the end of their window (11:15), waits in the parked taxi until B's pickup."""
+    trips = [
+        trip("a_out", "pat_a", "OUTBOUND", HOME_A, AIX_FAC, appointment=480),
+        trip("a_ret", "pat_a", "RETURN", AIX_FAC, HOME_A, ready=660),
+        trip("b_ret", "pat_b", "RETURN", AIX_FAC, HOME_B, ready=690),
+    ]
+    raw = request([vehicle("taxi_1", MARSEILLE), vehicle("taxi_2", AIX)], trips, **settings)
+    sequences: Sequences = {
+        "taxi_1": [("a_out", "PICKUP"), ("a_out", "DROPOFF")],
+        "taxi_2": [("a_ret", "PICKUP"), ("b_ret", "PICKUP"), ("a_ret", "DROPOFF"), ("b_ret", "DROPOFF")],
+    }
+    return planned(raw, sequences)
+
+
+def test_wait_on_board_at_the_facility_counts_in_the_total_wait() -> None:
+    req, routes, matrix = dialysis_returns()
+    taxi = route_of(routes, "taxi_2")
+    a_pickup, b_pickup = taxi.stops[0], taxi.stops[1]
+    assert (a_pickup.start_min, b_pickup.arrival_min, b_pickup.start_min) == (675, 680, 690)
+    assert route_of(routes, "taxi_1").stops[1].start_min == 450  # 30 min before the appointment
+    found = [v for v in validate(req, routes, matrix) if v.code == "TOTAL_WAIT"]
+    # 30 min before + 15 min after the session + 10 min in the parked taxi: 55 min, not 45.
+    assert [v.trip_id for v in found] == ["a_ret"]
+    assert "55 min" in found[0].message and "dont 10 min à bord" in found[0].message
+
+
+def test_ride_time() -> None:
+    req, routes, matrix = dialysis_returns(maxRideExtraMin=5)
+    rides = {v.trip_id: v.message for v in validate(req, routes, matrix) if v.code == "RIDE_TIME"}
+    # A rides through B's pickup (5 min) and the 10 min wait, B through A's dropoff: over direct + 5.
+    assert set(rides) == {"a_ret", "b_ret"}
+    assert "trajet direct + 5 min" in rides["a_ret"]
+    req, routes, matrix = dialysis_returns()
+    assert not [v for v in validate(req, routes, matrix) if v.code == "RIDE_TIME"]
+
+
+def test_route_longer_than_six_hours_needs_a_break() -> None:
+    trips = [
+        trip("early", "p1", "OUTBOUND", HOME_A, AIX_FAC, appointment=480),
+        trip("late", "p2", "RETURN", AIX_FAC, HOME_A, ready=900),
+    ]
+    sequences: Sequences = {"taxi_1": [("early", "PICKUP"), ("early", "DROPOFF"), ("late", "PICKUP"), ("late", "DROPOFF")]}
+    req, routes, matrix = planned(request([vehicle("taxi_1", MARSEILLE)], trips), sequences)
+    taxi = route_of(routes, "taxi_1")
+    assert taxi.end_min - taxi.start_min > 360 and taxi.break_ is None
+    work = [v for v in validate(req, routes, matrix) if v.code == "BREAK"]
+    assert len(work) == 1 and "L3121-16" in work[0].message
+    # With a 45 min break inside the route, the same day is lawful.
+    raw = request([vehicle("taxi_1", MARSEILLE, break_=TAXI_BREAK)], trips)
+    req, routes, matrix = planned(raw, sequences)
+    assert validate(req, routes, matrix) == []
 
 
 def test_detour() -> None:
