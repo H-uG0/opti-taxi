@@ -269,7 +269,12 @@ function NewTripFields({
           </Field>
         </div>
 
-        <Field label="Notes (facultatif)" htmlFor="notes" error={errors.notes} hint="Visible du régulateur et sur la feuille de route.">
+        <Field
+          label="Notes (facultatif)"
+          htmlFor="notes"
+          error={errors.notes}
+          hint="Visible du régulateur et sur la feuille de route du chauffeur. Aucune information médicale (diagnostic, traitement)."
+        >
           <Textarea id="notes" name="notes" maxLength={500} rows={2} defaultValue={v.notes ?? ""} />
         </Field>
       </Fieldset>

@@ -8,7 +8,7 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { loadDayCrewContext } from "@/lib/optimizer/build-request";
 import { replanBlocker } from "@/lib/planning/run-optimization";
-import { absenceOn, absenceText, isQualified, staffName } from "@/lib/staff/day-crews";
+import { absenceOn, isQualified, planningAbsenceText, staffName } from "@/lib/staff/day-crews";
 import { formatLongDate, fromIsoDate, isIsoDate, isoWeekday, tomorrowIso } from "@/lib/time";
 import { DateNav } from "../planning/date-nav";
 import { CrewForm, type CrewPersonOption, type CrewRow } from "./crew-form";
@@ -77,7 +77,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
         name: `${p.lastName.toUpperCase()} ${p.firstName}`,
         active: p.active,
         depotId: p.depotId,
-        absence: absence ? absenceText(absence).toLowerCase() : null,
+        absence: absence ? planningAbsenceText(absence).toLowerCase() : null,
         worksThatDay: p.workDays.includes(weekday),
         canDrive: Object.fromEntries(TYPES.map((t) => [t, isQualified(p, t, "driver")])) as Record<VehicleType, boolean>,
         canCrew: isQualified(p, "AMBULANCE", "crewMate"),
@@ -133,12 +133,14 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
                       <Link href={`/chauffeurs/${a.driverId}`} className="font-medium underline-offset-2 hover:underline">
                         {nameOf(a.driverId)}
                       </Link>{" "}
-                      — {absenceText(a)}
+                      — {planningAbsenceText(a).toLowerCase()}
                     </li>
                   ))}
                 </ul>
               )}
-              <p className="mt-3 text-xs text-slate-500">Congés, arrêts, formations et gardes se saisissent dans la fiche de chaque chauffeur.</p>
+              <p className="mt-3 text-xs text-slate-500">
+                Les absences se saisissent dans la fiche de chaque chauffeur ; leur motif n&apos;est visible que là.
+              </p>
             </CardBody>
           </Card>
           <Card>

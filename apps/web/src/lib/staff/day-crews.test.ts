@@ -3,6 +3,7 @@ import type { Qualification } from "@prisma/client";
 import {
   absenceOn,
   absenceText,
+  planningAbsenceText,
   resolveDayCrews,
   type CrewVehicle,
   type DatedAbsence,
@@ -69,10 +70,10 @@ describe("resolveDayCrews", () => {
     const crew = crewOf(result, "Taxi A");
     expect(crew).toMatchObject({ driverId: "spare_a", source: "replacement", blocked: null });
     expect(crew.issues.map((i) => i.message)).toEqual([
-      "Chauffeur attitré indisponible (taxi1 TAXI1 : congé du 09/11/2026 au 13/11/2026)",
+      "Chauffeur attitré indisponible (taxi1 TAXI1 : absence du 09/11/2026 au 13/11/2026)",
       "Chauffeur remplaçant proposé : spare_a SPARE_A",
     ]);
-    expect(result.absent).toEqual([{ driverId: "taxi1", kind: "LEAVE", startDate: "2026-11-09", endDate: "2026-11-13" }]);
+    expect(result.absent).toEqual([{ driverId: "taxi1", startDate: "2026-11-09", endDate: "2026-11-13" }]);
   });
 
   it("serves a vehicle missing its default driver before a spare vehicle", () => {
@@ -143,7 +144,7 @@ describe("resolveDayCrews", () => {
 
   it("blocks a fixed crew whose member is absent or unqualified", () => {
     const absent = plan({ absences: [{ ...leave("taxi1"), kind: "ON_CALL" }], saved: [{ vehicleId: "Taxi A", driverId: "taxi1", crewMateId: null }] });
-    expect(crewOf(absent, "Taxi A").blocked).toBe("taxi1 TAXI1 : garde le 09/11/2026");
+    expect(crewOf(absent, "Taxi A").blocked).toBe("taxi1 TAXI1 : absence le 09/11/2026");
     const unqualified = plan({ saved: [{ vehicleId: "Taxi A", driverId: "aux2", crewMateId: null }] });
     expect(crewOf(unqualified, "Taxi A").blocked).toBe("aux2 AUX2 n'a pas la qualification requise pour ce poste");
   });
@@ -198,11 +199,24 @@ describe("resolveDayCrews", () => {
 });
 
 describe("absences", () => {
-  it("covers both bounds and labels the kind", () => {
+  it("covers both bounds and labels the kind on the person's sheet only", () => {
     const list = [leave("p", "2026-11-09", "2026-11-11")];
     expect(absenceOn("p", "2026-11-09", list)).not.toBeNull();
     expect(absenceOn("p", "2026-11-11", list)).not.toBeNull();
     expect(absenceOn("p", "2026-11-12", list)).toBeNull();
     expect(absenceText({ kind: "SICK", startDate: "2026-11-09", endDate: "2026-11-09" })).toBe("Arrêt maladie le 09/11/2026");
+    expect(planningAbsenceText({ startDate: "2026-11-09", endDate: "2026-11-09" })).toBe("Absence le 09/11/2026");
+    expect(planningAbsenceText({ startDate: "2026-11-09", endDate: "2026-11-11" })).toBe("Absence du 09/11/2026 au 11/11/2026");
+  });
+
+  it("never lets the reason of an absence reach the planning (crews, problems, absent list)", () => {
+    for (const kind of ["SICK", "LEAVE", "TRAINING", "ON_CALL", "OTHER"] as const) {
+      const sick = { ...leave("taxi1"), kind };
+      const proposed = plan({ absences: [sick] });
+      const fixed = plan({ absences: [sick], saved: [{ vehicleId: "Taxi A", driverId: "taxi1", crewMateId: null }] });
+      const shown = JSON.stringify([proposed, fixed]);
+      expect(shown).not.toMatch(/maladie|congé|formation|garde|SICK|LEAVE|TRAINING|ON_CALL|"kind"/i);
+      expect(shown).toMatch(/absence le 09\/11\/2026/);
+    }
   });
 });

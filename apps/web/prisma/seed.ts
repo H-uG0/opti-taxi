@@ -271,8 +271,9 @@ async function seedVehicles(
  * Staff planning examples (lot 3), next week so the Équipages page shows them:
  * a taxi driver of Sisteron on leave Monday to Friday (no spare taxi driver in
  * Sisteron: the replacement comes from another depot), an ambulance driver of
- * Gap on call on Wednesday (replaced by Gap's spare DEA), and one pair of
- * people not to put in the same crew.
+ * Gap on call on Wednesday (replaced by Gap's spare DEA), that spare on sick
+ * leave on Thursday and Friday (its reason shows on her sheet only), and one
+ * pair of people not to put in the same crew.
  */
 async function seedStaffPlanning(drivers: Map<DriverKey, CreatedDriver>, dates: Dates): Promise<void> {
   const id = (key: DriverKey) => lookup(drivers, key, "Chauffeur").id;
@@ -291,6 +292,15 @@ async function seedStaffPlanning(drivers: Map<DriverKey, CreatedDriver>, dates: 
         startDate: fromIsoDate(addDays(dates.nextMonday, 2)),
         endDate: fromIsoDate(addDays(dates.nextMonday, 2)),
         note: "Garde départementale 8 h – 20 h.",
+      },
+      // A sick leave: « Arrêt maladie » on her sheet only, « absent » on the crew page.
+      // No note: a note never carries medical information.
+      {
+        driverId: id("sabrina"),
+        kind: "SICK",
+        startDate: fromIsoDate(addDays(dates.nextMonday, 3)),
+        endDate: fromIsoDate(addDays(dates.nextMonday, 4)),
+        note: null,
       },
     ],
   });

@@ -187,7 +187,8 @@ export default async function EditDriverPage({
             <CardBody className="space-y-4 text-sm text-slate-700">
               <p className="text-xs text-slate-500">
                 Congé, arrêt, formation ou garde : la personne n&apos;est pas proposée dans les équipages de ces jours,
-                et un remplaçant l&apos;est à sa place (page Équipages).
+                et un remplaçant l&apos;est à sa place (page Équipages). Le motif n&apos;apparaît que sur cette
+                fiche : les équipages et le planning indiquent seulement « absence ».
               </p>
               {absences.length === 0 ? (
                 <p className="text-slate-500">Aucune absence récente ou à venir.</p>

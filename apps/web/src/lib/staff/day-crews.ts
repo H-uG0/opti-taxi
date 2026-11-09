@@ -18,6 +18,11 @@
  * A vehicle unavailable that day (maintenance, on-call duty…, lib/fleet)
  * gets nobody, even a crew fixed earlier, and its default crew is free for
  * the other vehicles.
+ *
+ * The reason of a person's absence (sick leave is health data about an
+ * employee) never leaves this module: the crews, their problems and the
+ * absent list say « absence » only (planningAbsenceText). The reason shows on
+ * the person's own sheet alone (absenceText).
  */
 import type { AbsenceKind, Qualification, VehicleType } from "@prisma/client";
 import { REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
@@ -71,8 +76,8 @@ export type DayCrewPlan = {
   date: string;
   /** Active vehicles, in display order. */
   crews: DayCrewView[];
-  /** People absent that day, with the reason. */
-  absent: { driverId: string; kind: AbsenceKind; startDate: string; endDate: string }[];
+  /** People absent that day, without the reason (planning screens only need « absent »). */
+  absent: { driverId: string; startDate: string; endDate: string }[];
   /** Active people working that weekday, not absent, with no seat. */
   idle: string[];
 };
@@ -128,12 +133,28 @@ export function areIncompatible(a: string, b: string, pairs: readonly Incompatib
   return pairs.some((p) => (p.driverAId === a && p.driverBId === b) || (p.driverAId === b && p.driverBId === a));
 }
 
-/** "Congé du 10/11/2026 au 14/11/2026", "Garde le 10/11/2026". */
-export function absenceText(absence: Pick<DatedAbsence, "kind" | "startDate" | "endDate">): string {
-  const label = ABSENCE_KIND_LABELS[absence.kind];
+function datedText(label: string, absence: Pick<DatedAbsence, "startDate" | "endDate">): string {
   return absence.startDate === absence.endDate
     ? `${label} le ${formatShortDate(absence.startDate)}`
     : `${label} du ${formatShortDate(absence.startDate)} au ${formatShortDate(absence.endDate)}`;
+}
+
+/**
+ * "Congé du 10/11/2026 au 14/11/2026", "Arrêt maladie le 10/11/2026": with the
+ * reason, for the person's own sheet only (/chauffeurs/[id]).
+ */
+export function absenceText(absence: Pick<DatedAbsence, "kind" | "startDate" | "endDate">): string {
+  return datedText(ABSENCE_KIND_LABELS[absence.kind], absence);
+}
+
+/**
+ * "Absence du 10/11/2026 au 14/11/2026", "Absence le 10/11/2026": what the
+ * planning screens show (crews, crew problems, absent list), whatever the
+ * reason, so a sick leave cannot be told from a holiday there. A noun, so it
+ * reads right for anyone.
+ */
+export function planningAbsenceText(absence: Pick<DatedAbsence, "startDate" | "endDate">): string {
+  return datedText("Absence", absence);
 }
 
 const SEAT_LABEL: Record<Seat, string> = { driver: "Chauffeur", crewMate: "Équipier" };
@@ -182,7 +203,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
   const defaultUnavailable = (person: StaffPerson, vehicle: CrewVehicle, seat: Seat, other: string | null): string | null => {
     if (!person.active) return "désactivé";
     const absence = absenceOn(person.id, date, absences);
-    if (absence) return absenceText(absence).toLowerCase();
+    if (absence) return planningAbsenceText(absence).toLowerCase();
     if (!person.workDays.includes(weekday)) return `ne travaille pas le ${dayName}`;
     const holder = taken.get(person.id);
     if (holder) return `déjà sur ${holder}`;
@@ -279,7 +300,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
       const name = staffName(person);
       const absence = absenceOn(id, date, absences);
       if (!person.active) issues.push({ level: "error", seat, message: `${name} est désactivé` });
-      if (absence) issues.push({ level: "error", seat, message: `${name} : ${absenceText(absence).toLowerCase()}` });
+      if (absence) issues.push({ level: "error", seat, message: `${name} : ${planningAbsenceText(absence).toLowerCase()}` });
       if (!isQualified(person, vehicle.type, seat)) {
         issues.push({ level: "error", seat, message: `${name} n'a pas la qualification requise pour ce poste` });
       }
@@ -324,7 +345,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
     .map((p) => ({ person: p, absence: absenceOn(p.id, date, absences) }))
     .filter((x): x is { person: StaffPerson; absence: DatedAbsence } => x.absence !== null)
     .sort((x, y) => comparePeople(x.person, y.person))
-    .map(({ absence }) => ({ driverId: absence.driverId, kind: absence.kind, startDate: absence.startDate, endDate: absence.endDate }));
+    .map(({ absence }) => ({ driverId: absence.driverId, startDate: absence.startDate, endDate: absence.endDate }));
   const idle = pool.filter((p) => proposable(p) && !taken.has(p.id)).map((p) => p.id);
 
   return { date, crews, absent, idle };
