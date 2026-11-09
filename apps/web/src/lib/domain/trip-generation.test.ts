@@ -1,7 +1,17 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { fromIsoDate, toIsoDate } from "@/lib/time";
-import { generateTrips, planTripsFromRecurrences, type RecurrenceForGeneration } from "./trip-generation";
+import {
+  GENERATION_INCLUDE,
+  generateTrips,
+  planRecurrenceTrips,
+  planTripsFromRecurrences,
+  prescriptionOn,
+  recurrenceOccursOn,
+  revivalData,
+  type PrescriptionForGeneration,
+  type RecurrenceForGeneration,
+} from "./trip-generation";
 
 // The first Date#toISOString() of a test worker can take several seconds on a slow
 // Windows machine (4-7 s observed): pay it once here, outside the per-test timeout.
@@ -289,17 +299,108 @@ describe("generateTrips", () => {
         startDate: { lte: fromIsoDate(SUNDAY) },
         OR: [{ endDate: null }, { endDate: { gte: fromIsoDate(MONDAY) } }],
       },
-      include: { patient: true, facility: true, prescription: true },
+      include: GENERATION_INCLUDE,
     });
   });
 
   it("inserts the planned trips, skipping those that already exist", async () => {
     const { prisma, createMany } = fakePrisma([recurrence()], 4);
     const result = await generateTrips(prisma, MONDAY, SUNDAY);
-    expect(result).toEqual({ planned: 6, created: 4 });
+    expect(result).toEqual({ planned: 6, created: 4, skipped: [] });
     expect(createMany).toHaveBeenCalledTimes(1);
     const args = createMany.mock.calls[0]?.[0] as { data: Prisma.TripCreateManyInput[]; skipDuplicates: boolean };
     expect(args.skipDuplicates).toBe(true);
     expect(summary(args.data)).toEqual(summary(planTripsFromRecurrences([recurrence()], MONDAY, SUNDAY)));
+  });
+});
+
+describe("planRecurrenceTrips — renewal not attached yet", () => {
+  // The recurrence's PMT ends on Tuesday 3 November; the renewal takes over on Wednesday 4.
+  const ending = { validFrom: fromIsoDate("2026-05-01"), validTo: fromIsoDate("2026-11-03") };
+  const renewal: PrescriptionForGeneration = {
+    id: "pre_2",
+    mode: "TAP",
+    sharing: "OUTBOUND",
+    validFrom: fromIsoDate("2026-11-04"),
+    validTo: fromIsoDate("2027-05-03"),
+  };
+
+  it("uses the patient's renewal (same mode) once the recurrence's prescription has ended", () => {
+    const rec = recurrence({ prescription: ending, patient: { prescriptions: [{ id: "pre_1", mode: "TAP", sharing: "BOTH", ...ending }, renewal] } });
+    const { trips, skipped } = planRecurrenceTrips([rec], MONDAY, SUNDAY);
+
+    expect(summary(trips)).toEqual([
+      "2026-11-02 OUTBOUND",
+      "2026-11-02 RETURN",
+      "2026-11-04 OUTBOUND",
+      "2026-11-04 RETURN",
+      "2026-11-06 OUTBOUND",
+      "2026-11-06 RETURN",
+    ]);
+    expect(skipped).toEqual([]);
+    // Monday on the old PMT; Wednesday on the renewal, with its rules (sharing on the outbound leg only).
+    expect(trips.map((t) => t.prescriptionId)).toEqual(["pre_1", "pre_1", "pre_2", "pre_2", "pre_2", "pre_2"]);
+    expect(trips.filter((t) => t.prescriptionId === "pre_2").map((t) => t.sharingAllowed)).toEqual([true, false, true, false]);
+  });
+
+  it("never falls back on a prescription of another mode", () => {
+    const ambulance = { ...renewal, mode: "AMBULANCE" as const };
+    const rec = recurrence({ prescription: ending, patient: { prescriptions: [ambulance] } });
+    expect(prescriptionOn(rec, "2026-11-04")).toBeNull();
+  });
+
+  it("picks the covering prescription that lasts longest", () => {
+    const short = { ...renewal, id: "pre_short", validTo: fromIsoDate("2026-11-30") };
+    const rec = recurrence({ prescription: ending, patient: { prescriptions: [short, renewal] } });
+    expect(prescriptionOn(rec, "2026-11-04")?.id).toBe("pre_2");
+  });
+
+  it("reports the sessions without any valid prescription instead of dropping them silently", () => {
+    const rec = recurrence({ prescription: ending });
+    const { trips, skipped } = planRecurrenceTrips([rec], MONDAY, SUNDAY);
+    expect(summary(trips)).toEqual(["2026-11-02 OUTBOUND", "2026-11-02 RETURN"]);
+    expect(skipped).toEqual([
+      { recurrenceId: "rec_1", patientId: "pat_1", date: "2026-11-04" },
+      { recurrenceId: "rec_1", patientId: "pat_1", date: "2026-11-06" },
+    ]);
+  });
+
+  it("does not report the sessions of an inactive recurrence or patient", () => {
+    const { skipped } = planRecurrenceTrips(
+      [recurrence({ prescription: ending, active: false }), recurrence({ id: "rec_2", prescription: ending, patient: { active: false } })],
+      MONDAY,
+      SUNDAY,
+    );
+    expect(skipped).toEqual([]);
+    expect(recurrenceOccursOn(recurrence(), "2026-11-04")).toBe(true);
+    expect(recurrenceOccursOn(recurrence(), "2026-11-03")).toBe(false);
+  });
+});
+
+describe("revivalData", () => {
+  const [planned] = planTripsFromRecurrences([recurrence()], MONDAY, MONDAY);
+
+  it("makes the cancelled trip the one the generation would create, cleared of its cancellation", () => {
+    const data = revivalData(planned!, { sharingStatus: "NOT_PROPOSED" });
+    expect(data).toMatchObject({
+      status: "PLANNED",
+      cancellationReason: null,
+      cancellationOrigin: null,
+      cancelledAt: null,
+      cancelledById: null,
+      lateCancellation: false,
+      prescriptionId: "pre_1",
+      appointmentMinute: 450,
+      routeId: null,
+      lockedVehicleId: null,
+      sharingStatus: "NOT_PROPOSED",
+    });
+    // The row keeps its identity: no recurrence, date, direction or patient is rewritten.
+    expect(data).not.toHaveProperty("serviceDate");
+    expect(data).not.toHaveProperty("recurrenceId");
+  });
+
+  it("keeps a refusal of shared transport on record", () => {
+    expect(revivalData(planned!, { sharingStatus: "REFUSED" }).sharingStatus).toBe("REFUSED");
   });
 });

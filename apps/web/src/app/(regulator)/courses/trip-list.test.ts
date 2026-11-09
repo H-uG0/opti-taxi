@@ -196,12 +196,15 @@ describe("formatting", () => {
     expect(formatInstant(null)).toBeNull();
   });
 
-  it("reports created and existing trips of a generated week", () => {
-    expect(generationMessage({ planned: 60, created: 12 }, "2026-11-02", "2026-11-08")).toBe(
-      "Semaine du 02/11/2026 au 08/11/2026 : 12 courses créées (48 déjà existantes).",
+  it("reports the trips created and brought back over the generated days", () => {
+    expect(generationMessage({ created: 12, revived: 0 }, "2026-11-03", "2026-11-08")).toBe(
+      "Du 03/11/2026 au 08/11/2026 : 12 courses créées.",
     );
-    expect(generationMessage({ planned: 1, created: 0 }, "2026-11-02", "2026-11-08")).toBe(
-      "Semaine du 02/11/2026 au 08/11/2026 : 0 course créée (1 déjà existante).",
+    expect(generationMessage({ created: 1, revived: 2 }, "2026-11-03", "2026-11-08")).toBe(
+      "Du 03/11/2026 au 08/11/2026 : 1 course créée, 2 courses annulées automatiquement rétablies.",
+    );
+    expect(generationMessage({ created: 0, revived: 0 }, "2026-11-08", "2026-11-08")).toBe(
+      "Le 08/11/2026 : toutes les courses régulières existent déjà.",
     );
   });
 });

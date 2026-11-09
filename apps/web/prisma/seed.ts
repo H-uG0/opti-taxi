@@ -481,6 +481,89 @@ async function seedPatients(
 }
 
 // ---------------------------------------------------------------------------
+// Prescriptions to follow up (work list « Prescriptions »).
+
+/**
+ * Three cases for the work list, with their own generator (the other patients
+ * and trips stay those of the earlier seeds): a prescription renewed but whose
+ * recurrence still points to the old one (the trips go on with the renewal), one
+ * ending at the end of next week without renewal, and a patient whose
+ * prescription expired yesterday while the recurrence is still active (no trip
+ * any more: « récurrence active sans course » on the planning). Run before the
+ * trips are generated; the two first cases leave the generated trips unchanged.
+ */
+async function seedPrescriptionFollowUp(rng: Rng, facilities: Map<FacilityKey, CreatedFacility>, dates: Dates): Promise<void> {
+  const seriesOf = (city: string) =>
+    prisma.prescription.findFirst({
+      where: { mode: "TAP", patient: { active: true, city }, recurrences: { some: { active: true, endDate: null } } },
+      orderBy: { patient: { createdAt: "asc" } },
+      select: { id: true, patientId: true, mode: true, sharing: true, prescriber: true, notes: true },
+    });
+
+  // Renewed, not attached: the old PMT ends in 3 days, the renewal takes over the next day.
+  const renewed = await seriesOf(TOWNS.manosque.name);
+  if (renewed) {
+    const end = addDays(dates.today, 3);
+    await prisma.prescription.update({ where: { id: renewed.id }, data: { validTo: fromIsoDate(end) } });
+    await prisma.prescription.create({
+      data: {
+        patientId: renewed.patientId,
+        mode: renewed.mode,
+        sharing: renewed.sharing,
+        validFrom: fromIsoDate(addDays(end, 1)),
+        validTo: fromIsoDate(addDays(end, 180)),
+        isSeries: true,
+        prescriber: renewed.prescriber,
+        notes: renewed.notes,
+      },
+    });
+  }
+  // Ending on the last generated day, no renewal yet.
+  const ending = await seriesOf(TOWNS.gap.name);
+  if (ending) await prisma.prescription.update({ where: { id: ending.id }, data: { validTo: fromIsoDate(dates.lastDay) } });
+
+  // Expired yesterday, recurrence still active: no trip any more.
+  const facility = lookup(facilities, "dialysisMarseille", "Établissement");
+  const treatment = TREATMENTS.DIALYSIS;
+  const validFrom = addDays(dates.today, -180);
+  const expired = await prisma.patient.create({
+    data: {
+      firstName: "Gisèle",
+      lastName: "Arnoux",
+      phone: fictitiousMobile(rng),
+      ...homeIn(rng, "marseille13"),
+      mobility: "SEATED",
+      prescriptions: {
+        create: {
+          mode: "TAP",
+          sharing: "BOTH",
+          validFrom: fromIsoDate(validFrom),
+          validTo: fromIsoDate(addDays(dates.today, -1)),
+          isSeries: true,
+          prescriber: treatment.prescriber,
+          notes: treatment.notes,
+        },
+      },
+    },
+    select: { id: true, prescriptions: { select: { id: true } } },
+  });
+  const prescription = expired.prescriptions[0];
+  if (!prescription) throw new Error("Prescription non créée");
+  await prisma.recurrence.create({
+    data: {
+      patientId: expired.id,
+      facilityId: facility.id,
+      prescriptionId: prescription.id,
+      label: treatment.label,
+      weekdays: [1, 2, 3, 4, 5, 6],
+      appointmentMinute: minute("13:00"),
+      sessionMinutes: treatment.sessionMinutes,
+      startDate: fromIsoDate(validFrom),
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // One-off trips for tomorrow and sharing refusals.
 
 function legPlaces(direction: TripDirection, home: Place, care: { address: string; lat: number; lng: number }) {
@@ -765,6 +848,8 @@ async function main(): Promise<void> {
   console.log("• Patients, prescriptions et récurrences");
   const names = new NameFactory(rng, Object.values(DRIVERS));
   await seedPatients(rng, names, facilities, dates);
+  // Own generator: the patients and trips drawn afterwards stay those of the earlier seeds.
+  await seedPrescriptionFollowUp(new Rng(RANDOM_SEED + 5), facilities, dates);
   console.log(`• Courses générées du ${formatShortDate(dates.monday)} au ${formatShortDate(dates.lastDay)}`);
   const generated = await generateTrips(prisma, dates.monday, dates.lastDay);
   console.log(`  ${generated.created} courses créées (${generated.planned} prévues par les récurrences)`);

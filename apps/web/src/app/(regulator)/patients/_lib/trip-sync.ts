@@ -18,7 +18,10 @@ import type {
   TripStatus,
   VehicleType,
 } from "@prisma/client";
-import { allowedVehicleTypesFor, isShareable, sharingAllowedFor } from "@/lib/domain/rules";
+import { allowedVehicleTypesFor, isShareable, nextSharingStatus, sharingAllowedFor } from "@/lib/domain/rules";
+
+// Shared with the revival of cancelled trips (lib/domain/trip-generation.ts).
+export { nextSharingStatus };
 import { isoWeekday } from "@/lib/time";
 
 /** Trips a referential change may still modify: not started, not cancelled. */
@@ -138,15 +141,6 @@ function sameTypes(a: readonly VehicleType[], b: readonly VehicleType[]): boolea
   const left = new Set(a);
   const right = new Set(b);
   return left.size === right.size && [...left].every((t) => right.has(t));
-}
-
-/**
- * Sharing traceability once the prescription changes: no longer allowed ->
- * NOT_ELIGIBLE (a refusal stays recorded); allowed again -> NOT_PROPOSED.
- */
-export function nextSharingStatus(current: SharingStatus, sharingAllowed: boolean): SharingStatus {
-  if (!sharingAllowed) return current === "REFUSED" ? current : "NOT_ELIGIBLE";
-  return current === "NOT_ELIGIBLE" ? "NOT_PROPOSED" : current;
 }
 
 type Side = "pickup" | "dropoff";
@@ -330,9 +324,13 @@ export type SyncSummary = {
   detached: number;
   /** Trips of today already in a route, left untouched. */
   deferred: number;
+  /** Trips generated from the recurrences over the horizon (lib/trips/completion.ts). */
+  created: number;
+  /** Trips the application had cancelled, brought back once the cause was gone. */
+  revived: number;
 };
 
-export const EMPTY_SYNC: SyncSummary = { updated: 0, cancelled: 0, detached: 0, deferred: 0 };
+export const EMPTY_SYNC: SyncSummary = { updated: 0, cancelled: 0, detached: 0, deferred: 0, created: 0, revived: 0 };
 
 export function addSummaries(a: SyncSummary, b: SyncSummary): SyncSummary {
   return {
@@ -340,11 +338,18 @@ export function addSummaries(a: SyncSummary, b: SyncSummary): SyncSummary {
     cancelled: a.cancelled + b.cancelled,
     detached: a.detached + b.detached,
     deferred: a.deferred + b.deferred,
+    created: a.created + b.created,
+    revived: a.revived + b.revived,
   };
 }
 
+/** The summary plus what completing the horizon did. */
+export function withCompletion(summary: SyncSummary, completion: { created: number; revived: number }): SyncSummary {
+  return { ...summary, created: summary.created + completion.created, revived: summary.revived + completion.revived };
+}
+
 export function isEmptySync(s: SyncSummary): boolean {
-  return s.updated + s.cancelled + s.detached + s.deferred === 0;
+  return s.updated + s.cancelled + s.detached + s.deferred + s.created + s.revived === 0;
 }
 
 /** "1 course à venir" / "4 courses à venir" (open trips from today on). */
@@ -356,6 +361,8 @@ export function openTripsLabel(count: number): string {
 export function describeSync(s: SyncSummary): string | null {
   const sentences: string[] = [];
   const done: string[] = [];
+  if (s.created > 0) done.push(`${s.created} créée${s.created > 1 ? "s" : ""}`);
+  if (s.revived > 0) done.push(`${s.revived} rétablie${s.revived > 1 ? "s" : ""}`);
   if (s.updated > 0) done.push(`${s.updated} mise${s.updated > 1 ? "s" : ""} à jour`);
   if (s.cancelled > 0) done.push(`${s.cancelled} annulée${s.cancelled > 1 ? "s" : ""}`);
   if (done.length > 0) sentences.push(`Courses à venir : ${done.join(", ")}.`);
@@ -380,14 +387,24 @@ export function describeSync(s: SyncSummary): string | null {
 export const SYNC_PARAM = "courses";
 
 export function encodeSync(s: SyncSummary): string | null {
-  return isEmptySync(s) ? null : `${s.updated}-${s.cancelled}-${s.detached}-${s.deferred}`;
+  if (isEmptySync(s)) return null;
+  const head = `${s.updated}-${s.cancelled}-${s.detached}-${s.deferred}`;
+  return s.created + s.revived > 0 ? `${head}-${s.created}-${s.revived}` : head;
 }
 
+/** "u-c-d-f" (before generation was counted) or "u-c-d-f-created-revived". */
 export function decodeSync(value: string | null | undefined): SyncSummary | null {
-  const match = /^(\d{1,5})-(\d{1,5})-(\d{1,5})-(\d{1,5})$/.exec(value ?? "");
+  const match = /^(\d{1,5})-(\d{1,5})-(\d{1,5})-(\d{1,5})(?:-(\d{1,5})-(\d{1,5}))?$/.exec(value ?? "");
   if (!match) return null;
-  const [updated, cancelled, detached, deferred] = match.slice(1).map(Number) as [number, number, number, number];
-  const summary = { updated, cancelled, detached, deferred };
+  const [updated, cancelled, detached, deferred, created, revived] = match.slice(1).map((n) => Number(n ?? 0)) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const summary = { updated, cancelled, detached, deferred, created, revived };
   return isEmptySync(summary) ? null : summary;
 }
 

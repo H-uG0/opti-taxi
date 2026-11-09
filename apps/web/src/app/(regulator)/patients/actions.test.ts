@@ -12,9 +12,15 @@ const fake = vi.hoisted(() => {
     recurrence: { findFirst: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
     trip: { findMany: vi.fn(), updateMany: vi.fn() },
     auditEvent: { createMany: vi.fn() },
+    appSettings: { findUnique: vi.fn(async () => ({ tripHorizonDays: 14 })) },
   };
   // Interactive transaction: the callback receives the same models.
-  return { ...models, $transaction: vi.fn(async (fn: (tx: typeof models) => unknown) => fn(models)) };
+  return {
+    ...models,
+    $transaction: vi.fn(async (fn: (tx: typeof models) => unknown) => fn(models)),
+    completeTrips: vi.fn(),
+    reviveOneOffTrips: vi.fn(),
+  };
 });
 
 vi.mock("server-only", () => ({}));
@@ -25,6 +31,11 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/db", () => ({ db: fake }));
 vi.mock("@/lib/optimizer/client", () => ({ evaluate: vi.fn() }));
+vi.mock("@/lib/trips/completion", async (original) => ({
+  ...(await original<typeof import("@/lib/trips/completion")>()),
+  completeTrips: fake.completeTrips,
+  reviveOneOffTrips: fake.reviveOneOffTrips,
+}));
 
 function form(entries: Record<string, string>): FormData {
   const fd = new FormData();
@@ -78,6 +89,41 @@ beforeEach(() => {
   vi.clearAllMocks();
   fake.auditEvent.createMany.mockResolvedValue({ count: 1 });
   fake.trip.findMany.mockResolvedValue([]);
+  fake.completeTrips.mockResolvedValue({ created: 0, revived: 0, createdByDay: new Map(), skipped: [] });
+  fake.reviveOneOffTrips.mockResolvedValue(0);
+});
+
+describe("reactivation", () => {
+  it("brings the patient's trips of the horizon back: created, and those the deactivation cancelled", async () => {
+    fake.patient.updateMany.mockResolvedValue({ count: 1 });
+    fake.completeTrips.mockResolvedValue({ created: 4, revived: 6, createdByDay: new Map(), skipped: [] });
+    fake.reviveOneOffTrips.mockResolvedValue(1);
+
+    const result = await setPatientActive(INITIAL_ACTION_RESULT, form({ patientId: "p1", active: "true" }));
+
+    expect(fake.completeTrips.mock.calls[0]![3]).toEqual({ patientId: "p1" });
+    expect(fake.reviveOneOffTrips.mock.calls[0]![2]).toEqual({ patientId: "p1" });
+    expect(recorded()).toEqual([{ action: "patient.reactivate", entityId: "p1" }]);
+    expect(result).toEqual({ ok: true, message: "Patient réactivé. Courses à venir : 4 créées, 7 rétablies." });
+  });
+
+  it("completes a reactivated recurrence's trips and says which sessions have no valid prescription", async () => {
+    fake.recurrence.findFirst.mockResolvedValue({ id: "r1", facility: { name: "Centre", active: true } });
+    fake.recurrence.updateMany.mockResolvedValue({ count: 1 });
+    fake.completeTrips.mockResolvedValue({
+      created: 2,
+      revived: 0,
+      createdByDay: new Map(),
+      skipped: [{ recurrenceId: "r1", patientId: "p1", patientName: "MARTIN Jean", label: "Dialyse", dates: ["2099-01-05", "2099-01-07"] }],
+    });
+
+    const result = await setRecurrenceActive(INITIAL_ACTION_RESULT, form({ patientId: "p1", recurrenceId: "r1", active: "true" }));
+
+    expect(fake.completeTrips.mock.calls[0]![3]).toEqual({ id: "r1" });
+    expect(result.message).toBe(
+      "Récurrence réactivée. Courses à venir : 2 créées. 2 séances à venir n'ont pas de prescription valide : aucune course ces jours-là (voir Prescriptions).",
+    );
+  });
 });
 
 describe("setPatientActive", () => {

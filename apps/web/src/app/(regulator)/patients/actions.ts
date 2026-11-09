@@ -2,12 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { formatAddress } from "@/lib/domain/rules";
-import { planTripsFromRecurrences } from "@/lib/domain/trip-generation";
 import { evaluate } from "@/lib/optimizer/client";
 import {
   NOTHING_REFRESHED,
@@ -16,12 +16,13 @@ import {
   withRefreshNotice,
   type RefreshOutcome,
 } from "@/lib/planning/refresh-routes";
-import { addDays, formatShortDate, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
-import { activationEvent, alreadyInStateMessage, patientUpdateEvents, renewalEvents, tripCreateEvents } from "./_lib/audit-events";
+import { completeTrips, currentHorizon, reviveOneOffTrips, type Completion } from "@/lib/trips/completion";
+import { formatShortDate, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
+import { activationEvent, alreadyInStateMessage, patientUpdateEvents, renewalEvents } from "./_lib/audit-events";
 import { idSchema } from "./_lib/form-parse";
 import { formString, messageState, type ActionResult, type FormState } from "./_lib/form-state";
 import { parsePatientForm, parsePrescriptionForm, parseRecurrenceForm, readRecurrenceForm } from "./_lib/schemas";
-import { EXPIRY_WARNING_DAYS, isRenewalOf } from "./_lib/status";
+import { isRenewalOf } from "./_lib/status";
 import {
   CANCEL,
   describeSync,
@@ -30,6 +31,7 @@ import {
   prescriptionTarget,
   recurrenceTarget,
   renewalTarget,
+  withCompletion,
   withSyncNotice,
   type RecurrenceSchedule,
   type SyncSummary,
@@ -79,8 +81,27 @@ const CAUSES = {
   recurrenceDeactivated: "récurrence désactivée",
 } as const;
 
-const REACTIVATED_HINT =
-  "Ses récurrences génèrent à nouveau des courses (« Générer la semaine » dans Courses). Les courses annulées à la désactivation se rétablissent une à une dans Courses.";
+/**
+ * Completes the trips of the horizon (tomorrow to D+N) for the recurrences
+ * matching `where`, in the caller's transaction: trips created, and those the
+ * application had cancelled brought back (lib/trips/completion.ts).
+ */
+async function completeHorizon(
+  tx: Prisma.TransactionClient,
+  user: Awaited<ReturnType<typeof requireUser>>,
+  where: Prisma.RecurrenceWhereInput,
+): Promise<Completion> {
+  return completeTrips(tx, user, await currentHorizon(tx, todayIso()), where);
+}
+
+/** " 3 séances sans prescription valide : voir Prescriptions." when the horizon has sessions no prescription covers. */
+function skippedNote(completion: Completion): string {
+  const sessions = completion.skipped.reduce((sum, r) => sum + r.dates.length, 0);
+  if (sessions === 0) return "";
+  return sessions === 1
+    ? " 1 séance à venir n'a pas de prescription valide : aucune course ce jour-là (voir Prescriptions)."
+    : ` ${sessions} séances à venir n'ont pas de prescription valide : aucune course ces jours-là (voir Prescriptions).`;
+}
 
 // ---------------------------------------------------------------- patient
 
@@ -135,16 +156,23 @@ export async function updatePatient(patientId: string, _prev: FormState, formDat
     await tx.patient.update({ where: { id: existing.id }, data });
     await audit(tx, user, patientUpdateEvents(existing.id, { value: data.active, switched }));
     const deactivated = switched && !data.active;
-    if (!deactivated && !moved) return EMPTY_SYNC;
-    return syncOpenTrips(
-      tx,
-      { patientId: existing.id },
-      () => (deactivated ? CANCEL : { kind: "update", home }),
-      today,
-      leftRoutes,
-      user,
-      { cause: CAUSES.patientDeactivated },
-    );
+    const synced =
+      deactivated || moved
+        ? await syncOpenTrips(
+            tx,
+            { patientId: existing.id },
+            () => (deactivated ? CANCEL : { kind: "update", home }),
+            today,
+            leftRoutes,
+            user,
+            { cause: CAUSES.patientDeactivated },
+          )
+        : EMPTY_SYNC;
+    if (!switched || !data.active) return synced;
+    // Reactivated: the trips of the horizon come back (new ones, and those the deactivation cancelled).
+    const completion = await completeHorizon(tx, user, { patientId: existing.id });
+    const revivedOneOff = await reviveOneOffTrips(tx, user, { patientId: existing.id });
+    return withCompletion(synced, { created: completion.created, revived: completion.revived + revivedOneOff });
   }, SYNC_TX_OPTIONS);
   const refresh = await refreshLeftRoutes(leftRoutes);
 
@@ -170,9 +198,13 @@ export async function setPatientActive(_prev: ActionResult, formData: FormData):
     const { count } = await tx.patient.updateMany({ where: { id: patientId, active: !active }, data: { active } });
     if (count === 0) return null;
     await audit(tx, user, activationEvent("patient", patientId, active));
-    return active
-      ? EMPTY_SYNC
-      : syncOpenTrips(tx, { patientId }, () => CANCEL, today, leftRoutes, user, { cause: CAUSES.patientDeactivated });
+    if (!active) {
+      return syncOpenTrips(tx, { patientId }, () => CANCEL, today, leftRoutes, user, { cause: CAUSES.patientDeactivated });
+    }
+    // The trips of the horizon come back: new ones, and those the deactivation cancelled.
+    const completion = await completeHorizon(tx, user, { patientId });
+    const revivedOneOff = await reviveOneOffTrips(tx, user, { patientId });
+    return withCompletion(EMPTY_SYNC, { created: completion.created, revived: completion.revived + revivedOneOff });
   }, SYNC_TX_OPTIONS);
   if (!summary) {
     const current = await db.patient.findUnique({ where: { id: patientId }, select: { id: true } });
@@ -187,7 +219,7 @@ export async function setPatientActive(_prev: ActionResult, formData: FormData):
   revalidateTrips(summary);
   return {
     ok: true,
-    message: active ? `Patient réactivé. ${REACTIVATED_HINT}` : withSync("Patient désactivé.", summary, refresh),
+    message: active ? withSync("Patient réactivé.", summary) : withSync("Patient désactivé.", summary, refresh),
   };
 }
 
@@ -204,15 +236,18 @@ export async function createPrescription(patientId: string, _prev: FormState, fo
   if (!patient) return messageState(NOT_FOUND, null);
 
   const { validFrom, validTo, ...rest } = parsed.data;
-  await db.$transaction(async (tx) => {
+  const summary = await db.$transaction(async (tx) => {
     const created = await tx.prescription.create({
       data: { ...rest, patientId: patient.id, validFrom: fromIsoDate(validFrom), validTo: fromIsoDate(validTo) },
       select: { id: true },
     });
     await audit(tx, user, { action: "prescription.create", entity: "Prescription", entityId: created.id });
-  });
+    // A renewal covers the sessions its predecessor no longer did: their trips are created at once.
+    return withCompletion(EMPTY_SYNC, await completeHorizon(tx, user, { patientId: patient.id }));
+  }, SYNC_TX_OPTIONS);
   revalidatePatients();
-  redirect(`/patients/${patient.id}#prescriptions`);
+  revalidateTrips(summary);
+  redirect(withSyncNotice(`/patients/${patient.id}#prescriptions`, summary));
 }
 
 /**
@@ -257,7 +292,7 @@ export async function updatePrescription(
     });
     await audit(tx, user, { action: "prescription.update", entity: "Prescription", entityId: existing.id });
     if (!rulesChanged) return EMPTY_SYNC;
-    return syncOpenTrips(
+    const synced = await syncOpenTrips(
       tx,
       { prescriptionId: existing.id },
       (trip) => prescriptionTarget(trip, rules),
@@ -266,6 +301,10 @@ export async function updatePrescription(
       user,
       { cause: CAUSES.prescriptionChanged },
     );
+    // A validity lengthened (or corrected) brings back the sessions it covers again.
+    const completion = await completeHorizon(tx, user, { patientId: existing.patientId });
+    const revivedOneOff = await reviveOneOffTrips(tx, user, { prescriptionId: existing.id });
+    return withCompletion(synced, { created: completion.created, revived: completion.revived + revivedOneOff });
   }, SYNC_TX_OPTIONS);
   const refresh = await refreshLeftRoutes(leftRoutes);
 
@@ -320,11 +359,12 @@ export async function deletePrescription(_prev: ActionResult, formData: FormData
 }
 
 /**
- * Moves every recurrence of a prescription that ends soon (or has ended) to
- * its renewal. A recurrence has a single prescription and trips are only
- * generated inside its validity, so the trips still to come under the old
- * one (from tomorrow to its last day) are generated first; the open trips
- * inside the renewal's validity are attached to it.
+ * Moves every recurrence of a prescription to its renewal. The generation
+ * already falls back on the renewal once the old prescription has ended
+ * (lib/domain/trip-generation.ts, prescriptionOn), and on the old one for the
+ * days the renewal does not cover yet: the move can be made at any time. The
+ * open trips inside the renewal's validity are attached to it, and the trips
+ * of the horizon completed.
  */
 export async function attachRecurrencesToRenewal(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
   const user = await requireUser("REGULATOR");
@@ -354,14 +394,6 @@ export async function attachRecurrencesToRenewal(_prev: ActionResult, formData: 
   }
 
   const today = todayIso();
-  const fromEnd = toIsoDate(from.validTo);
-  if (fromEnd > addDays(today, EXPIRY_WARNING_DAYS)) {
-    return {
-      ok: false,
-      message: `La prescription actuelle court jusqu'au ${formatShortDate(fromEnd)} : le rattachement au renouvellement se fait dans ses ${EXPIRY_WARNING_DAYS} derniers jours.`,
-    };
-  }
-  const firstOldDay = addDays(today, 1);
   const renewal = {
     id: to.id,
     mode: to.mode,
@@ -372,32 +404,16 @@ export async function attachRecurrencesToRenewal(_prev: ActionResult, formData: 
 
   const leftRoutes = new Set<string>();
   const result = await db.$transaction(async (tx) => {
-    const recurrences = await tx.recurrence.findMany({
-      where: { patientId, prescriptionId: from.id },
-      include: { patient: true, facility: true, prescription: true },
-    });
-    if (recurrences.length === 0) return null;
     // Guarded on the old prescription: of two concurrent submits, only the first moves (and traces) them.
     const moved = await tx.recurrence.updateManyAndReturn({
-      where: { id: { in: recurrences.map((r) => r.id) }, prescriptionId: from.id },
+      where: { patientId, prescriptionId: from.id },
       data: { prescriptionId: to.id },
       select: { id: true },
     });
     if (moved.length === 0) return null;
     const ids = moved.map((r) => r.id);
-    // Trips up to the end of the old prescription, generated from the recurrences as read before the move.
-    const movedRecurrences = recurrences.filter((r) => ids.includes(r.id));
-    const planned = firstOldDay <= fromEnd ? planTripsFromRecurrences(movedRecurrences, firstOldDay, fromEnd) : [];
-    const createdTrips =
-      planned.length > 0
-        ? await tx.trip.createManyAndReturn({ data: planned, skipDuplicates: true, select: { id: true, serviceDate: true } })
-        : [];
-    const created = createdTrips.length;
-    await audit(tx, user, [
-      ...renewalEvents(ids),
-      ...tripCreateEvents(createdTrips.map((trip) => ({ id: trip.id, serviceDate: toIsoDate(trip.serviceDate) }))),
-    ]);
-    const summary = await syncOpenTrips(
+    await audit(tx, user, renewalEvents(ids));
+    const synced = await syncOpenTrips(
       tx,
       { recurrenceId: { in: ids } },
       (trip) => renewalTarget(trip, renewal),
@@ -405,7 +421,8 @@ export async function attachRecurrencesToRenewal(_prev: ActionResult, formData: 
       leftRoutes,
       user,
     );
-    return { count: ids.length, created, summary };
+    const completion = await completeHorizon(tx, user, { id: { in: ids } });
+    return { count: ids.length, summary: withCompletion(synced, completion) };
   }, SYNC_TX_OPTIONS);
   if (!result) return { ok: false, message: "Aucune récurrence n'est rattachée à cette prescription." };
   const refresh = await refreshLeftRoutes(leftRoutes);
@@ -415,14 +432,10 @@ export async function attachRecurrencesToRenewal(_prev: ActionResult, formData: 
   revalidatePath("/", "layout");
   const moved =
     result.count === 1 ? "1 récurrence rattachée" : `${result.count} récurrences rattachées`;
-  const generated =
-    result.created > 0
-      ? ` ${result.created === 1 ? "1 course générée" : `${result.created} courses générées`} jusqu'au ${formatShortDate(fromEnd)} sur l'ancienne prescription.`
-      : "";
   return {
     ok: true,
     message: withSync(
-      `${moved} à la prescription du ${formatShortDate(renewal.validFrom)} au ${formatShortDate(renewal.validTo)}.${generated}`,
+      `${moved} à la prescription du ${formatShortDate(renewal.validFrom)} au ${formatShortDate(renewal.validTo)}.`,
       result.summary,
       refresh,
     ),
@@ -466,7 +479,7 @@ export async function createRecurrence(patientId: string, _prev: FormState, form
     return messageState("Vérifiez l'établissement et la prescription.", readRecurrenceForm(formData), refErrors);
   }
 
-  await db.$transaction(async (tx) => {
+  const summary = await db.$transaction(async (tx) => {
     const created = await tx.recurrence.create({
       data: {
         ...rest,
@@ -477,10 +490,13 @@ export async function createRecurrence(patientId: string, _prev: FormState, form
       select: { id: true },
     });
     await audit(tx, user, { action: "recurrence.create", entity: "Recurrence", entityId: created.id });
-  });
+    // Its trips of the horizon exist as soon as the recurrence does.
+    return withCompletion(EMPTY_SYNC, await completeHorizon(tx, user, { id: created.id }));
+  }, SYNC_TX_OPTIONS);
   revalidatePatients();
   revalidatePath("/(regulator)/etablissements", "layout");
-  redirect(`/patients/${patient.id}#recurrences`);
+  revalidateTrips(summary);
+  redirect(withSyncNotice(`/patients/${patient.id}#recurrences`, summary));
 }
 
 function sameSchedule(a: RecurrenceSchedule, b: RecurrenceSchedule): boolean {
@@ -593,7 +609,7 @@ export async function updateRecurrence(
       },
       facility: { address: formatAddress(facility), lat: facility.lat, lng: facility.lng },
     };
-    return syncOpenTrips(
+    const synced = await syncOpenTrips(
       tx,
       { recurrenceId: existing.id },
       (trip) => recurrenceTarget(trip, before, target),
@@ -602,6 +618,8 @@ export async function updateRecurrence(
       user,
       { cause: CAUSES.recurrenceChanged },
     );
+    // A day added, a period lengthened or another prescription: the trips of the horizon follow.
+    return withCompletion(synced, await completeHorizon(tx, user, { id: existing.id }));
   }, SYNC_TX_OPTIONS);
   const refresh = await refreshLeftRoutes(leftRoutes);
 
@@ -611,7 +629,11 @@ export async function updateRecurrence(
   redirect(afterSave(`/patients/${existing.patientId}#recurrences`, summary, refresh));
 }
 
-/** Deactivating a recurrence cancels its open trips to come; reactivating it does not bring them back. */
+/**
+ * Deactivating a recurrence cancels its open trips to come (as the
+ * application's cancellations); reactivating it completes its trips of the
+ * horizon and brings those back.
+ */
 export async function setRecurrenceActive(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
   const user = await requireUser("REGULATOR");
   const input = z
@@ -638,23 +660,30 @@ export async function setRecurrenceActive(_prev: ActionResult, formData: FormDat
 
   const today = todayIso();
   const leftRoutes = new Set<string>();
-  const summary = await db.$transaction(async (tx) => {
+  const outcome = await db.$transaction(async (tx) => {
     // Guarded on the opposite state, as setPatientActive.
     const { count } = await tx.recurrence.updateMany({ where: { id: recurrence.id, active: !active }, data: { active } });
     if (count === 0) return null;
     await audit(tx, user, activationEvent("recurrence", recurrence.id, active));
-    return active
-      ? EMPTY_SYNC
-      : syncOpenTrips(tx, { recurrenceId: recurrence.id }, () => CANCEL, today, leftRoutes, user, {
+    if (!active) {
+      return {
+        completion: null,
+        sync: await syncOpenTrips(tx, { recurrenceId: recurrence.id }, () => CANCEL, today, leftRoutes, user, {
           cause: CAUSES.recurrenceDeactivated,
-        });
+        }),
+      };
+    }
+    // The trips of the horizon come back: new ones, and those the deactivation cancelled.
+    const completion = await completeHorizon(tx, user, { id: recurrence.id });
+    return { completion, sync: withCompletion(EMPTY_SYNC, completion) };
   }, SYNC_TX_OPTIONS);
-  if (!summary) {
+  if (!outcome) {
     const current = await db.recurrence.findUnique({ where: { id: recurrence.id }, select: { id: true } });
     if (!current) return { ok: false, message: NOT_FOUND };
     revalidatePatients(); // the page was stale: show the current state
     return { ok: true, message: alreadyInStateMessage("recurrence", active) };
   }
+  const summary = outcome.sync;
   const refresh = await refreshLeftRoutes(leftRoutes);
 
   revalidatePatients();
@@ -662,8 +691,8 @@ export async function setRecurrenceActive(_prev: ActionResult, formData: FormDat
   revalidateTrips(summary);
   return {
     ok: true,
-    message: active
-      ? "Récurrence réactivée : relancez « Générer la semaine » dans Courses ; les courses annulées à la désactivation se rétablissent dans Courses."
+    message: outcome.completion
+      ? `${withSync("Récurrence réactivée.", summary)}${skippedNote(outcome.completion)}`
       : withSync("Récurrence désactivée.", summary, refresh),
   };
 }

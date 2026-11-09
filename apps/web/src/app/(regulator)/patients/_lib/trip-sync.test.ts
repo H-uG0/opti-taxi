@@ -3,6 +3,7 @@ import {
   CANCEL,
   decodeSync,
   describeSync,
+  EMPTY_SYNC,
   encodeSync,
   nextSharingStatus,
   planTripChange,
@@ -291,16 +292,25 @@ describe("renewalTarget", () => {
 
 describe("sync summary", () => {
   it("describes what happened to the trips in French", () => {
-    expect(describeSync({ updated: 0, cancelled: 0, detached: 0, deferred: 0 })).toBeNull();
-    expect(describeSync({ updated: 1, cancelled: 0, detached: 0, deferred: 0 })).toBe("Courses à venir : 1 mise à jour.");
-    expect(describeSync({ updated: 3, cancelled: 2, detached: 1, deferred: 2 })).toBe(
+    expect(describeSync({ updated: 0, cancelled: 0, detached: 0, deferred: 0, created: 0, revived: 0 })).toBeNull();
+    expect(describeSync({ updated: 1, cancelled: 0, detached: 0, deferred: 0, created: 0, revived: 0 })).toBe("Courses à venir : 1 mise à jour.");
+    expect(describeSync({ updated: 3, cancelled: 2, detached: 1, deferred: 2, created: 0, revived: 0 })).toBe(
       "Courses à venir : 3 mises à jour, 2 annulées. 1 course a été retirée de sa tournée : réoptimisez la journée concernée. " +
         "2 courses d'aujourd'hui, déjà dans une tournée, n'ont pas été modifiées : ajustez-les dans Courses et prévenez les chauffeurs.",
     );
   });
 
+  it("tells the trips created and brought back by the horizon completion first", () => {
+    expect(describeSync({ ...EMPTY_SYNC, created: 12, revived: 1, cancelled: 2 })).toBe("Courses à venir : 12 créées, 1 rétablie, 2 annulées.");
+    const summary = { ...EMPTY_SYNC, created: 12, revived: 1 };
+    expect(encodeSync(summary)).toBe("0-0-0-0-12-1");
+    expect(decodeSync("0-0-0-0-12-1")).toEqual(summary);
+    expect(decodeSync("0-0-0-0-0-0")).toBeNull();
+    expect(decodeSync("1-0-0-0-5")).toBeNull();
+  });
+
   it("round-trips through the redirect URL", () => {
-    const summary = { updated: 3, cancelled: 2, detached: 1, deferred: 0 };
+    const summary = { updated: 3, cancelled: 2, detached: 1, deferred: 0, created: 0, revived: 0 };
     expect(encodeSync(summary)).toBe("3-2-1-0");
     expect(decodeSync("3-2-1-0")).toEqual(summary);
     expect(decodeSync("0-0-0-0")).toBeNull();
@@ -308,7 +318,7 @@ describe("sync summary", () => {
     expect(decodeSync(undefined)).toBeNull();
     expect(withSyncNotice("/patients/x#prescriptions", summary)).toBe("/patients/x?courses=3-2-1-0#prescriptions");
     expect(withSyncNotice("/patients/x", summary)).toBe("/patients/x?courses=3-2-1-0");
-    expect(withSyncNotice("/patients/x#recurrences", { updated: 0, cancelled: 0, detached: 0, deferred: 0 })).toBe(
+    expect(withSyncNotice("/patients/x#recurrences", { updated: 0, cancelled: 0, detached: 0, deferred: 0, created: 0, revived: 0 })).toBe(
       "/patients/x#recurrences",
     );
   });

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cancelTrip } from "./actions";
+import { addDays, startOfIsoWeek, todayIso } from "@/lib/time";
+import { cancelTrip, completeDayTrips, generateWeekTrips } from "./actions";
 import { INITIAL_ACTION_RESULT } from "./trip-form";
 
 // The trips screen actions against a fake Prisma client: which writes are
@@ -8,10 +9,14 @@ const fake = vi.hoisted(() => {
   const models = {
     trip: { findUnique: vi.fn(), updateMany: vi.fn() },
     routeStop: { findMany: vi.fn() },
-    appSettings: { upsert: vi.fn() },
+    appSettings: { upsert: vi.fn(), findUnique: vi.fn() },
     auditEvent: { createMany: vi.fn() },
   };
-  return { ...models, $transaction: vi.fn(async (fn: (tx: typeof models) => unknown) => fn(models)) };
+  return {
+    ...models,
+    $transaction: vi.fn(async (fn: (tx: typeof models) => unknown) => fn(models)),
+    completeTrips: vi.fn(),
+  };
 });
 
 vi.mock("server-only", () => ({}));
@@ -22,6 +27,10 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/db", () => ({ db: fake }));
 vi.mock("@/lib/optimizer/client", () => ({ evaluate: vi.fn() }));
+vi.mock("@/lib/trips/completion", async (original) => ({
+  ...(await original<typeof import("@/lib/trips/completion")>()),
+  completeTrips: fake.completeTrips,
+}));
 
 function form(entries: Record<string, string>): FormData {
   const fd = new FormData();
@@ -64,6 +73,8 @@ beforeEach(() => {
   fake.routeStop.findMany.mockResolvedValue([]);
   fake.appSettings.upsert.mockResolvedValue({ id: 1, lateCancellationHours: 2 });
   fake.auditEvent.createMany.mockResolvedValue({ count: 1 });
+  fake.appSettings.findUnique.mockResolvedValue({ tripHorizonDays: 14 });
+  fake.completeTrips.mockResolvedValue({ created: 0, revived: 0, createdByDay: new Map(), skipped: [] });
 });
 
 describe("cancelTrip", () => {
@@ -152,5 +163,53 @@ describe("cancelTrip", () => {
 
     expect(result).toEqual({ ok: false, message: "La course a changé entre-temps : rechargez la page." });
     expect(recorded()).toEqual([]);
+  });
+});
+
+describe("generation of the recurring trips", () => {
+  const today = todayIso();
+  const tomorrow = addDays(today, 1);
+
+  it("generates the week from tomorrow at the earliest, and names the recurrences without a valid prescription", async () => {
+    const weekStart = startOfIsoWeek(today);
+    fake.completeTrips.mockResolvedValue({
+      created: 3,
+      revived: 0,
+      createdByDay: new Map(),
+      skipped: [{ recurrenceId: "r1", patientId: "p1", patientName: "MARTIN Jean", label: "Dialyse", dates: [tomorrow] }],
+    });
+    const fd = new FormData();
+    fd.set("weekStart", weekStart);
+
+    const result = await generateWeekTrips({ ok: false, message: null, skipped: [] }, fd);
+
+    const range = fake.completeTrips.mock.calls[0]![2];
+    expect(range).toEqual({ from: tomorrow > weekStart ? tomorrow : weekStart, to: addDays(weekStart, 6) });
+    expect(result.ok).toBe(true);
+    expect(result.message).toMatch(/3 courses créées\.$/);
+    expect(result.skipped.map((r) => r.patientName)).toEqual(["MARTIN Jean"]);
+  });
+
+  it("refuses a week already over, writing nothing", async () => {
+    const fd = new FormData();
+    fd.set("weekStart", "2020-01-06");
+
+    const result = await generateWeekTrips({ ok: false, message: null, skipped: [] }, fd);
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/déjà passée/);
+    expect(fake.completeTrips).not.toHaveBeenCalled();
+  });
+
+  it("completes a date of the horizon once its page is shown, and nothing outside it", async () => {
+    fake.completeTrips.mockResolvedValue({ created: 2, revived: 1, createdByDay: new Map(), skipped: [] });
+    expect(await completeDayTrips(tomorrow)).toEqual({ changed: true });
+    expect(fake.completeTrips.mock.calls[0]![2]).toEqual({ from: tomorrow, to: tomorrow });
+
+    fake.completeTrips.mockClear();
+    expect(await completeDayTrips(today)).toEqual({ changed: false });
+    expect(await completeDayTrips(addDays(today, 15))).toEqual({ changed: false });
+    expect(await completeDayTrips("demain")).toEqual({ changed: false });
+    expect(fake.completeTrips).not.toHaveBeenCalled();
   });
 });

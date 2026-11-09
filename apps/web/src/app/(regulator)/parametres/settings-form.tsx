@@ -7,6 +7,7 @@ import { formatMinute } from "@/lib/time";
 import { IDLE_STATE, parseDecimal, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
 import { CONTRACT_MAX_TIME_LIMIT_SEC, TRIPS_PER_SOLVER_SECOND } from "@/lib/optimizer/build-request";
 import { FormFooter, UnitInput } from "../vehicules/_lib/ui";
+import { TRIP_HORIZON_DAYS } from "@/lib/trips/horizon";
 import { DECREE_LIMITS, MAX_SOLVER_TIME_LIMIT_SEC } from "./schema";
 
 type Action = (state: FormState, formData: FormData) => Promise<FormState>;
@@ -264,7 +265,20 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
       </Fieldset>
 
       <Fieldset legend="Courses">
+        <Explanation>
+          Les courses des récurrences sont créées d&apos;office, jamais avant demain : à la création, la modification ou la
+          réactivation d&apos;une récurrence, d&apos;une prescription ou d&apos;un patient, à l&apos;ouverture du planning ou
+          des courses d&apos;une date, et avant chaque optimisation.
+        </Explanation>
         <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Horizon des courses régulières (jours)"
+            htmlFor="tripHorizonDays"
+            error={errors.tripHorizonDays}
+            hint={`14 par défaut : les courses sont créées de demain à J+14. Entre ${TRIP_HORIZON_DAYS.min} et ${TRIP_HORIZON_DAYS.max} jours.`}
+          >
+            <NumberInput name="tripHorizonDays" unit="jours" integer values={values} errors={errors} />
+          </Field>
           <Field
             label="Annulation tardive (h avant la prise en charge)"
             htmlFor="lateCancellationHours"

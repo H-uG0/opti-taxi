@@ -300,12 +300,14 @@ export default async function PatientPage({
                           p._count.recurrences === 1
                             ? "1 récurrence y est encore rattachée"
                             : `${p._count.recurrences} récurrences y sont encore rattachées`
-                        } : sans rattachement, plus de course après le ${formatShortDate(p.dates.validTo)}.`}
+                        } : les courses continuent sur le renouvellement ; ${
+                          p._count.recurrences === 1 ? "rattachez-y la récurrence" : "rattachez-y les récurrences"
+                        } pour que la fiche reste à jour.`}
                       </p>
                       <ActionButton
                         action={attachRecurrencesToRenewal}
                         fields={{ patientId: patient.id, fromPrescriptionId: p.id, toPrescriptionId: p.renewal.id }}
-                        confirmMessage={`Rattacher ${p._count.recurrences === 1 ? "la récurrence" : `les ${p._count.recurrences} récurrences`} à la prescription du ${formatShortDate(p.renewal.validFrom)} au ${formatShortDate(p.renewal.validTo)} ? Les courses jusqu'au ${formatShortDate(p.dates.validTo)} sont d'abord générées sur la prescription actuelle.`}
+                        confirmMessage={`Rattacher ${p._count.recurrences === 1 ? "la récurrence" : `les ${p._count.recurrences} récurrences`} à la prescription du ${formatShortDate(p.renewal.validFrom)} au ${formatShortDate(p.renewal.validTo)} ? Les courses jusqu'au ${formatShortDate(p.dates.validTo)} restent sur la prescription actuelle.`}
                         variant="secondary"
                         pendingLabel="Rattachement…"
                       >
@@ -360,8 +362,12 @@ export default async function PatientPage({
                       <Td>
                         {p.renewal && needsRenewal(p.dates, today) ? (
                           <>
-                            <Badge tone="neutral" className="tabular whitespace-nowrap">
+                            <Badge
+                              tone={activeRecurrences.some((r) => r.prescriptionId === p.id) ? "warning" : "neutral"}
+                              className="tabular whitespace-nowrap"
+                            >
                               {validityLabel(p.dates, today)} · renouvelée
+                              {activeRecurrences.some((r) => r.prescriptionId === p.id) ? ", à rattacher" : ""}
                             </Badge>
                             <span className="tabular mt-0.5 block text-xs whitespace-nowrap text-slate-500">
                               suite : {formatShortDate(p.renewal.validFrom)} → {formatShortDate(p.renewal.validTo)}

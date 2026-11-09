@@ -9,6 +9,7 @@ import {
   Car,
   ContactRound,
   Euro,
+  FileClock,
   ListChecks,
   Settings,
   Share2,
@@ -26,6 +27,7 @@ export const REGULATOR_NAV = [
   { href: "/arrivees-partagees", label: "Arrivées partagées", icon: Share2 },
   { href: "/tableau-de-bord", label: "Tableau de bord", icon: BarChart3 },
   { href: "/patients", label: "Patients", icon: Users },
+  { href: "/prescriptions", label: "Prescriptions", icon: FileClock },
   { href: "/etablissements", label: "Établissements", icon: Building2 },
   { href: "/depots", label: "Dépôts", icon: Warehouse },
   { href: "/vehicules", label: "Véhicules", icon: Car },
@@ -34,7 +36,10 @@ export const REGULATOR_NAV = [
   { href: "/parametres", label: "Paramètres", icon: Settings },
 ] as const;
 
-export function RegulatorNav({ horizontal = false }: { horizontal?: boolean }) {
+/** Pages with a count of things to handle, shown next to their link (e.g. prescriptions to renew). */
+export type NavCounts = Partial<Record<(typeof REGULATOR_NAV)[number]["href"], number>>;
+
+export function RegulatorNav({ horizontal = false, counts = {} }: { horizontal?: boolean; counts?: NavCounts }) {
   const pathname = usePathname();
 
   return (
@@ -42,6 +47,7 @@ export function RegulatorNav({ horizontal = false }: { horizontal?: boolean }) {
       <ul className={cn(horizontal ? "flex gap-1 px-3 py-2" : "space-y-0.5 px-3")}>
         {REGULATOR_NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(`${href}/`);
+          const count = counts[href] ?? 0;
           return (
             <li key={href}>
               <Link
@@ -54,6 +60,12 @@ export function RegulatorNav({ horizontal = false }: { horizontal?: boolean }) {
               >
                 <Icon aria-hidden className="size-4 shrink-0" />
                 {label}
+                {count > 0 ? (
+                  <span className="tabular ml-auto rounded-full bg-amber-100 px-1.5 py-px text-xs font-semibold text-amber-900">
+                    {count}
+                    <span className="sr-only"> à traiter</span>
+                  </span>
+                ) : null}
               </Link>
             </li>
           );

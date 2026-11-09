@@ -21,10 +21,14 @@
  *   (/equipages: everyone's absences of the day);
  * - referentials: patient.*, prescription.*, recurrence.* (create, update,
  *   delete, deactivate, reactivate, attach_renewal), facility.*;
- * - trips: trip.generate_week (only when trips were created), trip.create,
- *   trip.cancel, trip.detach (taken off its route by a referential change, not
- *   cancelled), trip.restore, trip.reschedule, trip.sharing_accept,
- *   trip.sharing_refuse, trip.move, trip.lock, trip.unlock;
+ * - trips: trip.generate (recurring trips created, one event per service day,
+ *   details.created; lib/trips/completion.ts), trip.revive (a trip the
+ *   referential sync had cancelled, brought back once the cause is gone),
+ *   trip.generate_week (before the rolling horizon), trip.create,
+ *   trip.cancel (the reason stays on the trip), trip.detach (taken off its
+ *   route by a referential change, not cancelled), trip.restore,
+ *   trip.reschedule, trip.sharing_accept, trip.sharing_refuse, trip.move,
+ *   trip.lock, trip.unlock;
  * - planning: plan.optimize (details.confirmed when the regulator replaced the
  *   routes in place with a plan that waited for confirmation), plan.restore
  *   (« Revenir au planning précédent »), plan.discard (a waiting plan not

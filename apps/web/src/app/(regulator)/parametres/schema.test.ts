@@ -15,6 +15,7 @@ const defaults = {
   replanMaxServedLoss: "0",
   replanMaxMarginLoss: "10",
   lateCancellationHours: "2",
+  tripHorizonDays: "14",
   regulatorPhone: "",
 };
 
@@ -39,6 +40,7 @@ describe("settingsSchema", () => {
       replanMaxServedLoss: 0,
       replanMaxMarginLoss: 0.1,
       lateCancellationHours: 2,
+      tripHorizonDays: 14,
       regulatorPhone: null,
     });
   });

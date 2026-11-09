@@ -1,9 +1,23 @@
 import { requireUser } from "@/lib/auth";
 import { logout } from "@/app/login/actions";
-import { RegulatorNav } from "@/components/nav/regulator-nav";
+import { RegulatorNav, type NavCounts } from "@/components/nav/regulator-nav";
+import { countPrescriptionWork } from "@/app/(regulator)/patients/_lib/work-list-db";
+import { logError } from "@/lib/log";
+import { todayIso } from "@/lib/time";
+
+/** Counters of the navigation: one count query; a failure shows no counter, never breaks the page. */
+async function navCounts(): Promise<NavCounts> {
+  try {
+    return { "/prescriptions": await countPrescriptionWork(todayIso()) };
+  } catch (error) {
+    logError("[nav] counting the prescriptions to handle failed", error);
+    return {};
+  }
+}
 
 export default async function RegulatorLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser("REGULATOR");
+  const counts = await navCounts();
 
   return (
     <div className="flex min-h-below-banner">
@@ -12,7 +26,7 @@ export default async function RegulatorLayout({ children }: { children: React.Re
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand-700">Taxi & Ambulance V</p>
           <p className="text-lg font-semibold tracking-tight text-slate-900">Opti-Taxi</p>
         </div>
-        <RegulatorNav />
+        <RegulatorNav counts={counts} />
         <div className="mt-auto border-t border-slate-200 px-5 py-3 text-sm">
           <p className="truncate font-medium text-slate-800">{user.name}</p>
           <form action={logout}>
@@ -36,7 +50,7 @@ export default async function RegulatorLayout({ children }: { children: React.Re
           </form>
         </header>
         <div className="border-b border-slate-200 bg-white lg:hidden print:hidden">
-          <RegulatorNav horizontal />
+          <RegulatorNav horizontal counts={counts} />
         </div>
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 print:p-0">{children}</main>
       </div>

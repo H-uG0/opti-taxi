@@ -16,6 +16,10 @@ import { loadPlanningDay } from "@/lib/planning/load";
 import type { PlanningDayView } from "@/lib/planning/types";
 import { loadDayVersion } from "@/lib/planning/version";
 import { formatLongDate, isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
+import { currentHorizon, inHorizon } from "@/lib/trips/completion";
+import { loadRecurrencesWithoutTrip } from "@/lib/trips/missing-load";
+import { MissingRecurrencesNote } from "@/components/trips/missing-recurrences";
+import { TripCompletion } from "@/components/trips/trip-completion";
 import { DateNav } from "./date-nav";
 import { OptimizerStatus, OptimizerStatusPending } from "./optimizer-status";
 import { OptimizeHint } from "./optimize-hint";
@@ -78,11 +82,15 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   // Read before the plan: a change made between the two reads makes the version older than the plan shown,
   // so an action on this page is refused (never the other way round).
   const shownVersion = await loadDayVersion(db, date);
-  const [view] = await Promise.all([
+  const [view, horizon, missing] = await Promise.all([
     loadPlanningDay(date),
+    // Read only: the trips of a date of the horizon are completed by <TripCompletion> once the page is shown.
+    currentHorizon(db, today),
+    date >= today ? loadRecurrencesWithoutTrip(date) : Promise.resolve([]),
     // The day's patients and stop addresses are on screen (timeline, map, trip panel).
     auditRead(user, { action: "plan.view", entity: "Route", entityId: null, serviceDate: date }),
   ]);
+  const completing = inHorizon(date, horizon);
 
   const past = date < today;
   const hasRoutes = view.vehicles.some((v) => v.route !== null);
@@ -129,6 +137,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
 
       <div className="space-y-4">
         <PlanningActivityBanner />
+        {completing ? <TripCompletion key={date} date={date} /> : null}
         <PlanningVersionWatcher key={`${shownVersion.version}/${shownVersion.run ?? ""}`} date={date} shown={shownVersion} />
         <Suspense fallback={<OptimizerStatusPending />}>
           <OptimizerStatus />
@@ -152,6 +161,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
           }
         />
         {view.dayStatus !== "EMPTY" && !past ? <TariffGapBanner gaps={view.tariffGaps} date={date} /> : null}
+        {!past && view.dayStatus !== "VALIDATED" ? <MissingRecurrencesNote missing={missing} completing={completing} /> : null}
 
         {view.dayStatus === "EMPTY" ? (
           <>
@@ -161,12 +171,13 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
               action={
                 <LinkButton href={`/courses?date=${date}`} variant="primary">
                   <CalendarPlus aria-hidden className="size-4" />
-                  Générer ou saisir les courses
+                  {completing ? "Voir ou saisir les courses" : "Générer ou saisir les courses"}
                 </LinkButton>
               }
             >
-              Les courses régulières se génèrent à partir des récurrences (dialyse, chimiothérapie…) depuis la page
-              Courses ; revenez ensuite ici pour lancer l&apos;optimisation.
+              {completing
+                ? "Aucune récurrence (dialyse, chimiothérapie…) ne prévoit de course ce jour : les courses régulières sont créées d'office sur les prochains jours. Saisissez une course ponctuelle si besoin."
+                : "Les courses régulières sont créées d'office sur les prochains jours ; pour cette date, générez-les depuis la page Courses, puis revenez lancer l'optimisation."}
             </EmptyState>
           </>
         ) : (

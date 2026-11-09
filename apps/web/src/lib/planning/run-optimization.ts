@@ -39,7 +39,8 @@ import {
   type LockChange,
   type RunKind,
 } from "@/lib/optimizer/run-details";
-import { formatLongDate, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
+import { formatLongDate, fromIsoDate, todayIso, tomorrowIso, toIsoDate } from "@/lib/time";
+import { completeTrips } from "@/lib/trips/completion";
 import { tariffGapNote } from "./format";
 import { withBeforeCommit } from "./before-commit";
 import { lockPlanningDay } from "./day-lock";
@@ -251,6 +252,22 @@ function lowerFirst(text: string): string {
   return text.charAt(0).toLowerCase() + text.slice(1);
 }
 
+/**
+ * Before computing a date that can still be planned (tomorrow on), its
+ * missing recurring trips are created, and those the application cancelled
+ * brought back (lib/trips/completion.ts): the plan never leaves out a regular
+ * patient because the trips were not generated. A failure is logged and the
+ * computation goes on with the trips in place.
+ */
+async function completeDayBeforeRun(isoDate: string, user: Actor): Promise<void> {
+  if (isoDate < tomorrowIso() || (await replanBlocker(isoDate))) return;
+  try {
+    await db.$transaction((tx) => completeTrips(tx, user, { from: isoDate, to: isoDate }), PLANNING_TX_OPTIONS);
+  } catch (error) {
+    logError("[planning] completing the trips before the optimization failed", error, { serviceDate: isoDate });
+  }
+}
+
 /** The request of isoDate, or why there is nothing to compute. */
 async function prepareRequest(
   isoDate: string,
@@ -268,7 +285,7 @@ async function prepareRequest(
       error:
         excluded > 0
           ? `Aucune course exploitable le ${formatLongDate(isoDate)} : ${plural(excluded, "course incomplète", "courses incomplètes")} (voir la liste).`
-          : `Aucune course à planifier le ${formatLongDate(isoDate)}. Générez d'abord les courses de la semaine.`,
+          : `Aucune course à planifier le ${formatLongDate(isoDate)} : aucune récurrence ne prévoit de course ce jour (ou leurs prescriptions ont expiré). Saisissez une course ponctuelle, ou vérifiez les prescriptions.`,
     };
   }
   if (request.vehicles.length === 0) {
@@ -526,6 +543,7 @@ async function finishRun(args: {
  * leaves its run AWAITING_CONFIRMATION.
  */
 export async function runOptimization(isoDate: string, user: Actor, options: RunOptions = {}): Promise<RunOutcome> {
+  await completeDayBeforeRun(isoDate, user);
   const prepared = await prepareRequest(isoDate);
   if (!prepared.ok) return { ok: false, error: prepared.error };
   const { input, build } = prepared;

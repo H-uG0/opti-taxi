@@ -4,14 +4,13 @@ import type { Prisma, RouteStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { LOW_GEOCODE_SCORE } from "@/components/address/address-utils";
-import { audit, type AuditEntry } from "@/lib/audit";
+import { audit, auditRead, type AuditEntry } from "@/lib/audit";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { CANCELLATION_REASON_LABELS, isLateCancellation, NO_CANCELLATION, userCancellation } from "@/lib/domain/cancellation";
 import { isSameEpisode } from "@/lib/domain/no-show";
 import { formatAddress } from "@/lib/domain/rules";
 import { getSettings } from "@/lib/domain/settings";
-import { generateTrips } from "@/lib/domain/trip-generation";
 import { allowGeocodeSearch, bestMatch, GEOCODE_THROTTLED_MESSAGE, geocoderEnabled, searchAddress } from "@/lib/geocode";
 import { logError, safeErrorFields } from "@/lib/log";
 import { evaluate } from "@/lib/optimizer/client";
@@ -23,7 +22,9 @@ import {
   refreshRoutes,
   type RefreshOutcome,
 } from "@/lib/planning/refresh-routes";
-import { formatMinute, addDays, todayIso, toIsoDate } from "@/lib/time";
+import { formatMinute, addDays, formatShortDate, isIsoDate, todayIso, tomorrowIso, toIsoDate } from "@/lib/time";
+import { completeTrips, currentHorizon, inHorizon, type SkippedRecurrence } from "@/lib/trips/completion";
+import { writableRange } from "@/lib/trips/horizon";
 import {
   buildNewTripData,
   CANCEL_TRIP_FIELDS,
@@ -70,29 +71,60 @@ function tripEvent(action: AuditEntry["action"], trip: { id: string; serviceDate
 }
 
 // ---------------------------------------------------------------------------
-// Week generation
+// Generation of the recurring trips
 
-export async function generateWeekTrips(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
+/** « Générer les courses » : the feedback, and the recurrences whose sessions no prescription covers. */
+export type GenerationResult = ActionResult & { skipped: SkippedRecurrence[] };
+
+/**
+ * « Générer les courses de la semaine » : the missing trips of the week, from
+ * tomorrow at the earliest (a day begun or past is never filled in). Lists the
+ * recurrences skipped for want of a valid prescription, with their patient.
+ */
+export async function generateWeekTrips(_prev: GenerationResult, formData: FormData): Promise<GenerationResult> {
   const user = await requireUser("REGULATOR");
   const parsed = generateWeekSchema.safeParse(formValues(formData, ["weekStart"]));
-  if (!parsed.success) return failure(firstErrorMessage(parsed.error));
+  if (!parsed.success) return { ...failure(firstErrorMessage(parsed.error)), skipped: [] };
 
-  const from = parsed.data.weekStart;
-  const to = addDays(from, 6);
+  const week = { from: parsed.data.weekStart, to: addDays(parsed.data.weekStart, 6) };
+  const range = writableRange(week, tomorrowIso());
+  if (!range) {
+    return {
+      ok: false,
+      message: `Semaine du ${formatShortDate(week.from)} au ${formatShortDate(week.to)} déjà passée : les courses ne sont générées qu'à partir de demain.`,
+      skipped: [],
+    };
+  }
   try {
-    const result = await db.$transaction(async (tx) => {
-      const generated = await generateTrips(tx, from, to);
-      // Traced only when trips were created: regenerating a complete week changes nothing.
-      if (generated.created > 0) {
-        await audit(tx, user, { action: "trip.generate_week", entity: "Trip", entityId: null, serviceDate: from });
-      }
-      return generated;
-    }, TX_OPTIONS);
-    revalidateTripViews();
-    return { ok: true, message: generationMessage(result, from, to) };
+    const completion = await db.$transaction((tx) => completeTrips(tx, user, range), TX_OPTIONS);
+    // Patients named in the answer (no valid prescription): a read of their records.
+    if (completion.skipped.length > 0) await auditRead(user, { action: "patient_list.view", entity: "Patient", entityId: null });
+    if (completion.created + completion.revived > 0) revalidateTripViews();
+    return { ok: true, message: generationMessage(completion, range.from, range.to), skipped: completion.skipped };
   } catch (error) {
-    logError("[courses] generateWeekTrips failed", error, { weekStart: from });
-    return failure("La génération des courses a échoué. Réessayez ou contactez l'administrateur.");
+    logError("[courses] generateWeekTrips failed", error, { weekStart: week.from });
+    return { ...failure("La génération des courses a échoué. Réessayez ou contactez l'administrateur."), skipped: [] };
+  }
+}
+
+/**
+ * Called by the planning and trips pages once shown, for a date of the
+ * horizon: creates its missing recurring trips (and brings back those the
+ * application cancelled). Idempotent; a page render never writes.
+ */
+export async function completeDayTrips(date: string): Promise<{ changed: boolean }> {
+  const user = await requireUser("REGULATOR");
+  if (typeof date !== "string" || !isIsoDate(date)) return { changed: false };
+  try {
+    const horizon = await currentHorizon(db, todayIso());
+    if (!inHorizon(date, horizon)) return { changed: false };
+    const completion = await db.$transaction((tx) => completeTrips(tx, user, { from: date, to: date }), TX_OPTIONS);
+    const changed = completion.created + completion.revived > 0;
+    if (changed) revalidateTripViews();
+    return { changed };
+  } catch (error) {
+    logError("[courses] completeDayTrips failed", error, { date });
+    return { changed: false };
   }
 }
 

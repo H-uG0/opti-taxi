@@ -119,7 +119,9 @@ describe("recurrenceCoverageNotice (patient page)", () => {
   it("is calm when the renewal is already registered", () => {
     const notice = recurrenceCoverageNotice({ startDate: "2026-05-01", endDate: null }, endingPmt, TODAY, renewal);
     expect(notice?.tone).toBe("info");
-    expect(notice?.text).toMatch(/PMT renouvelée \(11\/11\/2026 → 10\/05\/2027\) : rattachez-y la récurrence avant le 10\/11\/2026/);
+    expect(notice?.text).toBe(
+      "PMT renouvelée (11/11/2026 → 10/05/2027) : les courses continuent dessus ; rattachez-y la récurrence.",
+    );
   });
 
   it("flags an expired PMT, less loudly when renewed", () => {
@@ -153,7 +155,7 @@ describe("recurrenceFormNotices (recurrence form)", () => {
     expect(recurrenceFormNotices({ startDate: "2026-11-02", endDate: null }, prescription, TODAY)).toEqual([
       {
         tone: "info",
-        text: "Courses générées jusqu'au 28/02/2027 (fin de la prescription) ; pour la suite, saisissez le renouvellement et rattachez-y la récurrence.",
+        text: "Courses générées jusqu'au 28/02/2027 (fin de la prescription) ; pour la suite, saisissez le renouvellement : les courses continueront dessus.",
       },
     ]);
   });

@@ -32,6 +32,15 @@ export function initialSharingStatus(sharingAllowed: boolean): SharingStatus {
   return sharingAllowed ? "NOT_PROPOSED" : "NOT_ELIGIBLE";
 }
 
+/**
+ * Sharing traceability once the prescription rules of a trip change: no longer
+ * allowed -> NOT_ELIGIBLE (a refusal stays recorded); allowed again -> NOT_PROPOSED.
+ */
+export function nextSharingStatus(current: SharingStatus, sharingAllowed: boolean): SharingStatus {
+  if (!sharingAllowed) return current === "REFUSED" ? current : "NOT_ELIGIBLE";
+  return current === "NOT_ELIGIBLE" ? "NOT_PROPOSED" : current;
+}
+
 /** What the optimizer may do with a trip: share only if allowed and the patient did not refuse. */
 export function isShareable(trip: { sharingAllowed: boolean; sharingStatus: SharingStatus }): boolean {
   return trip.sharingAllowed && trip.sharingStatus !== "REFUSED" && trip.sharingStatus !== "NOT_ELIGIBLE";

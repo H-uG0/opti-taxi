@@ -266,10 +266,12 @@ export function pairedReturns(
   return pairs;
 }
 
-/** Feedback of the "Générer les courses" action. */
-export function generationMessage(result: { planned: number; created: number }, fromIso: string, toIso: string): string {
-  const existing = Math.max(0, result.planned - result.created);
-  const created = plural(result.created, "course créée", "courses créées");
-  const already = `${existing} déjà ${existing > 1 ? "existantes" : "existante"}`;
-  return `Semaine du ${formatShortDate(fromIso)} au ${formatShortDate(toIso)} : ${created} (${already}).`;
+/** Feedback of « Générer les courses » : what was created or brought back between fromIso and toIso. */
+export function generationMessage(result: { created: number; revived: number }, fromIso: string, toIso: string): string {
+  const period = fromIso === toIso ? `Le ${formatShortDate(fromIso)}` : `Du ${formatShortDate(fromIso)} au ${formatShortDate(toIso)}`;
+  if (result.created + result.revived === 0) return `${period} : toutes les courses régulières existent déjà.`;
+  const done = [];
+  if (result.created > 0) done.push(plural(result.created, "course créée", "courses créées"));
+  if (result.revived > 0) done.push(plural(result.revived, "course annulée automatiquement rétablie", "courses annulées automatiquement rétablies"));
+  return `${period} : ${done.join(", ")}.`;
 }

@@ -11,7 +11,11 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { OUTBOUND_NO_SHOW_ADVICE, returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
 import { formatPercent, PRESCRIBED_MODE_LABELS, SHARING_SCOPE_LABELS } from "@/lib/labels";
-import { addDays, formatLongDate, formatShortDate, fromIsoDate, isIsoDate, startOfIsoWeek, tomorrowIso } from "@/lib/time";
+import { addDays, formatLongDate, formatShortDate, fromIsoDate, isIsoDate, startOfIsoWeek, todayIso, tomorrowIso } from "@/lib/time";
+import { currentHorizon, inHorizon } from "@/lib/trips/completion";
+import { loadRecurrencesWithoutTrip } from "@/lib/trips/missing-load";
+import { MissingRecurrencesNote } from "@/components/trips/missing-recurrences";
+import { TripCompletion } from "@/components/trips/trip-completion";
 import { DayNav } from "./day-nav";
 import { GenerateTripsForm } from "./generate-trips-form";
 import { cancellationTrace, outboundNoShowTrace, sharingAnswerTrace, stopStatusTraces } from "./record-trace";
@@ -53,7 +57,8 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
 
   // The day's patients, phones, addresses and notes are on screen (auditRead never throws).
   const traced = auditRead(user, { action: "trip_list.view", entity: "Trip", entityId: null, serviceDate: date });
-  const [trips, stops] = await Promise.all([
+  const today = todayIso();
+  const [trips, stops, horizon, missing] = await Promise.all([
     db.trip.findMany({
       where: { serviceDate },
       select: {
@@ -107,8 +112,12 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       where: { route: { serviceDate }, trip: { status: { notIn: ["CANCELLED", "NO_SHOW"] } } },
       select: { routeId: true, tripId: true, kind: true, sequence: true },
     }),
+    // Read only: the trips of a date of the horizon are completed by <TripCompletion> once the page is shown.
+    currentHorizon(db, today),
+    date >= today ? loadRecurrencesWithoutTrip(date) : Promise.resolve([]),
   ]);
   await traced;
+  const completing = inHorizon(date, horizon);
 
   // Same-day return trips to check: their outbound leg was closed as patient absent.
   const returnsToCheck = returnsToCheckAfterNoShow(trips);
@@ -201,8 +210,15 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
           weekStart={weekStart}
           nextWeekStart={addDays(weekStart, 7)}
           weekLabel={`${formatShortDate(weekStart)} au ${formatShortDate(addDays(weekStart, 6))}`}
+          horizonEnd={horizon.to}
         />
       </div>
+      {completing ? <TripCompletion key={date} date={date} /> : null}
+      {missing.length > 0 ? (
+        <div className="mb-4">
+          <MissingRecurrencesNote missing={missing} completing={completing} />
+        </div>
+      ) : null}
 
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <Stat label="Courses" value={summary.total} hint={`${summary.outbound} aller · ${summary.return} retour`} />
@@ -304,7 +320,8 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
             </LinkButton>
           }
         >
-          Générez les courses de la semaine à partir des récurrences, ou créez une course ponctuelle.
+          Les courses régulières sont créées d&apos;office jusqu&apos;au {formatShortDate(horizon.to)} à partir des
+          récurrences ; au-delà, générez-les pour la semaine, ou créez une course ponctuelle.
         </EmptyState>
       ) : rows.length === 0 ? (
         <EmptyState

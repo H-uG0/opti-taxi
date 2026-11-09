@@ -23,11 +23,16 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { DEFAULT_LATE_CANCELLATION_HOURS } from "@/lib/domain/cancellation";
-import { planTripsFromRecurrences, type RecurrenceForGeneration } from "@/lib/domain/trip-generation";
+import {
+  GENERATION_INCLUDE,
+  planTripsFromRecurrences,
+  recurrencesInRange,
+  type RecurrenceForGeneration,
+} from "@/lib/domain/trip-generation";
 import { computeKpisByDay, summarizePeriod } from "@/lib/kpis";
 import { loadKpiRows } from "@/lib/kpis-load";
 import { logError } from "@/lib/log";
-import { addDays, formatShortDate, fromIsoDate, todayIso } from "@/lib/time";
+import { addDays, formatShortDate, todayIso } from "@/lib/time";
 import { pickSimulationDates } from "./history/calendar";
 import {
   clearSimulatedDay,
@@ -71,14 +76,7 @@ const prisma = new PrismaClient();
 
 /** Recurrences that may produce trips between `from` and `to` (same query as generateTrips). */
 function loadRecurrences(from: string, to: string): Promise<RecurrenceForGeneration[]> {
-  return prisma.recurrence.findMany({
-    where: {
-      active: true,
-      startDate: { lte: fromIsoDate(to) },
-      OR: [{ endDate: null }, { endDate: { gte: fromIsoDate(from) } }],
-    },
-    include: { patient: true, facility: true, prescription: true },
-  });
+  return prisma.recurrence.findMany({ where: recurrencesInRange(from, to), include: GENERATION_INCLUDE });
 }
 
 function plural(count: number, singular: string, pluralForm = `${singular}s`): string {

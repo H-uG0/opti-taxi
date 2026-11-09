@@ -94,6 +94,7 @@ export default async function PatientsPage({
             weekdays: true,
             appointmentMinute: true,
             label: true,
+            prescriptionId: true,
             facility: { select: { name: true } },
           },
         },
@@ -180,6 +181,8 @@ export default async function PatientsPage({
                 const mismatch = current ? mobilityModeWarning(patient.mobility, current.mode) : null;
                 const renewal = current ? findRenewal(current, patient.prescriptions) : null;
                 const renewed = Boolean(renewal && currentDates && needsRenewal(currentDates, today));
+                // Renewed, but active recurrences still on the old prescription: to attach (work list « Prescriptions »).
+                const toAttach = renewed && current ? patient.recurrences.some((r) => r.prescriptionId === current.id) : false;
                 return (
                   <tr key={patient.id} className="hover:bg-slate-50">
                     <Td className="whitespace-nowrap">
@@ -200,8 +203,10 @@ export default async function PatientsPage({
                         <div className="flex flex-col items-start gap-1">
                           <span className="whitespace-nowrap">{PRESCRIBED_MODE_LABELS[current.mode]}</span>
                           {renewed && renewal ? (
-                            <Badge tone="neutral" className="tabular whitespace-nowrap">
-                              Renouvelée jusqu&apos;au {formatShortDate(toIsoDate(renewal.validTo))}
+                            <Badge tone={toAttach ? "warning" : "neutral"} className="tabular whitespace-nowrap">
+                              {toAttach
+                                ? "Renouvelée : récurrences à rattacher"
+                                : `Renouvelée jusqu'au ${formatShortDate(toIsoDate(renewal.validTo))}`}
                             </Badge>
                           ) : (
                             <Badge

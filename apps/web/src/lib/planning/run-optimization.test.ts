@@ -30,6 +30,7 @@ const fake = vi.hoisted(() => ({
   evaluate: vi.fn(),
   savePlan: vi.fn(),
   audit: vi.fn(),
+  completeTrips: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -43,6 +44,7 @@ vi.mock("@/lib/optimizer/build-request", () => ({
   buildOptimizeRequest: fake.build,
   isStaleRun: () => false,
 }));
+vi.mock("@/lib/trips/completion", () => ({ completeTrips: fake.completeTrips }));
 vi.mock("@/lib/optimizer/persist", () => ({
   FIELD_TRIP_STATUSES: ["PICKED_UP", "DROPPED_OFF"],
   PlanBlockedError: class PlanBlockedError extends Error {},
@@ -175,6 +177,41 @@ describe("runOptimization with a move", () => {
     expect(fake.db.optimizationRun.create).not.toHaveBeenCalled();
     expect(fake.db.optimizationRun.update).not.toHaveBeenCalled();
     expect(fake.optimize).not.toHaveBeenCalled();
+  });
+});
+
+describe("trips completed before the computation", () => {
+  it("creates the missing recurring trips of the date before loading the request", async () => {
+    const order: string[] = [];
+    fake.completeTrips.mockImplementation(async (_tx: unknown, _user: unknown, range: unknown) => {
+      order.push(`complete ${JSON.stringify(range)}`);
+      return { created: 2, revived: 0, createdByDay: new Map(), skipped: [] };
+    });
+    fake.loadInput.mockImplementation(async () => {
+      order.push("load");
+      return input();
+    });
+    fake.savePlan.mockResolvedValue({ routes: 1, served: 1, unassigned: 1 });
+
+    await runOptimization(DATE, REGULATOR);
+
+    expect(order.slice(0, 2)).toEqual([`complete {"from":"${DATE}","to":"${DATE}"}`, "load"]);
+    expect(fake.completeTrips.mock.calls[0]?.[1]).toBe(REGULATOR);
+  });
+
+  it("goes on with the trips in place when completing them fails", async () => {
+    fake.completeTrips.mockRejectedValue(new Error("database time-out"));
+    fake.savePlan.mockResolvedValue({ routes: 1, served: 1, unassigned: 1 });
+
+    const outcome = await runOptimization(DATE, REGULATOR);
+
+    expect(fake.loadInput).toHaveBeenCalled();
+    expect(outcome.ok).toBe(true);
+  });
+
+  it("never completes a past day", async () => {
+    await runOptimization("2020-01-06", REGULATOR);
+    expect(fake.completeTrips).not.toHaveBeenCalled();
   });
 });
 

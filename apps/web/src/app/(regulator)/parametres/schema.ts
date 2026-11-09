@@ -6,6 +6,7 @@
 import { z } from "zod";
 import type { AppSettings } from "@prisma/client";
 import { LATE_CANCELLATION_HOURS } from "@/lib/domain/cancellation";
+import { TRIP_HORIZON_DAYS } from "@/lib/trips/horizon";
 import { formatDecimalInput, numberField, type FormValues } from "@/lib/forms";
 import { fractionToPercent, percentToFraction } from "../tarifs/schema";
 
@@ -76,6 +77,8 @@ export const settingsSchema = z
     replanMaxServedLoss: numberField({ integer: true, min: 0, max: 1000, unit: "courses" }),
     // Typed in %, stored as a fraction of the revenue in place.
     replanMaxMarginLoss: numberField({ min: 0, max: 100, unit: "%" }).transform(percentToFraction),
+    // Recurring trips are created from tomorrow to D+N (lib/trips/completion.ts).
+    tripHorizonDays: numberField({ integer: true, min: TRIP_HORIZON_DAYS.min, max: TRIP_HORIZON_DAYS.max, unit: "jours" }),
     // A cancellation typed less than this many hours before the pickup is late (lib/domain/cancellation.ts).
     lateCancellationHours: numberField({
       integer: true,
@@ -124,6 +127,7 @@ export const SETTINGS_FIELDS = [
   "solverTimeLimitSec",
   "replanMaxServedLoss",
   "lateCancellationHours",
+  "tripHorizonDays",
 ] as const satisfies readonly (keyof SettingsInput & keyof AppSettings)[];
 
 export function settingsFormValues(

@@ -141,17 +141,17 @@ export function recurrenceCoverageNotice(
   const validity = prescriptionValidity(prescription, todayIso);
   const end = formatShortDate(prescription.validTo);
   const renewed = renewal
-    ? `PMT renouvelée (${formatShortDate(renewal.validFrom)} → ${formatShortDate(renewal.validTo)}) : rattachez-y la récurrence`
+    ? `PMT renouvelée (${formatShortDate(renewal.validFrom)} → ${formatShortDate(renewal.validTo)}) : les courses continuent dessus ; rattachez-y la récurrence`
     : null;
 
   if (validity.state === "expired") {
     return renewed
-      ? { tone: "warning", text: `PMT expirée le ${end}. ${renewed} pour que les courses reprennent.` }
+      ? { tone: "warning", text: `PMT expirée le ${end}. ${renewed}.` }
       : { tone: "danger", text: `Prescription expirée le ${end} : plus aucune course générée.` };
   }
   if (validity.state === "expiring" && outlives(recurrence, prescription)) {
     return renewed
-      ? { tone: "info", text: `${renewed} avant le ${end}.` }
+      ? { tone: "info", text: `${renewed}.` }
       : {
           tone: "warning",
           text: `${validityLabel(prescription, todayIso)} (${end}) : sans renouvellement, plus de course après cette date.`,
@@ -182,7 +182,7 @@ export function recurrenceFormNotices(recurrence: Period, prescription: Validity
         ? { tone: "danger", text: `Cette prescription a expiré le ${end} : aucune course ne sera générée.` }
         : {
             tone: "info",
-            text: `Courses générées jusqu'au ${end} (fin de la prescription) ; pour la suite, saisissez le renouvellement et rattachez-y la récurrence.`,
+            text: `Courses générées jusqu'au ${end} (fin de la prescription) ; pour la suite, saisissez le renouvellement : les courses continueront dessus.`,
           },
     );
   }

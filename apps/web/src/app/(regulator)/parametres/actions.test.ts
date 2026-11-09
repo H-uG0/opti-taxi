@@ -33,6 +33,7 @@ const STORED = {
   replanMaxServedLoss: 0,
   replanMaxMarginLoss: 0.1,
   lateCancellationHours: 2,
+  tripHorizonDays: 14,
   regulatorPhone: "04 65 71 00 00",
 };
 

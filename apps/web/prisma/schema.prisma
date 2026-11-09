@@ -632,6 +632,9 @@ model AppSettings {
   replanMaxMarginLoss        Float    @default(0.1)
   /// Une annulation saisie moins de N heures avant la prise en charge prévue est tardive.
   lateCancellationHours      Int      @default(2)
+  /// Les courses des récurrences sont créées de demain à J+N (création, modification ou réactivation
+  /// d'une récurrence, d'une prescription ou d'un patient ; ouverture du planning ou des courses).
+  tripHorizonDays            Int      @default(14)
   updatedAt                  DateTime @updatedAt
 }
 

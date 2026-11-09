@@ -103,7 +103,7 @@ describe("syncOpenTrips: trace of the trips cancelled", () => {
 
     const summary = await syncOpenTrips(tx, { patientId: "p1" }, () => CANCEL, TODAY, leftRoutes, ACTOR);
 
-    expect(summary).toEqual({ updated: 0, cancelled: 2, detached: 1, deferred: 0 });
+    expect(summary).toEqual({ updated: 0, cancelled: 2, detached: 1, deferred: 0, created: 0, revived: 0 });
     expect(leftRoutes).toEqual(new Set(["r3"]));
     // Each write is guarded on what was read.
     expect(tripUpdateMany.mock.calls.map(([args]) => args.where)).toEqual([
@@ -152,7 +152,7 @@ describe("syncOpenTrips: trace of the trips cancelled", () => {
 
     const summary = await syncOpenTrips(tx, { patientId: "p1" }, () => ({ kind: "update", home }), TODAY, leftRoutes, ACTOR);
 
-    expect(summary).toEqual({ updated: 2, cancelled: 0, detached: 1, deferred: 0 });
+    expect(summary).toEqual({ updated: 2, cancelled: 0, detached: 1, deferred: 0, created: 0, revived: 0 });
     expect(leftRoutes).toEqual(new Set(["r2"]));
     expect(createMany).toHaveBeenCalledTimes(1);
     expect(createMany).toHaveBeenCalledWith({ data: [tripEvent("trip.detach", "t2", "2026-11-05")] });
