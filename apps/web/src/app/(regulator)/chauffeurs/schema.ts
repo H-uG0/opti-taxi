@@ -254,7 +254,9 @@ export type AccountChange = {
  * What saving the account form does to an existing driver account, or null
  * when it changes nothing. A new e-mail or a new password also ends every open
  * session of the account (REVOKE_SESSIONS): whoever holds the old credentials,
- * e.g. on a lost or handed-over phone, is signed out.
+ * e.g. on a lost or handed-over phone, is signed out. A password set here is
+ * provisional (mustChangePassword): the regulator knows it, so the driver
+ * replaces it with their own at the next sign-in.
  */
 export function accountUpdate(
   currentEmail: string,
@@ -272,7 +274,7 @@ export function accountUpdate(
   return {
     data: {
       ...(emailChanged ? { email: next.email } : {}),
-      ...(passwordHash !== null ? { passwordHash } : {}),
+      ...(passwordHash !== null ? { passwordHash, mustChangePassword: true } : {}),
       ...REVOKE_SESSIONS,
     },
     actions,
@@ -296,16 +298,24 @@ export function accountUpdateMessage(
 ): string {
   const lead =
     change.emailChanged && change.passwordReset
-      ? "Identifiant modifié et mot de passe réinitialisé : communiquez-les au chauffeur."
+      ? "Identifiant modifié et mot de passe provisoire défini : communiquez-les au chauffeur."
       : change.passwordReset
-        ? "Mot de passe réinitialisé : communiquez-le au chauffeur."
+        ? "Mot de passe provisoire défini : communiquez-le au chauffeur."
         : "Identifiant modifié : communiquez-le au chauffeur.";
   if (!accountActive) return `${lead} ${ACCESS_STILL_DISABLED_NOTE}`;
   const detail = change.passwordReset
-    ? "L'ancien mot de passe ne permet plus de se connecter."
+    ? `L'ancien mot de passe ne permet plus de se connecter. ${PROVISIONAL_PASSWORD_NOTE}`
     : "Il se connecte désormais avec la nouvelle adresse et son mot de passe actuel.";
   return `${lead} ${detail} ${OPEN_SESSION_NOTE}`;
 }
+
+/** Said wherever the regulator sets a driver's password (it is provisional, see accountUpdate). */
+export const PROVISIONAL_PASSWORD_NOTE = "Le chauffeur le remplacera par le sien à sa prochaine connexion.";
+
+/** Success message after creating a driver account (its password is provisional). */
+export const ACCOUNT_CREATED_MESSAGE =
+  "Compte créé avec un mot de passe provisoire : communiquez l'identifiant et ce mot de passe au chauffeur. " +
+  "Il choisira son propre mot de passe à sa première connexion.";
 
 export const MIN_PASSWORD_LENGTH = 10;
 export const MAX_PASSWORD_LENGTH = 64;

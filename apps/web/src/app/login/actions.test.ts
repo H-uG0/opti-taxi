@@ -23,7 +23,11 @@ vi.mock("next/headers", () => ({
   headers: async () => new Headers({ "x-forwarded-for": "203.0.113.7", "user-agent": "Test/1.0" }),
 }));
 vi.mock("@/lib/db", () => ({ db: { user: fake.user, auditEvent: fake.auditEvent } }));
-vi.mock("@/lib/auth", () => ({ getCurrentUser: vi.fn(), ROLE_HOME: { REGULATOR: "/planning", DRIVER: "/chauffeur" } }));
+vi.mock("@/lib/auth", () => ({
+  getCurrentUser: vi.fn(),
+  PASSWORD_PAGE: "/chauffeur/mot-de-passe",
+  ROLE_HOME: { REGULATOR: "/planning", DRIVER: "/chauffeur" },
+}));
 vi.mock("@/lib/auth/login-throttle", () => ({ throttleLogin: fake.throttle, loginSucceeded: vi.fn() }));
 vi.mock("@/lib/auth/session", () => ({ createSession: fake.createSession, deleteSession: vi.fn() }));
 vi.mock("@/lib/auth/password", () => ({ hashPassword: async () => "dummy", verifyPassword: fake.verifyPassword }));
@@ -101,6 +105,13 @@ describe("login: audit trail of failures", () => {
     expect(events()).toEqual([
       expect.objectContaining({ userId: "u-driver", actorLabel: "Julien Marchetti", action: "session.login" }),
     ]);
+  });
+
+  it("sends a driver with a provisional password to choose their own first", async () => {
+    fake.user.findUnique.mockResolvedValue({ ...account, mustChangePassword: true });
+    fake.verifyPassword.mockResolvedValue(true);
+    await expect(login({ error: null, email: "" }, credentials())).rejects.toThrow("redirect:/chauffeur/mot-de-passe");
+    expect(fake.createSession).toHaveBeenCalledWith(expect.objectContaining({ mustChangePassword: true }), expect.anything());
   });
 
   it("answers a throttled attempt without looking the account up (the throttle traces it)", async () => {

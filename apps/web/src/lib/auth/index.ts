@@ -42,16 +42,33 @@ export async function requireUser(role?: Role): Promise<SessionUser> {
   return user;
 }
 
+/** Where a driver with a provisional password chooses their own (and any driver changes it). */
+export const PASSWORD_PAGE = "/chauffeur/mot-de-passe";
+
 /**
- * A driver session must be linked to an active Driver record to see a
- * roadmap. sessionIsCurrent already refuses a driver session without one, so
- * the check below only narrows the type; it redirects to /login, where the
- * same rule shows the form (no redirect loop).
+ * A signed-in driver, whether or not their password is still the provisional
+ * one: for the driver layout (header, call to the regulation) and the
+ * password page itself. Never for patient data: use requireDriver.
+ * A driver session must be linked to an active Driver record.
+ * sessionIsCurrent already refuses a driver session without one, so the check
+ * below only narrows the type; it redirects to /login, where the same rule
+ * shows the form (no redirect loop).
  */
-export async function requireDriver(): Promise<SessionUser & { driverId: string }> {
+export async function requireDriverAccount(): Promise<SessionUser & { driverId: string }> {
   const user = await requireUser("DRIVER");
   if (!user.driverId) redirect("/login?error=no-driver");
   return { ...user, driverId: user.driverId };
+}
+
+/**
+ * A driver allowed to see their roadmap: one still on the provisional
+ * password a regulator set (or reset) is sent to choose their own first, so a
+ * status is never recorded in their name with a password someone else knows.
+ */
+export async function requireDriver(): Promise<SessionUser & { driverId: string }> {
+  const user = await requireDriverAccount();
+  if (user.mustChangePassword) redirect(PASSWORD_PAGE);
+  return user;
 }
 
 export async function getCurrentUser(): Promise<SessionUser | null> {

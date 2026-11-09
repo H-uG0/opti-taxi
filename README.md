@@ -134,9 +134,11 @@ ou qui contient des comptes étrangers au jeu fictif (`@opti-taxi.test`). Compte
 | Régulateur | `regulateur@opti-taxi.test` | `regulateur` |
 | Chauffeur | `prenom.nom@opti-taxi.test` (liste affichée à la fin du seed) | `chauffeur` |
 
-Ces comptes n'existent que dans la base de développement et dans la démo (`DEMO_MODE=1`). Leurs mots de
-passe étant publics, l'image Docker ne charge jamais le jeu fictif sans `DEMO_MODE=1`, et le serveur
-refuse de démarrer en production hors démo si un compte `@opti-taxi.test` existe.
+Ces comptes n'existent que dans la base de développement et dans la démo (`DEMO_MODE=1`) ; leurs mots de
+passe ne sont pas provisoires (un compte créé dans l'application l'est, voir « Données de santé et
+sécurité »). Ces mots de passe étant publics, l'image Docker ne charge jamais le jeu fictif sans
+`DEMO_MODE=1`, et le serveur refuse de démarrer en production hors démo si un compte `@opti-taxi.test`
+existe.
 
 ## Tests
 
@@ -157,6 +159,12 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
   sessions du compte sur tous ses appareils. Désactiver un chauffeur ou son accès, ou lui donner un
   nouveau mot de passe ou une nouvelle adresse e-mail, coupe sa session ouverte dès sa prochaine action
   ou actualisation ; une réactivation ne la fait pas revenir (le chauffeur se reconnecte).
+- **Mot de passe chauffeur provisoire** : le mot de passe que le régulateur saisit à la création du
+  compte ou à sa réinitialisation est provisoire. À la connexion suivante, le chauffeur doit en choisir
+  un à lui (`/chauffeur/mot-de-passe`) avant d'ouvrir sa feuille de route ; ses autres sessions sont
+  alors fermées. Personne d'autre que lui ne peut donc saisir de statut en son nom. La page « Changer
+  mon mot de passe » reste accessible depuis le bas de la feuille de route. Les comptes du jeu fictif
+  ne sont pas provisoires (la démo s'ouvre avec les mots de passe publiés).
 - **Connexion** : après 5 échecs en 15 minutes sur une même adresse e-mail, la connexion à ce compte
   est refusée pendant 15 minutes ; après 30 tentatives en 5 minutes depuis une même adresse IP, elle est
   refusée depuis cette adresse pendant 5 minutes. Le message est le même que le compte existe ou non.

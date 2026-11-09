@@ -13,6 +13,8 @@ export type SessionUser = {
   name: string;
   role: Role;
   driverId: string | null;
+  /** The account still has the provisional password a regulator set: it must choose its own first. */
+  mustChangePassword: boolean;
 };
 
 /**
@@ -20,7 +22,10 @@ export type SessionUser = {
  * the account's session version at sign-in (null when the token predates the
  * claim).
  */
-export type SessionClaims = SessionUser & { passwordVersion: string | null; sessionVersion: number | null };
+export type SessionClaims = Omit<SessionUser, "mustChangePassword"> & {
+  passwordVersion: string | null;
+  sessionVersion: number | null;
+};
 
 /** The account fields the rules read (lib/auth and the login action load exactly these). */
 export type AccountState = {
@@ -30,6 +35,7 @@ export type AccountState = {
   driverId: string | null;
   passwordHash: string;
   sessionVersion: number;
+  mustChangePassword: boolean;
   driver: { active: boolean } | null;
 };
 
@@ -41,6 +47,7 @@ export const ACCOUNT_STATE_SELECT = {
   driverId: true,
   passwordHash: true,
   sessionVersion: true,
+  mustChangePassword: true,
   driver: { select: { active: true } },
 } as const;
 
@@ -89,5 +96,11 @@ export function sessionIsCurrent(claims: SessionClaims, account: AccountState | 
   if (account.role !== claims.role || account.driverId !== claims.driverId) return null;
   if (claims.sessionVersion === null || claims.sessionVersion !== account.sessionVersion) return null;
   if (claims.passwordVersion === null || claims.passwordVersion !== passwordVersion(account.passwordHash)) return null;
-  return { id: claims.id, name: account.name, role: account.role, driverId: account.driverId };
+  return {
+    id: claims.id,
+    name: account.name,
+    role: account.role,
+    driverId: account.driverId,
+    mustChangePassword: account.mustChangePassword,
+  };
 }

@@ -13,6 +13,7 @@ import {
   driverSchema,
   generatePassword,
   OPEN_SESSION_NOTE,
+  PROVISIONAL_PASSWORD_NOTE,
 } from "./schema";
 
 const valid = {
@@ -185,10 +186,10 @@ describe("accountUpdate", () => {
     });
   });
 
-  it("ends the open sessions on a new password, keeping the e-mail", () => {
+  it("ends the open sessions on a new password, keeping the e-mail; the password is provisional", () => {
     const update = accountUpdate(current, { email: current, passwordHash: "$2b$10$hash" });
     expect(update).toEqual({
-      data: { passwordHash: "$2b$10$hash", ...REVOKE_SESSIONS },
+      data: { passwordHash: "$2b$10$hash", mustChangePassword: true, ...REVOKE_SESSIONS },
       actions: ["account.password_reset"],
       emailChanged: false,
       passwordReset: true,
@@ -198,7 +199,7 @@ describe("accountUpdate", () => {
   it("records both changes when the e-mail and the password change together", () => {
     const update = accountUpdate(current, { email: "autre@exemple.fr", passwordHash: "$2b$10$hash" });
     expect(update).toEqual({
-      data: { email: "autre@exemple.fr", passwordHash: "$2b$10$hash", ...REVOKE_SESSIONS },
+      data: { email: "autre@exemple.fr", passwordHash: "$2b$10$hash", mustChangePassword: true, ...REVOKE_SESSIONS },
       actions: ["account.update", "account.password_reset"],
       emailChanged: true,
       passwordReset: true,
@@ -216,10 +217,12 @@ describe("accountUpdateMessage", () => {
       `Identifiant modifié : communiquez-le au chauffeur. Il se connecte désormais avec la nouvelle adresse et son mot de passe actuel. ${OPEN_SESSION_NOTE}`,
     );
     expect(accountUpdateMessage(passwordOnly, true)).toBe(
-      `Mot de passe réinitialisé : communiquez-le au chauffeur. L'ancien mot de passe ne permet plus de se connecter. ${OPEN_SESSION_NOTE}`,
+      "Mot de passe provisoire défini : communiquez-le au chauffeur. L'ancien mot de passe ne permet plus de se connecter. " +
+        `${PROVISIONAL_PASSWORD_NOTE} ${OPEN_SESSION_NOTE}`,
     );
     expect(accountUpdateMessage(both, true)).toBe(
-      `Identifiant modifié et mot de passe réinitialisé : communiquez-les au chauffeur. L'ancien mot de passe ne permet plus de se connecter. ${OPEN_SESSION_NOTE}`,
+      "Identifiant modifié et mot de passe provisoire défini : communiquez-les au chauffeur. " +
+        `L'ancien mot de passe ne permet plus de se connecter. ${PROVISIONAL_PASSWORD_NOTE} ${OPEN_SESSION_NOTE}`,
     );
   });
 

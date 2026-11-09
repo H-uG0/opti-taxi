@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import { requireDriver } from "@/lib/auth";
+import { requireDriverAccount } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getRegulatorPhone } from "@/lib/domain/settings";
 import { fromIsoDate, todayIso } from "@/lib/time";
@@ -118,9 +118,10 @@ export async function loadReturnTripsAfterOutboundNoShow(routes: readonly Driver
 
 /**
  * Regulation phone number set in Paramètres, or null. Cached per request:
- * the layout header and the page share one lookup.
+ * the layout header and the page share one lookup. Also shown to a driver
+ * who still has to change a provisional password (layout of that page).
  */
 export const loadRegulatorContact = cache(async (): Promise<RegulatorContact | null> => {
-  await requireDriver();
+  await requireDriverAccount();
   return regulatorContact(await getRegulatorPhone(db));
 });

@@ -639,6 +639,9 @@ model User {
   /// désactivation, nouveau mot de passe ou nouvelle adresse e-mail) : un jeton d'une
   /// version antérieure est refusé.
   sessionVersion Int      @default(0)
+  /// Mot de passe provisoire (choisi par un régulateur à la création ou à la réinitialisation du
+  /// compte) : le chauffeur doit le remplacer par le sien avant d'accéder à sa feuille de route.
+  mustChangePassword Boolean @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

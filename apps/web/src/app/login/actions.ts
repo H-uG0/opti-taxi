@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { audit, auditAnonymous, auditRead } from "@/lib/audit";
-import { getCurrentUser, ROLE_HOME } from "@/lib/auth";
+import { getCurrentUser, PASSWORD_PAGE, ROLE_HOME } from "@/lib/auth";
 import { loginSucceeded, throttleLogin } from "@/lib/auth/login-throttle";
 import { emailTag } from "@/lib/auth/rate-limit";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
@@ -73,10 +73,18 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   }
 
   loginSucceeded(parsed.data.email);
-  await createSession({ id: user.id, name: user.name, role: user.role, driverId: user.driverId }, user);
+  const sessionUser = {
+    id: user.id,
+    name: user.name,
+    role: user.role,
+    driverId: user.driverId,
+    mustChangePassword: user.mustChangePassword,
+  };
+  await createSession(sessionUser, user);
   // Best effort, like a read: a sign-in is never refused because its trace failed.
   await auditRead(user, { action: "session.login", entity: "User", entityId: user.id });
-  redirect(ROLE_HOME[user.role]);
+  // A provisional password set by a regulator is replaced before the roadmap opens.
+  redirect(user.role === "DRIVER" && user.mustChangePassword ? PASSWORD_PAGE : ROLE_HOME[user.role]);
 }
 
 /**

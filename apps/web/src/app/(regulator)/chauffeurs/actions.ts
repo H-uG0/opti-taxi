@@ -24,6 +24,7 @@ import {
 import {
   accountActiveData,
   accountSchema,
+  ACCOUNT_CREATED_MESSAGE,
   accountUpdate,
   accountUpdateMessage,
   assignmentConflicts,
@@ -180,7 +181,8 @@ export async function setDriverActive(driverId: string, active: boolean): Promis
 
 /**
  * Create the driver's login, or change its e-mail and/or reset its password
- * (either ends its open sessions, see accountUpdate).
+ * (either ends its open sessions, see accountUpdate). A password set here is
+ * provisional: the driver must replace it at the next sign-in.
  */
 export async function saveDriverAccount(driverId: string, _state: FormState, formData: FormData): Promise<FormState> {
   const user = await requireUser("REGULATOR");
@@ -230,6 +232,8 @@ export async function saveDriverAccount(driverId: string, _state: FormState, for
             email,
             name: `${driver.firstName} ${driver.lastName}`,
             passwordHash,
+            // The regulator chose it: the driver replaces it at the first sign-in.
+            mustChangePassword: true,
             role: "DRIVER",
             driverId: driver.id,
             active: true,
@@ -238,7 +242,7 @@ export async function saveDriverAccount(driverId: string, _state: FormState, for
         });
         await audit(tx, user, { action: "account.create", entity: "User", entityId: created.id });
       });
-      message = "Compte créé. Communiquez l'identifiant et le mot de passe au chauffeur.";
+      message = ACCOUNT_CREATED_MESSAGE;
     }
   } catch (error) {
     if (isUniqueViolation(error, "email")) {

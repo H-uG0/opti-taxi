@@ -41,7 +41,7 @@ export default async function EditDriverPage({
       defaultForVehicles: { select: { id: true, label: true, type: true, active: true }, orderBy: { label: "asc" } },
       crewMateForVehicles: { select: { id: true, label: true, type: true, active: true }, orderBy: { label: "asc" } },
       // Only safe account fields: never the password hash.
-      user: { select: { email: true, active: true, role: true, createdAt: true } },
+      user: { select: { email: true, active: true, role: true, createdAt: true, mustChangePassword: true } },
     },
   });
   if (!driver) notFound();
@@ -137,6 +137,17 @@ export default async function EditDriverPage({
                   </dd>
                   <dt className="text-slate-500">Statut</dt>
                   <dd>{account.active ? <Badge tone="success">Actif</Badge> : <Badge>Désactivé</Badge>}</dd>
+                  {account.mustChangePassword ? (
+                    <>
+                      <dt className="text-slate-500">Mot de passe</dt>
+                      <dd>
+                        <Badge tone="warning">Provisoire</Badge>
+                        <span className="mt-0.5 block text-xs text-slate-500">
+                          Le chauffeur le remplacera par le sien à sa prochaine connexion.
+                        </span>
+                      </dd>
+                    </>
+                  ) : null}
                   <dt className="text-slate-500">Créé le</dt>
                   <dd className="tabular">{dateTimeFormat.format(account.createdAt)}</dd>
                 </dl>

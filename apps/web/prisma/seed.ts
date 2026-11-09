@@ -386,12 +386,15 @@ async function seedUsers(
   drivers: Map<DriverKey, CreatedDriver>,
   vehicleOfDriver: Map<DriverKey, string>,
 ): Promise<{ regulatorId: string; accounts: DriverAccount[] }> {
+  // The demo accounts keep their published password: never provisional (mustChangePassword),
+  // so the demo opens without a password change. Accounts created in the app are provisional.
   const regulator = await prisma.user.create({
     data: {
       email: REGULATOR_ACCOUNT.email,
       name: REGULATOR_ACCOUNT.name,
       passwordHash: await hashPassword(REGULATOR_ACCOUNT.password),
       role: "REGULATOR",
+      mustChangePassword: false,
     },
     select: { id: true },
   });
@@ -400,7 +403,14 @@ async function seedUsers(
     const email = devEmail(driver.def.firstName, driver.def.lastName);
     const name = `${driver.def.firstName} ${driver.def.lastName}`;
     await prisma.user.create({
-      data: { email, name, passwordHash: await hashPassword(DRIVER_PASSWORD), role: "DRIVER", driverId: driver.id },
+      data: {
+        email,
+        name,
+        passwordHash: await hashPassword(DRIVER_PASSWORD),
+        role: "DRIVER",
+        driverId: driver.id,
+        mustChangePassword: false,
+      },
     });
     accounts.push({ email, name, vehicle: vehicleOfDriver.get(driver.key) ?? null });
   }

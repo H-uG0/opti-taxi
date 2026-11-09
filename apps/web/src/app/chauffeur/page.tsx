@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CalendarX } from "lucide-react";
 import { auditRead } from "@/lib/audit";
-import { requireDriver } from "@/lib/auth";
+import { PASSWORD_PAGE, requireDriver } from "@/lib/auth";
 import { cn } from "@/components/ui/cn";
 import { formatLongDate, formatMinute, minuteOfDay, todayIso, tomorrowIso } from "@/lib/time";
 import type { RegulatorContact } from "./_lib/links";
@@ -99,6 +99,15 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
           ))}
         </div>
       )}
+
+      <p className="border-t border-slate-200 pt-3 text-center">
+        <Link
+          href={PASSWORD_PAGE}
+          className="inline-flex min-h-11 items-center px-3 text-sm font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900"
+        >
+          Changer mon mot de passe
+        </Link>
+      </p>
     </div>
   );
 }

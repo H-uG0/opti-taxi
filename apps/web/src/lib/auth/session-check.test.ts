@@ -18,6 +18,7 @@ function driverAccount(overrides: Partial<AccountState> = {}): AccountState {
     driverId: "drv_1",
     passwordHash: HASH,
     sessionVersion: 3,
+    mustChangePassword: false,
     driver: { active: true },
     ...overrides,
   };
@@ -31,6 +32,7 @@ function regulatorAccount(overrides: Partial<AccountState> = {}): AccountState {
     driverId: null,
     passwordHash: HASH,
     sessionVersion: 0,
+    mustChangePassword: false,
     driver: null,
     ...overrides,
   };
@@ -84,7 +86,13 @@ describe("sessionIsCurrent", () => {
   it("keeps a session whose account has not changed, with the account's current name", () => {
     const account = driverAccount();
     const claims = claimsFor(account);
-    expect(sessionIsCurrent(claims, account)).toEqual({ id: "usr_1", name: "Paul Martin", role: "DRIVER", driverId: "drv_1" });
+    expect(sessionIsCurrent(claims, account)).toEqual({
+      id: "usr_1",
+      name: "Paul Martin",
+      role: "DRIVER",
+      driverId: "drv_1",
+      mustChangePassword: false,
+    });
     // Renaming the driver record renames the session, without ending it.
     expect(sessionIsCurrent(claims, { ...account, name: "Paul Martin-Durand" })?.name).toBe("Paul Martin-Durand");
     const regulator = regulatorAccount();
@@ -93,7 +101,13 @@ describe("sessionIsCurrent", () => {
       name: "Régulation",
       role: "REGULATOR",
       driverId: null,
+      mustChangePassword: false,
     });
+  });
+
+  it("keeps the session of an account with a provisional password, and says so", () => {
+    const account = driverAccount({ mustChangePassword: true });
+    expect(sessionIsCurrent(claimsFor(account), account)?.mustChangePassword).toBe(true);
   });
 
   it("ends the session of a deleted account", () => {

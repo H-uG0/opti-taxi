@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { LogOut } from "lucide-react";
-import { requireDriver } from "@/lib/auth";
+import { requireDriverAccount } from "@/lib/auth";
 import { cn } from "@/components/ui/cn";
 import { logout } from "@/app/login/actions";
 import { OfflineBanner } from "./_components/offline-banner";
@@ -37,7 +37,9 @@ function LogoutButton({ stacked }: { stacked: boolean }) {
 }
 
 export default async function DriverLayout({ children }: { children: React.ReactNode }) {
-  const user = await requireDriver();
+  // Not requireDriver: the layout also frames the page where a provisional password is changed.
+  // Each page checks its own access (the roadmap: requireDriver).
+  const user = await requireDriverAccount();
   const regulator = await loadRegulatorContact();
 
   return (
