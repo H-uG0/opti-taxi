@@ -72,7 +72,7 @@ export const SHARED_ADDRESS_RULE: LimitRule = { limit: 120, windowMs: 5 * MINUTE
  */
 export const DEFAULT_MAX_KEYS = 10_000;
 
-type Entry = { hits: number[]; blockedUntil: number };
+type Entry = { hits: number[]; blockedUntil: number; refusalNoted?: boolean };
 
 export type LimiterOptions = {
   /** Milliseconds since the epoch; Date.now by default (tests inject a fake clock). */
@@ -113,11 +113,24 @@ export class AttemptLimiter {
     if (entry.hits.length >= this.rule.limit) {
       entry.blockedUntil = now + this.rule.blockMs;
       entry.hits = [];
+      entry.refusalNoted = false;
     }
     // Re-inserted last: the map iterates from the least recently hit key.
     this.entries.delete(key);
     this.entries.set(key, entry);
     this.evict(now);
+  }
+
+  /**
+   * True for the first refusal of `key` during its current block, false
+   * afterwards and whenever `key` is not blocked: the audit trail records one
+   * event per block (session.throttled), however many attempts are refused.
+   */
+  noteRefusal(key: string): boolean {
+    const entry = this.entries.get(key);
+    if (!entry || entry.blockedUntil <= this.now() || entry.refusalNoted) return false;
+    entry.refusalNoted = true;
+    return true;
   }
 
   /** Forgets `key` (a successful sign-in clears its e-mail's failures). */
@@ -198,10 +211,26 @@ export function trustedProxyHops(raw: string | undefined): number {
  * missing or malformed entry also falls back to UNKNOWN_CLIENT.
  */
 export function clientAddress(forwardedFor: string | null | undefined, hops: number): string {
-  if (hops < 1 || !forwardedFor) return UNKNOWN_CLIENT;
+  const ip = trustedClientIp(forwardedFor, hops);
+  return (ip !== null && addressBucket(ip)) || UNKNOWN_CLIENT;
+}
+
+/**
+ * The client's own IP address under the same trust rule as clientAddress
+ * (the entry `hops` places from the right of X-Forwarded-For), whole rather
+ * than bucketed, for the audit trail; null when no proxy is trusted or the
+ * entry is not an IP address. An IPv4-mapped IPv6 address is given as IPv4.
+ */
+export function trustedClientIp(forwardedFor: string | null | undefined, hops: number): string | null {
+  if (hops < 1 || !forwardedFor) return null;
   const entries = forwardedFor.split(",");
   const entry = entries.length >= hops ? entries[entries.length - hops] : undefined;
-  return (entry !== undefined && addressBucket(entry)) || UNKNOWN_CLIENT;
+  if (entry === undefined) return null;
+  const address = entry.trim().replace(/%.*$/, "");
+  const version = isIP(address);
+  if (version === 0) return null;
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)?.[1];
+  return mapped !== undefined && isIP(mapped) === 4 ? mapped : address.toLowerCase();
 }
 
 /**
@@ -302,6 +331,18 @@ export function gateLoginAttempt(limiters: LoginLimiters, email: string, address
   addressLimiter.hit(address);
   limiters.email.hit(key);
   return null;
+}
+
+/**
+ * After a refusal of gateLoginAttempt: true when it is the first refusal of
+ * the block that caused it (address or e-mail), so the audit trail records
+ * one session.throttled per block rather than one per refused attempt.
+ */
+export function firstRefusalOfBlock(limiters: LoginLimiters, email: string, address: string): boolean {
+  const addressLimiter = address === UNKNOWN_CLIENT ? limiters.shared : limiters.address;
+  const byAddress = addressLimiter.noteRefusal(address);
+  const byEmail = limiters.email.noteRefusal(emailKey(email));
+  return byAddress || byEmail;
 }
 
 /** A successful sign-in clears the failures counted for `email` (not the address count). */

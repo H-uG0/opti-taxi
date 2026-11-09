@@ -72,7 +72,7 @@ async function referenceErrors(
 }
 
 export async function createVehicle(_state: FormState, formData: FormData): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const values = readForm(formData);
   const parsed = vehicleSchema.safeParse(values);
   if (!parsed.success) return invalidState(parsed.error, values);
@@ -81,7 +81,10 @@ export async function createVehicle(_state: FormState, formData: FormData): Prom
   if (Object.keys(errors).length > 0) return errorState(errors, values);
 
   try {
-    await db.vehicle.create({ data: parsed.data });
+    await db.$transaction(async (tx) => {
+      const created = await tx.vehicle.create({ data: parsed.data, select: { id: true } });
+      await audit(tx, user, { action: "vehicle.create", entity: "Vehicle", entityId: created.id });
+    });
   } catch (error) {
     if (isUniqueViolation(error, "registration")) return errorState({ registration: REGISTRATION_TAKEN }, values);
     throw error;
@@ -91,7 +94,7 @@ export async function createVehicle(_state: FormState, formData: FormData): Prom
 }
 
 export async function updateVehicle(vehicleId: string, _state: FormState, formData: FormData): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const id = idSchema.safeParse(vehicleId);
   if (!id.success) return messageState(VEHICLE_GONE);
   const current = await db.vehicle.findUnique({
@@ -108,7 +111,10 @@ export async function updateVehicle(vehicleId: string, _state: FormState, formDa
   if (Object.keys(errors).length > 0) return errorState(errors, values);
 
   try {
-    await db.vehicle.update({ where: { id: current.id }, data: parsed.data });
+    await db.$transaction(async (tx) => {
+      await tx.vehicle.update({ where: { id: current.id }, data: parsed.data });
+      await audit(tx, user, { action: "vehicle.update", entity: "Vehicle", entityId: current.id });
+    });
   } catch (error) {
     if (isUniqueViolation(error, "registration")) return errorState({ registration: REGISTRATION_TAKEN }, values);
     throw error;
@@ -151,7 +157,10 @@ export async function setVehicleActive(vehicleId: string, active: boolean): Prom
     if (problems.length > 0) {
       return messageState(`Réactivation impossible : ${problems.join(" ")} Modifiez d'abord l'équipage par défaut.`);
     }
-    await db.vehicle.update({ where: { id: vehicle.id }, data: { active: true } });
+    await db.$transaction(async (tx) => {
+      await tx.vehicle.update({ where: { id: vehicle.id }, data: { active: true } });
+      await audit(tx, user, { action: "vehicle.reactivate", entity: "Vehicle", entityId: vehicle.id });
+    });
     revalidateFleet(vehicle.id);
     return successState("Véhicule réactivé : il est de nouveau proposé à l'optimisation.");
   }
@@ -166,16 +175,15 @@ export async function setVehicleActive(vehicleId: string, active: boolean): Prom
       data: { lockedVehicleId: null },
       select: { id: true, serviceDate: true },
     });
-    await audit(
-      tx,
-      user,
-      released.map((trip) => ({
+    await audit(tx, user, [
+      { action: "vehicle.deactivate", entity: "Vehicle", entityId: vehicle.id },
+      ...released.map((trip) => ({
         action: "trip.unlock" as const,
         entity: "Trip" as const,
         entityId: trip.id,
         serviceDate: toIsoDate(trip.serviceDate),
       })),
-    );
+    ]);
     // Planned routes are left as they are: the regulator re-runs those days.
     const routes = await tx.route.findMany({
       where: { vehicleId: vehicle.id, serviceDate: { gte: today } },

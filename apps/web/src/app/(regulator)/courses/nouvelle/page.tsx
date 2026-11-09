@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ArrowLeft } from "lucide-react";
 import { LinkButton } from "@/components/ui/button";
 import { Card, CardBody, EmptyState, PageHeader } from "@/components/ui/layout";
+import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { geocoderEnabled } from "@/lib/geocode";
@@ -16,7 +17,7 @@ export default async function NewTripPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const params = await searchParams;
   const rawDate = Array.isArray(params.date) ? params.date[0] : params.date;
   const today = todayIso();
@@ -44,6 +45,8 @@ export default async function NewTripPage({
       orderBy: { name: "asc" },
       select: { id: true, name: true, city: true, type: true },
     }),
+    // Every active patient, with mobility and prescriptions, is in the patient choice.
+    auditRead(user, { action: "patient_list.view", entity: "Patient", entityId: null }),
   ]);
 
   const patientOptions: PatientOption[] = patients.map((patient) => ({

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { todayIso } from "@/lib/time";
@@ -14,7 +15,7 @@ import { pickCurrentPrescription } from "../../../_lib/status";
 export const metadata: Metadata = { title: "Nouvelle récurrence" };
 
 export default async function NewRecurrencePage({ params }: { params: Promise<{ id: string }> }) {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const { id } = await params;
   const patient = await db.patient.findUnique({
     where: { id },
@@ -28,7 +29,10 @@ export default async function NewRecurrencePage({ params }: { params: Promise<{ 
   if (!patient) notFound();
 
   const today = todayIso();
-  const { facilities, prescriptions } = await loadRecurrenceOptions(patient.id, today);
+  const [{ facilities, prescriptions }] = await Promise.all([
+    loadRecurrenceOptions(patient.id, today),
+    auditRead(user, { action: "patient.view", entity: "Patient", entityId: patient.id }),
+  ]);
   const current = pickCurrentPrescription(patient.prescriptions, today);
   const back = `/patients/${patient.id}#recurrences`;
 

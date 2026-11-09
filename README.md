@@ -165,13 +165,27 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
   le serveur signale au démarrage en production. Revers assumé : quiconque connaît l'adresse e-mail
   d'un compte peut en bloquer la connexion 15 minutes, de façon renouvelable ; le blocage, en mémoire,
   se lève aussi en redémarrant le serveur web.
-- **Journal d'audit** (table `AuditEvent`) : les connexions et déconnexions ; les consultations
-  (liste des patients, fiche patient et ses formulaires, fiche établissement, liste des courses,
-  planning d'un jour, feuille de route, arrivées partagées) ; qui a créé, modifié, annulé ou déplacé un patient, une prescription,
-  une récurrence, un établissement, une course, une tournée, un chauffeur ou un compte, et qui a saisi
-  ou annulé une prise en charge, une dépose ou une absence. Il ne contient que des identifiants, jamais
-  de nom, d'adresse ni de note. L'auteur d'une prise en charge, d'une absence ou d'une réponse de
-  partage est aussi affiché sur la course (Courses et Planning).
+- **Journal d'audit** (table `AuditEvent`) : les connexions, déconnexions, échecs de connexion et
+  blocages pour trop de tentatives (l'e-mail n'y figure que sous forme d'empreinte, `emailTag`) ; les
+  consultations (liste des patients, fiche patient et ses formulaires, saisie d'une course, fiche
+  établissement, liste des courses, planning d'un jour, feuille de route, arrivées partagées, fiche
+  chauffeur, équipages du jour) ; qui a créé, modifié, annulé ou déplacé un patient, une prescription,
+  une récurrence, un établissement, une course, une tournée, un chauffeur ou un compte, qui a saisi
+  ou annulé une prise en charge, une dépose ou une absence, et toute modification des équipages, des
+  absences et incompatibilités du personnel, des véhicules (indisponibilités, échéances, pleins), des
+  dépôts, des grilles tarifaires et des paramètres (ancienne et nouvelle valeur, dont le numéro de la
+  régulation). Chaque événement garde le nom de son auteur au moment de l'action, l'adresse IP (derrière
+  un proxy déclaré par `TRUSTED_PROXY_HOPS`) et une empreinte du navigateur. Il ne contient jamais de
+  nom de patient, d'adresse ni de note. L'auteur d'une prise en charge, d'une absence ou d'une réponse
+  de partage est aussi affiché sur la course (Courses et Planning).
+  La base refuse toute modification ou suppression du journal (déclencheur) ; un compte qui a des
+  événements ne peut plus être supprimé, seulement désactivé. Seuls le seed et la simulation
+  d'historique de développement lèvent ce verrou, le temps de leur transaction. En production, la
+  base doit avoir deux rôles distincts (kit de déploiement, lot PROD-01) : un rôle de migration,
+  propriétaire des tables, et un rôle d'exécution pour l'application, sans droit de propriétaire,
+  privé de `UPDATE`, `DELETE` et `TRUNCATE` sur `AuditEvent`
+  (`REVOKE UPDATE, DELETE, TRUNCATE ON "AuditEvent" FROM <rôle d'exécution>;`) : il ne peut alors ni
+  modifier le journal ni désactiver le déclencheur.
 - **Service d'optimisation** : il reçoit les coordonnées des domiciles et les rendez-vous. Avec
   `OPTIMIZER_TOKEN` (même valeur sur le web et sur l'optimiseur), il refuse tout appel sans ce jeton
   (`401`) ; sans jeton il accepte tout appel, ce que les deux services signalent au démarrage en

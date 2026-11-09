@@ -76,6 +76,19 @@ export const tariffSchema = tariffFields
 
 export type TariffInput = z.output<typeof tariffSchema>;
 
+/** Fields traced with their old and new value (tariff.*): amounts and dates, not the free texts. */
+export const TARIFF_AUDIT_FIELDS = [
+  "vehicleType",
+  "department",
+  "baseFare",
+  "pricePerKm",
+  "includedKm",
+  "sharedDiscount2",
+  "sharedDiscount3",
+  "validFrom",
+  "validTo",
+] as const satisfies readonly (keyof TariffInput)[];
+
 type TariffRecord = Pick<
   TariffGrid,
   | "vehicleType"

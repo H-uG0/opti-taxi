@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { VehicleType } from "@prisma/client";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
 import { FormMessage } from "@/components/ui/form";
+import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { loadDayCrewContext } from "@/lib/optimizer/build-request";
@@ -20,7 +21,7 @@ const TYPES: VehicleType[] = ["TAXI", "VSL", "AMBULANCE"];
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 export default async function CrewsPage({ searchParams }: { searchParams: SearchParams }) {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const params = await searchParams;
   const requested = Array.isArray(params.date) ? params.date[0] : params.date;
   const tomorrow = tomorrowIso();
@@ -32,6 +33,8 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
     db.depot.findMany({ select: { id: true, name: true } }),
     replanBlocker(date),
     db.route.count({ where: { serviceDate: fromIsoDate(date) } }),
+    // Everyone's absences of the day are on screen.
+    auditRead(user, { action: "day_crew.view", entity: "DayCrew", entityId: null, serviceDate: date }),
   ]);
   const { plan, input } = context;
   const depotName = new Map(depots.map((d) => [d.id, d.name]));

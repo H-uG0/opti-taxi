@@ -650,23 +650,36 @@ model User {
 }
 
 /// Journal des accès et modifications des données de santé (traçabilité HDS / RGPD art. 32).
-/// Ajout seulement : jamais modifié ni supprimé par l'application. Aucun nom, adresse ni note :
-/// seulement qui, quoi, sur quel enregistrement et quand.
+/// Ajout seulement : un déclencheur de la base refuse toute modification ou suppression (migration
+/// audit_trail_append_only), que seuls le seed et la simulation d'historique de développement lèvent
+/// le temps de leur transaction. Aucun nom de patient, adresse ni note : qui, quoi, sur quel
+/// enregistrement, quand et d'où.
 model AuditEvent {
-  id          String    @id @default(cuid())
-  at          DateTime  @default(now())
-  /// Null si le compte a été supprimé depuis (le rôle reste).
-  userId      String?
-  role        UserRole
+  id            String    @id @default(cuid())
+  at            DateTime  @default(now())
+  /// Compte auteur ; null pour un échec de connexion. Un compte qui a des événements ne peut pas
+  /// être supprimé (on le désactive).
+  userId        String?
+  /// Nom de l'auteur figé à l'écriture (rempli par la base depuis le compte s'il manque).
+  actorLabel    String?
+  /// Rôle de l'auteur ; null pour un échec de connexion (aucun compte authentifié).
+  role          UserRole?
   /// Action en notation pointée, ex. « patient.update », « stop.pickup », « roadmap.view ».
-  action      String
+  action        String
   /// Modèle concerné (« Patient », « Trip », « Route »…), jamais un arrêt (supprimé à chaque réoptimisation).
-  entity      String
-  entityId    String?
+  entity        String
+  entityId      String?
   /// Date de service concernée, quand l'action porte sur une journée planifiée.
-  serviceDate DateTime? @db.Date
+  serviceDate   DateTime? @db.Date
+  /// Adresse IP du client, seulement derrière un proxy déclaré (TRUSTED_PROXY_HOPS).
+  ip            String?
+  /// Empreinte du User-Agent (sha256 tronqué), jamais le texte.
+  userAgentHash String?
+  /// Contexte non médical de l'action : ancienne et nouvelle valeur d'un paramètre, empreinte de
+  /// l'e-mail d'un échec de connexion… Jamais de nom de patient, d'adresse ni de note.
+  details       Json?
 
-  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user User? @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([entity, entityId])
   @@index([userId, at])

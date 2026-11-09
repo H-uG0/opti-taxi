@@ -29,6 +29,7 @@ import { withBeforeCommit } from "@/lib/planning/before-commit";
 import { removeTripStops } from "@/lib/planning/detach";
 import { refreshRoutes } from "@/lib/planning/refresh-routes";
 import { fromIsoDate, toIsoDate } from "@/lib/time";
+import { liftAuditGuard, restoreAuditGuard } from "../audit-guard";
 import type { Rng } from "../seed/random";
 import {
   answerInstants,
@@ -121,14 +122,20 @@ export async function foreignDates(prisma: PrismaClient, from: string, to: strin
   return new Set(groups.flat().flatMap((row) => (row.serviceDate ? [toIsoDate(row.serviceDate)] : [])));
 }
 
-/** Deletes what a previous simulation created on the date (stops cascade with routes and trips). */
+/**
+ * Deletes what a previous simulation created on the date (stops cascade with
+ * routes and trips). Its own audit events only ("hist-" ids): the append-only
+ * trigger is lifted for this transaction alone (audit-guard.ts).
+ */
 export async function clearSimulatedDay(prisma: PrismaClient, isoDate: string): Promise<ClearedRows> {
   const where = simulatedRowsWhere(fromIsoDate(isoDate));
-  const [routes, trips, runs, events] = await prisma.$transaction([
+  const [, routes, trips, runs, events] = await prisma.$transaction([
+    liftAuditGuard(prisma),
     prisma.route.deleteMany({ where: where.routes }),
     prisma.trip.deleteMany({ where: where.trips }),
     prisma.optimizationRun.deleteMany({ where: where.runs }),
     prisma.auditEvent.deleteMany({ where: where.events }),
+    restoreAuditGuard(prisma),
   ]);
   return { trips: trips.count, routes: routes.count, runs: runs.count, events: events.count };
 }

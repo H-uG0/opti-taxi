@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { errorState, idSchema, invalidState, isUniqueViolation, messageState, readForm, successState, type FormState } from "@/lib/forms";
@@ -34,7 +35,7 @@ async function plannedDaysNotice(driverIds: string[], from: string, to: string |
 }
 
 export async function addAbsence(driverId: string, _state: FormState, formData: FormData): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const id = idSchema.safeParse(driverId);
   if (!id.success) return messageState(DRIVER_GONE);
   const values = readForm(formData);
@@ -44,25 +45,46 @@ export async function addAbsence(driverId: string, _state: FormState, formData: 
   if (!driver) return messageState(DRIVER_GONE);
 
   const { kind, startDate, endDate, note } = parsed.data;
-  await db.staffAbsence.create({
-    data: { driverId: driver.id, kind, startDate: fromIsoDate(startDate), endDate: fromIsoDate(endDate), note },
+  await db.$transaction(async (tx) => {
+    const absence = await tx.staffAbsence.create({
+      data: { driverId: driver.id, kind, startDate: fromIsoDate(startDate), endDate: fromIsoDate(endDate), note },
+      select: { id: true },
+    });
+    // Ids only: the reason (sick leave…) stays on the absence itself.
+    await audit(tx, user, {
+      action: "staff_absence.create",
+      entity: "StaffAbsence",
+      entityId: absence.id,
+      details: { driverId: driver.id },
+    });
   });
   refreshPages(driver.id);
   return successState(`Absence enregistrée.${await plannedDaysNotice([driver.id], startDate, endDate)}`);
 }
 
 export async function deleteAbsence(driverId: string, absenceId: string): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const ids = idSchema.safeParse(absenceId);
   const driver = idSchema.safeParse(driverId);
   if (!ids.success || !driver.success) return messageState("Demande invalide.");
-  const { count } = await db.staffAbsence.deleteMany({ where: { id: ids.data, driverId: driver.data } });
+  const count = await db.$transaction(async (tx) => {
+    const removed = await tx.staffAbsence.deleteMany({ where: { id: ids.data, driverId: driver.data } });
+    if (removed.count > 0) {
+      await audit(tx, user, {
+        action: "staff_absence.delete",
+        entity: "StaffAbsence",
+        entityId: ids.data,
+        details: { driverId: driver.data },
+      });
+    }
+    return removed.count;
+  });
   refreshPages(driverId);
   return count > 0 ? successState("Absence supprimée.") : successState("Cette absence était déjà supprimée.");
 }
 
 export async function addIncompatibility(driverId: string, _state: FormState, formData: FormData): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const id = idSchema.safeParse(driverId);
   if (!id.success) return messageState(DRIVER_GONE);
   const values = readForm(formData);
@@ -72,8 +94,20 @@ export async function addIncompatibility(driverId: string, _state: FormState, fo
 
   const people = await db.driver.findMany({ where: { id: { in: [id.data, parsed.data.otherId] } }, select: { id: true } });
   if (people.length < 2) return messageState("Personne introuvable : rechargez la page.", values);
+  const pair = orderedPair(id.data, parsed.data.otherId);
   try {
-    await db.crewIncompatibility.create({ data: { ...orderedPair(id.data, parsed.data.otherId), note: parsed.data.note } });
+    await db.$transaction(async (tx) => {
+      const created = await tx.crewIncompatibility.create({
+        data: { ...pair, note: parsed.data.note },
+        select: { id: true },
+      });
+      await audit(tx, user, {
+        action: "crew_incompatibility.create",
+        entity: "CrewIncompatibility",
+        entityId: created.id,
+        details: pair,
+      });
+    });
   } catch (error) {
     if (isUniqueViolation(error, "driverAId")) return errorState({ otherId: "Cette paire est déjà enregistrée." }, values);
     throw error;
@@ -86,12 +120,23 @@ export async function addIncompatibility(driverId: string, _state: FormState, fo
 }
 
 export async function deleteIncompatibility(driverId: string, incompatibilityId: string): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const ids = idSchema.safeParse(incompatibilityId);
   const driver = idSchema.safeParse(driverId);
   if (!ids.success || !driver.success) return messageState("Demande invalide.");
-  const { count } = await db.crewIncompatibility.deleteMany({
-    where: { id: ids.data, OR: [{ driverAId: driver.data }, { driverBId: driver.data }] },
+  const count = await db.$transaction(async (tx) => {
+    const removed = await tx.crewIncompatibility.deleteMany({
+      where: { id: ids.data, OR: [{ driverAId: driver.data }, { driverBId: driver.data }] },
+    });
+    if (removed.count > 0) {
+      await audit(tx, user, {
+        action: "crew_incompatibility.delete",
+        entity: "CrewIncompatibility",
+        entityId: ids.data,
+        details: { driverId: driver.data },
+      });
+    }
+    return removed.count;
   });
   refreshPages(driverId);
   return count > 0 ? successState("Paire supprimée.") : successState("Cette paire était déjà supprimée.");

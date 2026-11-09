@@ -9,11 +9,13 @@ import {
   EMAIL_RULE,
   emailKey,
   emailTag,
+  firstRefusalOfBlock,
   gateLoginAttempt,
   proxyHopsWarning,
   refusalLogFields,
   retryMinutes,
   SHARED_ADDRESS_RULE,
+  trustedClientIp,
   trustedProxyHops,
   UNKNOWN_CLIENT,
   type LimitRule,
@@ -242,6 +244,51 @@ describe("proxyHopsWarning", () => {
       expect(warning).not.toContain("yes-please");
     }
     expect(proxyHopsWarning("99", "development")).toMatch(/integer from 0 to 10/);
+  });
+});
+
+describe("trustedClientIp", () => {
+  it("gives the whole address the trusted proxy saw, or null when no proxy is trusted", () => {
+    expect(trustedClientIp("198.51.100.4, 203.0.113.7", 1)).toBe("203.0.113.7");
+    expect(trustedClientIp("198.51.100.4, 203.0.113.7", 2)).toBe("198.51.100.4");
+    expect(trustedClientIp("203.0.113.7", 0)).toBeNull();
+    expect(trustedClientIp(null, 1)).toBeNull();
+    expect(trustedClientIp("203.0.113.7", 2)).toBeNull();
+    expect(trustedClientIp("unknown", 1)).toBeNull();
+    // Not bucketed by /64 like the throttle key: the audit trail keeps the address.
+    expect(trustedClientIp("2001:DB8:1:2:3:4:5:6%eth0", 1)).toBe("2001:db8:1:2:3:4:5:6");
+    expect(trustedClientIp("::ffff:192.0.2.1", 1)).toBe("192.0.2.1");
+  });
+});
+
+describe("firstRefusalOfBlock", () => {
+  const A = "192.0.2.10";
+
+  it("is true once per block, so a refused flood leaves one trace", () => {
+    const clock = fakeClock();
+    const limiters = createLoginLimiters({ now: clock.now });
+    for (let i = 0; i < 5; i++) gateLoginAttempt(limiters, "x@example.fr", A);
+    expect(firstRefusalOfBlock(limiters, "x@example.fr", A)).toBe(true);
+    for (let i = 0; i < 50; i++) {
+      expect(gateLoginAttempt(limiters, "x@example.fr", A)?.by).toBe("email");
+      expect(firstRefusalOfBlock(limiters, "x@example.fr", A)).toBe(false);
+    }
+    // The next block of the same e-mail is traced again.
+    clock.advance(15 * MINUTE);
+    for (let i = 0; i < 5; i++) gateLoginAttempt(limiters, "x@example.fr", A);
+    expect(firstRefusalOfBlock(limiters, "x@example.fr", A)).toBe(true);
+  });
+
+  it("notes an address block once, whichever e-mail is refused by it", () => {
+    const limiters = createLoginLimiters({ now: fakeClock().now });
+    for (let i = 0; i < 30; i++) gateLoginAttempt(limiters, `spray-${i}@example.fr`, A);
+    expect(firstRefusalOfBlock(limiters, "victim@example.fr", A)).toBe(true);
+    expect(firstRefusalOfBlock(limiters, "other@example.fr", A)).toBe(false);
+  });
+
+  it("is false when nothing is blocked", () => {
+    const limiters = createLoginLimiters({ now: fakeClock().now });
+    expect(firstRefusalOfBlock(limiters, "x@example.fr", UNKNOWN_CLIENT)).toBe(false);
   });
 });
 

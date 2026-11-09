@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { errorState, messageState, readForm, successState, valueOf, type FormState } from "@/lib/forms";
@@ -24,7 +25,7 @@ const REPLAN_NOTICE = " Des tournées sont déjà calculées pour ce jour : rela
  * started or past, like a re-optimisation: its routes keep their crews.
  */
 export async function saveDayCrews(_state: FormState, formData: FormData): Promise<FormState> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const values = readForm(formData);
   const date = valueOf(values, "date");
   if (!isIsoDate(date)) return messageState("Date invalide : rechargez la page.");
@@ -34,7 +35,18 @@ export async function saveDayCrews(_state: FormState, formData: FormData): Promi
   const routes = await db.route.count({ where: { serviceDate } });
 
   if (valueOf(values, "intent") === "reset") {
-    const { count } = await db.dayCrew.deleteMany({ where: { serviceDate } });
+    const count = await db.$transaction(async (tx) => {
+      const removed = await tx.dayCrew.deleteMany({ where: { serviceDate } });
+      if (removed.count > 0) {
+        await audit(tx, user, {
+          action: "day_crew.reset",
+          entity: "DayCrew",
+          serviceDate: date,
+          details: { crews: removed.count },
+        });
+      }
+      return removed.count;
+    });
     refreshPages();
     if (count === 0) return successState("Les équipages de ce jour étaient déjà ceux proposés automatiquement.");
     return successState(`Équipages remis aux propositions automatiques.${routes > 0 ? REPLAN_NOTICE : ""}`);
@@ -59,12 +71,18 @@ export async function saveDayCrews(_state: FormState, formData: FormData): Promi
 
   // An unavailable vehicle keeps no crew: once back in service, it gets the usual proposal.
   const outOfService = new Set(plan.crews.filter((c) => c.unavailable).map((c) => c.vehicleId));
-  await db.$transaction([
-    db.dayCrew.deleteMany({ where: { serviceDate } }),
-    db.dayCrew.createMany({
-      data: saved.filter((crew) => !outOfService.has(crew.vehicleId)).map((crew) => ({ serviceDate, ...crew })),
-    }),
-  ]);
+  const kept = saved.filter((crew) => !outOfService.has(crew.vehicleId));
+  await db.$transaction(async (tx) => {
+    await tx.dayCrew.deleteMany({ where: { serviceDate } });
+    await tx.dayCrew.createMany({ data: kept.map((crew) => ({ serviceDate, ...crew })) });
+    // Who decided which crew drives which patients that day.
+    await audit(tx, user, {
+      action: "day_crew.save",
+      entity: "DayCrew",
+      serviceDate: date,
+      details: { crews: kept.length },
+    });
+  });
   refreshPages();
   return successState(`Équipages enregistrés.${routes > 0 ? REPLAN_NOTICE : ""}`);
 }

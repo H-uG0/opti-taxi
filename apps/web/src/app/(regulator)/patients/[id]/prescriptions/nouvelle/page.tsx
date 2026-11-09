@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { todayIso } from "@/lib/time";
@@ -11,13 +12,14 @@ import { PrescriptionForm } from "../../../_components/prescription-form";
 export const metadata: Metadata = { title: "Nouvelle prescription" };
 
 export default async function NewPrescriptionPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const { id } = await params;
   const patient = await db.patient.findUnique({
     where: { id },
     select: { id: true, firstName: true, lastName: true, mobility: true },
   });
   if (!patient) notFound();
+  await auditRead(user, { action: "patient.view", entity: "Patient", entityId: patient.id });
 
   const today = todayIso();
   const lying = patient.mobility === "LYING";

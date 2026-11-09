@@ -53,6 +53,7 @@ import {
   type DriverKey,
   type FacilityKey,
 } from "./seed/data";
+import { liftAuditGuard, restoreAuditGuard } from "./audit-guard";
 import { assertSeedOnlyDatabase, UnsafeDatabaseError } from "./safety";
 import { distanceKm, jitter } from "./seed/geo";
 import {
@@ -104,10 +105,12 @@ function lookup<K, V>(map: Map<K, V>, key: K, what: string): V {
 /**
  * Deletes every row, children before parents (development database only:
  * main() runs the guard of prisma/safety.ts first). The audit trail goes too:
- * it only ever holds ids of rows deleted here.
+ * it only ever holds ids of rows deleted here. Its append-only trigger is
+ * lifted for this transaction only (audit-guard.ts).
  */
 async function wipe(): Promise<void> {
   await prisma.$transaction([
+    liftAuditGuard(prisma),
     prisma.auditEvent.deleteMany(),
     prisma.fuelLog.deleteMany(),
     prisma.maintenanceDeadline.deleteMany(),
@@ -130,6 +133,7 @@ async function wipe(): Promise<void> {
     prisma.tariffGrid.deleteMany(),
     prisma.trafficZone.deleteMany(),
     prisma.appSettings.deleteMany(),
+    restoreAuditGuard(prisma),
   ]);
 }
 

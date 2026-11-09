@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { FormMessage } from "@/components/ui/form";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
+import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { addDays, fromIsoDate, todayIso, toIsoDate, tomorrowIso } from "@/lib/time";
@@ -31,7 +32,7 @@ export default async function EditDriverPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const [{ id }, { cree }] = await Promise.all([params, searchParams]);
 
   const driver = await db.driver.findUnique({
@@ -68,6 +69,8 @@ export default async function EditDriverPage({
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
       select: { id: true, firstName: true, lastName: true },
     }),
+    // The sheet shows the person's absences with their reason (sick leave…).
+    auditRead(user, { action: "driver.view", entity: "Driver", entityId: driver.id }),
   ]);
   const upcomingRoutes = toUpcomingRoutes(
     await db.route.findMany({
