@@ -9,7 +9,8 @@
     "pickupServiceMin": 5,
     "dropoffServiceMin": 5,
     "unassignedPenalty": 10000,
-    "timeLimitSec": 5
+    "timeLimitSec": 5,
+    "maxRideExtraMin": 30
   },
   "vehicles": [
     {
@@ -198,7 +199,9 @@
         "AMBULANCE"
       ],
       "shareable": false,
-      "lockedVehicleId": null
+      "lockedVehicleId": null,
+      "pickupServiceMin": 10,
+      "dropoffServiceMin": 15
     },
     {
       "id": "trip_7",

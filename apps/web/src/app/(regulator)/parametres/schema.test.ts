@@ -8,8 +8,13 @@ const defaults = {
   maxTotalWaitMin: "45",
   maxDetourKmPerExtraPatient: "10",
   maxDetourKmTotal: "30",
+  maxRideExtraMin: "30",
   pickupServiceMin: "5",
   dropoffServiceMin: "5",
+  ambulancePickupServiceMin: "",
+  ambulanceDropoffServiceMin: "",
+  wheelchairExtraServiceMin: "0",
+  lyingExtraServiceMin: "0",
   unassignedPenalty: "10 000",
   solverTimeLimitSec: "10",
   replanMaxServedLoss: "0",
@@ -36,8 +41,13 @@ describe("settingsSchema", () => {
       maxTotalWaitMin: 45,
       maxDetourKmPerExtraPatient: 10,
       maxDetourKmTotal: 30,
+      maxRideExtraMin: 30,
       pickupServiceMin: 5,
       dropoffServiceMin: 5,
+      ambulancePickupServiceMin: null,
+      ambulanceDropoffServiceMin: null,
+      wheelchairExtraServiceMin: 0,
+      lyingExtraServiceMin: 0,
       unassignedPenalty: 10000,
       solverTimeLimitSec: 10,
       replanMaxServedLoss: 0,
@@ -92,6 +102,15 @@ describe("settingsSchema", () => {
     expect(errorsOf({ ...defaults, solverTimeLimitSec: "2,5" }).solverTimeLimitSec).toBe("Nombre entier attendu.");
     expect(errorsOf({ ...defaults, pickupServiceMin: "61" }).pickupServiceMin).toMatch(/Maximum/);
     expect(errorsOf({ ...defaults, unassignedPenalty: "" }).unassignedPenalty).toBe("Champ obligatoire.");
+  });
+
+  it("bounds the stop durations and the time on board; a blank ambulance duration is the taxi and VSL one", () => {
+    const parsed = settingsSchema.parse({ ...defaults, ambulancePickupServiceMin: "15", wheelchairExtraServiceMin: "5" });
+    expect(parsed).toMatchObject({ ambulancePickupServiceMin: 15, ambulanceDropoffServiceMin: null, wheelchairExtraServiceMin: 5 });
+    expect(errorsOf({ ...defaults, ambulanceDropoffServiceMin: "61" }).ambulanceDropoffServiceMin).toMatch(/Maximum/);
+    expect(errorsOf({ ...defaults, lyingExtraServiceMin: "" }).lyingExtraServiceMin).toBeDefined();
+    expect(errorsOf({ ...defaults, maxRideExtraMin: "181" }).maxRideExtraMin).toMatch(/Maximum/);
+    expect(settingsSchema.parse(settingsFormValues(parsed))).toEqual(parsed);
   });
 
   it("round-trips through the form values", () => {

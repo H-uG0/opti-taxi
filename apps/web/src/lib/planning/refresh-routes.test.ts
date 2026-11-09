@@ -4,6 +4,8 @@ import type { OptimizeRequest, PlanResponse, PlanRoute, TripResult } from "@/lib
 import type { RouteRow } from "@/lib/optimizer/persist";
 import {
   buildEvaluateRequest,
+  MIXED_MATRIX_SOURCE,
+  refreshedMatrixSource,
   decodeRefresh,
   encodeRefresh,
   isDayStarted,
@@ -742,9 +744,10 @@ function driver(id: string) {
     workDays: [1, 2, 3, 4, 5],
     shiftStartMinute: 360,
     shiftEndMinute: 1140,
-    breakWindowStartMinute: null,
-    breakWindowEndMinute: null,
-    breakMinutes: 0,
+    // A 13-hour shift needs a break of 20 min or more (lib/staff/work-time.ts).
+    breakWindowStartMinute: 690,
+    breakWindowEndMinute: 840,
+    breakMinutes: 45,
     hourlyCost: 24,
     // Read by the crews of the day (lib/staff/day-crews.ts): qualified for every seat.
     qualifications: ["TAXI_CARD", "DEA"] as ("TAXI_CARD" | "DEA")[],
@@ -801,7 +804,9 @@ function fakePrisma(routes: FakeRoute[], trips: RefreshTrip[]) {
     },
     routeStop: { update: async (args: { where: unknown; data: unknown }) => writes.push({ model: "routeStop", ...args }) },
     trip: {
-      findMany: async ({ where }: { where: { id?: { in: string[] } } }) => (where.id ? trips.filter((t) => where.id?.in.includes(t.id)) : []),
+      // loadOptimizeInput also reads the patient's mobility and the facility's stop time.
+      findMany: async ({ where }: { where: { id?: { in: string[] } } }) =>
+        (where.id ? trips.filter((t) => where.id?.in.includes(t.id)) : []).map((t) => ({ ...t, patient: { mobility: "SEATED" }, facility: null })),
       updateMany: async (args: { where: unknown; data: unknown }) => {
         writes.push({ model: "trip", ...args });
         return { count: 1 };
@@ -916,8 +921,10 @@ describe("refreshRoutes", () => {
     });
     const routeWrite = writes[0]?.data as Record<string, unknown>;
     expect(Object.keys(routeWrite).sort()).toEqual(
-      ["breakEndMinute", "breakStartMinute", "cost", "distanceKm", "emptyKm", "endMinute", "margin", "revenue", "startMinute"],
+      ["breakEndMinute", "breakStartMinute", "cost", "distanceKm", "emptyKm", "endMinute", "margin", "matrixSource", "revenue", "startMinute"],
     );
+    // The stored route had no known source: it takes the evaluation's (traffic calibration, one source at a time).
+    expect(routeWrite.matrixSource).toBe("haversine");
     expect(Object.keys(writes[1]?.data as object).sort()).toEqual(["arrivalMinute", "departureMinute", "loadAfter", "startMinute"]);
     expect(writes[3]?.data).toMatchObject({ shared: false, sharingStatus: "NOT_PROPOSED", sharingProposedAt: null });
     expect(writes[3]?.data).not.toHaveProperty("status");
@@ -995,5 +1002,14 @@ describe("refreshRoutes", () => {
     } finally {
       errors.mockRestore();
     }
+  });
+});
+
+describe("refreshedMatrixSource", () => {
+  it("keeps the source of a route recomputed with the same one, marks a route recomputed with another one", () => {
+    expect(refreshedMatrixSource("osrm", "osrm", true)).toBe("osrm");
+    expect(refreshedMatrixSource(null, "osrm", true)).toBe("osrm");
+    expect(refreshedMatrixSource("osrm", "haversine", true)).toBe(MIXED_MATRIX_SOURCE);
+    expect(refreshedMatrixSource("osrm", "haversine", false)).toBe("osrm");
   });
 });

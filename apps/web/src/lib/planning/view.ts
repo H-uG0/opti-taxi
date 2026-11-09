@@ -24,6 +24,7 @@ import {
 } from "@/lib/optimizer/build-request";
 import type { RunDetails } from "@/lib/optimizer/run-details";
 import { returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
+import { halfServedPairs } from "./half-served";
 import { computeDayKpis as computeDashboardDayKpis, type KpiRoute, type KpiTrip } from "@/lib/kpis";
 import { VIOLATION_LABELS } from "@/lib/labels";
 import { remainingPart } from "@/lib/staff/route-crew";
@@ -527,6 +528,9 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
   const planDetails = input.planRun ? (input.details.get(input.planRun.id) ?? null) : null;
   const optimizerReasons = new Map(planDetails?.unassigned.map((u) => [u.tripId, u.reason]) ?? []);
 
+  const halfServed = halfServedPairs(
+    input.trips.filter((t) => isActiveTrip(t.status)).map((t) => ({ ...t, vehicleId: vehicleOfTrip(t) })),
+  );
   const unassigned: UnassignedView[] = trips
     .filter((t) => t.vehicleId === null && isActiveTrip(t.status))
     .map((t) => {
@@ -537,7 +541,8 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
       else if (!input.planRun) reason = "Pas encore optimisée";
       else if ((rawById.get(t.id)?.createdAt ?? new Date(0)) > input.planRun.startedAt) reason = "Ajoutée après la dernière optimisation";
       else reason = "Non affectée lors de la dernière optimisation";
-      return { tripId: t.id, reason };
+      const servedPartner = halfServed.get(t.id);
+      return servedPartner ? { tripId: t.id, reason, servedPartner } : { tripId: t.id, reason };
     });
 
   const staleTrips: UnassignedView[] = [];

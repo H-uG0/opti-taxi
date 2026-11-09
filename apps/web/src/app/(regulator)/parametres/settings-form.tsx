@@ -39,6 +39,8 @@ function NumberInput({
   values,
   errors,
   integer = false,
+  optional = false,
+  placeholder,
   value,
   onChange,
 }: {
@@ -47,6 +49,9 @@ function NumberInput({
   values: FormValues;
   errors: FieldErrors;
   integer?: boolean;
+  /** Blank allowed (the field then falls back on another one). */
+  optional?: boolean;
+  placeholder?: string;
   value?: string;
   onChange?: (value: string) => void;
 }) {
@@ -58,7 +63,8 @@ function NumberInput({
     <UnitInput
       id={name}
       name={name}
-      required
+      required={!optional}
+      placeholder={placeholder}
       inputMode={integer ? "numeric" : "decimal"}
       autoComplete="off"
       unit={unit}
@@ -192,25 +198,95 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
           >
             <NumberInput name="maxDetourKmTotal" unit="km" values={values} errors={errors} />
           </Field>
+          <Field
+            label="Temps à bord en plus du trajet direct (min)"
+            htmlFor="maxRideExtraMin"
+            error={errors.maxRideExtraMin}
+            hint="Du départ de la prise en charge à l'arrivée à la dépose, un patient ne reste pas à bord plus longtemps que le trajet direct + cette durée, détours et autres arrêts compris. 30 min par défaut."
+          >
+            <NumberInput name="maxRideExtraMin" unit="min" integer values={values} errors={errors} />
+          </Field>
         </div>
+        <Explanation>
+          L&apos;attente d&apos;un patient dans le véhicule arrêté devant son lieu de soins (le véhicule attend
+          l&apos;heure d&apos;un autre patient) compte dans son attente au lieu de soins : l&apos;optimiseur ne la
+          laisse pas dépasser les marges ci-dessus.
+        </Explanation>
       </Fieldset>
 
       <Fieldset legend="Temps d'arrêt">
         <Explanation>
           Temps passé à chaque arrêt (aide à la montée, installation, accueil) ajouté aux temps de trajet. Une valeur
-          trop faible produit des horaires intenables ; trop forte, elle réduit le nombre de courses par tournée.
+          trop faible produit des horaires intenables ; trop forte, elle réduit le nombre de courses par tournée. Les
+          courses assises partent en taxi ou en VSL : elles ont les mêmes temps d&apos;arrêt. Un établissement peut
+          ajouter son propre temps (fiche de l&apos;établissement) à l&apos;arrêt chez lui.
         </Explanation>
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-4">
           <Field
-            label="Prise en charge (min)"
+            label="Prise en charge, taxi et VSL (min)"
             htmlFor="pickupServiceMin"
             error={errors.pickupServiceMin}
             hint="Entre 0 et 60 min."
           >
             <NumberInput name="pickupServiceMin" unit="min" integer values={values} errors={errors} />
           </Field>
-          <Field label="Dépose (min)" htmlFor="dropoffServiceMin" error={errors.dropoffServiceMin} hint="Entre 0 et 60 min.">
+          <Field
+            label="Dépose, taxi et VSL (min)"
+            htmlFor="dropoffServiceMin"
+            error={errors.dropoffServiceMin}
+            hint="Entre 0 et 60 min."
+          >
             <NumberInput name="dropoffServiceMin" unit="min" integer values={values} errors={errors} />
+          </Field>
+          <Field
+            label="Prise en charge, ambulance (min)"
+            htmlFor="ambulancePickupServiceMin"
+            error={errors.ambulancePickupServiceMin}
+            hint="Brancard, étages. Vide : comme le taxi et le VSL."
+          >
+            <NumberInput
+              name="ambulancePickupServiceMin"
+              unit="min"
+              integer
+              optional
+              placeholder={valueOf(values, "pickupServiceMin")}
+              values={values}
+              errors={errors}
+            />
+          </Field>
+          <Field
+            label="Dépose, ambulance (min)"
+            htmlFor="ambulanceDropoffServiceMin"
+            error={errors.ambulanceDropoffServiceMin}
+            hint="Vide : comme le taxi et le VSL."
+          >
+            <NumberInput
+              name="ambulanceDropoffServiceMin"
+              unit="min"
+              integer
+              optional
+              placeholder={valueOf(values, "dropoffServiceMin")}
+              values={values}
+              errors={errors}
+            />
+          </Field>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-4">
+          <Field
+            label="En plus, patient en fauteuil (min)"
+            htmlFor="wheelchairExtraServiceMin"
+            error={errors.wheelchairExtraServiceMin}
+            hint="Ajouté à la prise en charge et à la dépose. 0 par défaut."
+          >
+            <NumberInput name="wheelchairExtraServiceMin" unit="min" integer values={values} errors={errors} />
+          </Field>
+          <Field
+            label="En plus, patient allongé (min)"
+            htmlFor="lyingExtraServiceMin"
+            error={errors.lyingExtraServiceMin}
+            hint="Ajouté à la prise en charge et à la dépose. 0 par défaut."
+          >
+            <NumberInput name="lyingExtraServiceMin" unit="min" integer values={values} errors={errors} />
           </Field>
         </div>
       </Fieldset>

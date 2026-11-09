@@ -73,10 +73,26 @@ export type StoredStop = {
   completedAt: Date | null;
 };
 
+/** Route.matrixSource of a route whose stored times come from two sources (lib/domain/traffic-observed.ts leaves it out). */
+export const MIXED_MATRIX_SOURCE = "mixed";
+
+/**
+ * Distance source of a route once /evaluate rewrote its times with `evaluated`:
+ * the same as before, or MIXED_MATRIX_SOURCE when the two differ (the stops
+ * already done keep their times, and the source changed meanwhile, OSRM down
+ * or put into service). Unchanged when no time was rewritten.
+ */
+export function refreshedMatrixSource(previous: string | null | undefined, evaluated: string, rewritten: boolean): string | null {
+  if (!rewritten) return previous ?? null;
+  return !previous || previous === evaluated ? evaluated : MIXED_MATRIX_SOURCE;
+}
+
 /** A route as stored, with its stops (any order). */
 export type StoredRoute = {
   id: string;
   vehicleId: string;
+  /** Source of its stored times (Route.matrixSource); absent: unknown. */
+  matrixSource?: string | null;
   startMinute: number;
   breakStartMinute: number | null;
   breakEndMinute: number | null;
@@ -565,6 +581,7 @@ export function withRefreshNotice(path: string, outcome: RefreshOutcome): string
 const storedRouteSelect = {
   id: true,
   vehicleId: true,
+  matrixSource: true,
   startMinute: true,
   breakStartMinute: true,
   breakEndMinute: true,
@@ -643,8 +660,10 @@ async function writeRefresh(
   });
   const plan = planRefresh(unchanged, response, vehicles, new Map(trips.map((t) => [t.id, t])), now);
 
+  const sourceOf = new Map(unchanged.map((route) => [route.id, route.matrixSource]));
   for (const route of plan.routes) {
-    await tx.route.update({ where: { id: route.routeId }, data: route.data });
+    const matrixSource = refreshedMatrixSource(sourceOf.get(route.routeId), response.meta.matrixSource, route.stops.length > 0);
+    await tx.route.update({ where: { id: route.routeId }, data: { ...route.data, matrixSource } });
     for (const stop of route.stops) await tx.routeStop.update({ where: { id: stop.id }, data: stop.data });
   }
   for (const trip of plan.trips) {

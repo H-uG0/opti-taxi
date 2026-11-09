@@ -15,6 +15,8 @@ export type FacilityFormInitial = {
   type: string;
   phone: string;
   notes: string;
+  /** Minutes added to the stop at the facility, "" or "0" for none. */
+  extraServiceMin: string;
   address: AddressFormValues;
 };
 
@@ -78,6 +80,23 @@ export function FacilityForm({
             autoComplete="off"
             className="tabular"
             aria-invalid={errors.phone ? true : undefined}
+          />
+        </Field>
+        <Field
+          label="Temps d'arrêt en plus (min)"
+          htmlFor="extraServiceMin"
+          error={errors.extraServiceMin}
+          hint="Ajouté à la dépose d'un aller et à la prise en charge d'un retour ici : accueil éloigné, service à l'étage… 0 par défaut."
+          className="sm:max-w-md"
+        >
+          <Input
+            id="extraServiceMin"
+            name="extraServiceMin"
+            inputMode="numeric"
+            defaultValue={value("extraServiceMin")}
+            autoComplete="off"
+            className="tabular sm:max-w-32"
+            aria-invalid={errors.extraServiceMin ? true : undefined}
           />
         </Field>
       </Fieldset>

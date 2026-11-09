@@ -114,6 +114,13 @@ export default async function FacilityPage({
                 <span className="text-amber-700">Non renseigné — nécessaire pour prévenir des arrivées partagées</span>
               )}
             </Item>
+            <Item label="Temps d'arrêt en plus">
+              {facility.extraServiceMin > 0 ? (
+                <span className="tabular">{facility.extraServiceMin} min à chaque dépose et prise en charge ici</span>
+              ) : (
+                <span className="text-slate-400">Aucun</span>
+              )}
+            </Item>
             <Item label="Adresse" className="sm:col-span-2">
               {facility.address}
               <br />

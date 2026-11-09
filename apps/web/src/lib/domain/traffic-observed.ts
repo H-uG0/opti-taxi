@@ -20,12 +20,16 @@
  *   the reference minutes of the two stops (optimizer: traffic.py), not from the
  *   planned times, so next to a band edge the factor it applied is not known;
  * - computed since the last change of the traffic settings (older plans used
- *   other factors).
+ *   other factors);
+ * - computed with the distance source of the latest run (Route.matrixSource,
+ *   OSRM or the straight-line estimate): a day planned on the fallback would
+ *   teach its error as traffic. A route recomputed (/evaluate) with another
+ *   source than its own is left out (MIXED_MATRIX_SOURCE).
  *
  * Nothing changes by itself: the regulator applies the values shown in
  * /parametres. No server-only import: unit-tested.
  */
-import type { AppSettings, PrismaClient, StopKind, TrafficZone } from "@prisma/client";
+import type { AppSettings, Prisma, PrismaClient, StopKind, TrafficZone } from "@prisma/client";
 import { addDays, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import {
   bandRanges,
@@ -184,21 +188,84 @@ export function observedFactors(
   );
 }
 
+/** Routes of the calibration period: recent, planned since the last change of the traffic settings. */
+function calibrationPeriod(settings: Pick<AppSettings, "trafficChangedAt">, now: Date): Prisma.RouteWhereInput {
+  return {
+    serviceDate: { gte: fromIsoDate(addDays(todayIso(now), -OBSERVATION_DAYS)) },
+    // startedAt: the settings are read when the run starts.
+    ...(settings.trafficChangedAt ? { optimizationRun: { startedAt: { gte: settings.trafficChangedAt } } } : {}),
+  };
+}
+
+/** Routes whose recorded stops count: those of the calibration period planned with `source`. */
+export function calibrationRoutes(
+  settings: Pick<AppSettings, "trafficChangedAt">,
+  source: string | null,
+  now: Date,
+): Prisma.RouteWhereInput {
+  // No run yet: nothing to calibrate on (a route has no source before its first run).
+  return { ...calibrationPeriod(settings, now), matrixSource: source ?? "" };
+}
+
+/** Source of the distances of the latest finished run (osrm, haversine): what the factors apply to. */
+export async function currentMatrixSource(prisma: Pick<PrismaClient, "optimizationRun">): Promise<string | null> {
+  const run = await prisma.optimizationRun.findFirst({
+    where: { status: "SUCCESS", matrixSource: { not: null } },
+    orderBy: { startedAt: "desc" },
+    select: { matrixSource: true },
+  });
+  return run?.matrixSource ?? null;
+}
+
+export type ObservedCalibration = {
+  /** Distance source of the routes measured, null before any run. */
+  source: string | null;
+  factors: ObservedFactor[];
+  /** Routes with recorded stops in the same period, left out because planned with another source. */
+  otherSourceRoutes: number;
+};
+
+export async function loadObservedCalibration(
+  prisma: PrismaClient,
+  settings: TrafficPeaks & Pick<AppSettings, "trafficEnabled" | "trafficChangedAt">,
+  zones: readonly ZoneInput[],
+  now: Date = new Date(),
+): Promise<ObservedCalibration> {
+  const source = await currentMatrixSource(prisma);
+  const [factors, others] = await Promise.all([
+    observedFactorsOf(prisma, settings, zones, calibrationRoutes(settings, source, now)),
+    prisma.route.count({
+      where: {
+        ...calibrationPeriod(settings, now),
+        // A route of unknown source (its run deleted) counts as another source.
+        OR: [{ matrixSource: null }, { NOT: { matrixSource: source ?? "" } }],
+        stops: { some: { completedAt: { not: null } } },
+      },
+    }),
+  ]);
+  return { source, factors, otherSourceRoutes: others };
+}
+
 export async function loadObservedFactors(
   prisma: PrismaClient,
   settings: TrafficPeaks & Pick<AppSettings, "trafficEnabled" | "trafficChangedAt">,
   zones: readonly ZoneInput[],
   now: Date = new Date(),
 ): Promise<ObservedFactor[]> {
+  return (await loadObservedCalibration(prisma, settings, zones, now)).factors;
+}
+
+async function observedFactorsOf(
+  prisma: PrismaClient,
+  settings: TrafficPeaks & Pick<AppSettings, "trafficEnabled">,
+  zones: readonly ZoneInput[],
+  route: Prisma.RouteWhereInput,
+): Promise<ObservedFactor[]> {
   const stops = await prisma.routeStop.findMany({
     where: {
       completedAt: { not: null },
       trip: { status: { notIn: ["NO_SHOW", "CANCELLED"] } },
-      route: {
-        serviceDate: { gte: fromIsoDate(addDays(todayIso(now), -OBSERVATION_DAYS)) },
-        // startedAt: the settings are read when the run starts.
-        ...(settings.trafficChangedAt ? { optimizationRun: { startedAt: { gte: settings.trafficChangedAt } } } : {}),
-      },
+      route,
     },
     select: {
       routeId: true,

@@ -3,7 +3,7 @@ import type { ComponentProps } from "react";
 import { cn } from "@/components/ui/cn";
 import { Table, TBody, THead } from "@/components/ui/table";
 import { hasPlanning, type DayKpis, type PeriodKpis } from "@/lib/kpis";
-import { formatKm, formatPercent } from "@/lib/labels";
+import { formatKm, formatPercent, MATRIX_SOURCE_LABELS } from "@/lib/labels";
 import { formatDuration, formatLongDate } from "@/lib/time";
 import {
   capitalize,
@@ -18,6 +18,21 @@ import { dashboardHref } from "./range-form";
 
 /** Columns after the day column (colSpan of days without planning). */
 const DATA_COLUMNS = 14;
+
+const SOURCE_SHORT: Record<string, string> = { osrm: "OSRM", haversine: "vol d'oiseau", mixed: "mixte" };
+
+/** Distance source(s) of a day or a period, under its date: one is the normal case, several do not compare. */
+function sourcesCell(sources: readonly string[]): { tone: Tone; text: string; title: string | undefined } {
+  if (sources.length === 0) return { tone: "muted", text: "—", title: undefined };
+  const text = sources.map((source) => SOURCE_SHORT[source] ?? source).join(" + ");
+  const mixed = sources.length > 1 || sources.includes("mixed");
+  return {
+    tone: mixed ? "warn" : "default",
+    // Short under the date (the column must not widen); the title says what it is.
+    text: mixed && sources.length > 1 ? "sources mélangées" : text,
+    title: `Temps et distances : ${sources.map((source) => MATRIX_SOURCE_LABELS[source] ?? source).join(", ")}`,
+  };
+}
 
 const ALIGN = { left: "text-left", center: "text-center", right: "text-right" } as const;
 const TONES = {
@@ -170,6 +185,7 @@ export function KpiTable({
         {rows.map((day) => {
           const isFocus = day.date === focusDate;
           const background = isFocus ? "bg-brand-50" : "bg-white";
+          const sources = sourcesCell(day.matrixSources);
           const dayCell = (
             <th scope="row" className={cn("sticky left-0 z-10 px-3 py-2 text-left font-normal whitespace-nowrap", background)}>
               <Link
@@ -187,6 +203,11 @@ export function KpiTable({
                 <span className="ml-1.5 text-[11px] font-semibold text-brand-700">J+1</span>
               ) : day.date === today ? (
                 <span className="ml-1.5 text-[11px] font-semibold text-sky-700">auj.</span>
+              ) : null}
+              {day.matrixSources.length > 0 ? (
+                <span className={cn("block text-[11px]", TONES[sources.tone])} title={sources.title}>
+                  {sources.text}
+                </span>
               ) : null}
             </th>
           );
@@ -263,6 +284,14 @@ export function KpiTable({
             <span className="block text-[11px] font-normal text-slate-500">
               {plural(period.plannedDays, "jour planifié", "jours planifiés")}
             </span>
+            {period.matrixSources.length > 0 ? (
+              <span
+                className={cn("block text-[11px] font-normal", TONES[sourcesCell(period.matrixSources).tone])}
+                title={sourcesCell(period.matrixSources).title}
+              >
+                {sourcesCell(period.matrixSources).text}
+              </span>
+            ) : null}
           </th>
           <Num tone="strong" title="Journées-véhicules">
             {period.vehicles}

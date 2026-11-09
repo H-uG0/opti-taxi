@@ -40,9 +40,10 @@ const driver = (id: string, workDays = [1, 2, 3, 4, 5]): DriverInput => ({
   workDays,
   shiftStartMinute: 360,
   shiftEndMinute: 1140,
-  breakWindowStartMinute: null,
-  breakWindowEndMinute: null,
-  breakMinutes: 0,
+  // A 13-hour shift needs a break of 20 min or more (lib/staff/work-time.ts).
+  breakWindowStartMinute: 690,
+  breakWindowEndMinute: 840,
+  breakMinutes: 45,
   hourlyCost: 24,
 });
 

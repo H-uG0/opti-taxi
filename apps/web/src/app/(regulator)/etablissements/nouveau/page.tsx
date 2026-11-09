@@ -18,7 +18,7 @@ export default async function NewFacilityPage() {
       <PageHeader title="Nouvel établissement" description="Lieu de soins, destination des courses régulières." />
       <FacilityForm
         action={createFacility}
-        initial={{ name: "", type: "DIALYSIS", phone: "", notes: "", address: EMPTY_ADDRESS }}
+        initial={{ name: "", type: "DIALYSIS", phone: "", notes: "", extraServiceMin: "0", address: EMPTY_ADDRESS }}
         geocoderEnabled={geocoderEnabled()}
         submitLabel="Créer l'établissement"
         cancelHref="/etablissements"

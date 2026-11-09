@@ -118,6 +118,12 @@
         "message": "Exemple de violation : arrivée après le rendez-vous",
         "tripId": "trip_5",
         "vehicleId": "veh_amb_1"
+      },
+      {
+        "code": "RIDE_TIME",
+        "message": "Exemple de violation : patient de la course trip_1 à bord plus longtemps que le trajet direct + 30 min",
+        "tripId": "trip_1",
+        "vehicleId": "veh_taxi_1"
       }
     ]
   },

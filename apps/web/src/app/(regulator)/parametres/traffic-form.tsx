@@ -4,7 +4,8 @@ import { useActionState } from "react";
 import { Checkbox, Field, Fieldset, FormMessage, Input } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Table, TBody, Td, Th, THead } from "@/components/ui/table";
-import { MIN_OBSERVED_LEGS, type ObservedFactor } from "@/lib/domain/traffic-observed";
+import { MIN_OBSERVED_LEGS, type ObservedCalibration, type ObservedFactor } from "@/lib/domain/traffic-observed";
+import { MATRIX_SOURCE_LABELS } from "@/lib/labels";
 import { TRAFFIC_BAND_LABELS, TRAFFIC_BANDS, type TrafficBandKey } from "@/lib/domain/traffic";
 import { formatDecimalInput, IDLE_STATE, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
 import { FormFooter, UnitInput } from "../vehicules/_lib/ui";
@@ -20,12 +21,15 @@ export function TrafficForm({
   initial,
   zones,
   observed,
+  calibration,
 }: {
   action: Action;
   applyObserved: Action;
   initial: FormValues;
   zones: ZoneRow[];
   observed: ObservedFactor[];
+  /** Distance source the observed values are measured on, and the routes left out for another one. */
+  calibration: Pick<ObservedCalibration, "source" | "otherSourceRoutes">;
 }) {
   const [state, formAction] = useActionState(action, IDLE_STATE);
   const [applied, applyAction] = useActionState(applyObserved, IDLE_STATE);
@@ -92,11 +96,14 @@ export function TrafficForm({
         <FormFooter submitLabel="Enregistrer le trafic" />
       </form>
       <form action={applyAction} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-        <p className="min-w-0 max-w-2xl">
-          {applicable > 0
-            ? `Les trajets réels donnent une valeur pour ${applicable} ${applicable > 1 ? "cases" : "case"} du tableau. Vous pouvez les appliquer d'un clic : les autres ne changent pas.`
-            : `Une valeur observée apparaît sous un facteur à partir de ${MIN_OBSERVED_LEGS} trajets réels mesurés depuis le dernier changement de ce réglage.`}
-        </p>
+        <div className="min-w-0 max-w-2xl space-y-1">
+          <p>
+            {applicable > 0
+              ? `Les trajets réels donnent une valeur pour ${applicable} ${applicable > 1 ? "cases" : "case"} du tableau. Vous pouvez les appliquer d'un clic : les autres ne changent pas.`
+              : `Une valeur observée apparaît sous un facteur à partir de ${MIN_OBSERVED_LEGS} trajets réels mesurés depuis le dernier changement de ce réglage.`}
+          </p>
+          <CalibrationSource {...calibration} />
+        </div>
         <SubmitButton variant="secondary" disabled={applicable === 0} pendingLabel="Application…">
           Appliquer les valeurs observées
         </SubmitButton>
@@ -158,6 +165,24 @@ function ZoneNumber({
       />
       {errors[name] ? <p className="mt-1 max-w-32 text-xs text-red-700">{errors[name]}</p> : null}
     </>
+  );
+}
+
+/** Which distances the measured times are compared with (only one source counts: lib/domain/traffic-observed.ts). */
+function CalibrationSource({ source, otherSourceRoutes }: Pick<ObservedCalibration, "source" | "otherSourceRoutes">) {
+  if (source === null) return <p className="text-xs text-slate-500">Aucun calcul de tournées encore : rien à mesurer.</p>;
+  const label = MATRIX_SOURCE_LABELS[source] ?? source;
+  return (
+    <p className="text-xs text-slate-500" data-testid="calibration-source">
+      Valeurs mesurées sur les tournées calculées avec la même source de distances que le dernier calcul : {label}.
+      {otherSourceRoutes > 0 ? (
+        <span className="text-amber-800">
+          {" "}
+          {otherSourceRoutes} {otherSourceRoutes > 1 ? "tournées calculées" : "tournée calculée"} avec une autre source ne{" "}
+          {otherSourceRoutes > 1 ? "comptent" : "compte"} pas : leurs écarts viendraient de l&apos;estimation, pas du trafic.
+        </span>
+      ) : null}
+    </p>
   );
 }
 

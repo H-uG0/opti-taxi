@@ -493,3 +493,24 @@ describe("absences", () => {
     expect(shown).not.toMatch(/ON_CALL|TRAINING|"kind"/);
   });
 });
+
+describe("work time of the crew (art. L3121-16)", () => {
+  it("blocks a crew working more than 6 hours when the driver's break is not a legal one", () => {
+    const withBreak = (id: string, breakMinutes: number, shift: [number, number] = [360, 1140]): StaffPerson => ({
+      ...person(id, ["TAXI_CARD"], "dep_a", MON_FRI, shift),
+      breakWindowStartMinute: 690,
+      breakWindowEndMinute: 840,
+      breakMinutes,
+    });
+    const result = plan({
+      vehicles: [vehicle("Taxi A", "TAXI", "a"), vehicle("Taxi B", "TAXI", "b"), vehicle("Taxi C", "TAXI", "c")],
+      people: [withBreak("a", 0), withBreak("b", 30), withBreak("c", 0, [480, 840])],
+    });
+    expect(crewOf(result, "Taxi A").blocked).toMatch(/^Horaire de 13 h 00 sans pause : .*L3121-16/);
+    expect(crewOf(result, "Taxi B").blocked).toBeNull();
+    expect(crewOf(result, "Taxi C").blocked).toBeNull(); // 6 hours: no break owed
+    // People without break settings (older callers) are not checked.
+    expect(crewOf(plan(), "Taxi A").blocked).toBeNull();
+  });
+});
+

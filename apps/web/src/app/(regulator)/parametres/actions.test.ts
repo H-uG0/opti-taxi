@@ -26,8 +26,13 @@ const STORED = {
   maxTotalWaitMin: 45,
   maxDetourKmPerExtraPatient: 10,
   maxDetourKmTotal: 30,
+  maxRideExtraMin: 30,
   pickupServiceMin: 5,
   dropoffServiceMin: 5,
+  ambulancePickupServiceMin: null,
+  ambulanceDropoffServiceMin: null,
+  wheelchairExtraServiceMin: 0,
+  lyingExtraServiceMin: 0,
   unassignedPenalty: 10000,
   solverTimeLimitSec: 10,
   replanMaxServedLoss: 0,
@@ -44,7 +49,8 @@ function form(overrides: Record<string, string> = {}): FormData {
   const fd = new FormData();
   // The margin loss tolerance is typed in % in the form, stored as a fraction.
   const values = { ...STORED, replanMaxMarginLoss: STORED.replanMaxMarginLoss * 100, regulatorPhone: "04 65 71 00 00", ...overrides };
-  for (const [key, value] of Object.entries(values)) if (key !== "id") fd.set(key, String(value));
+  // A blank input is a null setting (ambulance stop durations: as taxi and VSL).
+  for (const [key, value] of Object.entries(values)) if (key !== "id") fd.set(key, value === null ? "" : String(value));
   return fd;
 }
 

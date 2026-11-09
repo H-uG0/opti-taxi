@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { CarFront, OctagonAlert, CircleSlash, LockKeyholeOpen, RotateCcw, UserX } from "lucide-react";
+import { CarFront, House, OctagonAlert, CircleSlash, LockKeyholeOpen, RotateCcw, UserX } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
 import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_SHORT_LABEL } from "@/lib/domain/no-show";
@@ -130,7 +130,14 @@ function vehicleIssuesIntro(
   );
 }
 
-/** Everything the regulator should look at: vehicles to review, returns after an absence, unassigned trips, violations, stale or ignored locks. */
+/** Why a leg without a vehicle comes first: the patient's other leg is planned. */
+function halfServedText(trip: TripView | undefined, vehicleLabel: string): string {
+  return trip?.direction === "OUTBOUND"
+    ? `Aller sans véhicule : le retour est planifié sur ${vehicleLabel}`
+    : `Retour sans véhicule : l'aller est planifié sur ${vehicleLabel}`;
+}
+
+/** Everything the regulator should look at: half-served patients, vehicles to review, returns after an absence, unassigned trips, violations, stale or ignored locks. */
 export function IssuesPanel({
   date,
   unassigned,
@@ -149,6 +156,9 @@ export function IssuesPanel({
   onSelectTrip,
   onSelectVehicle,
 }: IssuesPanelProps) {
+  // A patient driven to the facility and not back home (or the reverse) comes first.
+  const halfServed = planned ? unassigned.filter((u) => u.servedPartner) : [];
+  const otherUnassigned = planned ? unassigned.filter((u) => !u.servedPartner) : unassigned;
   const count =
     vehicleIssues.length +
     returnsToCheck.length +
@@ -170,6 +180,26 @@ export function IssuesPanel({
               Le dernier calcul signalait des violations, mais leur détail n&apos;a pas été enregistré (calcul antérieur à
               cette version) : relancez l&apos;optimisation pour les revoir.
             </p>
+          ) : null}
+
+          {halfServed.length > 0 ? (
+            <Section
+              icon={<House aria-hidden className="size-3.5" />}
+              title={`Aller ou retour sans véhicule (${halfServed.length})`}
+              tone="red"
+              intro="L'autre trajet du patient est planifié : sans celui-ci, il reste au lieu de soins ou n'y est pas conduit. Placez la course à la main, réoptimisez ou confiez-la à un autre transporteur."
+            >
+              {halfServed.map((u) => (
+                <li key={u.tripId}>
+                  <TripButton tripId={u.tripId} trips={trips} selected={u.tripId === selectedTripId} onSelect={onSelectTrip}>
+                    <span className="font-medium text-red-800">
+                      {halfServedText(trips[u.tripId], vehicleLabels[u.servedPartner?.vehicleId ?? ""] ?? "un véhicule")}
+                    </span>
+                    <span className="block">{u.reason}</span>
+                  </TripButton>
+                </li>
+              ))}
+            </Section>
           ) : null}
 
           {vehicleIssues.length > 0 ? (
@@ -254,13 +284,13 @@ export function IssuesPanel({
             </Section>
           ) : null}
 
-          {unassigned.length > 0 ? (
+          {otherUnassigned.length > 0 ? (
             <Section
               icon={<CircleSlash aria-hidden className="size-3.5" />}
-              title={planned ? `Non affectées (${unassigned.length})` : "En attente d'optimisation"}
+              title={planned ? `Non affectées (${otherUnassigned.length})` : "En attente d'optimisation"}
               tone={planned ? "amber" : "slate"}
             >
-              {unassigned.map((u) => (
+              {otherUnassigned.map((u) => (
                 <li key={u.tripId}>
                   <TripButton tripId={u.tripId} trips={trips} selected={u.tripId === selectedTripId} onSelect={onSelectTrip}>
                     {planned ? u.reason : null}

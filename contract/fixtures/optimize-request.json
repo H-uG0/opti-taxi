@@ -10,6 +10,7 @@
     "dropoffServiceMin": 5,
     "unassignedPenalty": 10000,
     "timeLimitSec": 5,
+    "maxRideExtraMin": 30,
     "traffic": {
       "bands": [
         { "startMin": 420, "endMin": 570 },
@@ -125,7 +126,9 @@
       "readyMin": null,
       "allowedVehicleTypes": ["AMBULANCE"],
       "shareable": false,
-      "lockedVehicleId": null
+      "lockedVehicleId": null,
+      "pickupServiceMin": 8,
+      "dropoffServiceMin": 10
     },
     {
       "id": "trip_6",

@@ -658,3 +658,24 @@ describe("comparison", () => {
     expect(deltaTrend(null, true)).toBeNull();
   });
 });
+
+describe("distance sources", () => {
+  it("lists the sources of each day's routes and of the period, so a mixed period shows", () => {
+    const data: KpiData = {
+      routes: [
+        route({ serviceDate: "2026-11-02", vehicleId: "a", matrixSource: "haversine" }),
+        route({ serviceDate: "2026-11-03", vehicleId: "a", matrixSource: "osrm" }),
+        route({ serviceDate: "2026-11-03", vehicleId: "b", matrixSource: "osrm" }),
+        // A route emptied by cancellations does not count, nor a route of unknown source.
+        route({ serviceDate: "2026-11-03", vehicleId: "c", matrixSource: "mixed", stopCount: 0 }),
+        route({ serviceDate: "2026-11-01", vehicleId: "a", matrixSource: null }),
+      ],
+      trips: [],
+      runs: [],
+    };
+    const days = computeKpisByDay("2026-11-01", "2026-11-03", data, "2026-11-04");
+    expect(days.map((d) => d.matrixSources)).toEqual([[], ["haversine"], ["osrm"]]);
+    expect(summarizePeriod(days).matrixSources).toEqual(["haversine", "osrm"]);
+    expect(summarizePeriod(days.slice(2)).matrixSources).toEqual(["osrm"]);
+  });
+});

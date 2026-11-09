@@ -9,6 +9,11 @@ import { z } from "zod";
 
 const MINUTES_PER_DAY = 24 * 60;
 const dayMinute = z.number().int().min(0).max(2 * MINUTES_PER_DAY);
+/** Stop duration of one trip (Trip.pickupServiceMin / dropoffServiceMin), same bound in schemas.py. */
+export const MAX_TRIP_SERVICE_MIN = 120;
+const tripServiceMinutes = z.number().int().min(0).max(MAX_TRIP_SERVICE_MIN);
+/** settings.maxRideExtraMin when the request leaves it out (DEFAULT_MAX_RIDE_EXTRA_MIN in schemas.py). */
+export const DEFAULT_MAX_RIDE_EXTRA_MIN = 30;
 
 export const vehicleTypeSchema = z.enum(["TAXI", "VSL", "AMBULANCE"]);
 export const directionSchema = z.enum(["OUTBOUND", "RETURN"]);
@@ -23,6 +28,7 @@ export const violationCodeSchema = z.enum([
   "EXCLUSIVE_RIDE",
   "TIME_WINDOW",
   "TOTAL_WAIT",
+  "RIDE_TIME",
   "DETOUR",
   "SHIFT",
   "BREAK",
@@ -71,6 +77,8 @@ export const settingsSchema = z.strictObject({
   dropoffServiceMin: z.number().int().min(0).max(60),
   unassignedPenalty: z.number().min(0),
   timeLimitSec: z.number().int().min(1).max(600),
+  /** Time on board (end of the pickup to start of the dropoff) above the direct drive allowed to a patient. */
+  maxRideExtraMin: z.number().int().min(0).max(180).default(DEFAULT_MAX_RIDE_EXTRA_MIN),
   traffic: trafficSettingsSchema.nullish(),
 });
 
@@ -115,6 +123,9 @@ export const tripSchema = z
     allowedVehicleTypes: z.array(vehicleTypeSchema).min(1),
     shareable: z.boolean(),
     lockedVehicleId: z.string().nullable().default(null),
+    /** Stop durations of this trip (vehicle type, mobility, facility); absent or null: the settings'. */
+    pickupServiceMin: tripServiceMinutes.nullish(),
+    dropoffServiceMin: tripServiceMinutes.nullish(),
   })
   .refine((t) => t.direction !== "OUTBOUND" || t.appointmentMin !== null, {
     message: "OUTBOUND trip requires appointmentMin",

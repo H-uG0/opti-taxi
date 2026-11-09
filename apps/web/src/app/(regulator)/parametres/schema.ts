@@ -7,7 +7,7 @@ import { z } from "zod";
 import type { AppSettings } from "@prisma/client";
 import { LATE_CANCELLATION_HOURS } from "@/lib/domain/cancellation";
 import { TRIP_HORIZON_DAYS } from "@/lib/trips/horizon";
-import { formatDecimalInput, numberField, type FormValues } from "@/lib/forms";
+import { formatDecimalInput, numberField, optionalNumberField, type FormValues } from "@/lib/forms";
 import { fractionToPercent, percentToFraction } from "../tarifs/schema";
 
 /** Décret 2025-202 (transport partagé): art. R. 322-11-5 (détours) and R. 322-11-6 (attente). */
@@ -18,6 +18,10 @@ export const DECREE_LIMITS = {
 } as const;
 
 export const MAX_SOLVER_TIME_LIMIT_SEC = 120;
+/** Upper bound of a stop duration or surcharge typed here (the contract allows 120 min per trip in all). */
+export const MAX_SERVICE_MIN = 60;
+/** Upper bound of the time on board above the direct drive (contract: maxRideExtraMin <= 180). */
+export const MAX_RIDE_EXTRA_MIN = 180;
 
 /** Upper bounds of the « Équipages » settings. */
 export const CREW_LIMITS = { maxReplacementKm: 400, minPairOverlapMin: 720, reservePerDepot: 50 } as const;
@@ -72,8 +76,19 @@ export const settingsSchema = z
       max: DECREE_LIMITS.maxDetourKmTotal,
       maxMessage: `${DECREE_LIMITS.maxDetourKmTotal} km maximum : plafond du décret 2025-202 (art. R. 322-11-5).`,
     }),
-    pickupServiceMin: numberField({ integer: true, min: 0, max: 60, unit: "min" }),
-    dropoffServiceMin: numberField({ integer: true, min: 0, max: 60, unit: "min" }),
+    // Time on board above the direct drive (optimizer RIDE_TIME): also bounds the wait in a parked vehicle.
+    maxRideExtraMin: numberField({ integer: true, min: 0, max: MAX_RIDE_EXTRA_MIN, unit: "min" }),
+    pickupServiceMin: numberField({ integer: true, min: 0, max: MAX_SERVICE_MIN, unit: "min" }),
+    dropoffServiceMin: numberField({ integer: true, min: 0, max: MAX_SERVICE_MIN, unit: "min" }),
+    // Blank: as a taxi or VSL (lib/optimizer/build-request.ts, tripServiceMinutes).
+    ambulancePickupServiceMin: optionalNumberField({ integer: true, min: 0, max: MAX_SERVICE_MIN, unit: "min" }).transform(
+      (value) => value ?? null,
+    ),
+    ambulanceDropoffServiceMin: optionalNumberField({ integer: true, min: 0, max: MAX_SERVICE_MIN, unit: "min" }).transform(
+      (value) => value ?? null,
+    ),
+    wheelchairExtraServiceMin: numberField({ integer: true, min: 0, max: MAX_SERVICE_MIN, unit: "min" }),
+    lyingExtraServiceMin: numberField({ integer: true, min: 0, max: MAX_SERVICE_MIN, unit: "min" }),
     unassignedPenalty: numberField({ min: 0, max: 1_000_000, unit: "€" }),
     solverTimeLimitSec: numberField({ integer: true, min: 1, max: MAX_SOLVER_TIME_LIMIT_SEC, unit: "s" }),
     // Replacing the routes in place (lib/planning/plan-compare.ts): beyond these, the regulator confirms.
@@ -128,8 +143,11 @@ export const SETTINGS_FIELDS = [
   "maxTotalWaitMin",
   "maxDetourKmPerExtraPatient",
   "maxDetourKmTotal",
+  "maxRideExtraMin",
   "pickupServiceMin",
   "dropoffServiceMin",
+  "wheelchairExtraServiceMin",
+  "lyingExtraServiceMin",
   "unassignedPenalty",
   "solverTimeLimitSec",
   "replanMaxServedLoss",
@@ -141,10 +159,20 @@ export const SETTINGS_FIELDS = [
 ] as const satisfies readonly (keyof SettingsInput & keyof AppSettings)[];
 
 export function settingsFormValues(
-  settings: Pick<AppSettings, (typeof SETTINGS_FIELDS)[number] | "regulatorPhone" | "replanMaxMarginLoss">,
+  settings: Pick<
+    AppSettings,
+    | (typeof SETTINGS_FIELDS)[number]
+    | "regulatorPhone"
+    | "replanMaxMarginLoss"
+    | "ambulancePickupServiceMin"
+    | "ambulanceDropoffServiceMin"
+  >,
 ): FormValues {
   return {
     ...Object.fromEntries(SETTINGS_FIELDS.map((field) => [field, formatDecimalInput(settings[field])])),
+    // Blank: as a taxi or VSL.
+    ambulancePickupServiceMin: formatDecimalInput(settings.ambulancePickupServiceMin),
+    ambulanceDropoffServiceMin: formatDecimalInput(settings.ambulanceDropoffServiceMin),
     replanMaxMarginLoss: formatDecimalInput(fractionToPercent(settings.replanMaxMarginLoss)),
     regulatorPhone: settings.regulatorPhone ?? "",
   };

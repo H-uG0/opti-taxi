@@ -375,10 +375,12 @@ describe("contract fixtures", () => {
    * trips of their stops), with `violationsInPlace` on their run. Each vehicle
    * of the request is crewed by `drv_<vehicle id>`.
    */
-  function fakeClient(inPlace: InPlaceRoute[] = [], violationsInPlace = 0) {
+  function fakeClient(inPlace: InPlaceRoute[] = [], violationsInPlace = 0, earlierOsrmRuns = 0) {
     const servedInPlace = inPlace.flatMap((r) => [...new Set(r.stops.map((s) => s.tripId))].map((id) => ({ id, routeId: r.id })));
     const runWrites: RunWrite[] = [];
     const deleted: unknown[] = [];
+    const createdData: Record<string, unknown>[] = [];
+    const settingsWrites: unknown[] = [];
     let createdRoutes = 0;
     const tx = {
       $queryRaw: async () => [],
@@ -400,9 +402,19 @@ describe("contract fixtures", () => {
           deleted.push(args);
           return { count: inPlace.length };
         },
-        create: async () => ({ id: `route_${++createdRoutes}` }),
+        create: async (args: { data: Record<string, unknown> }) => {
+          createdData.push(args.data);
+          return { id: `route_${++createdRoutes}` };
+        },
+      },
+      appSettings: {
+        updateMany: async (args: unknown) => {
+          settingsWrites.push(args);
+          return { count: 1 };
+        },
       },
       optimizationRun: {
+        count: async () => earlierOsrmRuns,
         findFirst: async () =>
           inPlace.length > 0
             ? {
@@ -427,8 +439,25 @@ describe("contract fixtures", () => {
       },
     };
     const prisma = { $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx) } as unknown as PrismaClient;
-    return { prisma, runWrites, deleted };
+    return { prisma, runWrites, deleted, createdData, settingsWrites };
   }
+
+  it("stores the distance source with each route, and starts the traffic calibration over when OSRM is first used", async () => {
+    const straight = fakeClient();
+    await savePlan(straight.prisma, { runId: "run_1", isoDate: request.date, request, response, now: NOW });
+    expect(straight.createdData.every((data) => data.matrixSource === "haversine")).toBe(true);
+    expect(straight.settingsWrites).toEqual([]);
+
+    const osrm = { ...response, meta: { ...response.meta, matrixSource: "osrm" as const } };
+    const first = fakeClient();
+    await savePlan(first.prisma, { runId: "run_2", isoDate: request.date, request, response: osrm, now: NOW });
+    expect(first.createdData.every((data) => data.matrixSource === "osrm")).toBe(true);
+    expect(first.settingsWrites).toEqual([{ where: { id: 1 }, data: { trafficChangedAt: expect.any(Date) } }]);
+
+    const again = fakeClient([], 0, 4);
+    await savePlan(again.prisma, { runId: "run_3", isoDate: request.date, request, response: osrm, now: NOW });
+    expect(again.settingsWrites).toEqual([]);
+  });
 
   it("saves the run with exactly the optimizer KPIs and the details in their own column", async () => {
     const { prisma, runWrites } = fakeClient();

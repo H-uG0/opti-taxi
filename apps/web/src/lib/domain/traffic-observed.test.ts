@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { legsFromStops, MIN_OBSERVED_LEGS, observedFactors, type ObservedLeg, type ObservedStop } from "./traffic-observed";
+import type { PrismaClient } from "@prisma/client";
+import { describe, expect, it, vi } from "vitest";
+import {
+  calibrationRoutes,
+  legsFromStops,
+  loadObservedCalibration,
+  MIN_OBSERVED_LEGS,
+  observedFactors,
+  type ObservedLeg,
+  type ObservedStop,
+} from "./traffic-observed";
 
 const SETTINGS = {
   trafficEnabled: true,
@@ -154,3 +163,36 @@ describe("legsFromStops", () => {
     expect(legsFromStops([stop(), stop({ ...next, routeId: "r2" })])).toEqual([]);
   });
 });
+
+describe("calibration on one distance source", () => {
+  const NOW = new Date("2026-11-09T12:00:00Z");
+  const CHANGED = new Date("2026-11-01T08:00:00Z");
+
+  it("only counts the routes planned with the source of the latest run, since the last traffic change", () => {
+    expect(calibrationRoutes({ trafficChangedAt: CHANGED }, "osrm", NOW)).toEqual({
+      serviceDate: { gte: new Date("2026-09-14T00:00:00.000Z") },
+      optimizationRun: { startedAt: { gte: CHANGED } },
+      matrixSource: "osrm",
+    });
+    // Before any run, no route qualifies.
+    expect(calibrationRoutes({ trafficChangedAt: null }, null, NOW)).toMatchObject({ matrixSource: "" });
+  });
+
+  it("reads the source of the latest successful run and counts the routes left out", async () => {
+    const prisma = {
+      optimizationRun: { findFirst: vi.fn(async () => ({ matrixSource: "osrm" })) },
+      routeStop: { findMany: vi.fn(async () => []) },
+      route: { count: vi.fn(async () => 3) },
+    };
+    const calibration = await loadObservedCalibration(prisma as unknown as PrismaClient, { ...SETTINGS, trafficChangedAt: null }, ZONES, NOW);
+    expect(calibration).toMatchObject({ source: "osrm", otherSourceRoutes: 3 });
+    expect(prisma.optimizationRun.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { status: "SUCCESS", matrixSource: { not: null } }, orderBy: { startedAt: "desc" } }),
+    );
+    const stopsWhere = (prisma.routeStop.findMany.mock.calls[0] as unknown as [{ where: { route: { matrixSource: string } } }])[0].where;
+    expect(stopsWhere.route.matrixSource).toBe("osrm");
+    const countWhere = (prisma.route.count.mock.calls[0] as unknown as [{ where: Record<string, unknown> }])[0].where;
+    expect(countWhere.OR).toEqual([{ matrixSource: null }, { NOT: { matrixSource: "osrm" } }]);
+  });
+});
+

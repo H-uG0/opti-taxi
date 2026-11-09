@@ -139,9 +139,12 @@ async function wipe(): Promise<void> {
 }
 
 async function seedSettingsAndTariffs(): Promise<void> {
-  // Schema defaults: arrival up to 30 min before the appointment, pickup up to 15 min after the session, etc.
-  // Regulation number in the 04 65 71 xx xx range reserved for fiction (see fictitiousLandline).
-  await prisma.appSettings.create({ data: { id: 1, regulatorPhone: "04 65 71 00 00" } });
+  // Schema defaults: arrival up to 30 min before the appointment, pickup up to 15 min after the session, etc.,
+  // but longer stops for an ambulance (stretcher, stairs). Regulation number in the 04 65 71 xx xx range
+  // reserved for fiction (see fictitiousLandline).
+  await prisma.appSettings.create({
+    data: { id: 1, regulatorPhone: "04 65 71 00 00", ambulancePickupServiceMin: 10, ambulanceDropoffServiceMin: 10 },
+  });
   await prisma.tariffGrid.createMany({
     data: TARIFFS.map((tariff) => ({
       ...tariff,
@@ -167,6 +170,7 @@ async function seedFacilities(rng: Rng): Promise<Map<FacilityKey, CreatedFacilit
         lng: location.lng,
         phone: fictitiousLandline(rng),
         notes: def.notes,
+        extraServiceMin: "extraServiceMin" in def ? def.extraServiceMin : 0,
       },
     });
     facilities.set(key, created);

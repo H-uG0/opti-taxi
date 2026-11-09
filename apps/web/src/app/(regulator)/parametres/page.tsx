@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getSettings } from "@/lib/domain/settings";
 import { loadTrafficZones } from "@/lib/domain/traffic";
-import { loadObservedFactors } from "@/lib/domain/traffic-observed";
+import { loadObservedCalibration } from "@/lib/domain/traffic-observed";
 import { TIME_ZONE } from "@/lib/time";
 import { applyObservedTraffic, saveSettings, saveTraffic } from "./actions";
 import { settingsFormValues } from "./schema";
@@ -19,7 +19,7 @@ const updatedAtFormat = new Intl.DateTimeFormat("fr-FR", { timeZone: TIME_ZONE, 
 export default async function SettingsPage() {
   await requireUser("REGULATOR");
   const [settings, zones] = await Promise.all([getSettings(db), loadTrafficZones(db)]);
-  const observed = await loadObservedFactors(db, settings, zones);
+  const calibration = await loadObservedCalibration(db, settings, zones);
 
   return (
     <div className="max-w-5xl space-y-8">
@@ -33,7 +33,8 @@ export default async function SettingsPage() {
         applyObserved={applyObservedTraffic}
         initial={trafficFormValues(settings, zones)}
         zones={zones.map((zone) => ({ id: zone.id, name: zone.name, hasRadius: zone.radiusKm !== null }))}
-        observed={observed}
+        observed={calibration.factors}
+        calibration={{ source: calibration.source, otherSourceRoutes: calibration.otherSourceRoutes }}
       />
     </div>
   );

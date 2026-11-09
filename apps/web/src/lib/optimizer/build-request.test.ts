@@ -8,7 +8,9 @@ import {
   resolveVehicleAvailability,
   STALE_RUN_MARGIN_SEC,
   toContractSettings,
+  tripServiceMinutes,
   type DriverInput,
+  type ServiceSettings,
   type OptimizeInput,
   type SettingsInput,
   type TariffInput,
@@ -122,7 +124,62 @@ describe("settings mapping", () => {
       dropoffServiceMin: 5,
       unassignedPenalty: 10000,
       timeLimitSec: 12,
+      maxRideExtraMin: 30,
     });
+    expect(toContractSettings({ ...settings, maxRideExtraMin: 20 }, 20).maxRideExtraMin).toBe(20);
+  });
+});
+
+describe("stop durations per trip", () => {
+  const service: ServiceSettings = {
+    pickupServiceMin: 5,
+    dropoffServiceMin: 4,
+    ambulancePickupServiceMin: 15,
+    ambulanceDropoffServiceMin: null,
+    wheelchairExtraServiceMin: 5,
+    lyingExtraServiceMin: 10,
+  };
+  const seated = { direction: "OUTBOUND", allowedVehicleTypes: ["TAXI", "VSL"] } as const;
+
+  it("leaves both out when they are the settings' own (request unchanged without these settings)", () => {
+    expect(tripServiceMinutes(seated, service)).toEqual({ pickupServiceMin: null, dropoffServiceMin: null });
+    expect(tripServiceMinutes({ ...seated, mobility: "SEATED", facilityExtraServiceMin: 0 }, { pickupServiceMin: 5, dropoffServiceMin: 4 })).toEqual({
+      pickupServiceMin: null,
+      dropoffServiceMin: null,
+    });
+  });
+
+  it("takes the ambulance base for an ambulance-only trip, the taxi and VSL one otherwise", () => {
+    const ambulance = { direction: "OUTBOUND", allowedVehicleTypes: ["AMBULANCE"] } as const;
+    // No ambulance dropoff set: as taxi and VSL.
+    expect(tripServiceMinutes(ambulance, service)).toEqual({ pickupServiceMin: 15, dropoffServiceMin: null });
+    // Allowed both ways: the longer one, whatever vehicle the optimizer picks.
+    expect(tripServiceMinutes({ ...ambulance, allowedVehicleTypes: ["AMBULANCE", "VSL"] }, service).pickupServiceMin).toBe(15);
+  });
+
+  it("adds the mobility to both stops and the facility to the stop at the facility", () => {
+    expect(tripServiceMinutes({ ...seated, mobility: "WHEELCHAIR", facilityExtraServiceMin: 3 }, service)).toEqual({
+      pickupServiceMin: 10,
+      dropoffServiceMin: 12,
+    });
+    expect(tripServiceMinutes({ ...seated, direction: "RETURN", mobility: "LYING", facilityExtraServiceMin: 3 }, service)).toEqual({
+      pickupServiceMin: 18,
+      dropoffServiceMin: 14,
+    });
+  });
+
+  it("sends them per trip, within the zod contract", () => {
+    const build = buildOptimizeRequest({
+      date: TUESDAY,
+      settings: { ...settings, ...service },
+      vehicles: [vehicle("v")],
+      trips: [trip("plain"), trip("chair", { mobility: "WHEELCHAIR" })],
+      tariffs: [],
+    });
+    const [plain, chair] = build.request.trips;
+    expect(plain).not.toHaveProperty("pickupServiceMin");
+    expect(chair).toMatchObject({ pickupServiceMin: 10, dropoffServiceMin: 9 });
+    expect(optimizeRequestSchema.safeParse(build.request).success).toBe(true);
   });
 });
 
@@ -264,15 +321,34 @@ describe("vehicle availability", () => {
     expect(skipped[0]).toMatchObject({ vehicleId: "v2", reason: "Chauffeur déjà affecté à Taxi 1 ce jour" });
   });
 
-  it("drops the break when breakMinutes is 0 or there is no window", () => {
+  it("drops the break when breakMinutes is 0 or there is no window, on a shift of 6 hours or less", () => {
+    const short = { shiftStartMinute: 480, shiftEndMinute: 840 };
     const { available } = resolveVehicleAvailability(
       [
-        vehicle("v1", { defaultDriver: driver("d1", { breakMinutes: 0 }) }),
-        vehicle("v2", { defaultDriver: driver("d2", { breakWindowStartMinute: null, breakWindowEndMinute: null }) }),
+        vehicle("v1", { defaultDriver: driver("d1", { ...short, breakMinutes: 0 }) }),
+        vehicle("v2", { defaultDriver: driver("d2", { ...short, breakWindowStartMinute: null, breakWindowEndMinute: null }) }),
       ],
       TUESDAY,
     );
     expect(available.map((v) => v.break)).toEqual([null, null]);
+  });
+
+  it("leaves out a vehicle whose shift is over 6 hours without a break of 20 min (art. L3121-16)", () => {
+    const { available, skipped } = resolveVehicleAvailability(
+      [
+        vehicle("v1", { label: "Taxi 1", defaultDriver: driver("d1", { breakMinutes: 0 }) }),
+        vehicle("v2", { label: "Taxi 2", defaultDriver: driver("d2", { breakMinutes: 15 }) }),
+        vehicle("v3", { label: "Taxi 3", defaultDriver: driver("d3", { breakWindowStartMinute: 1130, breakWindowEndMinute: 1200 }) }),
+        vehicle("v4", { label: "Taxi 4", defaultDriver: driver("d4", { breakMinutes: 20 }) }),
+      ],
+      TUESDAY,
+    );
+    expect(available.map((v) => v.id)).toEqual(["v4"]);
+    expect(skipped.map((s) => s.reason)).toEqual([
+      expect.stringMatching(/^Horaire de 13 h 00 sans pause : .* \(Code du travail, art\. L3121-16\)\. Réglez la pause de Prénom D1/),
+      expect.stringContaining("avec une pause de 15 min"),
+      expect.stringContaining("fenêtre de pause qui ne laisse pas 45 min dans l'horaire"),
+    ]);
   });
 
   it("clips the break window to the shift and ignores a break that no longer fits", () => {

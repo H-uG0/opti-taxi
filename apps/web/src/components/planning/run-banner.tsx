@@ -4,11 +4,8 @@ import { formatEurosRounded, formatInstant, formatSeconds, pluralize } from "@/l
 import { MOVE_REFUSED_PREFIX } from "@/lib/planning/move";
 import { NOT_KEPT_PREFIX } from "@/lib/planning/plan-compare";
 import type { RunView } from "@/lib/planning/types";
+import { MATRIX_SOURCE_LABELS } from "@/lib/labels";
 
-const MATRIX_LABELS: Record<string, string> = {
-  osrm: "OSRM (réseau routier)",
-  haversine: "estimation à vol d'oiseau",
-};
 
 const PLAN_RUN_LABEL: Record<NonNullable<RunView["kind"]>, string> = {
   optimize: "Dernier calcul",
@@ -117,7 +114,7 @@ export function RunBanner({
             <span aria-hidden className="text-slate-300">
               ·
             </span>
-            <span>distances : {MATRIX_LABELS[planRun.matrixSource ?? ""] ?? planRun.matrixSource ?? "—"}</span>
+            <span>distances : {MATRIX_SOURCE_LABELS[planRun.matrixSource ?? ""] ?? planRun.matrixSource ?? "—"}</span>
             {planRun.trafficSource ? (
               <>
                 <span aria-hidden className="text-slate-300">

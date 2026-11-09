@@ -135,6 +135,13 @@ export const USER_ROLE_LABELS = {
   DRIVER: "Chauffeur",
 } as const;
 
+/** Source of the travel times and distances (optimizer matrixSource; "mixed": a route recomputed with another one). */
+export const MATRIX_SOURCE_LABELS: Record<string, string> = {
+  osrm: "OSRM (réseau routier)",
+  haversine: "estimation à vol d'oiseau",
+  mixed: "mixte (recalculée avec une autre source)",
+};
+
 export const VIOLATION_LABELS: Record<string, string> = {
   UNKNOWN_REFERENCE: "Référence inconnue",
   DUPLICATE_TRIP: "Course en double",
@@ -144,7 +151,8 @@ export const VIOLATION_LABELS: Record<string, string> = {
   CAPACITY: "Capacité dépassée",
   EXCLUSIVE_RIDE: "Patient non partageable accompagné",
   TIME_WINDOW: "Hors fenêtre horaire",
-  TOTAL_WAIT: "Attente cumulée > 45 min",
+  TOTAL_WAIT: "Attente au lieu de soins trop longue",
+  RIDE_TIME: "Temps à bord trop long",
   DETOUR: "Détour trop long",
   SHIFT: "Hors horaires du chauffeur",
   BREAK: "Pause non respectée",

@@ -209,6 +209,8 @@ model Facility {
   /// Accueil, prévenu des arrivées en transport partagé.
   phone      String?
   notes      String?
+  /// Minutes ajoutées au temps d'arrêt à l'établissement (dépose d'un aller, prise en charge d'un retour) : accueil, étages.
+  extraServiceMin Int     @default(0)
   active     Boolean      @default(true)
   createdAt  DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
@@ -548,6 +550,8 @@ model Route {
   margin            Float
   breakStartMinute  Int?
   breakEndMinute    Int?
+  /// Source des temps et distances des horaires enregistrés (osrm, haversine) : calcul ou dernier recalcul.
+  matrixSource      String?
   validatedAt       DateTime?
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
@@ -616,8 +620,17 @@ model AppSettings {
   maxTotalWaitMin            Int      @default(45)
   maxDetourKmPerExtraPatient Float    @default(10)
   maxDetourKmTotal           Float    @default(30)
+  /// Temps d'arrêt d'une course en taxi ou VSL (une course assise peut partir dans l'un ou l'autre).
   pickupServiceMin           Int      @default(5)
   dropoffServiceMin          Int      @default(5)
+  /// Temps d'arrêt d'une course en ambulance ; null : comme le taxi et le VSL.
+  ambulancePickupServiceMin  Int?
+  ambulanceDropoffServiceMin Int?
+  /// Minutes ajoutées à chaque arrêt d'un patient en fauteuil roulant, ou allongé.
+  wheelchairExtraServiceMin  Int      @default(0)
+  lyingExtraServiceMin       Int      @default(0)
+  /// Temps à bord au plus égal au trajet direct + N min (de la fin de la prise en charge au début de la dépose).
+  maxRideExtraMin            Int      @default(30)
   unassignedPenalty          Float    @default(10000)
   solverTimeLimitSec         Int      @default(10)
   /// Numéro de la régulation, proposé en appel direct sur la feuille de route des chauffeurs.

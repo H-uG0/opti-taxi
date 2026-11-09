@@ -49,6 +49,7 @@ export async function loadKpiRows(prisma: KpiClient, from: string, to: string): 
         cost: true,
         margin: true,
         validatedAt: true,
+        matrixSource: true,
         _count: { select: { stops: true } },
       },
     }),

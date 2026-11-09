@@ -92,6 +92,13 @@ export default async function DashboardPage({
               </h2>
               <p className="text-xs text-slate-500">Cliquez sur un jour pour l&apos;afficher en tête de page.</p>
             </div>
+            {period.matrixSources.length > 1 || period.matrixSources.includes("mixed") ? (
+              <p role="note" className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                Cette période mélange des tournées calculées avec les distances routières (OSRM) et avec l&apos;estimation à
+                vol d&apos;oiseau (indiqué sous chaque jour) : leurs kilomètres, durées et retards prévus ne se comparent pas
+                d&apos;un jour à l&apos;autre.
+              </p>
+            ) : null}
             <KpiTable days={days} period={period} focusDate={focus?.date ?? null} range={range} today={today} tomorrow={tomorrow} />
           </section>
         </>

@@ -91,6 +91,8 @@ type FacilityDef = {
   address: string;
   postalCode: string;
   notes: string | null;
+  /** Minutes added to the stop at the facility (Facility.extraServiceMin); absent: 0. */
+  extraServiceMin?: number;
 };
 
 export const FACILITIES = {
@@ -113,6 +115,8 @@ export const FACILITIES = {
     address: "264 rue des Calanques",
     postalCode: "13005",
     notes: "Dépose des patients devant le hall 2. Hôpital de jour d'oncologie au 3e étage.",
+    // Escorting the patient to the 3rd floor.
+    extraServiceMin: 5,
   },
   radiotherapyMarseille: {
     name: "Institut de radiothérapie Méditerranée (fictif)",

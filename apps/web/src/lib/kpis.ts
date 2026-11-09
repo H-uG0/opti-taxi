@@ -31,6 +31,8 @@ export type KpiRoute = {
   stopCount: number;
   /** The crew recorded at least one stop status (pickup, drop-off or absence) on this route. */
   hasRecordedStatus: boolean;
+  /** Source of its times and km (Route.matrixSource: osrm, haversine, mixed); absent or null: unknown. */
+  matrixSource?: string | null;
 };
 
 export type KpiTrip = {
@@ -132,6 +134,8 @@ export type DayKpis = KpiTotals &
     validatedAt: Date | null;
     /** 5. Temps passé à construire le planning: first run -> last validation, in minutes. */
     planningMinutes: number | null;
+    /** Distance sources of the day's routes, sorted (km and planned delays compare only within one). */
+    matrixSources: string[];
   };
 
 export type PeriodKpis = KpiTotals &
@@ -151,6 +155,8 @@ export type PeriodKpis = KpiTotals &
     /** Validated days whose planning time could be measured. */
     measuredPlanningDays: number;
     averagePlanningMinutes: number | null;
+    /** Distance sources of the period's routes, sorted: more than one, its days do not compare. */
+    matrixSources: string[];
   };
 
 // ---------------------------------------------------------------------------
@@ -356,7 +362,12 @@ export function computeDayKpis(
     validatedAt,
     // A validation older than the first run means the routes did not come from these runs.
     planningMinutes: elapsed !== null && elapsed >= 0 ? elapsed : null,
+    matrixSources: distinctSources(routes),
   };
+}
+
+function distinctSources(routes: readonly Pick<KpiRoute, "matrixSource">[]): string[] {
+  return [...new Set(routes.flatMap((route) => (route.matrixSource ? [route.matrixSource] : [])))].sort();
 }
 
 /** Indicators of every date from `from` to `to` (empty days included), oldest first. */
@@ -400,6 +411,7 @@ export function summarizePeriod(days: readonly DayKpis[]): PeriodKpis {
     validatedDays: days.filter((d) => d.planningStatus === "VALIDATED").length,
     measuredPlanningDays: measured.length,
     averagePlanningMinutes: ratio(planningSum, measured.length),
+    matrixSources: [...new Set(days.flatMap((day) => day.matrixSources))].sort(),
     ...totals,
     ...deriveRates(totals),
   };

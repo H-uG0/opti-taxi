@@ -130,7 +130,15 @@ export type TripView = {
   outboundNoShow: boolean;
 };
 
-export type UnassignedView = { tripId: string; reason: string };
+export type UnassignedView = {
+  tripId: string;
+  reason: string;
+  /**
+   * The patient's other leg of the day, in a route: a patient driven to the
+   * facility and not back home, or the reverse (lib/planning/half-served.ts).
+   */
+  servedPartner?: { tripId: string; vehicleId: string };
+};
 
 export type ViolationView = {
   code: string;

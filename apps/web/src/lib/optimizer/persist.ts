@@ -448,6 +448,8 @@ export async function savePlan(
             serviceDate,
             status: "PROPOSED",
             optimizationRunId: runId,
+            // Traffic calibration compares the stored times with real ones, source by source.
+            matrixSource: response.meta.matrixSource,
             stops: { createMany: { data: stops } },
           },
           select: { id: true },
@@ -487,6 +489,13 @@ export async function savePlan(
           }),
         },
       });
+
+      // OSRM put into service: the traffic factors were set on straight-line times until now, the
+      // calibration starts over (lib/domain/traffic-observed.ts only counts routes of one source anyway).
+      if (response.meta.matrixSource === "osrm") {
+        const earlier = await tx.optimizationRun.count({ where: { matrixSource: "osrm", status: "SUCCESS", id: { not: runId } } });
+        if (earlier === 0) await tx.appSettings.updateMany({ where: { id: 1 }, data: { trafficChangedAt: new Date() } });
+      }
 
       const served = servedTripIds.length;
       return { routes: routes.length, served, unassigned: updates.length - served, comparison };

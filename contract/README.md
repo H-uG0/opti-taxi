@@ -45,10 +45,11 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
     "maxTotalWaitMin": 45,              // attente cumulée aller + retour d'un patient le même jour
     "maxDetourKmPerExtraPatient": 10,   // détour autorisé par co-passager distinct
     "maxDetourKmTotal": 30,             // plafond du détour d'un patient
-    "pickupServiceMin": 5,              // temps d'arrêt à une prise en charge
-    "dropoffServiceMin": 5,             // temps d'arrêt à une dépose
+    "pickupServiceMin": 5,              // temps d'arrêt à une prise en charge (course sans le sien)
+    "dropoffServiceMin": 5,             // temps d'arrêt à une dépose (course sans le sien)
     "unassignedPenalty": 10000,         // € de pénalité par course non affectée
     "timeLimitSec": 10,                 // budget de calcul du solveur, entier 1..600 s (voir plus bas)
+    "maxRideExtraMin": 30,              // facultatif (30 par défaut), 0..180 : temps à bord <= trajet direct + 30 min
     "traffic": {                        // facultatif, absent ou null = temps de trajet sans trafic (voir plus bas)
       "bands": [{ "startMin": 420, "endMin": 570 }, { "startMin": 570, "endMin": 960 }],
       "roadFactors": [1.05, 1],         // un facteur par créneau, hors des zones
@@ -66,7 +67,8 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
     "costPerHour": 24,                  // € / h de service (chauffeur, équipage)
     "shiftStartMin": 360,               // départ du dépôt au plus tôt
     "shiftEndMin": 1140,                // retour au dépôt au plus tard
-    "break": { "windowStartMin": 690, "windowEndMin": 840, "durationMin": 45 } // ou null
+    "break": { "windowStartMin": 690, "windowEndMin": 840, "durationMin": 45 } // ou null ; sans pause
+                                        // d'au moins 20 min dans l'horaire, une tournée dure 6 h au plus (L3121-16)
   }],
   "trips": [{
     "id": "trip_1",
@@ -79,7 +81,9 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
     "readyMin": null,                   // obligatoire si RETURN (fin de séance), null sinon
     "allowedVehicleTypes": ["TAXI", "VSL"],
     "shareable": true,                  // prescription compatible ET patient non opposé
-    "lockedVehicleId": null             // course figée sur ce véhicule par le régulateur
+    "lockedVehicleId": null,            // course figée sur ce véhicule par le régulateur
+    "pickupServiceMin": 10,             // facultatifs, 0..120 : temps d'arrêt propres à la course
+    "dropoffServiceMin": 10             //   (absents ou null : ceux de settings)
   }],
   "tariffs": [{
     "vehicleType": "TAXI",
@@ -124,12 +128,39 @@ fenêtre. Dépôt : pas de référence, l'autre extrémité plus ou moins le tra
 `meta.trafficSource` dit ce qui a été appliqué : `none` ou `factors`. Une API de trafic (temps par
 créneau demandés à un fournisseur) serait une autre valeur, sans changer le reste du contrat.
 
+### Temps d'arrêt par course (`trips[].pickupServiceMin`, `trips[].dropoffServiceMin`)
+
+Le web les calcule (`tripServiceMinutes`, `apps/web/src/lib/optimizer/build-request.ts`) : temps du mode
+de transport (ambulance, ou taxi et VSL pour une course assise, qui peut partir dans l'un ou l'autre),
+plus la majoration de la mobilité du patient (fauteuil, allongé) aux deux arrêts, plus celle de
+l'établissement à l'arrêt chez lui (dépose d'un aller, prise en charge d'un retour). Il ne les envoie
+que s'ils diffèrent de `settings.pickupServiceMin` / `dropoffServiceMin` : sans ces réglages, la
+requête est la même qu'avant. Le solveur, le calcul des horaires et le validateur les utilisent
+(`departureMin = startMin + temps d'arrêt`).
+
 ### Fenêtres horaires dérivées (calculées par l'optimizer, une seule source de vérité)
 
 - `OUTBOUND` : la dépose (arrivée du patient au lieu de soins) commence dans
   `[appointmentMin - waitBeforeAppointmentMin, appointmentMin]`. Prise en charge : libre.
 - `RETURN` : la prise en charge au lieu de soins commence dans
   `[readyMin, readyMin + waitAfterSessionMin]`. Dépose : libre.
+- Si `waitBeforeAppointmentMin + waitAfterSessionMin` dépasse `maxTotalWaitMin`, les fenêtres de
+  l'aller et du retour d'un même patient sont resserrées (la marge avant le RDV d'abord) ; une
+  course sans son aller ou son retour attend au plus `maxTotalWaitMin`.
+
+### Attente à bord au lieu de soins et temps à bord
+
+Le véhicule peut rester arrêté devant le lieu de soins avec un patient à bord : il attend
+l'heure d'un autre patient (retour partagé : A prêt à 11:00, pris à 11:15, B prêt à 11:30), ou
+l'ouverture de la fenêtre de dépose. Ces minutes d'attente à bord (`startMin - arrivalMin` des
+arrêts au même endroit, patient à bord) comptent dans l'attente du patient au lieu de soins :
+l'aller avant sa dépose, le retour après sa prise en charge. Le temps d'arrêt des autres patients
+(leur montée, leur descente) n'en fait pas partie. L'optimizer garde chaque trajet dans sa fenêtre,
+attente à bord comprise ; le validateur vérifie le total (`TOTAL_WAIT`).
+
+Temps à bord : de la fin de la prise en charge (`departureMin`) au début de la dépose
+(`startMin`), au plus le trajet direct (aux minutes de référence de la course, voir « Trafic ») +
+`maxRideExtraMin` (`RIDE_TIME`).
 
 ## EvaluateRequest
 
@@ -182,7 +213,8 @@ Les courses absentes de `routes` sont non affectées.
     "rideKm": 24.0,                     // distance réellement parcourue patient à bord
     "detourKm": 5.8,                    // rideKm - directKm
     "revenue": 31.6,                    // CA estimé de la course (abattement inclus), 0 si non affectée
-    "waitAtFacilityMin": 10             // aller : RDV - arrivée ; retour : prise en charge - fin de séance
+    "waitAtFacilityMin": 10             // aller : RDV - début de la dépose ; retour : prise en charge - fin de séance
+                                        // (sans l'attente à bord, comptée par TOTAL_WAIT)
   }],
   "unassigned": [{ "tripId": "trip_9", "reason": "Aucun véhicule compatible disponible" }],
   "kpis": {
@@ -199,8 +231,9 @@ Les courses absentes de `routes` sont non affectées.
   "meta": {
     "matrixSource": "haversine",        // osrm | haversine
     "trafficSource": "factors",         // none | factors (voir « Trafic »)
-    "solverStatus": "ROUTING_SUCCESS",  // libellé du solveur, ou "EVALUATE"
-    "objective": 123456,                // valeur interne du solveur, null pour /evaluate
+    "solverStatus": "ROUTING_SUCCESS",  // libellé du solveur ; "INSERTION" : planning de l'insertion
+                                        // Python seule (grande journée) ; "EVALUATE" pour /evaluate
+    "objective": 123456,                // valeur interne du solveur (centimes), null pour /evaluate
     "wallTimeMs": 2140,
     "warnings": ["Pas de grille tarifaire pour AMBULANCE/05 : CA estimé à 0"]
   }
@@ -226,7 +259,8 @@ Si la course est partagée avec `n - 1` co-passagers distincts (n plafonné à 3
 | `CAPACITY` | plus de patients à bord que la capacité |
 | `EXCLUSIVE_RIDE` | patient non partageable transporté avec un autre patient |
 | `TIME_WINDOW` | arrivée hors fenêtre (retard au RDV, trop tôt, prise en charge hors fenêtre) |
-| `TOTAL_WAIT` | attente cumulée aller + retour > `maxTotalWaitMin` |
+| `TOTAL_WAIT` | attente au lieu de soins, attente à bord comprise, > `maxTotalWaitMin` : aller + retour d'un patient, ou un trajet sans son pendant |
+| `RIDE_TIME` | temps à bord > trajet direct + `maxRideExtraMin` |
 | `DETOUR` | détour > `min(maxDetourKmPerExtraPatient * co-passagers, maxDetourKmTotal)` |
 | `SHIFT` | départ avant `shiftStartMin` ou retour après `shiftEndMin` |
-| `BREAK` | pas de pause de `durationMin` sans patient à bord dans la fenêtre de pause |
+| `BREAK` | pas de pause de `durationMin` sans patient à bord dans la fenêtre de pause ; ou tournée de plus de 6 h sans pause d'au moins 20 min en son sein (Code du travail, art. L3121-16) |

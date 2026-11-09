@@ -13,6 +13,7 @@
  */
 import type {
   AppSettings,
+  Mobility,
   Prisma,
   PrismaClient,
   SharingStatus,
@@ -36,13 +37,16 @@ import {
   type DayCrewView,
   type StaffPerson,
 } from "@/lib/staff/day-crews";
+import { breakInShift, workTimeIssue } from "@/lib/staff/work-time";
 import { fromIsoDate, isoWeekday, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
-import type {
-  OptimizeRequest,
-  OptimizerSettings,
-  OptimizerTariff,
-  OptimizerTrip,
-  OptimizerVehicle,
+import {
+  DEFAULT_MAX_RIDE_EXTRA_MIN,
+  MAX_TRIP_SERVICE_MIN,
+  type OptimizeRequest,
+  type OptimizerSettings,
+  type OptimizerTariff,
+  type OptimizerTrip,
+  type OptimizerVehicle,
 } from "./contract";
 
 const MAX_DAY_MINUTE = 2 * 24 * 60;
@@ -117,7 +121,17 @@ export type TripInput = {
   sharingAllowed: boolean;
   sharingStatus: SharingStatus;
   lockedVehicleId: string | null;
+  /** Patient's mobility (stop surcharge, tripServiceMinutes); absent: seated. */
+  mobility?: Mobility;
+  /** Facility.extraServiceMin of the trip's facility; absent: 0. */
+  facilityExtraServiceMin?: number;
 };
+
+/** Stop durations (Paramètres « Temps d'arrêt »); absent fields: no surcharge, ambulance as taxi and VSL. */
+export type ServiceSettings = Pick<AppSettings, "pickupServiceMin" | "dropoffServiceMin"> &
+  Partial<
+    Pick<AppSettings, "ambulancePickupServiceMin" | "ambulanceDropoffServiceMin" | "wheelchairExtraServiceMin" | "lyingExtraServiceMin">
+  >;
 
 export type SettingsInput = Pick<
   AppSettings,
@@ -130,7 +144,9 @@ export type SettingsInput = Pick<
   | "dropoffServiceMin"
   | "unassignedPenalty"
   | "solverTimeLimitSec"
->;
+> &
+  ServiceSettings &
+  Partial<Pick<AppSettings, "maxRideExtraMin">>;
 
 export type TariffInput = Pick<
   TariffGrid,
@@ -228,7 +244,43 @@ export function toContractSettings(settings: SettingsInput, tripCount: number): 
     dropoffServiceMin: settings.dropoffServiceMin,
     unassignedPenalty: settings.unassignedPenalty,
     timeLimitSec: effectiveTimeLimitSec(settings.solverTimeLimitSec, tripCount),
+    maxRideExtraMin: settings.maxRideExtraMin ?? DEFAULT_MAX_RIDE_EXTRA_MIN,
   };
+}
+
+/**
+ * Stop durations of a trip, or null where they are the settings' own (the
+ * field is then left out of the request: without these settings, the request
+ * is the same as before). The base is the transport mode's: ambulance when the
+ * trip can only go by ambulance, taxi and VSL otherwise (a seated trip may go
+ * by either; a trip allowed both ways gets the longer one). The patient's
+ * mobility adds to both stops, the facility to its own stop: the dropoff of
+ * an outbound trip, the pickup of a return.
+ */
+export function tripServiceMinutes(
+  trip: Pick<TripInput, "direction" | "mobility" | "facilityExtraServiceMin"> & { allowedVehicleTypes: readonly VehicleType[] },
+  settings: ServiceSettings,
+): { pickupServiceMin: number | null; dropoffServiceMin: number | null } {
+  const types = new Set(trip.allowedVehicleTypes);
+  const ambulance = types.has("AMBULANCE");
+  const seated = types.has("TAXI") || types.has("VSL");
+  const base = (seatedMin: number, ambulanceMin: number | null | undefined) => {
+    const ambulanceValue = ambulanceMin ?? seatedMin;
+    if (ambulance && seated) return Math.max(seatedMin, ambulanceValue);
+    return ambulance ? ambulanceValue : seatedMin;
+  };
+  const mobility =
+    trip.mobility === "WHEELCHAIR"
+      ? (settings.wheelchairExtraServiceMin ?? 0)
+      : trip.mobility === "LYING"
+        ? (settings.lyingExtraServiceMin ?? 0)
+        : 0;
+  const facility = trip.facilityExtraServiceMin ?? 0;
+  const pickup = base(settings.pickupServiceMin, settings.ambulancePickupServiceMin) + mobility + (trip.direction === "RETURN" ? facility : 0);
+  const dropoff =
+    base(settings.dropoffServiceMin, settings.ambulanceDropoffServiceMin) + mobility + (trip.direction === "OUTBOUND" ? facility : 0);
+  const sent = (minutes: number, settingsMin: number) => (minutes === settingsMin ? null : Math.min(minutes, MAX_TRIP_SERVICE_MIN));
+  return { pickupServiceMin: sent(pickup, settings.pickupServiceMin), dropoffServiceMin: sent(dropoff, settings.dropoffServiceMin) };
 }
 
 export function personName(person: { firstName: string; lastName: string }): string {
@@ -299,17 +351,21 @@ export function decideVehicle(vehicle: VehicleInput, weekday: number): VehicleDe
     return { ok: false, reason: `Horaires du chauffeur invalides (${personName(driver)})` };
   }
 
+  // Art. L3121-16: over 6 hours, the shift is only worked with a break of 20 min or more inside it.
+  // A crew of the day was checked on /equipages already (blocked above); this covers the default crew.
+  const shift = { start: shiftStart, end: shiftEnd };
+  const workIssue = workTimeIssue(driver, shift, personName(driver));
+  if (workIssue) return { ok: false, reason: workIssue };
+
   const notes: string[] = [];
   let breakRule: OptimizerVehicle["break"] = null;
-  const ws = driver.breakWindowStartMinute;
-  const we = driver.breakWindowEndMinute;
-  if (ws !== null && we !== null && driver.breakMinutes > 0) {
+  if (driver.breakWindowStartMinute !== null && driver.breakWindowEndMinute !== null && driver.breakMinutes > 0) {
     // The break must fit inside the working hours to be schedulable.
-    const windowStart = Math.max(ws, shiftStart);
-    const windowEnd = Math.min(we, shiftEnd);
-    if (windowEnd - windowStart >= driver.breakMinutes) {
-      breakRule = { windowStartMin: windowStart, windowEndMin: windowEnd, durationMin: driver.breakMinutes };
+    const fitted = breakInShift(driver, shift);
+    if (fitted) {
+      breakRule = { windowStartMin: fitted.windowStart, windowEndMin: fitted.windowEnd, durationMin: fitted.duration };
     } else {
+      // Only on a shift of 6 hours or less (workTimeIssue): no break is owed.
       notes.push(`${vehicle.label} : pause ignorée, la fenêtre de pause ne laisse pas ${driver.breakMinutes} min dans l'horaire`);
     }
   }
@@ -451,6 +507,7 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
       }
     }
 
+    const service = tripServiceMinutes(trip, input.settings);
     trips.push({
       id: trip.id,
       patientId: trip.patientId,
@@ -463,6 +520,8 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
       allowedVehicleTypes: [...new Set(trip.allowedVehicleTypes)],
       shareable: isShareable(trip),
       lockedVehicleId,
+      ...(service.pickupServiceMin !== null ? { pickupServiceMin: service.pickupServiceMin } : {}),
+      ...(service.dropoffServiceMin !== null ? { dropoffServiceMin: service.dropoffServiceMin } : {}),
     });
   }
 
@@ -669,17 +728,22 @@ export function loadTariffInputs(prisma: PrismaClient, isoDate: string): Promise
 
 export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): Promise<OptimizeInput> {
   const serviceDate = fromIsoDate(isoDate);
-  const [settings, zones, vehicles, trips, tariffs] = await Promise.all([
+  const [settings, zones, vehicles, rows, tariffs] = await Promise.all([
     getSettings(prisma),
     loadTrafficZones(prisma),
     loadDayVehicleInputs(prisma, isoDate),
     prisma.trip.findMany({
       where: { serviceDate, status: { notIn: [...EXCLUDED_TRIP_STATUSES] } },
-      select: tripInputSelect,
+      select: { ...tripInputSelect, patient: { select: { mobility: true } }, facility: { select: { extraServiceMin: true } } },
       orderBy: [{ appointmentMinute: "asc" }, { readyMinute: "asc" }, { id: "asc" }],
     }),
     loadTariffInputs(prisma, isoDate),
   ]);
+  const trips: TripInput[] = rows.map(({ patient, facility, ...trip }) => ({
+    ...trip,
+    mobility: patient.mobility,
+    facilityExtraServiceMin: facility?.extraServiceMin ?? 0,
+  }));
   return {
     date: isoDate,
     settings,

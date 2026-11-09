@@ -32,7 +32,9 @@
  *    An empty seat says why the free qualified people were not proposed
  *    (too far, kept in reserve).
  * An ambulance crew needs a DEA at the wheel or beside the patient (rules.ts,
- * R. 6312-10) and CrewRules.minPairOverlapMin of shared working time.
+ * R. 6312-10) and CrewRules.minPairOverlapMin of shared working time. A crew
+ * working more than 6 hours needs the driver's break of at least 20 min to fit
+ * in its hours (Code du travail, art. L3121-16; lib/staff/work-time.ts).
  * A vehicle with a blocking problem (`blocked`) is left out of the planning.
  * A vehicle unavailable that day (maintenance, on-call duty…, lib/fleet)
  * gets nobody, even a crew fixed earlier, and its default crew is free for
@@ -50,6 +52,7 @@ import { CREW_REQUIRED_ONE_OF, crewHoldsRequired, REQUIRED_QUALIFICATIONS } from
 import { unavailabilityOn, unavailabilityText, type DatedVehicleUnavailability } from "@/lib/fleet/availability";
 import { ABSENCE_KIND_LABELS, QUALIFICATION_NOUNS } from "@/lib/labels";
 import { formatDuration, formatMinute, formatShortDate, isoWeekday, WEEKDAY_LABELS } from "@/lib/time";
+import { workTimeIssue } from "./work-time";
 
 export type StaffPerson = {
   id: string;
@@ -62,6 +65,10 @@ export type StaffPerson = {
   /** Usual working hours, minutes since local midnight. */
   shiftStartMinute: number;
   shiftEndMinute: number;
+  /** Break settings (Driver); absent: not checked (lib/staff/work-time.ts). */
+  breakWindowStartMinute?: number | null;
+  breakWindowEndMinute?: number | null;
+  breakMinutes?: number;
 };
 
 export type CrewVehicle = {
@@ -732,6 +739,19 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
     if (shift && mate && vehicle.type === "AMBULANCE") {
       shift = { start: Math.max(shift.start, mate.shiftStartMinute), end: Math.min(shift.end, mate.shiftEndMinute) };
       if (shift.end <= shift.start) shift = null;
+    }
+    // The optimizer gets the driver's break for the whole crew: over 6 hours it must be a legal one.
+    if (shift && driver && driver.breakMinutes !== undefined && !d.parked) {
+      const workIssue = workTimeIssue(
+        {
+          breakWindowStartMinute: driver.breakWindowStartMinute ?? null,
+          breakWindowEndMinute: driver.breakWindowEndMinute ?? null,
+          breakMinutes: driver.breakMinutes,
+        },
+        shift,
+        staffName(driver),
+      );
+      if (workIssue) issues.push({ level: "error", seat: "driver", message: workIssue });
     }
     const blocked = issues.find((i) => i.level === "error")?.message ?? (d.parked ? PARKED_MESSAGE : null);
     crews.push({
