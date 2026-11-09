@@ -10,6 +10,7 @@ import { Timeline, TimelineLegend } from "@/components/planning/timeline";
 import { VehiclePanel } from "@/components/planning/vehicle-panel";
 import type { DroppedLock } from "@/lib/optimizer/build-request";
 import type { TimeRange } from "@/lib/planning/timeline";
+import type { VehicleIssue } from "@/lib/planning/route-issues";
 import type { TripView, UnassignedView, VehicleRowView, ViolationView } from "@/lib/planning/types";
 import { STOP_KIND_LABELS } from "@/lib/labels";
 import { formatMinute } from "@/lib/time";
@@ -23,6 +24,7 @@ export type PlanningBoardProps = {
   violations: ViolationView[];
   violationsKnown: boolean;
   staleTrips: UnassignedView[];
+  vehicleIssues: VehicleIssue[];
   droppedLocks: DroppedLock[];
   timeRange: TimeRange;
   planned: boolean;
@@ -43,6 +45,7 @@ export function PlanningBoard({
   violations,
   violationsKnown,
   staleTrips,
+  vehicleIssues,
   droppedLocks,
   timeRange,
   planned,
@@ -178,12 +181,14 @@ export function PlanningBoard({
             </p>
           )}
           <IssuesPanel
+            date={date}
             unassigned={unassigned}
             violations={violations}
             violationsKnown={violationsKnown}
             staleTrips={staleTrips}
             droppedLocks={droppedLocks}
             returnsToCheck={returnsToCheck}
+            vehicleIssues={vehicleIssues}
             trips={tripsById}
             vehicleLabels={vehicleLabels}
             planned={planned}

@@ -24,6 +24,7 @@ import { isShareable } from "@/lib/domain/rules";
 import { getSettings } from "@/lib/domain/settings";
 import { loadTrafficZones, toContractTraffic, type TrafficInput } from "@/lib/domain/traffic";
 import { tariffGaps, tariffsInForce, type TariffGap } from "@/lib/domain/tariffs";
+import { complianceAlerts, COMPLIANCE_KINDS } from "@/lib/fleet/maintenance";
 import { resolveDayCrews, type DayCrewInput, type DayCrewPlan, type StaffPerson } from "@/lib/staff/day-crews";
 import { fromIsoDate, isoWeekday, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
 import type {
@@ -561,12 +562,17 @@ export type DayCrewContext = {
   plan: DayCrewPlan;
   /** Every person, active or not, by id. */
   people: Map<string, DriverInput & StaffPerson>;
+  /**
+   * Vehicles whose inspection or insurance is overdue on the date (lib/fleet
+   * complianceAlerts), with the alerts. Reported, not blocking (PO question).
+   */
+  fleetAlerts: Map<string, string[]>;
 };
 
 /** Everything the crews of isoDate depend on, resolved (lib/staff/day-crews.ts). */
 export async function loadDayCrewContext(prisma: PrismaClient, isoDate: string): Promise<DayCrewContext> {
   const serviceDate = fromIsoDate(isoDate);
-  const [vehicles, people, absences, incompatibilities, saved, outages] = await Promise.all([
+  const [vehicles, people, absences, incompatibilities, saved, outages, deadlines, odometers] = await Promise.all([
     prisma.vehicle.findMany({
       select: { id: true, label: true, type: true, active: true, depotId: true, defaultDriverId: true, defaultCrewMateId: true },
     }),
@@ -581,7 +587,21 @@ export async function loadDayCrewContext(prisma: PrismaClient, isoDate: string):
       where: { startDate: { lte: serviceDate }, endDate: { gte: serviceDate } },
       select: { vehicleId: true, kind: true, startDate: true, endDate: true },
     }),
+    prisma.maintenanceDeadline.findMany({
+      where: { kind: { in: [...COMPLIANCE_KINDS] }, doneDate: null },
+      select: { vehicleId: true, kind: true, label: true, dueDate: true, dueKm: true, doneDate: true },
+    }),
+    prisma.fuelLog.groupBy({ by: ["vehicleId"], _max: { odometerKm: true } }),
   ]);
+  const odometerOf = new Map(odometers.map((o) => [o.vehicleId, o._max.odometerKm ?? null]));
+  const fleetAlerts = new Map<string, string[]>();
+  for (const vehicle of vehicles) {
+    const own = deadlines
+      .filter((d) => d.vehicleId === vehicle.id)
+      .map((d) => ({ ...d, dueDate: d.dueDate ? toIsoDate(d.dueDate) : null, doneDate: d.doneDate ? toIsoDate(d.doneDate) : null }));
+    const alerts = own.length > 0 ? complianceAlerts(own, isoDate, odometerOf.get(vehicle.id) ?? null) : [];
+    if (alerts.length > 0) fleetAlerts.set(vehicle.id, alerts);
+  }
   const input: DayCrewInput = {
     date: isoDate,
     vehicles,
@@ -591,7 +611,7 @@ export async function loadDayCrewContext(prisma: PrismaClient, isoDate: string):
     saved,
     vehicleUnavailabilities: outages.map((u) => ({ ...u, startDate: toIsoDate(u.startDate), endDate: toIsoDate(u.endDate) })),
   };
-  return { input, plan: resolveDayCrews(input), people: new Map(people.map((p) => [p.id, p])) };
+  return { input, plan: resolveDayCrews(input), people: new Map(people.map((p) => [p.id, p])), fleetAlerts };
 }
 
 /** Every vehicle with the crew of isoDate (optimisation, planning view, moves). */

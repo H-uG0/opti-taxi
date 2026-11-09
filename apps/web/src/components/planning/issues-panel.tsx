@@ -1,16 +1,19 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { OctagonAlert, CircleSlash, LockKeyholeOpen, RotateCcw, UserX } from "lucide-react";
+import Link from "next/link";
+import { CarFront, OctagonAlert, CircleSlash, LockKeyholeOpen, RotateCcw, UserX } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
 import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_SHORT_LABEL } from "@/lib/domain/no-show";
 import type { DroppedLock } from "@/lib/optimizer/build-request";
+import type { VehicleIssue } from "@/lib/planning/route-issues";
 import type { TripView, UnassignedView, ViolationView } from "@/lib/planning/types";
 import { DIRECTION_LABELS } from "@/lib/labels";
 import { formatMinute } from "@/lib/time";
 
 export type IssuesPanelProps = {
+  date: string;
   unassigned: UnassignedView[];
   violations: ViolationView[];
   violationsKnown: boolean;
@@ -18,6 +21,8 @@ export type IssuesPanelProps = {
   droppedLocks: DroppedLock[];
   /** Return trips to check: their outbound leg was closed as "patient absent". */
   returnsToCheck: string[];
+  /** Routes planned before a change of vehicle or crew, overdue inspection or insurance. */
+  vehicleIssues: VehicleIssue[];
   trips: Record<string, TripView>;
   vehicleLabels: Record<string, string>;
   planned: boolean;
@@ -93,14 +98,31 @@ function Section({
   );
 }
 
-/** Everything the regulator should look at: returns after an absence, unassigned trips, violations, stale or ignored locks. */
+/** What to do about vehicles to review, said once for the section. */
+function vehicleIssuesIntro(issues: readonly VehicleIssue[], date: string): ReactNode {
+  const changed = issues.some((issue) => issue.changes.length > 0);
+  const compliance = issues.some((issue) => issue.compliance.length > 0);
+  return (
+    <>
+      {changed ? "Changements survenus depuis le calcul : réoptimisez pour appliquer les équipages du jour. " : null}
+      {compliance ? "Échéance dépassée : vérifiez le véhicule avant de le faire rouler. " : null}
+      <Link href={`/equipages?date=${date}`} className="font-medium text-brand-700 underline-offset-2 hover:underline">
+        Équipages du jour
+      </Link>
+    </>
+  );
+}
+
+/** Everything the regulator should look at: vehicles to review, returns after an absence, unassigned trips, violations, stale or ignored locks. */
 export function IssuesPanel({
+  date,
   unassigned,
   violations,
   violationsKnown,
   staleTrips,
   droppedLocks,
   returnsToCheck,
+  vehicleIssues,
   trips,
   vehicleLabels,
   planned,
@@ -109,6 +131,7 @@ export function IssuesPanel({
   onSelectVehicle,
 }: IssuesPanelProps) {
   const count =
+    vehicleIssues.length +
     returnsToCheck.length +
     (planned ? unassigned.length : 0) +
     violations.length +
@@ -128,6 +151,40 @@ export function IssuesPanel({
               Le dernier calcul signalait des violations, mais leur détail n&apos;a pas été enregistré (calcul antérieur à
               cette version) : relancez l&apos;optimisation pour les revoir.
             </p>
+          ) : null}
+
+          {vehicleIssues.length > 0 ? (
+            <Section
+              icon={<CarFront aria-hidden className="size-3.5" />}
+              title={`Véhicules à revoir (${vehicleIssues.length})`}
+              tone="red"
+              intro={vehicleIssuesIntro(vehicleIssues, date)}
+            >
+              {vehicleIssues.map((issue) => (
+                <li key={issue.vehicleId}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectVehicle(issue.vehicleId)}
+                    className="block w-full rounded-md px-2 py-1.5 text-left hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-brand-600"
+                  >
+                    <span className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-sm font-medium text-slate-900">{issue.label}</span>
+                      <span className="shrink-0 text-xs text-slate-500">{issue.hasRoute ? "Tournée calculée" : "Sans tournée"}</span>
+                    </span>
+                    {issue.changes.map((message) => (
+                      <span key={message} className="mt-0.5 block text-xs font-medium text-red-800">
+                        {message}
+                      </span>
+                    ))}
+                    {issue.compliance.map((message) => (
+                      <span key={message} className="mt-0.5 block text-xs text-amber-800">
+                        {message}
+                      </span>
+                    ))}
+                  </button>
+                </li>
+              ))}
+            </Section>
           ) : null}
 
           {returnsToCheck.length > 0 ? (

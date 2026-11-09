@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { unavailabilityOn, unavailabilityText } from "./availability";
 import { consumptionStats, energyUnit, type FuelEntry } from "./consumption";
-import { deadlineAlerts, deadlineState, type Deadline } from "./maintenance";
+import { complianceAlerts, deadlineAlerts, deadlineState, type Deadline } from "./maintenance";
 
 const TODAY = "2026-11-08";
 
@@ -71,5 +71,35 @@ describe("consumptionStats", () => {
     expect(energyUnit("ELECTRIC")).toBe("kWh");
     expect(energyUnit("DIESEL")).toBe("L");
     expect(energyUnit(null)).toBe("L");
+  });
+});
+
+describe("complianceAlerts (inspection and insurance on the service date)", () => {
+  const deadline = (overrides: Partial<Deadline>): Deadline => ({
+    kind: "INSPECTION",
+    label: null,
+    dueDate: "2026-11-09",
+    dueKm: null,
+    doneDate: null,
+    ...overrides,
+  });
+
+  it("reports an inspection or insurance already overdue on the service date", () => {
+    expect(complianceAlerts([deadline({})], "2026-11-10", null)).toEqual(["Contrôle technique : échéance dépassée (09/11/2026)"]);
+    expect(complianceAlerts([deadline({ kind: "INSURANCE", label: "AXA" })], "2026-11-10", null)).toEqual([
+      "Assurance (AXA) : échéance dépassée (09/11/2026)",
+    ]);
+  });
+
+  it("is judged on the service date, not today: due that day is still met, done or other kinds are ignored", () => {
+    expect(complianceAlerts([deadline({})], "2026-11-09", null)).toEqual([]);
+    expect(complianceAlerts([deadline({ doneDate: "2026-11-08" })], "2026-11-10", null)).toEqual([]);
+    expect(complianceAlerts([deadline({ kind: "SERVICE" }), deadline({ kind: "TIRES" })], "2026-11-10", null)).toEqual([]);
+  });
+
+  it("counts a mileage deadline passed at the last odometer reading", () => {
+    expect(complianceAlerts([deadline({ dueDate: null, dueKm: 120_000 })], "2026-11-10", 121_000)).toEqual([
+      "Contrôle technique : échéance dépassée",
+    ]);
   });
 });

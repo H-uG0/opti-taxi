@@ -14,6 +14,7 @@ import type {
 } from "@prisma/client";
 import type { TariffGap } from "@/lib/domain/tariffs";
 import type { DroppedLock, ExcludedTrip, SkippedVehicle } from "@/lib/optimizer/build-request";
+import type { VehicleIssue } from "./route-issues";
 
 export type LatLngView = { lat: number; lng: number };
 
@@ -206,6 +207,12 @@ export type PlanningDayView = {
   tariffGaps: TariffGap[];
   /** Trips whose state changed after planning (cancelled while still in a route…). */
   staleTrips: UnassignedView[];
+  /**
+   * Vehicles whose route was planned before a change of vehicle or crew
+   * (unavailability, absence, crew changed), or whose inspection or insurance
+   * is overdue on the date (lib/planning/route-issues.ts).
+   */
+  vehicleIssues: VehicleIssue[];
   /** Latest run of any status. */
   lastRun: RunView | null;
   /** Run that produced the current routes (latest successful one). */

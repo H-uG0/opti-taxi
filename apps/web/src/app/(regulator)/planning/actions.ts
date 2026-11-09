@@ -7,9 +7,9 @@ import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { loadDayVehicleInputs, personName, resolveVehicleAvailability } from "@/lib/optimizer/build-request";
-import { readRunDetails } from "@/lib/optimizer/run-details";
 import { logError } from "@/lib/log";
 import { planningErrorMessage } from "@/lib/planning/action-errors";
+import { loadPlanningDay } from "@/lib/planning/load";
 import { LOCKED, lockAction, notLockedOn } from "@/lib/planning/lock";
 import {
   OPTIMIZATION_IN_PROGRESS_ERROR,
@@ -18,6 +18,7 @@ import {
   replanBlocker,
   runOptimization,
 } from "@/lib/planning/run-optimization";
+import { validationIssues, validationQuestion } from "@/lib/planning/validation";
 import { VEHICLE_TYPE_SHORT } from "@/lib/labels";
 import { formatLongDate, fromIsoDate, isIsoDate, todayIso, toIsoDate } from "@/lib/time";
 
@@ -231,8 +232,10 @@ export async function unlockTrip(tripId: string): Promise<PlanningActionResult> 
 
 /**
  * « Valider le planning » : every route of the date becomes VALIDATED. When
- * the plan has unassigned trips, violations or cancelled trips still on a
- * route, the regulator must confirm explicitly (`confirmed`).
+ * the plan carries something to fix (route planned before a change of vehicle
+ * or crew, overdue inspection or insurance, unassigned trip, violation, return
+ * to check, trip to review), the regulator must confirm explicitly
+ * (`confirmed`): validationIssues, the same list as the page's « À traiter ».
  */
 export async function validateDay(date: string, confirmed: boolean): Promise<PlanningActionResult> {
   const user = await requireUser("REGULATOR");
@@ -245,31 +248,13 @@ export async function validateDay(date: string, confirmed: boolean): Promise<Pla
     if (await optimizationInProgress(isoDate)) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
 
     const serviceDate = fromIsoDate(isoDate);
-    const [routes, unassigned, stale, planRun] = await Promise.all([
-      db.route.count({ where: { serviceDate } }),
-      db.trip.count({ where: { serviceDate, status: { notIn: ["CANCELLED", "NO_SHOW"] }, routeId: null } }),
-      db.trip.count({ where: { serviceDate, status: { in: ["CANCELLED", "NO_SHOW"] }, routeId: { not: null } } }),
-      db.optimizationRun.findFirst({
-        where: { serviceDate, status: "SUCCESS" },
-        orderBy: { startedAt: "desc" },
-        // kpis: details of runs saved before the details column (see run-details.ts).
-        select: { id: true, valid: true, details: true, kpis: true },
-      }),
-    ]);
+    // The same view as the page: unassigned trips, violations, trips and routes to review.
+    const [routes, view] = await Promise.all([db.route.count({ where: { serviceDate } }), loadPlanningDay(isoDate)]);
     if (routes === 0) return { ok: false, error: "Aucune tournée à valider : lancez d'abord l'optimisation." };
 
-    const issues: string[] = [];
-    if (unassigned > 0) issues.push(plural(unassigned, "course non affectée", "courses non affectées"));
-    const details = planRun ? readRunDetails(planRun) : null;
-    if (details && details.violations.length > 0) {
-      issues.push(plural(details.violations.length, "violation de contrainte", "violations de contraintes"));
-    } else if (!details && planRun?.valid === false) {
-      issues.push("des violations de contraintes");
-    }
-    if (stale > 0) issues.push(plural(stale, "course annulée encore dans une tournée", "courses annulées encore dans une tournée"));
-
+    const issues = validationIssues(view);
     if (issues.length > 0 && confirmed !== true) {
-      return { ok: false, needsConfirmation: true, error: `Le planning comporte ${issues.join(", ")}. Valider quand même ?` };
+      return { ok: false, needsConfirmation: true, error: validationQuestion(issues) };
     }
 
     await db.$transaction(async (tx) => {

@@ -12,6 +12,7 @@ import {
 } from "@/lib/optimizer/build-request";
 import { readRunDetails, type RunDetails } from "@/lib/optimizer/run-details";
 import { fromIsoDate } from "@/lib/time";
+import { vehicleIssues } from "./route-issues";
 import type { PlanningDayView } from "./types";
 import { buildPlanningView } from "./view";
 
@@ -74,6 +75,8 @@ export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView 
       select: {
         id: true,
         vehicleId: true,
+        driverId: true,
+        crewMateId: true,
         status: true,
         startMinute: true,
         endMinute: true,
@@ -123,6 +126,16 @@ export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView 
   }
 
   const vehicles = applyDayCrewPlan(defaultVehicles, crewContext.plan, crewContext.people);
+  // Routes planned before a change of vehicle or crew, overdue inspection or insurance.
+  const issues = vehicleIssues({
+    date: isoDate,
+    routes,
+    vehicles: defaultVehicles,
+    plan: crewContext.plan,
+    absences: crewContext.input.absences,
+    people: crewContext.people,
+    fleetAlerts: crewContext.fleetAlerts,
+  });
   const view = buildPlanningView({
     date: isoDate,
     settings,
@@ -133,6 +146,7 @@ export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView 
     planRun,
     details,
     tariffs,
+    vehicleIssues: issues,
     baseColors: VEHICLE_TYPE_HEX,
   });
   // view.timeLimitSec: the solver budget scaled with the day's trips, not the bare setting.

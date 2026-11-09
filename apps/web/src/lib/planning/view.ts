@@ -28,6 +28,7 @@ import { computeDayKpis as computeDashboardDayKpis, type KpiRoute, type KpiTrip 
 import { VIOLATION_LABELS } from "@/lib/labels";
 import { vehicleShade } from "./colors";
 import { resolveTripRefs } from "./move";
+import type { VehicleIssue } from "./route-issues";
 import { coPassengers, computeTimeRange } from "./timeline";
 import type {
   DayKpis,
@@ -133,6 +134,8 @@ export type PlanningRawInput = {
   details: ReadonlyMap<string, RunDetails>;
   /** Tariff grids that may be in force that day (loadTariffInputs): vehicles without one are flagged. */
   tariffs: TariffInput[];
+  /** Routes made impossible since their computation, overdue deadlines (route-issues.ts); none when absent. */
+  vehicleIssues?: VehicleIssue[];
   baseColors: Record<VehicleType, string>;
   /** Time of the page load, to tell a live RUNNING run from an interrupted one; defaults to the current time. */
   now?: Date;
@@ -515,6 +518,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     notes: build.notes,
     tariffGaps: build.tariffGaps,
     staleTrips,
+    vehicleIssues: input.vehicleIssues ?? [],
     lastRun: runView(input.lastRun, input.details, input.settings.solverTimeLimitSec, now, patientOf),
     planRun: runView(input.planRun, input.details, input.settings.solverTimeLimitSec, now, patientOf),
     timeRange: computeTimeRange(rows),

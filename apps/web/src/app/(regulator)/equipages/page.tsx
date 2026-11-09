@@ -7,10 +7,12 @@ import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { loadDayCrewContext } from "@/lib/optimizer/build-request";
+import { vehicleIssues } from "@/lib/planning/route-issues";
 import { replanBlocker } from "@/lib/planning/run-optimization";
 import { absenceOn, isQualified, planningAbsenceText, staffName } from "@/lib/staff/day-crews";
 import { formatLongDate, fromIsoDate, isIsoDate, isoWeekday, tomorrowIso } from "@/lib/time";
 import { DateNav } from "../planning/date-nav";
+import { Callout } from "../vehicules/_lib/ui";
 import { CrewForm, type CrewPersonOption, type CrewRow } from "./crew-form";
 
 export const metadata: Metadata = { title: "Équipages" };
@@ -27,16 +29,27 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
   const tomorrow = tomorrowIso();
   const date = isIsoDate(requested) ? requested : tomorrow;
 
-  const [context, vehicles, depots, locked, routeCount] = await Promise.all([
+  const [context, vehicles, depots, locked, routes] = await Promise.all([
     loadDayCrewContext(db, date),
     db.vehicle.findMany({ where: { active: true }, select: { id: true, label: true, type: true, registration: true, depotId: true } }),
     db.depot.findMany({ select: { id: true, name: true } }),
     replanBlocker(date),
-    db.route.count({ where: { serviceDate: fromIsoDate(date) } }),
+    db.route.findMany({ where: { serviceDate: fromIsoDate(date) }, select: { vehicleId: true, driverId: true, crewMateId: true } }),
     // Everyone's absences of the day are on screen.
     auditRead(user, { action: "day_crew.view", entity: "DayCrew", entityId: null, serviceDate: date }),
   ]);
   const { plan, input } = context;
+  const routeCount = routes.length;
+  // The same list as the planning's « À traiter » (lib/planning/route-issues.ts).
+  const issues = vehicleIssues({
+    date,
+    routes,
+    vehicles: input.vehicles,
+    plan,
+    absences: input.absences,
+    people: context.people,
+    fleetAlerts: context.fleetAlerts,
+  });
   const depotName = new Map(depots.map((d) => [d.id, d.name]));
   const crewOf = new Map(plan.crews.map((c) => [c.vehicleId, c]));
   const weekday = isoWeekday(date);
@@ -111,6 +124,28 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
             </Link>
             .
           </FormMessage>
+        ) : null}
+        {issues.length > 0 ? (
+          <Callout tone="warning" title={`Véhicules à revoir (${issues.length})`}>
+            {issues.some((issue) => issue.changes.length > 0) ? (
+              <p>
+                Ces tournées ont été calculées avant un changement de véhicule ou d&apos;équipage : relancez
+                l&apos;optimisation depuis le{" "}
+                <Link href={`/planning?date=${date}`} className="font-medium underline">
+                  planning
+                </Link>{" "}
+                pour appliquer les équipages ci-dessous.
+              </p>
+            ) : null}
+            <ul className="list-disc space-y-0.5 pl-5">
+              {issues.map((issue) => (
+                <li key={issue.vehicleId}>
+                  <span className="font-medium">{issue.label}</span>
+                  {issue.hasRoute ? "" : " (sans tournée)"} : {[...issue.changes, ...issue.compliance].join(" ; ")}
+                </li>
+              ))}
+            </ul>
+          </Callout>
         ) : null}
         <p className="text-sm text-slate-600">
           {hasSavedCrews

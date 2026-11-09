@@ -72,3 +72,25 @@ export function deadlineAlerts<T extends Deadline>(
     .filter((a) => a.state.status === "overdue" || a.state.status === "soon")
     .sort((a, b) => (a.state.status === b.state.status ? 0 : a.state.status === "overdue" ? -1 : 1));
 }
+
+/**
+ * Deadlines without which a vehicle may not carry patients: technical
+ * inspection and insurance. Whether an overdue one should also take the
+ * vehicle out of the planning, like an unavailability, is a PO question:
+ * for now it is reported, not blocking.
+ */
+export const COMPLIANCE_KINDS: readonly MaintenanceKind[] = ["INSPECTION", "INSURANCE"];
+
+/**
+ * "Contrôle technique : échéance dépassée (05/11/2026)": the inspection and
+ * insurance deadlines already overdue on the service date `isoDate` (a
+ * deadline due that very day is still met), given the last odometer reading.
+ */
+export function complianceAlerts(deadlines: readonly Deadline[], isoDate: string, odometerKm: number | null): string[] {
+  return deadlines
+    .filter((d) => COMPLIANCE_KINDS.includes(d.kind) && deadlineState(d, isoDate, odometerKm).status === "overdue")
+    .map((d) => {
+      const since = d.dueDate !== null && d.dueDate < isoDate ? ` (${formatShortDate(d.dueDate)})` : "";
+      return `${deadlineName(d)} : échéance dépassée${since}`;
+    });
+}

@@ -160,6 +160,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
               violations={view.violations}
               violationsKnown={view.violationsKnown}
               staleTrips={view.staleTrips}
+              vehicleIssues={view.vehicleIssues}
               droppedLocks={view.droppedLocks}
               timeRange={view.timeRange}
               planned={hasRoutes}
