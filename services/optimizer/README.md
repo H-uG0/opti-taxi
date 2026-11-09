@@ -29,6 +29,9 @@ Variables d'environnement :
 | --- | --- |
 | `OSRM_URL` | ex. `http://localhost:5050` : temps et distances routiers via OSRM. Vide : estimation à vol d'oiseau. |
 | `LOG_LEVEL` | `info` par défaut (temps de calcul de chaque requête dans les journaux). |
+| `OPTIMIZER_TOKEN` | jeton partagé avec le web : `/optimize` et `/evaluate` exigent `Authorization: Bearer <jeton>` (sinon `401`), `/health` reste libre. Vide : aucun contrôle, signalé au démarrage (développement seulement). Générer avec `openssl rand -base64 32`. |
+| `OPTIMIZER_MAX_CONCURRENT_SOLVES` | calculs simultanés, 2 par défaut (1 à 8) ; au-delà, `/optimize` répond `429` (« réessayez dans une minute » côté web). Un calcul à 120 véhicules occupe 2 à 4 Go. |
+| `OPTIMIZER_MAX_BODY_MB` | taille maximale d'une requête, 10 Mo par défaut (sinon `413`). |
 
 Tests (~2 min sur la machine de développement ; `tests/test_search.py` lance trois interpréteurs,
 un par valeur de `PYTHONHASHSEED`) :
@@ -64,6 +67,7 @@ docker compose up -d --build optimizer
 | `app/validator.py` | validateur indépendant des contraintes dures (codes de violation du contrat) |
 | `app/kpis.py` | indicateurs de la journée |
 | `app/service.py`, `app/main.py` | opérations `optimize` / `evaluate` et API HTTP |
+| `app/security.py` | jeton d'accès, nombre de calculs simultanés, taille des requêtes |
 
 ## Choix de modélisation
 

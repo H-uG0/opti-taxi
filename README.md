@@ -172,6 +172,13 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
   ou annulé une prise en charge, une dépose ou une absence. Il ne contient que des identifiants, jamais
   de nom, d'adresse ni de note. L'auteur d'une prise en charge, d'une absence ou d'une réponse de
   partage est aussi affiché sur la course (Courses et Planning).
+- **Service d'optimisation** : il reçoit les coordonnées des domiciles et les rendez-vous. Avec
+  `OPTIMIZER_TOKEN` (même valeur sur le web et sur l'optimiseur), il refuse tout appel sans ce jeton
+  (`401`) ; sans jeton il accepte tout appel, ce que les deux services signalent au démarrage en
+  production. Il limite les calculs simultanés (2 par défaut, `429` au-delà : « réessayez dans une
+  minute »), la taille des requêtes (10 Mo) et leur contenu (300 véhicules, 3 000 courses), et son
+  conteneur est limité à 8 Go de mémoire. En production il reste sur un réseau privé, sans port
+  publié. Les ports de `docker-compose.yml` n'écoutent que sur la machine elle-même (127.0.0.1).
 - **Journaux serveur** : les erreurs, y compris celles que Next.js journalise lui-même, sont écrites
   sans les arguments des requêtes Prisma (qui contiendraient adresses et notes).
 - **En-têtes** : Content-Security-Policy avec nonce par requête, Permissions-Policy,

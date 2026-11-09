@@ -4,6 +4,9 @@
 #   docker compose up -d postgres optimizer    development (then pnpm dev, see README)
 #   docker compose --profile osrm up -d osrm   road times (after bash infra/osrm/prepare.sh), then
 #                                              OSRM_URL=http://osrm:5000 in .env and restart the optimizer
+# Published ports listen on this machine only (127.0.0.1): the database password is the default one and
+# the optimizer receives patients' addresses. OPTIMIZER_TOKEN (in .env, same value for both services)
+# makes the optimizer refuse callers without it; unset, it accepts any caller (development).
 name: opti-taxi
 
 services:
@@ -14,7 +17,7 @@ services:
       POSTGRES_PASSWORD: optitaxi
       POSTGRES_DB: optitaxi
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -29,8 +32,14 @@ services:
       # Empty = straight-line estimate. With the osrm profile running: http://osrm:5000
       OSRM_URL: ${OSRM_URL:-}
       LOG_LEVEL: info
+      # Empty: no authentication (warned at startup). Same value as the web service.
+      OPTIMIZER_TOKEN: ${OPTIMIZER_TOKEN:-}
+      # Solves at once (2 to 4 GB each at 120 vehicles); beyond, /optimize answers 429.
+      OPTIMIZER_MAX_CONCURRENT_SOLVES: ${OPTIMIZER_MAX_CONCURRENT_SOLVES:-2}
+    # Two large solves at once fit; a runaway one is stopped rather than starving the machine.
+    mem_limit: ${OPTIMIZER_MEM_LIMIT:-8g}
     ports:
-      - "8100:8100"
+      - "127.0.0.1:8100:8100"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
       interval: 10s
@@ -52,13 +61,14 @@ services:
     environment:
       DATABASE_URL: postgresql://optitaxi:optitaxi@postgres:5432/optitaxi
       OPTIMIZER_URL: http://optimizer:8100
+      OPTIMIZER_TOKEN: ${OPTIMIZER_TOKEN:-}
       GEOCODER_URL: https://data.geopf.fr/geocodage/search
       # 1: demo with fictitious data only (seed + history on an empty database, banner;
       # the seed's accounts have public passwords). Never set it in production: without
       # it the database starts empty and the server refuses to start if demo accounts exist.
       DEMO_MODE: "1"
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     init: true
 
   osrm:
@@ -66,7 +76,7 @@ services:
     image: ghcr.io/project-osrm/osrm-backend:v5.27.1
     command: osrm-routed --algorithm mld --max-table-size 1000 /data/region.osrm
     ports:
-      - "5050:5000"
+      - "127.0.0.1:5050:5000"
     volumes:
       - ./infra/osrm/data:/data
 

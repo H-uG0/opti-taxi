@@ -5,7 +5,8 @@
  * time it signs or reads a cookie. In production outside demo mode, also
  * refuses to start while the seed's demo accounts (public passwords) exist
  * (lib/demo.ts). Warns when the sign-in throttling cannot key on client
- * addresses (TRUSTED_PROXY_HOPS, lib/auth/rate-limit.ts).
+ * addresses (TRUSTED_PROXY_HOPS, lib/auth/rate-limit.ts) and when the
+ * optimizer is called without a token (OPTIMIZER_TOKEN, lib/optimizer/token.ts).
  * Next.js logs uncaught errors with console.error(error) and a Prisma error
  * prints its query arguments (addresses, notes): console.error is wrapped so
  * those errors are reduced to their safe fields (lib/log.ts).
@@ -24,6 +25,9 @@ export async function register(): Promise<void> {
     const { proxyHopsWarning } = await import("./lib/auth/rate-limit");
     const warning = proxyHopsWarning(process.env.TRUSTED_PROXY_HOPS, process.env.NODE_ENV);
     if (warning) console.warn(`[startup] ${warning}`);
+    const { optimizerTokenWarning } = await import("./lib/optimizer/token");
+    const tokenWarning = optimizerTokenWarning(process.env);
+    if (tokenWarning) console.warn(`[startup] ${tokenWarning}`);
 
     const { checkDemoAccountsAtStartup, DEMO_EMAIL_DOMAIN } = await import("./lib/demo");
     await checkDemoAccountsAtStartup(async () => {

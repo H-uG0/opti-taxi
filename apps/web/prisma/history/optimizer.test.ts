@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { OptimizeRequest, PlanResponse } from "@/lib/optimizer/contract";
 import { HistoryError } from "./errors";
 import {
+  BUSY_RETRIES,
   createOptimizerClient,
   OptimizerCallError,
   optimizerBaseUrl,
@@ -140,6 +141,43 @@ describe("history optimizer client", () => {
     expect(withTimeLimit(request, null)).toBe(request);
     expect(withTimeLimit(request, 3).settings.timeLimitSec).toBe(3);
     expect(request.settings.timeLimitSec).toBe(10);
+  });
+
+  it("sends the OPTIMIZER_TOKEN header given, and none without a token", async () => {
+    const headers: Record<string, string>[] = [];
+    const fetchImpl: FetchLike = async (_url, init) => {
+      headers.push(init.headers as Record<string, string>);
+      return json(plan);
+    };
+    await createOptimizerClient("http://x", fetchImpl, { authHeaders: { authorization: "Bearer s3cret" } }).optimize(request);
+    await createOptimizerClient("http://x", fetchImpl, { authHeaders: {} }).optimize(request);
+    expect(headers[0]?.authorization).toBe("Bearer s3cret");
+    expect(headers[1]).not.toHaveProperty("authorization");
+  });
+
+  it("asks a busy service (429) again after a pause, then gives up with a clear message", async () => {
+    const pauses: number[] = [];
+    const pause = async (ms: number) => {
+      pauses.push(ms);
+    };
+    let calls = 0;
+    const busyTwice: FetchLike = async () => (++calls <= 2 ? json({ detail: "occupé" }, 429) : json(plan));
+    await expect(createOptimizerClient("http://x", busyTwice, { pause }).optimize(request)).resolves.toEqual(plan);
+    expect(calls).toBe(3);
+    expect(pauses).toHaveLength(2);
+
+    calls = 0;
+    const alwaysBusy: FetchLike = async () => {
+      calls++;
+      return json({ detail: "occupé" }, 429);
+    };
+    await expect(createOptimizerClient("http://x", alwaysBusy, { pause }).optimize(request)).rejects.toThrow(/Réessayez/);
+    expect(calls).toBe(BUSY_RETRIES + 1);
+  });
+
+  it("explains a refused token", async () => {
+    const client = createOptimizerClient("http://x", async () => json({ detail: "Jeton invalide" }, 401), { authHeaders: {} });
+    await expect(client.optimize(request)).rejects.toThrow(/OPTIMIZER_TOKEN/);
   });
 
   it("reads OPTIMIZER_URL without its trailing slash", () => {

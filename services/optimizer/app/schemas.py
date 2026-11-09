@@ -36,6 +36,12 @@ ViolationCode = Literal[
 MINUTES_PER_DAY = 24 * 60
 DayMinute = Annotated[int, Field(ge=0, le=2 * MINUTES_PER_DAY)]
 
+# Bounds of a request (a 120-vehicle day is about 1 000 trips): beyond, 422 before any work.
+# Same values in contract.ts (MAX_VEHICLES, MAX_TRIPS, MAX_TARIFFS).
+MAX_VEHICLES = 300
+MAX_TRIPS = 3000
+MAX_TARIFFS = 500
+
 
 class ContractModel(BaseModel):
     model_config = ConfigDict(
@@ -168,9 +174,9 @@ class Tariff(ContractModel):
 class OptimizeRequest(ContractModel):
     date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     settings: Settings
-    vehicles: list[Vehicle]
-    trips: list[Trip]
-    tariffs: list[Tariff]
+    vehicles: list[Vehicle] = Field(max_length=MAX_VEHICLES)
+    trips: list[Trip] = Field(max_length=MAX_TRIPS)
+    tariffs: list[Tariff] = Field(max_length=MAX_TARIFFS)
 
 
 class StopRef(ContractModel):
@@ -180,11 +186,11 @@ class StopRef(ContractModel):
 
 class RoutePlan(ContractModel):
     vehicle_id: str
-    stops: list[StopRef]
+    stops: list[StopRef] = Field(max_length=2 * MAX_TRIPS)
 
 
 class EvaluateRequest(OptimizeRequest):
-    routes: list[RoutePlan]
+    routes: list[RoutePlan] = Field(max_length=MAX_VEHICLES)
 
 
 class BreakSlot(ContractModel):

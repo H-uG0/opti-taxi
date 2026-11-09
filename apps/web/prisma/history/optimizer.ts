@@ -1,8 +1,11 @@
 /**
  * Optimizer calls of the history script. lib/optimizer/client.ts is
  * server-only (Next.js): this is the same HTTP exchange, checked against the
- * same zod contract, for a command-line script. `fetch` is a parameter so the
- * error handling is unit-tested without a running service.
+ * same zod contract and with the same OPTIMIZER_TOKEN header, for a
+ * command-line script. `fetch` is a parameter so the error handling is
+ * unit-tested without a running service. A solve refused because the service
+ * is busy (429: a regulator optimizing at the same time, e.g. on the demo
+ * while the history loads in the background) is retried after a pause.
  */
 import type { z } from "zod";
 import {
@@ -14,6 +17,8 @@ import {
   type OptimizeRequest,
   type PlanResponse,
 } from "@/lib/optimizer/contract";
+import { optimizerHttpErrorMessage } from "@/lib/optimizer/http-errors";
+import { optimizerAuthHeaders } from "@/lib/optimizer/token";
 import { HistoryError } from "./errors";
 
 const DEFAULT_OPTIMIZER_URL = "http://localhost:8100";
@@ -21,8 +26,18 @@ const DEFAULT_OPTIMIZER_URL = "http://localhost:8100";
 const HEALTH_TIMEOUT_MS = 15_000;
 /** Margin added to the solver time limit for the distance matrix, validation and network. */
 const RESPONSE_MARGIN_SEC = 60;
+/** A busy service (429) is asked again this many times, BUSY_PAUSE_MS apart (5 min in all). */
+export const BUSY_RETRIES = 20;
+const BUSY_PAUSE_MS = 15_000;
 
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
+
+export type OptimizerClientOptions = {
+  /** Authorization header (OPTIMIZER_TOKEN); read from the environment by default. */
+  authHeaders?: Record<string, string>;
+  /** Pause before asking a busy service again (tests: no wait). */
+  pause?: (ms: number) => Promise<void>;
+};
 
 /** Same reasons as lib/optimizer/client.ts (OptimizerFailureReason): refreshRoutes tells « unavailable » from « failed » with them. */
 export type OptimizerFailureReason = "unreachable" | "timeout" | "error";
@@ -103,23 +118,40 @@ async function errorDetail(response: Response): Promise<string> {
   return text.slice(0, 300);
 }
 
-export function createOptimizerClient(baseUrl: string, fetchImpl: FetchLike = fetch): OptimizerClient {
+export function createOptimizerClient(
+  baseUrl: string,
+  fetchImpl: FetchLike = fetch,
+  options: OptimizerClientOptions = {},
+): OptimizerClient {
+  const authHeaders = options.authHeaders ?? optimizerAuthHeaders();
+  const pause = options.pause ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
+  async function send(path: string, init: { method: "GET" | "POST"; body?: unknown; timeoutMs: number }): Promise<Response> {
+    return fetchImpl(`${baseUrl}${path}`, {
+      method: init.method,
+      headers: {
+        accept: "application/json",
+        ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+        ...authHeaders,
+      },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      signal: AbortSignal.timeout(init.timeoutMs),
+    });
+  }
+
   async function call<S extends z.ZodType>(
     path: string,
     schema: S,
-    init: { method: "GET" | "POST"; body?: unknown; timeoutMs: number },
+    init: { method: "GET" | "POST"; body?: unknown; timeoutMs: number; retryWhenBusy?: boolean },
   ): Promise<z.infer<S>> {
     let response: Response;
     try {
-      response = await fetchImpl(`${baseUrl}${path}`, {
-        method: init.method,
-        headers:
-          init.body === undefined
-            ? { accept: "application/json" }
-            : { "content-type": "application/json", accept: "application/json" },
-        body: init.body === undefined ? undefined : JSON.stringify(init.body),
-        signal: AbortSignal.timeout(init.timeoutMs),
-      });
+      response = await send(path, init);
+      for (let retry = 0; init.retryWhenBusy && response.status === 429 && retry < BUSY_RETRIES; retry++) {
+        await response.body?.cancel();
+        await pause(BUSY_PAUSE_MS);
+        response = await send(path, init);
+      }
     } catch (error) {
       if (error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError")) {
         throw new OptimizerCallError(
@@ -131,10 +163,7 @@ export function createOptimizerClient(baseUrl: string, fetchImpl: FetchLike = fe
       throw new OptimizerCallError(unreachableMessage(baseUrl), "unreachable");
     }
     if (!response.ok) {
-      throw new OptimizerCallError(
-        `Le service d'optimisation a renvoyé une erreur (HTTP ${response.status}) : ${await errorDetail(response)}`,
-        "error",
-      );
+      throw new OptimizerCallError(optimizerHttpErrorMessage(response.status, await errorDetail(response)), "error");
     }
     let json: unknown;
     try {
@@ -167,6 +196,7 @@ export function createOptimizerClient(baseUrl: string, fetchImpl: FetchLike = fe
         method: "POST",
         body: body.data,
         timeoutMs: timeoutFor(body.data.settings.timeLimitSec),
+        retryWhenBusy: true,
       });
     },
     async evaluate(request) {

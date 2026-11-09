@@ -133,12 +133,20 @@ export const tariffSchema = z.strictObject({
   sharedDiscount3: z.number().min(0).max(1),
 });
 
+/**
+ * Bounds of a request (a 120-vehicle day is about 1 000 trips), the same in
+ * services/optimizer/app/schemas.py: the optimizer refuses more with 422.
+ */
+export const MAX_VEHICLES = 300;
+export const MAX_TRIPS = 3000;
+export const MAX_TARIFFS = 500;
+
 export const optimizeRequestSchema = z.strictObject({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   settings: settingsSchema,
-  vehicles: z.array(vehicleSchema),
-  trips: z.array(tripSchema),
-  tariffs: z.array(tariffSchema),
+  vehicles: z.array(vehicleSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} véhicules au plus par calcul`),
+  trips: z.array(tripSchema).max(MAX_TRIPS, `${MAX_TRIPS} courses au plus par calcul`),
+  tariffs: z.array(tariffSchema).max(MAX_TARIFFS, `${MAX_TARIFFS} grilles tarifaires au plus par calcul`),
 });
 
 export const stopRefSchema = z.strictObject({
@@ -148,11 +156,11 @@ export const stopRefSchema = z.strictObject({
 
 export const routePlanSchema = z.strictObject({
   vehicleId: z.string(),
-  stops: z.array(stopRefSchema),
+  stops: z.array(stopRefSchema).max(2 * MAX_TRIPS),
 });
 
 export const evaluateRequestSchema = optimizeRequestSchema.extend({
-  routes: z.array(routePlanSchema),
+  routes: z.array(routePlanSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} tournées au plus par évaluation`),
 });
 
 export const breakSlotSchema = z.strictObject({

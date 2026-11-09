@@ -1,7 +1,8 @@
 /**
  * HTTP client of the optimizer service (services/optimizer, FastAPI).
  * Requests and responses are checked against the zod contract; every failure
- * becomes a French message the regulator can act on.
+ * becomes a French message the regulator can act on. With OPTIMIZER_TOKEN set,
+ * every call carries it (lib/optimizer/token.ts).
  */
 import "server-only";
 import type { z } from "zod";
@@ -14,6 +15,8 @@ import {
   type OptimizeRequest,
   type PlanResponse,
 } from "./contract";
+import { optimizerHttpErrorMessage } from "./http-errors";
+import { optimizerAuthHeaders } from "./token";
 
 const DEFAULT_OPTIMIZER_URL = "http://localhost:8100";
 /** Margin added to the solver time limit for the distance matrix, validation and network. */
@@ -75,7 +78,11 @@ async function call<S extends z.ZodType>(
   try {
     response = await fetch(`${base}${path}`, {
       method: init.method,
-      headers: init.body === undefined ? { accept: "application/json" } : { "content-type": "application/json", accept: "application/json" },
+      headers: {
+        accept: "application/json",
+        ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+        ...optimizerAuthHeaders(),
+      },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       signal: AbortSignal.timeout(init.timeoutMs),
       cache: "no-store",
@@ -93,11 +100,7 @@ async function call<S extends z.ZodType>(
 
   if (!response.ok) {
     const detail = await readErrorDetail(response);
-    return {
-      ok: false,
-      error: `Le service d'optimisation a renvoyé une erreur (HTTP ${response.status}) : ${detail}`,
-      reason: "error",
-    };
+    return { ok: false, error: optimizerHttpErrorMessage(response.status, detail), reason: "error" };
   }
 
   let json: unknown;

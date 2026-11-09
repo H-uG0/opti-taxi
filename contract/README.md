@@ -14,6 +14,20 @@ par les deux ; un test de chaque côté le vérifie. Toute évolution modifie le
 
 Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_generator=to_camel`).
 
+## Authentification et limites
+
+- **Jeton** : quand `OPTIMIZER_TOKEN` est défini sur le service, `POST /optimize` et `POST /evaluate`
+  exigent l'en-tête `Authorization: Bearer <OPTIMIZER_TOKEN>` (comparaison en temps constant) et
+  répondent `401` sans lui ou avec un autre jeton. `GET /health` reste libre. Le web envoie l'en-tête
+  dès que sa propre variable `OPTIMIZER_TOKEN` est définie (même valeur des deux côtés). Sans jeton
+  configuré, le service accepte tout appel et le signale au démarrage (développement seulement).
+- **Calculs simultanés** : `POST /optimize` répond `429` (en-tête `Retry-After: 30`) quand
+  `OPTIMIZER_MAX_CONCURRENT_SOLVES` calculs (2 par défaut) tournent déjà. `/evaluate`, sans solveur,
+  n'est pas compté.
+- **Taille** : un corps de plus de `OPTIMIZER_MAX_BODY_MB` Mo (10 par défaut) reçoit `413` avant
+  d'être lu. Une requête porte au plus 300 véhicules (`vehicles`, et `routes` pour `/evaluate`),
+  3 000 courses (`trips`) et 500 grilles (`tariffs`) ; au-delà, `422`.
+
 ## Unités
 
 - Heures : **entiers, minutes depuis minuit, heure locale Europe/Paris** de la date planifiée (`450` = 07:30).
