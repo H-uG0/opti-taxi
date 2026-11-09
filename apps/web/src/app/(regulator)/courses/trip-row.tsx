@@ -15,6 +15,7 @@ import {
   type UserCancellationReason,
 } from "@/lib/domain/cancellation";
 import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_LABEL } from "@/lib/domain/no-show";
+import { EXCEPTIONAL_AMBULANCE_REASON } from "@/lib/planning/exceptional-ambulance";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Td } from "@/components/ui/table";
 import { DIRECTION_LABELS, PAYER_LABELS, SHARING_STATUS_LABELS, TRIP_STATUS_LABELS, formatEuros, formatKm } from "@/lib/labels";
@@ -63,6 +64,8 @@ export type TripRowData = {
   vehicleLabel: string | null;
   vehicleType: VehicleType | null;
   lockedVehicleLabel: string | null;
+  /** « Recours exceptionnel à une ambulance » in force (seated trip locked on an ambulance): who proposed it and when. */
+  exceptionalAmbulance?: RecordTrace | null;
   plannedPickupMinute: number | null;
   plannedDropoffMinute: number | null;
   shared: boolean;
@@ -190,6 +193,11 @@ export function TripRow({ trip }: { trip: TripRowData }) {
               PEC {formatMinute(trip.plannedPickupMinute)} · dépose {formatMinute(trip.plannedDropoffMinute)}
             </span>
           ) : null}
+          {trip.exceptionalAmbulance ? (
+            <span className="mt-1 flex" title={`${EXCEPTIONAL_AMBULANCE_REASON}. ${trip.exceptionalAmbulance.full}.`}>
+              <Badge tone="warning">Recours exceptionnel</Badge>
+            </span>
+          ) : null}
         </Td>
         <Td className={muted}>
           <Badge tone={SHARING_STATUS_TONES[trip.sharingStatus]}>{SHARING_STATUS_LABELS[trip.sharingStatus]}</Badge>
@@ -298,6 +306,12 @@ function TripDetails({ trip }: { trip: TripRowData }) {
             </Detail>
           ) : null}
           {trip.lockedVehicleLabel ? <Detail label="Verrou">Figée sur {trip.lockedVehicleLabel}</Detail> : null}
+          {trip.exceptionalAmbulance ? (
+            <Detail label="Recours exceptionnel">
+              {EXCEPTIONAL_AMBULANCE_REASON} : ambulance facturée au tarif VSL.
+              <span className="block text-xs text-slate-500">{trip.exceptionalAmbulance.full}.</span>
+            </Detail>
+          ) : null}
           {trip.directKm !== null ? (
             <Detail label="Distance">
               <span className="tabular">

@@ -8,6 +8,7 @@ import { Card, CardBody, CardHeader, EmptyState, PageHeader } from "@/components
 import { TBody, THead, Table, Td, Th } from "@/components/ui/table";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { DEFAULT_FARE_RULES, fareRulesOf } from "@/lib/domain/fare";
 import { companyStatusOn, readSharedDiscounts, tariffCoverageAlerts, tariffsInForce, toFareGrid } from "@/lib/domain/tariffs";
 import { formatEuros, formatKm, formatPercent, VEHICLE_TYPE_LABELS, VEHICLE_TYPE_SHORT } from "@/lib/labels";
 import { addDays, formatLongDate, formatShortDate, todayIso, tomorrowIso, toIsoDate } from "@/lib/time";
@@ -99,7 +100,7 @@ export default async function TariffsPage({
     db.companyCertification.findMany({ select: { validFrom: true, validTo: true }, orderBy: { validFrom: "asc" } }),
     db.appSettings.findUnique({
       where: { id: 1 },
-      select: { hqDepartment: true, hqCity: true, emptyLegRule: true, sharedPatientCount: true },
+      select: { hqDepartment: true, hqCity: true, emptyLegRule: true, surchargeOrder: true, sharedPatientCount: true },
     }),
   ]);
   const company = { certifications, hqDepartment: settings?.hqDepartment ?? null };
@@ -248,35 +249,33 @@ export default async function TariffsPage({
                         <Th className="text-right" title="Abattement à 2, 3, 4 patients et plus">
                           Partage
                         </Th>
-                        <Th>
-                          <span className="sr-only">Actions</span>
-                        </Th>
                       </tr>
                     </THead>
                     {groupByScope(ofType).map(({ department, certified, grids: list }) => (
                       <TBody key={`${department}/${certified}`}>
                         <tr className="bg-slate-50/70">
-                          <th scope="rowgroup" colSpan={6} className="px-3 py-1.5 text-left text-xs font-semibold text-slate-600">
+                          <th scope="rowgroup" colSpan={5} className="px-3 py-1.5 text-left text-xs font-semibold text-slate-600">
                             {scopeTitle(department, certified)}
                           </th>
                         </tr>
                         {list.map((grid) => {
                           const status = tariffStatus(grid, today, inForceIds);
                           const extras = [
-                            grid.bigCityFare > 0 ? `+${formatEuros(grid.bigCityFare)} grande ville` : null,
+                            // Non-breaking: wraps as « +15,00 € » / « grande ville » in a narrow column.
+                            grid.bigCityFare > 0 ? `+${formatEuros(grid.bigCityFare)} grande\u00a0ville` : null,
                             grid.aggloFare !== null ? `agglo. ${formatEuros(grid.aggloFare)}` : null,
                           ].filter(Boolean);
                           return (
                             <tr key={grid.id} className={status === "IN_FORCE" ? "hover:bg-slate-50" : "text-slate-500 hover:bg-slate-50"}>
-                              <Td className="max-w-64">
+                              <Td className="min-w-48 whitespace-normal">
+                                {/* Wrapped, never cut: the whole label reads without a tooltip. */}
                                 <Link
                                   href={`/tarifs/${grid.id}`}
-                                  className="block truncate font-medium text-slate-900 underline-offset-2 hover:text-brand-700 hover:underline"
-                                  title={grid.notes ?? undefined}
+                                  className="block font-medium wrap-break-word text-slate-900 underline-offset-2 hover:text-brand-700 hover:underline"
                                 >
                                   {grid.label ?? "Sans libellé"}
                                 </Link>
-                                <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
+                                <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
                                   <Badge tone={STATUS_TONES[status]}>{TARIFF_STATUS_LABELS[status]}</Badge>
                                   <span className="tabular text-slate-500">{validityText(grid)}</span>
                                   <Badge tone={VERIFICATION_TONES[grid.verification]}>{VERIFICATION_LABELS[grid.verification]}</Badge>
@@ -291,6 +290,16 @@ export default async function TariffsPage({
                                       <ExternalLink aria-hidden className="size-3" />
                                     </a>
                                   ) : null}
+                                  {/* In the label cell, not a last column: always in view, whatever the width. */}
+                                  <Link
+                                    href={`/tarifs/nouveau?depuis=${grid.id}`}
+                                    className="inline-flex items-center gap-0.5 font-medium text-brand-700 underline-offset-2 hover:underline"
+                                    title="Nouvelle version datée de cette grille (avenant)"
+                                    aria-label={`Dupliquer la grille ${grid.label ?? departmentLabel(grid.department)}`}
+                                  >
+                                    <Copy aria-hidden className="size-3" />
+                                    Dupliquer
+                                  </Link>
                                 </span>
                               </Td>
                               <Td className="tabular text-right">
@@ -314,17 +323,6 @@ export default async function TariffsPage({
                                   {grid.maxSharedPatients > 1 ? `${grid.maxSharedPatients} patients max.` : "pas de partage"}
                                 </span>
                               </Td>
-                              <Td className="w-10 text-right">
-                                <LinkButton
-                                  href={`/tarifs/nouveau?depuis=${grid.id}`}
-                                  size="sm"
-                                  variant="ghost"
-                                  title="Dupliquer : nouvelle version datée de cette grille"
-                                  aria-label={`Dupliquer la grille ${grid.label ?? departmentLabel(grid.department)}`}
-                                >
-                                  <Copy aria-hidden className="size-3.5" />
-                                </LinkButton>
-                              </Td>
                             </tr>
                           );
                         })}
@@ -342,6 +340,8 @@ export default async function TariffsPage({
           <CardBody>
             <FareSimulator
               grids={simulatorGrids}
+              rules={settings ? fareRulesOf(settings) : DEFAULT_FARE_RULES}
+              emptyLegCounted={(settings?.emptyLegRule ?? "DEPOT") !== "NONE"}
               defaultGridId={
                 inForce.find((g) => g.vehicleType === "TAXI" && g.department === settings?.hqDepartment)?.id ??
                 inForce.find((g) => g.vehicleType === "TAXI")?.id ??

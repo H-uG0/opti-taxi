@@ -5,7 +5,7 @@
 import type { EmptyLegRule, SharedPatientCount, SurchargeOrder } from "@prisma/client";
 
 export const EMPTY_LEG_LABELS: Record<EmptyLegRule, string> = {
-  NONE: "Jamais (non modélisé)",
+  NONE: "Jamais (pas de majoration du retour à vide)",
   DEPOT: "Aller qui termine la tournée, retour qui la commence (véhicule à vide jusqu'à la station)",
 };
 

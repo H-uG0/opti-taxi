@@ -92,8 +92,8 @@ describe("TripPanel (panneau course)", () => {
     expect((screen.getByRole("button", { name: "Déplacer" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("offers an exceptional ambulance for an unassigned seated trip only, and sends the one chosen", async () => {
-    const unassigned = { ...planningFixture().trips["trip-a"]!, vehicleId: null, coPassengerTripIds: [], shared: false };
+  it("offers an exceptional ambulance for a seated trip the optimizer left unassigned only, and sends the one chosen", async () => {
+    const unassigned = { ...planningFixture().trips["trip-a"]!, vehicleId: null, coPassengerTripIds: [], shared: false, leftByOptimizer: true };
     renderPanel(unassigned);
     const select = screen.getByLabelText("Ambulance proposée") as HTMLSelectElement;
     expect(Array.from(select.options).map((o) => o.textContent)).toEqual(["Choisir une ambulance", "Ambulance 1 (Marseille) — libre"]);
@@ -113,6 +113,18 @@ describe("TripPanel (panneau course)", () => {
     cleanup();
     renderPanel({ ...unassigned, payer: "PRIVATE", allowedVehicleTypes: ["TAXI"] });
     expect(screen.queryByText("Recours exceptionnel à une ambulance")).toBeNull();
+    cleanup();
+
+    // Not yet optimized, or added since the last computation: no taxi or VSL was tried, optimize first.
+    renderPanel({ ...unassigned, leftByOptimizer: false });
+    expect(screen.queryByLabelText("Ambulance proposée")).toBeNull();
+    expect(screen.getByText(/^Optimisez d'abord la journée/)).toBeTruthy();
+  });
+
+  it("warns that « Défiger » ends the exceptional measure", () => {
+    renderPanel({ ...planningFixture().trips["trip-a"]!, vehicleId: "amb-1", lockedVehicleId: "amb-1", exceptionalAmbulance: true });
+    expect(screen.getByText("« Défiger » retire le recours exceptionnel à l'ambulance.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Défiger/ }).getAttribute("title")).toMatch(/^Retire le recours exceptionnel/);
   });
 
   it("shows a trip carried by an ambulance as an exceptional measure, at the VSL tariff", () => {

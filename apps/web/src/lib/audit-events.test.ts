@@ -89,4 +89,13 @@ describe("changedFields", () => {
     });
     expect(changedFields({ s: [{ a: 1 }] }, { s: [{ a: 1 }] })).toEqual({});
   });
+
+  it("reads a list of objects the same whatever the order of its keys (jsonb reorders them)", () => {
+    const stored = { sharedDiscounts: [{ rate: 0.23, patients: 2 }], shortTripBands: [{ amount: 8.54, upToKm: 7 }] };
+    const typed = { sharedDiscounts: [{ patients: 2, rate: 0.23 }], shortTripBands: [{ upToKm: 7, amount: 8.54 }] };
+    expect(changedFields(stored, typed)).toEqual({});
+    expect(changedFields(stored, { ...typed, shortTripBands: [{ upToKm: 7, amount: 9 }] })).toEqual({
+      shortTripBands: { from: '[{"amount":8.54,"upToKm":7}]', to: '[{"amount":9,"upToKm":7}]' },
+    });
+  });
 });

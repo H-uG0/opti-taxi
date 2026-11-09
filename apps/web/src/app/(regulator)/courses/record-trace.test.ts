@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   cancellationTrace,
+  exceptionalAmbulanceTrace,
   formatDayTime,
   outboundNoShowTrace,
   recordTrace,
@@ -153,5 +154,27 @@ describe("cancellationTrace", () => {
   it("is null for a trip not cancelled, or cancelled before the instant was recorded", () => {
     expect(cancellationTrace({ ...cancelled, status: "PLANNED", cancellationOrigin: null })).toBeNull();
     expect(cancellationTrace({ ...cancelled, cancelledAt: null, cancellationOrigin: null })).toBeNull();
+  });
+});
+
+describe("exceptionalAmbulanceTrace", () => {
+  const proposal = {
+    exceptionalAmbulanceAt: AT,
+    exceptionalAmbulanceBy: { name: "Marie Durand" },
+    lockedVehicleId: "amb",
+    lockedVehicle: { type: "AMBULANCE" as const },
+    allowedVehicleTypes: ["TAXI" as const, "VSL" as const],
+  };
+
+  it("names who proposed the ambulance at the VSL tariff, and when", () => {
+    expect(exceptionalAmbulanceTrace(proposal)).toEqual({
+      full: "Ambulance au tarif VSL proposée par Marie Durand le 03/11 à 08:12",
+      short: "par Marie Durand · 03/11 à 08:12",
+    });
+  });
+
+  it("has nothing to say once the trip is no longer locked on the ambulance", () => {
+    expect(exceptionalAmbulanceTrace({ ...proposal, lockedVehicleId: null, lockedVehicle: null })).toBeNull();
+    expect(exceptionalAmbulanceTrace({ ...proposal, exceptionalAmbulanceAt: null })).toBeNull();
   });
 });

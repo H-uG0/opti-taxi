@@ -45,6 +45,7 @@ import { tariffGapNote } from "./format";
 import { withBeforeCommit } from "./before-commit";
 import { lockPlanningDay } from "./day-lock";
 import { emptyPlanIssue } from "./empty-plan";
+import { isExceptionalAmbulanceTrip } from "./exceptional-ambulance";
 import { lockAction } from "./lock";
 import {
   movePlacementIssue,
@@ -154,6 +155,54 @@ export async function optimizationInProgress(
   const { solverTimeLimitSec } = await getSettings(db);
   const { live } = await runningRuns(client, fromIsoDate(isoDate), solverTimeLimitSec);
   return live.length > 0;
+}
+
+/**
+ * Trips the plan in place of isoDate (its last saved computation) left
+ * without a vehicle: the only ones an exceptional ambulance may be proposed
+ * for (TAR-03). Empty before any computation.
+ */
+export async function unassignedByLastPlan(isoDate: string): Promise<ReadonlySet<string>> {
+  const run = await db.optimizationRun.findFirst({
+    where: { serviceDate: fromIsoDate(isoDate), status: "SUCCESS" },
+    orderBy: { startedAt: "desc" },
+    select: { id: true, details: true, kpis: true },
+  });
+  const details = run ? readRunDetails(run) : null;
+  return new Set(details?.unassigned.map((u) => u.tripId) ?? []);
+}
+
+/**
+ * Exceptional ambulance proposals of isoDate no longer in force (TAR-03): the
+ * trip is no longer locked on an ambulance (moved, unlocked, the plan that
+ * carried it discarded), or its prescription now allows an ambulance. Cleared
+ * and traced (trip.exceptional_ambulance_withdrawn) in `tx`: with every plan
+ * saved, and when a plan waiting for confirmation is dropped. A proposal
+ * whose plan still waits for confirmation keeps its flag (the plan is
+ * rebuilt with it), so never call this while one may wait.
+ */
+export async function withdrawLapsedProposals(tx: Prisma.TransactionClient, user: Actor, isoDate: string): Promise<void> {
+  const proposed = await tx.trip.findMany({
+    where: { serviceDate: fromIsoDate(isoDate), exceptionalAmbulanceAt: { not: null } },
+    select: {
+      id: true,
+      exceptionalAmbulanceAt: true,
+      lockedVehicleId: true,
+      allowedVehicleTypes: true,
+      lockedVehicle: { select: { type: true } },
+    },
+  });
+  const lapsed = proposed.filter((trip) => !isExceptionalAmbulanceTrip(trip, () => trip.lockedVehicle?.type)).map((trip) => trip.id);
+  if (lapsed.length === 0) return;
+  await tx.trip.updateMany({
+    where: { id: { in: lapsed }, exceptionalAmbulanceAt: { not: null } },
+    data: { exceptionalAmbulanceAt: null, exceptionalAmbulanceById: null },
+  });
+  await audit(
+    tx,
+    user,
+    lapsed.map((id) => ({ action: "trip.exceptional_ambulance_withdrawn" as const, entity: "Trip" as const, entityId: id, serviceDate: isoDate })),
+  );
 }
 
 /** Why savePlan's guard kept the routes in place. */
@@ -508,6 +557,7 @@ async function finishRun(args: {
       await audit(tx, user, { action: AUDIT_ACTION[kind], entity: "OptimizationRun", entityId: runId, serviceDate: isoDate });
       // A restoration puts back, with the routes, the lock the move it undoes had replaced.
       if (lock && !lock.written) await writeLockChange(tx, user, isoDate, lock.change);
+      await withdrawLapsedProposals(tx, user, isoDate);
     });
     saved = await savePlan(traced, {
       runId,
@@ -727,6 +777,7 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
       if (lockChange) {
         await writeLockChange(tx, user, isoDate, lockChange, kind === "move" ? "trip.move" : lockAction(lockChange.to));
       }
+      await withdrawLapsedProposals(tx, user, isoDate);
     });
     saved = await savePlan(traced, {
       runId: run.id,

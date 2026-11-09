@@ -20,6 +20,7 @@ export function ConfirmAction({
   pendingLabel = "En cours…",
   question,
   variant = "danger",
+  ariaLabel,
 }: {
   action: Action;
   label: string;
@@ -27,6 +28,8 @@ export function ConfirmAction({
   pendingLabel?: string;
   question: ReactNode;
   variant?: ButtonVariant;
+  /** Accessible name of the first button when `label` alone does not say what it acts on (a row of a list). */
+  ariaLabel?: string;
 }) {
   const [state, formAction] = useActionState(action, IDLE_STATE);
   const [confirming, setConfirming] = useState(false);
@@ -38,7 +41,7 @@ export function ConfirmAction({
   if (!confirming) {
     return (
       <div className="space-y-3">
-        <Button variant={variant === "danger" ? "secondary" : variant} size="sm" onClick={() => setConfirming(true)}>
+        <Button variant={variant === "danger" ? "secondary" : variant} size="sm" aria-label={ariaLabel} onClick={() => setConfirming(true)}>
           {label}
         </Button>
         {result}

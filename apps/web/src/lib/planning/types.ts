@@ -133,6 +133,12 @@ export type TripView = {
    * still locked on it: billed at the VSL tariff (TAR-03). Absent: false.
    */
   exceptionalAmbulance?: boolean;
+  /**
+   * The last optimization of the day ran and left this trip without a vehicle
+   * (its « unassigned » list): only then may a regulator propose an
+   * exceptional ambulance. Absent: false.
+   */
+  leftByOptimizer?: boolean;
 };
 
 export type UnassignedView = {

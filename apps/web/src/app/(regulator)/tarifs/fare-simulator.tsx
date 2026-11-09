@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Checkbox, Field, Select } from "@/components/ui/form";
-import { DEFAULT_FARE_RULES, fareEuros, rideMinutes, sameRide, type FareCalendar, type FareGrid } from "@/lib/domain/fare";
+import { fareEuros, rideMinutes, sameRide, type FareCalendar, type FareGrid, type FareRules } from "@/lib/domain/fare";
 import { formatEuros, formatPercent } from "@/lib/labels";
 import { parseDecimal } from "@/lib/forms";
 import { UnitInput } from "../vehicules/_lib/ui";
@@ -22,8 +22,22 @@ const MOMENTS = {
 
 type Moment = keyof typeof MOMENTS;
 
-/** Example fare for N km, alone and shared, with one of the grids. */
-export function FareSimulator({ grids, defaultGridId }: { grids: SimulatorGrid[]; defaultGridId: string | null }) {
+/**
+ * Example fare for N km, alone and shared, with one of the grids and the
+ * company's readings of the conventions (Règles de facturation): `rules` and
+ * `emptyLegCounted` (the empty-leg surcharge is billed at all).
+ */
+export function FareSimulator({
+  grids,
+  defaultGridId,
+  rules,
+  emptyLegCounted,
+}: {
+  grids: SimulatorGrid[];
+  defaultGridId: string | null;
+  rules: FareRules;
+  emptyLegCounted: boolean;
+}) {
   const [gridId, setGridId] = useState(defaultGridId ?? grids[0]?.id ?? "");
   const [kmText, setKmText] = useState("25");
   const [moment, setMoment] = useState<Moment>("weekday");
@@ -40,10 +54,12 @@ export function FareSimulator({ grids, defaultGridId }: { grids: SimulatorGrid[]
   }
 
   const when = MOMENTS[moment];
+  const emptyLegOffered = emptyLegCounted && grid !== undefined && (grid.emptyLegRateShort > 0 || grid.emptyLegRateLong > 0);
+  const withEmptyLeg = emptyLeg && emptyLegOffered;
   const trip = {
     bigCity: bigCity && (grid?.bigCityFare ?? 0) > 0,
     agglomeration: agglomeration && grid?.aggloFare != null,
-    hospitalLinked: emptyLeg,
+    hospitalLinked: withEmptyLeg,
     wheelchair: false,
     tollAmount: 0,
   };
@@ -53,8 +69,8 @@ export function FareSimulator({ grids, defaultGridId }: { grids: SimulatorGrid[]
           grid,
           trip,
           { tpmrEquipped: false },
-          { ...sameRide(km, patients, when.pickupMin, rideMinutes(km)), emptyLeg: emptyLeg && patients === 1 },
-          DEFAULT_FARE_RULES,
+          { ...sameRide(km, patients, when.pickupMin, rideMinutes(km)), emptyLeg: withEmptyLeg && patients === 1 },
+          rules,
           when.calendar,
         )
       : 0;
@@ -95,7 +111,7 @@ export function FareSimulator({ grids, defaultGridId }: { grids: SimulatorGrid[]
           </Select>
         </Field>
       </div>
-      {grid && (grid.bigCityFare > 0 || grid.aggloFare !== null || grid.emptyLegRateShort > 0 || grid.emptyLegRateLong > 0) ? (
+      {grid && (grid.bigCityFare > 0 || grid.aggloFare !== null || emptyLegOffered) ? (
         <div className="space-y-1.5">
           {grid.bigCityFare > 0 ? (
             <Checkbox checked={bigCity} onChange={(e) => setBigCity(e.target.checked)} label={`Grande ville (+${formatEuros(grid.bigCityFare)})`} />
@@ -103,8 +119,12 @@ export function FareSimulator({ grids, defaultGridId }: { grids: SimulatorGrid[]
           {grid.aggloFare !== null ? (
             <Checkbox checked={agglomeration} onChange={(e) => setAgglomeration(e.target.checked)} label="Dans l'agglomération du siège" />
           ) : null}
-          {grid.emptyLegRateShort > 0 || grid.emptyLegRateLong > 0 ? (
-            <Checkbox checked={emptyLeg} onChange={(e) => setEmptyLeg(e.target.checked)} label="Hospitalisation avec retour à vide (patient seul)" />
+          {emptyLegOffered ? (
+            <Checkbox
+              checked={emptyLeg}
+              onChange={(e) => setEmptyLeg(e.target.checked)}
+              label="Dialyse, chimiothérapie ou radiothérapie avec retour à vide (patient seul)"
+            />
           ) : null}
         </div>
       ) : null}

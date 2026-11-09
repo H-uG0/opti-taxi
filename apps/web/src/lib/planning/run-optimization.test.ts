@@ -52,7 +52,9 @@ vi.mock("@/lib/optimizer/persist", () => ({
   savePlan: fake.savePlan,
 }));
 
-const { confirmPendingRun, discardPendingRun, restorePreviousPlan, runOptimization } = await import("./run-optimization");
+const { confirmPendingRun, discardPendingRun, restorePreviousPlan, runOptimization, withdrawLapsedProposals } = await import(
+  "./run-optimization"
+);
 const { planVersionToken, requestHash } = await import("./version");
 
 const DATE = "2099-03-02";
@@ -620,5 +622,37 @@ describe("a plan waiting for confirmation", () => {
     expect(order).toEqual(["lock", "discard"]);
     const dropped = fake.db.optimizationRun.updateMany.mock.calls.at(-1)![0] as { data: { details: object } };
     expect(dropped.data.details).not.toHaveProperty("pending");
+  });
+});
+
+describe("withdrawLapsedProposals (recours exceptionnel)", () => {
+  it("clears and traces the proposals no longer locked on an ambulance, and keeps the ones in force", async () => {
+    const at = new Date("2026-11-02T17:00:00Z");
+    const seated = ["TAXI", "VSL"];
+    fake.db.trip.findMany.mockResolvedValue([
+      { id: "kept", exceptionalAmbulanceAt: at, lockedVehicleId: "amb", allowedVehicleTypes: seated, lockedVehicle: { type: "AMBULANCE" } },
+      { id: "unlocked", exceptionalAmbulanceAt: at, lockedVehicleId: null, allowedVehicleTypes: seated, lockedVehicle: null },
+      { id: "moved", exceptionalAmbulanceAt: at, lockedVehicleId: "vsl", allowedVehicleTypes: seated, lockedVehicle: { type: "VSL" } },
+      { id: "lying", exceptionalAmbulanceAt: at, lockedVehicleId: "amb", allowedVehicleTypes: ["AMBULANCE"], lockedVehicle: { type: "AMBULANCE" } },
+    ]);
+    const tx = fake.db as unknown as Parameters<typeof withdrawLapsedProposals>[0];
+    await withdrawLapsedProposals(tx, REGULATOR, DATE);
+    expect(fake.db.trip.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["unlocked", "moved", "lying"] }, exceptionalAmbulanceAt: { not: null } },
+      data: { exceptionalAmbulanceAt: null, exceptionalAmbulanceById: null },
+    });
+    const events = fake.audit.mock.calls[0]![2] as { action: string; entityId: string }[];
+    expect(events.map((e) => [e.action, e.entityId])).toEqual([
+      ["trip.exceptional_ambulance_withdrawn", "unlocked"],
+      ["trip.exceptional_ambulance_withdrawn", "moved"],
+      ["trip.exceptional_ambulance_withdrawn", "lying"],
+    ]);
+  });
+
+  it("writes nothing when every proposal still holds", async () => {
+    fake.db.trip.findMany.mockResolvedValue([]);
+    await withdrawLapsedProposals(fake.db as unknown as Parameters<typeof withdrawLapsedProposals>[0], REGULATOR, DATE);
+    expect(fake.db.trip.updateMany).not.toHaveBeenCalled();
+    expect(fake.audit).not.toHaveBeenCalled();
   });
 });

@@ -9,7 +9,7 @@ import type { TariffGrid, TariffVerification, VehicleType } from "@prisma/client
 import type { BadgeTone } from "@/components/ui/badge";
 import { readSharedDiscounts, readShortTripBands } from "@/lib/domain/tariffs";
 import type { FareGrid, ShortTripBand } from "@/lib/domain/fare";
-import { formatMinute, fromIsoDate, toIsoDate } from "@/lib/time";
+import { formatMinute, formatShortDate, fromIsoDate, toIsoDate } from "@/lib/time";
 import { departmentField } from "../vehicules/_lib/departments";
 import {
   dateField,
@@ -86,6 +86,16 @@ export function parseKmList(text: string): number[] | null {
   return values.every((v): v is number => v !== undefined && Number.isFinite(v) && v >= 0) ? values : null;
 }
 
+/**
+ * Bounds of the optimizer contract (lib/optimizer/contract.ts tariffSchema,
+ * services/optimizer/app/schemas.py Tariff): a grid outside them would make
+ * every computation of the days it covers fail, so the form refuses it.
+ */
+export const MAX_SHORT_TRIP_BANDS = 50;
+export const MAX_BILLABLE_DETOURS = 7;
+/** Largest distance (km) and amount (€) of a short-trip band or a detour. */
+const MAX_LIST_VALUE = 1000;
+
 const percent = (max = 100) => numberField({ min: 0, max, unit: "%" });
 const optionalPercent = () => optionalNumberField({ min: 0, max: 100, unit: "%" });
 
@@ -144,17 +154,28 @@ export const tariffSchema = tariffFields
         });
       }
     });
-    if (v.shortTripBands && parseShortTripBands(v.shortTripBands) === null) {
-      ctx.addIssue({ code: "custom", path: ["shortTripBands"], message: "Une tranche par ligne : « km : montant », ex. « 7 : 8,54 »." });
-    } else if (v.shortTripBands) {
-      const bands = parseShortTripBands(v.shortTripBands)!;
-      if (new Set(bands.map((b) => b.upToKm)).size !== bands.length) {
-        ctx.addIssue({ code: "custom", path: ["shortTripBands"], message: "Deux tranches ont la même distance." });
-      }
-    }
-    if (v.billableDetourKm && parseKmList(v.billableDetourKm) === null) {
-      ctx.addIssue({ code: "custom", path: ["billableDetourKm"], message: "Des km séparés par « ; », ex. « 10 ; 10 »." });
-    }
+    const bands = v.shortTripBands ? parseShortTripBands(v.shortTripBands) : [];
+    const bandIssue =
+      bands === null
+        ? "Une tranche par ligne : « km : montant », ex. « 7 : 8,54 »."
+        : new Set(bands.map((b) => b.upToKm)).size !== bands.length
+          ? "Deux tranches ont la même distance."
+          : bands.length > MAX_SHORT_TRIP_BANDS
+            ? `${MAX_SHORT_TRIP_BANDS} tranches au plus.`
+            : bands.some((b) => b.upToKm > MAX_LIST_VALUE || b.amount > MAX_LIST_VALUE)
+              ? "Distances et montants de 1 000 au plus."
+              : null;
+    if (bandIssue) ctx.addIssue({ code: "custom", path: ["shortTripBands"], message: bandIssue });
+    const detours = v.billableDetourKm ? parseKmList(v.billableDetourKm) : [];
+    const detourIssue =
+      detours === null
+        ? "Des km séparés par « ; », ex. « 10 ; 10 »."
+        : detours.length > MAX_BILLABLE_DETOURS
+          ? `${MAX_BILLABLE_DETOURS} détours au plus (un par patient ajouté).`
+          : detours.some((km) => km > MAX_LIST_VALUE)
+            ? "1 000 km au plus par détour."
+            : null;
+    if (detourIssue) ctx.addIssue({ code: "custom", path: ["billableDetourKm"], message: detourIssue });
     if (v.validTo !== null && v.validTo < v.validFrom) {
       ctx.addIssue({ code: "custom", path: ["validTo"], message: "La fin de validité doit être postérieure ou égale au début." });
     }
@@ -320,6 +341,23 @@ export function tariffFormValues(grid?: TariffRecord, overrides: Partial<Record<
     if (value !== undefined) base[key] = value;
   }
   return base;
+}
+
+/**
+ * « Dupliquer »: the form of a new version of `source`, effective `fromIso`,
+ * open-ended. Its amounts are those of the source, to be adjusted, but not its
+ * verification, source or notes: they were about the previous text, and a new
+ * avenant typed by hand is not « Officiel » until checked.
+ */
+export function duplicateOverrides(source: Pick<TariffGrid, "label" | "validFrom">, fromIso: string): Record<string, string> {
+  const from = formatShortDate(toIsoDate(source.validFrom));
+  return {
+    validFrom: fromIso,
+    validTo: "",
+    verification: "UNVERIFIED",
+    sourceUrl: "",
+    notes: `Reprise de la grille${source.label ? ` « ${source.label} »` : ""} en vigueur depuis le ${from}.`.slice(0, 500),
+  };
 }
 
 /** The grid typed so far as fare.ts reads it, or null while an amount is missing or invalid. */

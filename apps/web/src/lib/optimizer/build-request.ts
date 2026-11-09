@@ -43,10 +43,12 @@ import {
   tariffsInForce,
   toFareGrid,
   type CompanyTariffContext,
+  type CompanyTariffStatus,
   type PricedGrid,
   type TariffGap,
 } from "@/lib/domain/tariffs";
 import { complianceAlerts, COMPLIANCE_KINDS } from "@/lib/fleet/maintenance";
+import { isExceptionalAmbulanceTrip } from "@/lib/planning/exceptional-ambulance";
 import type { ReplaceThresholds } from "@/lib/planning/plan-compare";
 import {
   DEFAULT_CREW_RULES,
@@ -572,23 +574,18 @@ export function tripBillingFlags(
   };
 }
 
-/** Prescribed vehicle types a seated (TAP) trip may exceptionally extend with an ambulance. */
-function isSeatedOnly(types: readonly VehicleType[]): boolean {
-  return types.length > 0 && !types.includes("AMBULANCE") && types.some((t) => t === "TAXI" || t === "VSL");
-}
+export { isExceptionalAmbulanceTrip };
 
 /**
- * Is `trip` an exceptional ambulance trip on this date: proposed by a
- * regulator, still locked on an ambulance, seated only by prescription
- * (TAR-03)? The optimizer then accepts that ambulance for it, at the VSL
- * tariff; without the lock, it goes back to taxi or VSL only.
+ * The grid an exceptional ambulance trip is billed at (TAR-03): the VSL grid
+ * the company would use for that department on the date (gridForVehicle).
  */
-export function isExceptionalAmbulanceTrip(
-  trip: Pick<TripInput, "exceptionalAmbulanceAt" | "lockedVehicleId" | "allowedVehicleTypes">,
-  vehicleType: (id: string) => VehicleType | undefined,
-): boolean {
-  if (!trip.exceptionalAmbulanceAt || !trip.lockedVehicleId) return false;
-  return isSeatedOnly(trip.allowedVehicleTypes) && vehicleType(trip.lockedVehicleId) === "AMBULANCE";
+export function exceptionalAmbulanceGrid<T extends Pick<TariffGrid, "vehicleType" | "department" | "certified">>(
+  inForce: readonly T[],
+  ambulance: { department: string },
+  status: CompanyTariffStatus,
+): T | undefined {
+  return gridForVehicle(inForce, { type: "VSL", department: ambulance.department }, status);
 }
 
 /** Pure: the optimizer request of input.date, plus everything left out and why. */
@@ -619,6 +616,8 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
   const trips: OptimizerTrip[] = [];
   const droppedLocks: DroppedLock[] = [];
   const excludedTrips: ExcludedTrip[] = [];
+  // Ambulances carrying an exceptional seated trip without a VSL grid that day (the optimizer falls back to theirs).
+  const seatedGridMissing = new Set<string>();
 
   for (const raw of input.trips) {
     if (EXCLUDED_TRIP_STATUSES.includes(raw.status)) continue;
@@ -648,8 +647,9 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
     let tariffId: string | null = null;
     if (trip !== raw && lockedVehicleId) {
       const ambulance = availableById.get(lockedVehicleId)!;
-      const seated = gridForVehicle(inForce, { type: "VSL", department: ambulance.department }, status);
+      const seated = exceptionalAmbulanceGrid(inForce, ambulance, status);
       if (seated) used.set(seated.id, seated);
+      else seatedGridMissing.add(ambulance.label);
       tariffId = seated?.id ?? null;
     }
 
@@ -692,7 +692,13 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
     skippedVehicles: skipped,
     droppedLocks,
     excludedTrips,
-    notes,
+    notes: [
+      ...notes,
+      ...[...seatedGridMissing].map(
+        (label) =>
+          `${label} : recours exceptionnel sans grille VSL en vigueur ce jour, la course est estimée au tarif ambulance. Créez la grille VSL dans Grilles tarifaires.`,
+      ),
+    ],
     tariffGaps: tariffGaps(
       available.map((v) => ({ label: v.label, type: v.type, department: v.department })),
       inForce,
@@ -903,6 +909,16 @@ export async function loadBillingInput(prisma: PrismaClient, isoDate: string): P
     areas,
     holidays: holidays.map((h) => toIsoDate(h.date)),
   };
+}
+
+/** The VSL grid an exceptional trip carried by `ambulance` would be billed at on isoDate (exceptionalAmbulanceGrid), if any. */
+export async function loadExceptionalAmbulanceGrid(
+  prisma: PrismaClient,
+  isoDate: string,
+  ambulance: { department: string },
+): Promise<TariffInput | undefined> {
+  const [tariffs, billing] = await Promise.all([loadTariffInputs(prisma, isoDate), loadBillingInput(prisma, isoDate)]);
+  return exceptionalAmbulanceGrid(tariffsInForce(tariffs, isoDate), ambulance, companyStatusOn(billing.company, isoDate));
 }
 
 export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): Promise<OptimizeInput> {

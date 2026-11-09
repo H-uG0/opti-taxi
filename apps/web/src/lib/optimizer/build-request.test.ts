@@ -710,6 +710,15 @@ describe("exceptional ambulance for a seated trip (TAR-03)", () => {
     const { request } = buildOptimizeRequest(input({ vehicles: [amb], trips: [lying], tariffs: [vslGrid, ambGrid] }));
     expect(request.trips[0]?.tariffId).toBeNull();
   });
+
+  it("says so when no VSL grid is in force that day: the trip would be estimated at the ambulance tariff", () => {
+    const seated = trip("t1", { lockedVehicleId: "amb", exceptionalAmbulanceAt: proposed });
+    const { request, notes } = buildOptimizeRequest(input({ vehicles: [vehicle("v1"), amb], trips: [seated], tariffs: [ambGrid] }));
+    expect(request.trips[0]).toMatchObject({ lockedVehicleId: "amb", tariffId: null });
+    expect(notes).toEqual([expect.stringMatching(/^Véhicule amb : recours exceptionnel sans grille VSL en vigueur ce jour/)]);
+    const covered = buildOptimizeRequest(input({ vehicles: [vehicle("v1"), amb], trips: [seated], tariffs: [vslGrid, ambGrid] }));
+    expect(covered.notes).toEqual([]);
+  });
 });
 
 describe("whole request", () => {

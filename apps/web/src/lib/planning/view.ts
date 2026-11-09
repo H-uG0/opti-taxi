@@ -492,6 +492,9 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
   const returnsToCheck = returnsToCheckAfterNoShow(input.trips);
   const fieldRecords = fieldRecordsByTrip(input.routes);
 
+  const planDetails = input.planRun ? (input.details.get(input.planRun.id) ?? null) : null;
+  const optimizerReasons = new Map(planDetails?.unassigned.map((u) => [u.tripId, u.reason]) ?? []);
+
   const trips: TripView[] = input.trips
     .filter((t) => isActiveTrip(t.status) || vehicleOfTrip(t) !== null)
     .map((t) => {
@@ -526,13 +529,12 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
         waitAtFacilityMin: vehicleId ? waitAtFacility(t) : null,
         outboundNoShow: returnsToCheck.has(t.id),
         exceptionalAmbulance: isExceptionalAmbulanceTrip(t, (id) => vehicleById.get(id)?.type),
+        leftByOptimizer: vehicleId === null && optimizerReasons.has(t.id),
       };
     })
     .sort((a, b) => tripTime(a) - tripTime(b));
 
   const rawById = rawTripById;
-  const planDetails = input.planRun ? (input.details.get(input.planRun.id) ?? null) : null;
-  const optimizerReasons = new Map(planDetails?.unassigned.map((u) => [u.tripId, u.reason]) ?? []);
 
   const halfServed = halfServedPairs(
     input.trips.filter((t) => isActiveTrip(t.status)).map((t) => ({ ...t, vehicleId: vehicleOfTrip(t) })),

@@ -68,11 +68,11 @@ export function BillingSettingsForm({ action, initial }: { action: Action; initi
       </div>
       <Choice<EmptyLegRule>
         name="emptyLegRule"
-        label="Retour à vide d'un taxi (transport lié à une hospitalisation)"
+        label="Retour à vide d'un taxi (séance de dialyse, de chimiothérapie ou de radiothérapie)"
         options={EMPTY_LEG_LABELS}
         values={values}
         error={errors.emptyLegRule}
-        hint="À confirmer : faut-il le compter, et à partir de quand un retour est-il « à vide » ?"
+        hint="Compté pour les courses vers ou depuis un établissement de dialyse, de chimiothérapie ou de radiothérapie ; pas pour une entrée ou une sortie d'hospitalisation, dont le motif reste dans votre logiciel de facturation. À confirmer : faut-il le compter, et à partir de quand un retour est-il « à vide » ?"
       />
       <div className="grid gap-4 sm:grid-cols-2">
         <Choice<SurchargeOrder>

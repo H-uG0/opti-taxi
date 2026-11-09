@@ -4,8 +4,9 @@
  * built with the shared wording of @/lib/record-trace.
  * Pure: no server-only import so vitest can cover it.
  */
-import type { CancellationOrigin, SharingStatus, StopKind, TripDirection, TripStatus } from "@prisma/client";
+import type { CancellationOrigin, SharingStatus, StopKind, TripDirection, TripStatus, VehicleType } from "@prisma/client";
 import { isSameEpisode, type LegKey } from "@/lib/domain/no-show";
+import { isExceptionalAmbulanceTrip } from "@/lib/planning/exceptional-ambulance";
 import { recordTrace, sharingAnswerWords, type RecordTrace } from "@/lib/record-trace";
 
 export { formatDayTime, recordTrace, UNKNOWN_AUTHOR, type RecordTrace } from "@/lib/record-trace";
@@ -86,4 +87,20 @@ export function cancellationTrace(trip: {
   if (trip.status !== "CANCELLED" || !trip.cancelledAt) return null;
   const what = trip.cancellationOrigin === "SYSTEM" ? "Annulation automatique (modification du référentiel)" : "Annulation enregistrée";
   return recordTrace(what, trip.cancelledAt, trip.cancelledBy?.name);
+}
+
+/**
+ * The exceptional ambulance in force on the trip (TAR-03): who proposed it
+ * and when. Null when none holds: never proposed, or the trip is no longer
+ * locked on an ambulance (isExceptionalAmbulanceTrip, as billing reads it).
+ */
+export function exceptionalAmbulanceTrace(trip: {
+  exceptionalAmbulanceAt: Date | null;
+  exceptionalAmbulanceBy: { name: string } | null;
+  lockedVehicleId: string | null;
+  lockedVehicle: { type: VehicleType } | null;
+  allowedVehicleTypes: readonly VehicleType[];
+}): RecordTrace | null {
+  if (!trip.exceptionalAmbulanceAt || !isExceptionalAmbulanceTrip(trip, () => trip.lockedVehicle?.type)) return null;
+  return recordTrace("Ambulance au tarif VSL proposée", trip.exceptionalAmbulanceAt, trip.exceptionalAmbulanceBy?.name);
 }

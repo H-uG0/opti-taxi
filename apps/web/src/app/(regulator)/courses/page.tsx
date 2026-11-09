@@ -21,7 +21,7 @@ import { SimulatedDayBadge } from "@/components/planning/simulated-day-badge";
 import { isSimulatedDay } from "@/lib/simulated-day";
 import { DayNav } from "./day-nav";
 import { GenerateTripsForm } from "./generate-trips-form";
-import { cancellationTrace, outboundNoShowTrace, sharingAnswerTrace, stopStatusTraces } from "./record-trace";
+import { cancellationTrace, exceptionalAmbulanceTrace, outboundNoShowTrace, sharingAnswerTrace, stopStatusTraces } from "./record-trace";
 import { TripFiltersForm } from "./trip-filters";
 import {
   coPassengersFromStops,
@@ -102,7 +102,11 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
         prescription: { select: { mode: true, sharing: true } },
         recurrence: { select: { label: true } },
         route: { select: { vehicle: { select: { label: true, type: true } } } },
-        lockedVehicle: { select: { label: true } },
+        lockedVehicleId: true,
+        lockedVehicle: { select: { label: true, type: true } },
+        // « Recours exceptionnel à une ambulance »: who proposed it and when (account name only).
+        exceptionalAmbulanceAt: true,
+        exceptionalAmbulanceBy: { select: { name: true } },
         // Who recorded the answer and the crew's statuses: account names only.
         sharingRespondedBy: { select: { name: true } },
         stops: {
@@ -168,6 +172,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       vehicleLabel: trip.route?.vehicle.label ?? null,
       vehicleType: trip.route?.vehicle.type ?? null,
       lockedVehicleLabel: trip.lockedVehicle?.label ?? null,
+      exceptionalAmbulance: exceptionalAmbulanceTrace(trip),
       plannedPickupMinute: trip.plannedPickupMinute,
       plannedDropoffMinute: trip.plannedDropoffMinute,
       shared: trip.shared,

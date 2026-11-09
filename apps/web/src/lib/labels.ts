@@ -156,6 +156,7 @@ export const VIOLATION_LABELS: Record<string, string> = {
   DETOUR: "Détour trop long",
   SHIFT: "Hors horaires du chauffeur",
   BREAK: "Pause non respectée",
+  REVENUE: "Écart sur le CA estimé",
 };
 
 export function formatEuros(value: number | null | undefined): string {

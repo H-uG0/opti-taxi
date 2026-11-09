@@ -8,7 +8,7 @@ import { departmentLabel } from "../../vehicules/_lib/departments";
 import { idSchema } from "@/lib/forms";
 import { BackLink, Callout } from "../../vehicules/_lib/ui";
 import { createTariff } from "../actions";
-import { tariffFormValues } from "../schema";
+import { duplicateOverrides, tariffFormValues } from "../schema";
 import { TariffForm } from "../tariff-form";
 
 export const metadata: Metadata = { title: "Nouvelle grille tarifaire" };
@@ -38,11 +38,19 @@ export default async function NewTariffPage({
             {source.label ? ` « ${source.label} »` : ""}. Ajustez les montants et la date d&apos;effet : à partir de
             cette date, la nouvelle grille remplacera l&apos;ancienne, qui reste dans l&apos;historique.
           </p>
+          <p>
+            La vérification repart à « Non vérifié » et la source est vide : indiquez le nouveau texte, puis « Officiel » une
+            fois les montants vérifiés.
+          </p>
         </Callout>
       ) : null}
       <TariffForm
         action={createTariff}
-        initial={source ? tariffFormValues(source, { validFrom: todayIso(), validTo: "" }) : tariffFormValues(undefined, { validFrom: todayIso() })}
+        initial={
+          source
+            ? tariffFormValues(source, duplicateOverrides(source, todayIso()))
+            : tariffFormValues(undefined, { validFrom: todayIso() })
+        }
         submitLabel="Créer la grille"
       />
     </div>

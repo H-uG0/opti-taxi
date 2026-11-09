@@ -98,8 +98,21 @@ function detailValue(value: unknown): DetailValue {
   if (value === undefined || value === null) return null;
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   if (Array.isArray(value)) {
-    return value.every((item) => item === null || typeof item !== "object") ? value.map(String).join(",") : JSON.stringify(value);
+    return value.every((item) => item === null || typeof item !== "object") ? value.map(String).join(",") : stableJson(value);
   }
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
-  return typeof value === "object" ? JSON.stringify(value) : String(value);
+  return typeof value === "object" ? stableJson(value) : String(value);
+}
+
+/**
+ * JSON with the keys of every object in alphabetical order: a value read back
+ * from a jsonb column (PostgreSQL reorders the keys) compares equal to the one
+ * the form built, so an unchanged list is not traced as changed.
+ */
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    item !== null && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, (item as Record<string, unknown>)[key]]))
+      : item,
+  );
 }

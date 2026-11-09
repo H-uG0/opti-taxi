@@ -51,7 +51,7 @@ export default async function BillingRulesPage() {
       <BackLink href="/tarifs">Grilles tarifaires</BackLink>
       <PageHeader
         title="Règles de facturation"
-        description="Ce qui choisit la grille de chaque véhicule et les lectures des conventions retenues en attendant la réponse du client."
+        description="Ce qui choisit la grille de chaque véhicule, et les lectures des conventions retenues en attendant la confirmation de votre CPAM."
       />
 
       <div className="space-y-6">
@@ -63,8 +63,12 @@ export default async function BillingRulesPage() {
           <CardBody className="space-y-4 text-sm text-slate-700">
             <p>
               Une entreprise est certifiée quand tous ses véhicules ont une géolocalisation certifiée par l&apos;Assurance maladie et
-              qu&apos;elle facture par SEFi. Ses VSL et ses ambulances relèvent alors des grilles majorées (VSL : 15,75 € et
-              abattements de 15 et 33 % ; ambulance : 57,39 €), sinon des grilles socle. Les taxis n&apos;en dépendent pas.
+              qu&apos;elle facture par SEFi. Ses VSL et ses ambulances relèvent alors des grilles majorées (forfaits plus élevés et,
+              en VSL, abattements de partage plus faibles : montants dans{" "}
+              <Link href="/tarifs" className="font-medium text-brand-700 underline underline-offset-2">
+                Grilles tarifaires
+              </Link>
+              ), sinon des grilles socle. Les taxis n&apos;en dépendent pas.
             </p>
             {certifications.length > 0 ? (
               <Table>
@@ -86,6 +90,7 @@ export default async function BillingRulesPage() {
                         <ConfirmAction
                           action={deleteCertification.bind(null, c.id)}
                           label="Supprimer"
+                          ariaLabel={`Supprimer la période de certification ${period(c.validFrom, c.validTo)}`}
                           confirmLabel="Supprimer la période"
                           pendingLabel="Suppression…"
                           question={<p>Les calculs à venir sur ces dates prendront les grilles socle des VSL et des ambulances.</p>}
@@ -199,12 +204,19 @@ export default async function BillingRulesPage() {
                 {holidays.map((h) => {
                   const iso = toIsoDate(h.date);
                   return (
-                    <li key={iso} className="flex items-center justify-between gap-2 border-b border-slate-100 py-0.5">
-                      <span>
+                    <li key={iso} className="flex items-start justify-between gap-2 border-b border-slate-100 py-1">
+                      <span className="pt-1">
                         <span className="tabular font-medium text-slate-900">{formatLongDate(iso)}</span>{" "}
                         <span className="text-slate-500">· {h.label}</span>
                       </span>
-                      <RowAction action={deleteHoliday.bind(null, iso)} label="Retirer" pendingLabel="Retrait…" />
+                      <ConfirmAction
+                        action={deleteHoliday.bind(null, iso)}
+                        label="Retirer"
+                        ariaLabel={`Retirer le ${formatLongDate(iso)} des jours fériés`}
+                        confirmLabel="Retirer le jour"
+                        pendingLabel="Retrait…"
+                        question={<p>La majoration « dimanche et jour férié » ne s&apos;appliquera plus ce jour-là aux prochains calculs.</p>}
+                      />
                     </li>
                   );
                 })}

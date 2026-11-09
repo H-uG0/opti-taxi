@@ -11,6 +11,7 @@
  */
 import type { PrismaClient, VehicleType } from "@prisma/client";
 import { SERVED_TRIP_STATUSES, type KpiData, type KpiRoute, type KpiTrip } from "@/lib/kpis";
+import { isExceptionalAmbulanceTrip } from "@/lib/planning/exceptional-ambulance";
 import { isSimulatedId } from "@/lib/simulated";
 import { fromIsoDate, toIsoDate } from "@/lib/time";
 
@@ -30,9 +31,11 @@ export type KpiQueryRows = {
     serviceDate: Date;
     /** Completed DROPOFF stops of the trip. */
     stops: { completedAt: Date | null }[];
-    /** Exceptional ambulance proposed for this seated trip, and the type of the vehicle of its route. */
+    /** Exceptional ambulance proposed for this seated trip, its lock and prescription, and the vehicle of its route. */
     exceptionalAmbulanceAt?: Date | null;
-    route?: { vehicle: { type: VehicleType } } | null;
+    lockedVehicleId?: string | null;
+    allowedVehicleTypes?: VehicleType[];
+    route?: { vehicleId: string; vehicle: { type: VehicleType } } | null;
   })[];
   runs: { id: string; serviceDate: Date; startedAt: Date }[];
 };
@@ -74,7 +77,9 @@ export async function loadKpiRows(prisma: KpiClient, from: string, to: string): 
         plannedDropoffMinute: true,
         stops: { where: { kind: "DROPOFF", completedAt: { not: null } }, select: { completedAt: true } },
         exceptionalAmbulanceAt: true,
-        route: { select: { vehicle: { select: { type: true } } } },
+        lockedVehicleId: true,
+        allowedVehicleTypes: true,
+        route: { select: { vehicleId: true, vehicle: { select: { type: true } } } },
       },
     }),
     prisma.optimizationRun.findMany({
@@ -97,11 +102,14 @@ export function toKpiData({ routes, recorded, trips, runs }: KpiQueryRows): KpiD
       stopCount: _count.stops,
       hasRecordedStatus: recordedRouteIds.has(id),
     })),
-    trips: trips.map(({ stops, serviceDate: date, exceptionalAmbulanceAt, route, ...trip }) => ({
+    trips: trips.map(({ stops, serviceDate: date, exceptionalAmbulanceAt, lockedVehicleId, allowedVehicleTypes, route, ...trip }) => ({
       ...trip,
       serviceDate: toIsoDate(date),
-      // Counted while the proposal holds: the trip is in an ambulance's route.
-      exceptionalAmbulance: Boolean(exceptionalAmbulanceAt) && route?.vehicle.type === "AMBULANCE",
+      // The same rule as billing and the planning (isExceptionalAmbulanceTrip): served by the ambulance it is still locked on.
+      exceptionalAmbulance: isExceptionalAmbulanceTrip(
+        { exceptionalAmbulanceAt, lockedVehicleId: lockedVehicleId ?? null, allowedVehicleTypes: allowedVehicleTypes ?? [] },
+        (id) => (route && id === route.vehicleId ? route.vehicle.type : undefined),
+      ),
       // One drop-off stop per trip; keep the latest timestamp if there were several.
       dropoffCompletedAt: stops.reduce<Date | null>(
         (latest, stop) => (stop.completedAt && (!latest || stop.completedAt > latest) ? stop.completedAt : latest),

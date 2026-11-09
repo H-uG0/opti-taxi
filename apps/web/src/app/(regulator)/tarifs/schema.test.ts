@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { fromIsoDate } from "@/lib/time";
 import { fieldErrorsFromZod } from "@/lib/forms";
+import { toContractTariff } from "@/lib/optimizer/build-request";
+import { tariffSchema as contractTariffSchema } from "@/lib/optimizer/contract";
 import { tariffRow } from "@/test/tariff-fixtures";
 import {
+  duplicateOverrides,
   fractionToPercent,
   parseKmList,
   parseShortTripBands,
@@ -145,6 +148,33 @@ describe("tariffSchema", () => {
     expect(errorsOf({ ...valid, zone: "E" }).zone).toMatch(/A, B, C ou D/);
   });
 
+  it("keeps the lists within the bounds of the optimizer contract", () => {
+    expect(errorsOf({ ...valid, shortTripBands: "2000 : 5" }).shortTripBands).toBe("Distances et montants de 1 000 au plus.");
+    expect(errorsOf({ ...valid, shortTripBands: "7 : 5000" }).shortTripBands).toBe("Distances et montants de 1 000 au plus.");
+    const bands = Array.from({ length: 51 }, (_, i) => `${i + 1} : 1`).join("\n");
+    expect(errorsOf({ ...valid, shortTripBands: bands }).shortTripBands).toBe("50 tranches au plus.");
+    expect(errorsOf({ ...valid, billableDetourKm: "10;10;10;10;10;10;10;10" }).billableDetourKm).toBe("7 détours au plus (un par patient ajouté).");
+    expect(errorsOf({ ...valid, billableDetourKm: "1001" }).billableDetourKm).toBe("1 000 km au plus par détour.");
+  });
+
+  it("only accepts grids the optimizer contract accepts", () => {
+    const toContract = (form: Record<string, string>) => {
+      const parsed = tariffSchema.parse(form);
+      return contractTariffSchema.safeParse(toContractTariff({ ...parsed, id: "grid", createdAt: new Date(0) }));
+    };
+    const bands = Array.from({ length: 50 }, (_, i) => `${(i + 1) * 20} : ${1000 - i}`).join("\n");
+    for (const form of [
+      valid,
+      { ...valid, shortTripBands: bands, billableDetourKm: "1000 ; 10 ; 10 ; 10 ; 10 ; 10 ; 10" },
+      { ...valid, nightRate: "500", weekendRate: "500", emptyLegRateShort: "500", emptyLegRateLong: "500", pricePerKm: "50" },
+      { ...valid, baseFare: "1000", bigCityFare: "1000", aggloFare: "1000", tpmrFare: "1000", includedKm: "1000", discount4: "100" },
+      { ...valid, shortTripBands: "", billableDetourKm: "", discount2: "", discount3: "", maxSharedPatients: "1" },
+    ]) {
+      const result = toContract(form);
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    }
+  });
+
   it("gives back the values of a saved grid in the form", () => {
     const parsed = tariffSchema.parse(valid);
     const values = tariffFormValues(parsed);
@@ -156,6 +186,26 @@ describe("tariffSchema", () => {
     expect(values.validFrom).toBe("2026-11-09");
     expect(values.discount2).toBe("23");
     expect(values.discount4).toBe("");
+  });
+
+  it("duplicates a grid without its verification, source or notes: a new text is checked again", () => {
+    const source = tariffRow({
+      label: "Taxi conventionné — Bouches-du-Rhône",
+      verification: "OFFICIAL",
+      sourceUrl: "https://www.legifrance.gouv.fr/",
+      notes: "Avenant 1",
+      validFrom: fromIsoDate("2025-11-01"),
+      validTo: fromIsoDate("2026-10-31"),
+    });
+    const values = tariffFormValues(source, duplicateOverrides(source, "2026-11-09"));
+    expect(values).toMatchObject({
+      validFrom: "2026-11-09",
+      validTo: "",
+      verification: "UNVERIFIED",
+      sourceUrl: "",
+      notes: "Reprise de la grille « Taxi conventionné — Bouches-du-Rhône » en vigueur depuis le 01/11/2025.",
+      baseFare: "13",
+    });
   });
 });
 

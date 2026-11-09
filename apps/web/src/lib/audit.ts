@@ -31,8 +31,10 @@
  *   trip.reschedule, trip.sharing_accept, trip.sharing_refuse, trip.move,
  *   trip.lock, trip.unlock, trip.toll (details: old and new toll),
  *   trip.exceptional_ambulance (a seated trip proposed in an ambulance,
- *   details.vehicleId) and trip.exceptional_ambulance_withdrawn (the
- *   optimizer could not serve it there);
+ *   details.vehicleId and details.reason, a fixed text) and
+ *   trip.exceptional_ambulance_withdrawn (not kept: the optimizer could not
+ *   serve it there or did not answer; or no longer in force: unlocked, moved
+ *   off the ambulance, the plan computed with it discarded);
  * - planning: plan.optimize (details.confirmed when the regulator replaced the
  *   routes in place with a plan that waited for confirmation), plan.restore
  *   (« Revenir au planning précédent »), plan.discard (a waiting plan not

@@ -170,6 +170,11 @@ export function fareEuros(...args: Parameters<typeof fareCents>): number {
 export const NO_TRIP_FLAGS: FareTrip = { bigCity: false, agglomeration: false, hospitalLinked: false, wheelchair: false, tollAmount: 0 };
 export const DEFAULT_FARE_RULES: FareRules = { emptyLegOrder: "MULTIPLICATIVE", patientCount: "DISTINCT" };
 
+/** The company's readings of the conventions (AppSettings), as the optimizer request carries them (settings.pricing). */
+export function fareRulesOf(settings: { surchargeOrder: FareRules["emptyLegOrder"]; sharedPatientCount: FareRules["patientCount"] }): FareRules {
+  return { emptyLegOrder: settings.surchargeOrder, patientCount: settings.sharedPatientCount };
+}
+
 /** A ride of `km` km from `pickupMin`, shared by `patients` patients travelling the same distance together. */
 export function sameRide(km: number, patients: number, pickupMin: number, minutes: number): FareRide {
   return {

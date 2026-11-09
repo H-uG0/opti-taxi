@@ -90,6 +90,8 @@ function Preview({ grid }: { grid: FareGrid | null }) {
       </div>
     );
   }
+  // The company's readings (Règles de facturation) do not change these rows: no empty leg, and every patient on
+  // board for the whole ride, so both patient counts agree. The simulator of /tarifs applies them.
   const fare = (patients: number, pickupMin: number) =>
     fareEuros(grid, NO_TRIP_FLAGS, { tpmrEquipped: false }, sameRide(PREVIEW_KM, patients, pickupMin, 40), DEFAULT_FARE_RULES, PREVIEW_WEEKDAY);
   const shared = Array.from({ length: Math.max(0, Math.min(grid.maxSharedPatients, 4) - 1) }, (_, i) => i + 2);
@@ -230,7 +232,7 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
             <Field
               label="Tranches (facultatif)"
               htmlFor="shortTripBands"
-              hint="Une tranche par ligne, « km au plus : montant », ex. « 7 : 8,54 ». Ajoutée au forfait selon les km facturés."
+              hint="Une tranche par ligne (50 au plus), « km au plus : montant », ex. « 7 : 8,54 », jusqu'à 1 000 km et 1 000 €. Ajoutée au forfait selon les km facturés."
               error={errors.shortTripBands}
             >
               <Textarea
@@ -263,10 +265,11 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
             />
           </Fieldset>
 
-          <Fieldset legend="Retour à vide (taxi, transport lié à une hospitalisation)">
+          <Fieldset legend="Retour à vide (taxi : dialyse, chimiothérapie, radiothérapie)">
             <p className="text-xs text-slate-500">
-              Majoration du prix au km pour une dialyse, une chimiothérapie, une radiothérapie ou une hospitalisation dont l&apos;aller ou
-              le retour du véhicule se fait à vide. Laissez vide pour un VSL ou une ambulance.
+              Majoration du prix au km pour une course vers ou depuis un établissement de dialyse, de chimiothérapie ou de
+              radiothérapie, dont l&apos;aller ou le retour du véhicule se fait à vide. Une entrée ou une sortie d&apos;hospitalisation
+              n&apos;est pas reconnue : son motif reste dans votre logiciel de facturation. Laissez vide pour un VSL ou une ambulance.
             </p>
             <div className="grid gap-4 sm:grid-cols-3">
               <Amount name="emptyLegRateShort" label="Sous le seuil" unit="%" values={values} errors={errors} />
@@ -297,11 +300,18 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
                 />
               </Field>
               <Amount name="aloneDiscount" label="Patient seul à bord (facultatif)" unit="%" values={values} errors={errors} hint="Taxi : 5 % au lieu du taux de partage." />
-              <Amount name="aloneThresholdKm" label="… sur au moins" unit="km" values={values} errors={errors} hint="Seuil local, 30 km au minimum." />
+              <Amount
+                name="aloneThresholdKm"
+                label="Seuil du patient seul à bord"
+                unit="km"
+                values={values}
+                errors={errors}
+                hint="Taux ci-contre à partir de cette distance. Seuil local, 30 km au minimum."
+              />
               <Field
                 label="Détours facturables (facultatif)"
                 htmlFor="billableDetourKm"
-                hint="Km par prise en charge ajoutée, ex. « 10 ; 10 » en VSL. Vide : distance directe seulement."
+                hint="Km par prise en charge ajoutée (7 au plus), ex. « 10 ; 10 » en VSL. Vide : distance directe seulement."
                 error={errors.billableDetourKm}
                 className="sm:col-span-2"
               >
@@ -324,7 +334,12 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
 
       <Fieldset legend="Source et validité">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="Vérification" htmlFor="verification" error={errors.verification}>
+          <Field
+            label="Vérification"
+            htmlFor="verification"
+            error={errors.verification}
+            hint="« Officiel » une fois les montants vérifiés sur le texte publié."
+          >
             <Select id="verification" name="verification" defaultValue={valueOf(values, "verification")} aria-invalid={Boolean(errors.verification)}>
               {VERIFICATIONS.map((v) => (
                 <option key={v} value={v}>

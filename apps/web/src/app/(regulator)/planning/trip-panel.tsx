@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
 import { Card } from "@/components/ui/layout";
 import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_LABEL } from "@/lib/domain/no-show";
-import { exceptionalAmbulanceIssue } from "@/lib/planning/exceptional-ambulance";
+import { exceptionalAmbulanceIssue, OPTIMIZE_FIRST_ISSUE } from "@/lib/planning/exceptional-ambulance";
 import { fieldRecordLabel, fieldRecordText, sharingAnswerText } from "@/lib/planning/format";
 import type { TripView, VehicleRowView, ViolationView } from "@/lib/planning/types";
 import {
@@ -86,10 +86,12 @@ export function TripPanel({
       ? "Course déjà commencée."
       : (replanBlocked ?? optimizerOffline);
   const outbound = trip.direction === "OUTBOUND";
-  // « Recours exceptionnel » (TAR-03): only for an unassigned seated trip, never proposed by the optimizer itself.
-  const exceptionalOffer =
-    trip.vehicleId === null &&
-    exceptionalAmbulanceIssue({ status: trip.status, payer: trip.payer, allowedVehicleTypes: trip.allowedVehicleTypes, assigned: false }) === null;
+  // « Recours exceptionnel » (TAR-03): only for a seated trip the last optimization left without a vehicle, never
+  // proposed by the optimizer itself. Before that computation, the panel says to optimize first.
+  const exceptionalCandidate = { status: trip.status, payer: trip.payer, allowedVehicleTypes: trip.allowedVehicleTypes, assigned: false };
+  const exceptionalEligible =
+    trip.vehicleId === null && exceptionalAmbulanceIssue({ ...exceptionalCandidate, leftByOptimizer: true }) === null;
+  const exceptionalOffer = exceptionalEligible && trip.leftByOptimizer === true;
   const ambulances = vehicles.filter((v) => v.available && v.type === "AMBULANCE");
   const ambulanceValid = ambulances.some((v) => v.id === ambulance);
   const sharingAnswerLine = trip.sharingAnswer ? sharingAnswerText(trip.sharingAnswer, trip.sharingStatus) : null;
@@ -247,6 +249,9 @@ export function TripPanel({
             ) : trip.lockedVehicleId ? (
               <span className="ml-1.5 text-xs text-amber-800">figée sur un véhicule indisponible</span>
             ) : null}
+            {trip.exceptionalAmbulance ? (
+              <span className="mt-0.5 block text-xs text-slate-500">« Défiger » retire le recours exceptionnel à l&apos;ambulance.</span>
+            ) : null}
           </p>
           {trip.lockedVehicleId ? (
             <Button
@@ -254,7 +259,12 @@ export function TripPanel({
               variant="secondary"
               disabled={busy || lockBlocked !== null}
               onClick={() => run("Défigeage de la course…", () => unlockTrip(trip.id))}
-              title={lockBlocked ?? "L'optimisation pourra de nouveau changer la course de véhicule"}
+              title={
+                lockBlocked ??
+                (trip.exceptionalAmbulance
+                  ? "Retire le recours exceptionnel : la prochaine optimisation confiera la course à un taxi ou un VSL, ou la laissera sans véhicule"
+                  : "L'optimisation pourra de nouveau changer la course de véhicule")
+              }
             >
               <LockOpen aria-hidden className="size-3.5" />
               Défiger
@@ -357,6 +367,11 @@ export function TripPanel({
               </Button>
             </div>
           </form>
+        ) : exceptionalEligible ? (
+          <p className="flex items-start gap-1.5 border-t border-slate-200 pt-3 text-xs text-slate-500">
+            <Ambulance aria-hidden className="mt-0.5 size-3.5 shrink-0 text-slate-400" />
+            <span>{OPTIMIZE_FIRST_ISSUE}</span>
+          </p>
         ) : null}
       </div>
     </Card>

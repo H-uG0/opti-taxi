@@ -3,15 +3,21 @@
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
-import { audit } from "@/lib/audit";
+import { audit, type AuditEntry } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { loadCrewRules, loadDayVehicleInputs, personName, resolveVehicleAvailability } from "@/lib/optimizer/build-request";
+import {
+  loadCrewRules,
+  loadDayVehicleInputs,
+  loadExceptionalAmbulanceGrid,
+  personName,
+  resolveVehicleAvailability,
+} from "@/lib/optimizer/build-request";
 import { logError } from "@/lib/log";
 import { DATABASE_ERROR, PLAN_CHANGED_ERROR, planningErrorMessage, UNEXPECTED_ERROR } from "@/lib/planning/action-errors";
 import { lockPlanningDay } from "@/lib/planning/day-lock";
 import { loadPlanningDay } from "@/lib/planning/load";
-import { LOCKED, notLockedOn } from "@/lib/planning/lock";
+import { LOCKED, lockAction, notLockedOn } from "@/lib/planning/lock";
 import {
   confirmPendingRun,
   discardPendingRun,
@@ -23,9 +29,11 @@ import {
   replanBlocker,
   restorePreviousPlan,
   runOptimization,
+  unassignedByLastPlan,
+  withdrawLapsedProposals,
   type RunOutcome,
 } from "@/lib/planning/run-optimization";
-import { exceptionalAmbulanceIssue } from "@/lib/planning/exceptional-ambulance";
+import { EXCEPTIONAL_AMBULANCE_REASON, exceptionalAmbulanceIssue } from "@/lib/planning/exceptional-ambulance";
 import { validationIssues, validationQuestion } from "@/lib/planning/validation";
 import { checkRouteCrewChange, remainingPart } from "@/lib/staff/route-crew";
 import { loadPlanVersion, STALE_PLAN_ERROR } from "@/lib/planning/version";
@@ -212,11 +220,14 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
 
 /**
  * « Recours exceptionnel à une ambulance » (TAR-03, protocol of 24 September
- * 2025): an unassigned seated (TAP) trip goes to an ambulance of the day,
- * billed at the VSL tariff, the reason traced on the trip. Never automatic:
- * the regulator picks the trip and the ambulance; the trip is locked on it,
- * then the day is re-optimized as for « Déplacer vers… ». When the optimizer
- * cannot serve it there, the lock and the proposal are both withdrawn.
+ * 2025): a seated (TAP) trip the last optimization left without a vehicle goes
+ * to an ambulance of the day, billed at the VSL tariff, the measure traced on
+ * the trip. Never automatic: the regulator picks the trip and the ambulance;
+ * the trip is locked on it, then the day is re-optimized as for « Déplacer
+ * vers… ». The measure stays only with a plan that serves the trip there,
+ * saved or waiting for confirmation: on any other outcome (refused by the
+ * optimizer, optimizer unreachable, computation already running…), the lock
+ * and the proposal are both withdrawn and the regulator is told so.
  */
 export async function proposeExceptionalAmbulance(tripId: string, vehicleId: string): Promise<PlanningActionResult> {
   const user = await requireUser("REGULATOR");
@@ -241,12 +252,14 @@ export async function proposeExceptionalAmbulance(tripId: string, vehicleId: str
       },
     });
     if (!trip) return UNKNOWN_TRIP;
-    const issue = exceptionalAmbulanceIssue({ ...trip, assigned: trip.routeId !== null });
-    if (issue) return { ok: false, error: issue };
-
     const isoDate = toIsoDate(trip.serviceDate);
     const past = pastDateError(isoDate);
     if (past) return past;
+    // A last resort: only for a trip the last computation could not give to any taxi or VSL.
+    const leftByOptimizer = (await unassignedByLastPlan(isoDate)).has(trip.id);
+    const issue = exceptionalAmbulanceIssue({ ...trip, assigned: trip.routeId !== null, leftByOptimizer });
+    if (issue) return { ok: false, error: issue };
+
     const blocker = await replanBlocker(isoDate);
     if (blocker) return { ok: false, error: blocker };
     const { available, skipped } = resolveVehicleAvailability(await loadDayVehicleInputs(db, isoDate), isoDate);
@@ -255,34 +268,59 @@ export async function proposeExceptionalAmbulance(tripId: string, vehicleId: str
       const skip = skipped.find((s) => s.vehicleId === ids.data.vehicleId);
       return { ok: false, error: skip ? `${skip.label} est indisponible ce jour : ${skip.reason}.` : "Ambulance introuvable ou indisponible ce jour." };
     }
+    // Billed at the VSL tariff: without a VSL grid that day, the optimizer would estimate it at the ambulance's.
+    if (!(await loadExceptionalAmbulanceGrid(db, isoDate, target))) {
+      return {
+        ok: false,
+        error: `Aucune grille VSL en vigueur le ${formatLongDate(isoDate)} pour facturer ce recours au tarif VSL : créez-la dans Grilles tarifaires, puis recommencez.`,
+      };
+    }
     if (await optimizationInProgress(isoDate)) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
 
     const who = personName(trip.patient);
     const traced = { entity: "Trip", entityId: trip.id, serviceDate: isoDate } as const;
-    // Still unassigned when written: the proposal and the lock together, traced with the ambulance.
+    const proposedAt = new Date();
+    // Still unassigned when written: the proposal and the lock together, traced with the ambulance and the reason.
     const proposed = await db.$transaction(async (tx) => {
       const { count } = await tx.trip.updateMany({
         where: { id: trip.id, routeId: null, status: { in: ["PLANNED", "ASSIGNED"] } },
-        data: { exceptionalAmbulanceAt: new Date(), exceptionalAmbulanceById: user.id, lockedVehicleId: target.id },
+        data: { exceptionalAmbulanceAt: proposedAt, exceptionalAmbulanceById: user.id, lockedVehicleId: target.id },
       });
       if (count > 0) {
-        await audit(tx, user, { action: "trip.exceptional_ambulance", ...traced, details: { vehicleId: target.id } });
+        await audit(tx, user, {
+          action: "trip.exceptional_ambulance",
+          ...traced,
+          details: { vehicleId: target.id, reason: EXCEPTIONAL_AMBULANCE_REASON },
+        });
       }
       return count > 0;
     }, PLANNING_TX_OPTIONS);
     if (!proposed) return { ok: false, error: "Cette course a changé entre-temps : rechargez la page.", stale: true };
 
+    // Puts the trip back as it was: its lock (if still the one written above: a refused move already put it
+    // back) and its proposal (if still this one). Never once a plan gave the trip a route.
+    const relocked = trip.lockedVehicleId !== target.id;
     const withdraw = () =>
       db.$transaction(async (tx) => {
+        const events: AuditEntry[] = [];
+        if (relocked) {
+          const { count } = await tx.trip.updateMany({
+            where: { id: trip.id, routeId: null, lockedVehicleId: target.id },
+            data: { lockedVehicleId: trip.lockedVehicleId },
+          });
+          if (count > 0) events.push({ action: lockAction(trip.lockedVehicleId), ...traced });
+        }
         const { count } = await tx.trip.updateMany({
-          where: { id: trip.id, routeId: null },
+          where: { id: trip.id, routeId: null, exceptionalAmbulanceAt: proposedAt },
           data: { exceptionalAmbulanceAt: trip.exceptionalAmbulanceAt, exceptionalAmbulanceById: trip.exceptionalAmbulanceById },
         });
-        if (count > 0) await audit(tx, user, { action: "trip.exceptional_ambulance_withdrawn", ...traced });
+        if (count > 0) events.push({ action: "trip.exceptional_ambulance_withdrawn", ...traced });
+        if (events.length > 0) await audit(tx, user, events);
       }, PLANNING_TX_OPTIONS);
+    const notKept = `Le recours exceptionnel à ${target.label} est retiré : la course de ${who} reste sans véhicule.`;
+
     let outcome: RunOutcome;
     try {
-      // A refused move puts the previous lock back (runOptimization); the proposal goes with it below.
       outcome = await runOptimization(isoDate, user, {
         move: {
           tripId: trip.id,
@@ -290,19 +328,35 @@ export async function proposeExceptionalAmbulance(tripId: string, vehicleId: str
           vehicleLabel: target.label,
           patientName: who,
           direction: trip.direction,
-          previousLock: trip.lockedVehicleId,
+          ...(relocked ? { previousLock: trip.lockedVehicleId } : {}),
         },
       });
     } catch (error) {
       logError("[planning] proposeExceptionalAmbulance failed after the lock", error);
+      const undone = await withdraw().then(
+        () => true,
+        (undoError: unknown) => {
+          logError("[planning] withdrawing an exceptional ambulance failed", undoError);
+          return false;
+        },
+      );
       refreshPages();
+      const why = planningErrorMessage(error) === DATABASE_ERROR ? "la base de données n'a pas répondu à temps" : "erreur inattendue";
       return {
         ok: false,
-        error: `Recours à ${target.label} interrompu : la course est peut-être restée figée sur l'ambulance. Rechargez la page pour voir l'état réel du planning.`,
+        error: undone
+          ? `Recours à ${target.label} interrompu (${why}). ${notKept} Rechargez la page pour voir l'état réel du planning.`
+          : `Recours à ${target.label} interrompu (${why}) : la course est peut-être restée figée sur l'ambulance. Rechargez la page pour voir l'état réel du planning.`,
         stale: true,
       };
     }
-    if (!outcome.ok && outcome.moveRejected) await withdraw();
+    // A plan waiting for confirmation keeps the proposal (it is rebuilt with it): confirmed, the trip goes to the
+    // ambulance; discarded or replaced, the proposal is withdrawn (withdrawLapsedProposals).
+    if (!outcome.ok && !outcome.needsConfirmation) {
+      await withdraw();
+      refreshPages();
+      return { ok: false, error: `${outcome.error} ${notKept}`, ...(outcome.stale ? { stale: true } : {}) };
+    }
     refreshPages();
     if (!outcome.ok) return toResult(outcome);
     return {
@@ -334,9 +388,11 @@ export async function discardPlan(runId: string): Promise<PlanningActionResult> 
   return guarded("discardPlan", async () => {
     const id = idSchema.safeParse(runId);
     if (!id.success) return { ok: false, error: "Calcul introuvable : rechargez la page.", stale: true };
-    const dropped = await discardPendingRun(id.data, (tx, isoDate) =>
-      audit(tx, user, { action: "plan.discard", entity: "OptimizationRun", entityId: id.data, serviceDate: isoDate }),
-    );
+    const dropped = await discardPendingRun(id.data, async (tx, isoDate) => {
+      await audit(tx, user, { action: "plan.discard", entity: "OptimizationRun", entityId: id.data, serviceDate: isoDate });
+      // An exceptional ambulance proposed with that plan is not kept either.
+      await withdrawLapsedProposals(tx, user, isoDate);
+    });
     refreshPages();
     return dropped
       ? { ok: true, message: "Calcul écarté : le planning en place est conservé." }
@@ -425,15 +481,28 @@ export async function unlockTrip(tripId: string): Promise<PlanningActionResult> 
     if (!trip) return UNKNOWN_TRIP;
     const past = pastDateError(toIsoDate(trip.serviceDate));
     if (past) return past;
-    // Conditional write: two concurrent « Défiger » change the row, and trace it, once.
-    await db.$transaction(async (tx) => {
+    const traced = { entity: "Trip", entityId: trip.id, serviceDate: toIsoDate(trip.serviceDate) } as const;
+    // Conditional writes: two concurrent « Défiger » change the row, and trace it, once.
+    const withdrawn = await db.$transaction(async (tx) => {
+      const events: AuditEntry[] = [];
       const { count } = await tx.trip.updateMany({ where: { id: trip.id, ...LOCKED }, data: { lockedVehicleId: null } });
-      if (count > 0) {
-        await audit(tx, user, { action: "trip.unlock", entity: "Trip", entityId: trip.id, serviceDate: toIsoDate(trip.serviceDate) });
-      }
+      if (count > 0) events.push({ action: "trip.unlock", ...traced });
+      // An exceptional ambulance holds only while the trip is locked on it: withdrawn with the lock.
+      const proposal = await tx.trip.updateMany({
+        where: { id: trip.id, exceptionalAmbulanceAt: { not: null } },
+        data: { exceptionalAmbulanceAt: null, exceptionalAmbulanceById: null },
+      });
+      if (proposal.count > 0) events.push({ action: "trip.exceptional_ambulance_withdrawn", ...traced });
+      if (events.length > 0) await audit(tx, user, events);
+      return proposal.count > 0;
     }, PLANNING_TX_OPTIONS);
     refreshPages();
-    return { ok: true, message: "Course défigée : la prochaine optimisation pourra la changer de véhicule." };
+    return {
+      ok: true,
+      message: withdrawn
+        ? "Course défigée et recours exceptionnel à l'ambulance retiré : la prochaine optimisation la confiera à un taxi ou un VSL, ou la laissera sans véhicule."
+        : "Course défigée : la prochaine optimisation pourra la changer de véhicule.",
+    };
   });
 }
 
@@ -479,8 +548,10 @@ export async function validateDay(date: string, confirmed: string | null, shownV
         data: { status: "VALIDATED", validatedAt: new Date() },
       });
       if (count > 0) await audit(tx, user, { action: "plan.validate", entity: "Route", entityId: null, serviceDate: isoDate });
-      // A computation still waiting for confirmation could no longer replace a validated plan.
+      // A computation still waiting for confirmation could no longer replace a validated plan,
+      // nor bring the exceptional ambulance it was computed with.
       await dropPendingRuns(tx, serviceDate, "le planning a été validé.");
+      await withdrawLapsedProposals(tx, user, isoDate);
       return "validated" as const;
     }, PLANNING_TX_OPTIONS);
     if (outcome === "running") return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
