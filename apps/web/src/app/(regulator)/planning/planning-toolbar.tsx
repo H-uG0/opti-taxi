@@ -34,9 +34,11 @@ export function PlanningToolbar({
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
 
+  // The question appears while the validation is still finishing (its button disabled, so not focusable):
+  // the focus goes to « Valider quand même » once it is enabled.
   useEffect(() => {
-    if (confirmation) confirmRef.current?.focus();
-  }, [confirmation]);
+    if (confirmation && !busy) confirmRef.current?.focus();
+  }, [confirmation, busy]);
 
   // Why each button is off right now (shown as its title and read by screen readers). A poll of the
   // version (remoteRunning) is more recent than the page's own render (runningReason).
