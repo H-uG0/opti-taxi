@@ -15,6 +15,7 @@ import {
   refusalLogFields,
   retryMinutes,
   SHARED_ADDRESS_RULE,
+  signInSubject,
   trustedClientIp,
   trustedProxyHops,
   UNKNOWN_CLIENT,
@@ -409,5 +410,18 @@ describe("refusal log fields", () => {
   it("give one e-mail the same tag every time and two e-mails different tags", () => {
     expect(emailTag("a@example.fr")).toBe(emailTag("a@example.fr"));
     expect(emailTag("a@example.fr")).not.toBe(emailTag("b@example.fr"));
+  });
+});
+
+describe("signInSubject (audit trail of failed sign-ins)", () => {
+  it("names a known account by its id only, never by a tag of its e-mail", () => {
+    expect(signInSubject("julien.marchetti@opti-taxi.test", "u1")).toEqual({ entityId: "u1", details: {} });
+  });
+
+  it("keeps the tag only for an e-mail that is no account", () => {
+    expect(signInSubject("inconnu@example.fr", null)).toEqual({
+      entityId: null,
+      details: { emailTag: emailTag("inconnu@example.fr") },
+    });
   });
 });

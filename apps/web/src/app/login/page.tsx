@@ -12,7 +12,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const { error } = await searchParams;
 
   return (
-    <main className="flex min-h-dvh items-center justify-center px-4 py-12">
+    <main className="flex min-h-below-banner items-center justify-center px-4 py-12">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-700">Taxi & Ambulance V</p>

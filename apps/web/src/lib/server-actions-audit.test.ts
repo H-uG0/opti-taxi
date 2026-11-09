@@ -9,6 +9,11 @@
  * The check is per action, not per branch: an action that traces one of its
  * writes passes. An action that writes without a trace on purpose goes in
  * AUDIT_EXEMPT with the reason; the list is checked to stay accurate.
+ *
+ * The scan reads function declarations, so a "use server" file must export
+ * its actions as `export async function` only (no `export const`, `export
+ * default` or `export { … }`, which it could not see); top-level `const x =
+ * async (…) =>` helpers are read too.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -37,16 +42,37 @@ function isServerActionFile(source: string): boolean {
   return /^\s*["']use server["'];/.test(source);
 }
 
-/** Top-level function declarations: from `function name` at column 0 to the next `}` at column 0. */
+/** Exports the scan cannot read as functions: values, default and re-exports (`export type` is erased). */
+const UNREADABLE_EXPORT = /^export\s+(?:const|let|var|default|\{|\*)/m;
+
+/** A top-level function held by a variable: `const name = async (` or `= function`. */
+const ARROW_HELPER = /^(?:const|let) (\w+)(?::[^=]+)? = (?:async )?(?:function\b|\(|\w+ =>)/;
+
+/**
+ * Top-level functions: from `function name` at column 0 to the next `}` at
+ * column 0, and from `const name = async (` to the next line starting with `}`
+ * (or the same line for a one-line arrow).
+ */
 function topLevelFunctions(source: string): TopLevelFunction[] {
   const lines = source.split("\n");
   const functions: TopLevelFunction[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const match = /^(export )?(?:async )?function (\w+)/.exec(lines[i] ?? "");
-    if (!match?.[2]) continue;
+    const line = lines[i] ?? "";
+    const declared = /^(export )?(?:async )?function (\w+)/.exec(line);
+    if (declared?.[2]) {
+      let end = i;
+      while (end < lines.length && lines[end] !== "}") end++;
+      functions.push({ name: declared[2], exported: Boolean(declared[1]), body: lines.slice(i, end + 1).join("\n") });
+      continue;
+    }
+    const arrow = ARROW_HELPER.exec(line);
+    if (!arrow?.[1]) continue;
     let end = i;
-    while (end < lines.length && lines[end] !== "}") end++;
-    functions.push({ name: match[2], exported: Boolean(match[1]), body: lines.slice(i, end + 1).join("\n") });
+    if (!line.trimEnd().endsWith(";")) {
+      end = i + 1;
+      while (end < lines.length && !/^[})]/.test(lines[end] ?? "")) end++;
+    }
+    functions.push({ name: arrow[1], exported: false, body: lines.slice(i, end + 1).join("\n") });
   }
   return functions;
 }
@@ -97,6 +123,16 @@ describe("server actions and the audit trail", () => {
     expect(actions.map((a) => a.key)).toContain("app/(regulator)/parametres/actions.ts#saveSettings");
   });
 
+  it("every \"use server\" file exports its actions as function declarations the scan can read", () => {
+    const unreadable = sourceFiles(SRC)
+      .filter((file) => {
+        const source = fs.readFileSync(file, "utf8");
+        return isServerActionFile(source) && UNREADABLE_EXPORT.test(source);
+      })
+      .map((file) => path.relative(SRC, file));
+    expect(unreadable).toEqual([]);
+  });
+
   it("every action that writes also writes its audit event", () => {
     const missing = actions.filter((a) => a.writes && !a.audits && !(a.key in AUDIT_EXEMPT)).map((a) => a.key);
     expect(missing).toEqual([]);
@@ -138,5 +174,37 @@ describe("topLevelFunctions (the scanner itself)", () => {
     const traced = closure(functions[1]!, functions);
     expect(traced.some((f) => WRITE.test(f.body)) && traced.some((f) => AUDIT_CALL.test(f.body))).toBe(true);
     expect(WRITE.test(functions[2]!.body) && !AUDIT_CALL.test(functions[2]!.body)).toBe(true);
+  });
+
+  it("follows a write delegated to a top-level arrow helper", () => {
+    const source = [
+      '"use server";',
+      "const NOT_FOUND = \"Introuvable.\";",
+      "const save = async (tx: Tx, id: string) => {",
+      "  await tx.vehicle.update({ where: { id } });",
+      "};",
+      "const drop = (id: string) => db.vehicle.delete({ where: { id } });",
+      "export async function untraced() {",
+      "  await db.$transaction((tx) => save(tx, id));",
+      "  await drop(id);",
+      "}",
+    ].join("\n");
+    const functions = topLevelFunctions(source);
+    expect(functions.map((f) => f.name)).toEqual(["save", "drop", "untraced"]);
+    const reached = closure(functions[2]!, functions);
+    expect(reached.map((f) => f.name).sort()).toEqual(["drop", "save", "untraced"]);
+    expect(reached.some((f) => WRITE.test(f.body)) && !reached.some((f) => AUDIT_CALL.test(f.body))).toBe(true);
+  });
+
+  it("refuses exports it cannot read", () => {
+    for (const line of [
+      "export const save = async () => {};",
+      "export default async function save() {}",
+      "export { save };",
+      "export * from './other';",
+    ]) {
+      expect(UNREADABLE_EXPORT.test(`"use server";\n${line}`), line).toBe(true);
+    }
+    expect(UNREADABLE_EXPORT.test('"use server";\nexport type State = { ok: boolean };\nexport async function save() {}')).toBe(false);
   });
 });

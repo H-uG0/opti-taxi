@@ -418,7 +418,18 @@ function SharingPanel({ trip }: { trip: TripRowData }) {
             <label htmlFor={noteId} className="block text-sm font-medium text-slate-700">
               Note <span className="font-normal text-slate-500">(facultatif : motif du refus, canal…)</span>
             </label>
-            <Textarea id={noteId} name="note" maxLength={500} rows={2} className="min-h-14" />
+            <Textarea
+              id={noteId}
+              name="note"
+              maxLength={500}
+              rows={2}
+              className="min-h-14"
+              aria-describedby={`${noteId}-hint`}
+            />
+            {/* A refusal is often explained by the patient's health: the reason stays non-medical. */}
+            <p id={`${noteId}-hint`} className="text-xs text-slate-500">
+              Aucune information médicale (diagnostic, traitement) : « préfère voyager seul » suffit.
+            </p>
           </div>
           <DecisionButtons decisions={decisions} />
         </ActionForm>

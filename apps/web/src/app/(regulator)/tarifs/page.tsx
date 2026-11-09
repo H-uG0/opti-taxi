@@ -238,7 +238,7 @@ export default async function TariffsPage() {
           )}
         </div>
 
-        <Card className="xl:sticky xl:top-6">
+        <Card className="xl:sticky xl:top-[calc(1.5rem+var(--demo-banner-h))]">
           <CardHeader title="Simulateur" />
           <CardBody>
             <FareSimulator grids={simulatorGrids} defaultGridId={inForce[0]?.id ?? null} />

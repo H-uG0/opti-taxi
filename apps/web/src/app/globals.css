@@ -24,6 +24,24 @@
 
 :root {
   color-scheme: light;
+  /* Height of the demo banner (components/demo/demo-banner.tsx): 1.5rem in demo mode (root layout), else 0. */
+  --demo-banner-h: 0px;
+}
+
+/*
+ * Full-height layouts and sticky elements leave room for the demo banner, which stays at the top
+ * of the page: without it, a sidebar of 100dvh would run past the bottom of the screen.
+ */
+@utility min-h-below-banner {
+  min-height: calc(100dvh - var(--demo-banner-h));
+}
+
+@utility h-below-banner {
+  height: calc(100dvh - var(--demo-banner-h));
+}
+
+@utility top-below-banner {
+  top: var(--demo-banner-h);
 }
 
 body {

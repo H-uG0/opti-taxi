@@ -139,7 +139,7 @@ export function PlanningBoard({
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_24rem]">
-        <Card className="h-[26rem] overflow-hidden lg:sticky lg:top-4 lg:h-[36rem]">
+        <Card className="h-[26rem] overflow-hidden lg:sticky lg:top-[calc(1rem+var(--demo-banner-h))] lg:h-[36rem]">
           <PlanningMapLazy
             vehicles={mapVehicles}
             trips={mapTrips}

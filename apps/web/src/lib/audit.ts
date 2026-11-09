@@ -38,12 +38,14 @@
  *   changed fields, old and new value), tariff.create/update/delete (details:
  *   changed fields; the deleted grid);
  * - accounts: driver.*, account.* (create, update, password_reset,
- *   password_change, deactivate, reactivate), session.login, session.logout,
- *   session.login_failed and session.throttled (no author; details.emailTag,
- *   never the e-mail).
- * Changes are written in the transaction of the change (audit); reads and
- * sign-ins with auditRead, sign-in failures with auditAnonymous (best effort,
- * never blocks the page).
+ *   password_change, password_change_failed: a wrong current password,
+ *   deactivate, reactivate), session.login, session.logout,
+ *   session.login_failed and session.throttled (no author; the account as
+ *   entityId, or for an e-mail that is no account its details.emailTag, never
+ *   the e-mail: see signInSubject).
+ * Changes are written in the transaction of the change (audit); reads,
+ * sign-ins and wrong current passwords with auditRead, sign-in failures with
+ * auditAnonymous (best effort, never blocks the page).
  */
 import "server-only";
 import { headers } from "next/headers";
@@ -83,8 +85,9 @@ export async function audit(client: AuditClient, user: AuditActor, entries: Audi
 }
 
 /**
- * Records a read (a patient record or a roadmap shown). A failure is logged and
- * never breaks the page.
+ * Records a read (a patient record or a roadmap shown), or another event that
+ * goes with no change (a sign-in, a wrong current password). A failure is
+ * logged and never breaks the page.
  */
 export async function auditRead(user: AuditActor, entry: AuditEntry): Promise<void> {
   try {

@@ -359,9 +359,28 @@ export function emailKey(email: string): string {
   return createHash("sha256").update(email).digest("hex");
 }
 
-/** Pseudonymous tag of an e-mail for the logs (sha256 prefix): never the e-mail itself. */
+/**
+ * Pseudonymous tag of an e-mail for the logs (sha256 prefix): never the e-mail
+ * itself. Unsalted, so it can be reversed by hashing guesses (staff e-mails
+ * follow prenom.nom@…): fine for transient logs, and stored in the audit trail
+ * only for an e-mail that is no account (signInSubject).
+ */
 export function emailTag(email: string): string {
   return createHash("sha256").update(email).digest("hex").slice(0, 12);
+}
+
+/**
+ * Who a failed or throttled sign-in was about, for the audit trail: the
+ * account's id when the e-mail is one (entityId, nothing about the e-mail),
+ * otherwise the e-mail's tag, so repeated tries of one unknown e-mail can still
+ * be told apart. The trail is permanent: a guessable tag of a staff e-mail
+ * would last as long as it does.
+ */
+export function signInSubject(
+  email: string,
+  accountId: string | null,
+): { entityId: string | null; details: { emailTag?: string } } {
+  return accountId ? { entityId: accountId, details: {} } : { entityId: null, details: { emailTag: emailTag(email) } };
 }
 
 /** Fields logged for a refused attempt: the e-mail only as emailTag, never the password. */

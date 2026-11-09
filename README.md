@@ -162,9 +162,16 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
 - **Mot de passe chauffeur provisoire** : le mot de passe que le régulateur saisit à la création du
   compte ou à sa réinitialisation est provisoire. À la connexion suivante, le chauffeur doit en choisir
   un à lui (`/chauffeur/mot-de-passe`) avant d'ouvrir sa feuille de route ; ses autres sessions sont
-  alors fermées. Personne d'autre que lui ne peut donc saisir de statut en son nom. La page « Changer
-  mon mot de passe » reste accessible depuis le bas de la feuille de route. Les comptes du jeu fictif
-  ne sont pas provisoires (la démo s'ouvre avec les mots de passe publiés).
+  alors fermées. Une fois ce choix fait, la régulation ne connaît plus le mot de passe du chauffeur.
+  Limite : celui qui connaît le mot de passe provisoire (la régulation, ou quiconque l'a vu passer)
+  peut se connecter avant le chauffeur et choisir le mot de passe à sa place. Ce n'est pas impossible,
+  mais cela se voit : le mot de passe provisoire ne fonctionne plus pour le chauffeur, qui appelle la
+  régulation, et le changement figure au journal d'audit (`account.password_change`, avec l'adresse IP
+  et l'empreinte du navigateur). Chaque mot de passe actuel erroné saisi sur cette page est tracé
+  (`account.password_change_failed`) et compte dans le blocage des connexions (5 échecs : 15 minutes,
+  pour cette page comme pour la connexion). La page « Changer mon mot de passe » reste accessible
+  depuis le bas de la feuille de route. Les comptes du jeu fictif ne sont pas provisoires (la démo
+  s'ouvre avec les mots de passe publiés).
 - **Connexion** : après 5 échecs en 15 minutes sur une même adresse e-mail, la connexion à ce compte
   est refusée pendant 15 minutes ; après 30 tentatives en 5 minutes depuis une même adresse IP, elle est
   refusée depuis cette adresse pendant 5 minutes. Le message est le même que le compte existe ou non.
@@ -174,7 +181,10 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
   d'un compte peut en bloquer la connexion 15 minutes, de façon renouvelable ; le blocage, en mémoire,
   se lève aussi en redémarrant le serveur web.
 - **Journal d'audit** (table `AuditEvent`) : les connexions, déconnexions, échecs de connexion et
-  blocages pour trop de tentatives (l'e-mail n'y figure que sous forme d'empreinte, `emailTag`) ; les
+  blocages pour trop de tentatives (le compte visé par son identifiant ; l'e-mail n'y figure jamais, et
+  une adresse qui ne correspond à aucun compte n'y figure que sous forme d'empreinte `emailTag`, un
+  hachage sans clé qu'on peut retrouver en essayant des adresses : elle n'est donc jamais stockée pour
+  un compte existant), les mots de passe actuels erronés saisis par un chauffeur ; les
   consultations (liste des patients, fiche patient et ses formulaires, saisie d'une course, fiche
   établissement, liste des courses, planning d'un jour, feuille de route, arrivées partagées, fiche
   chauffeur, équipages du jour) ; qui a créé, modifié, annulé ou déplacé un patient, une prescription,
@@ -193,10 +203,17 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
   propriétaire des tables, et un rôle d'exécution pour l'application, sans droit de propriétaire,
   privé de `UPDATE`, `DELETE` et `TRUNCATE` sur `AuditEvent`
   (`REVOKE UPDATE, DELETE, TRUNCATE ON "AuditEvent" FROM <rôle d'exécution>;`) : il ne peut alors ni
-  modifier le journal ni désactiver le déclencheur.
+  modifier le journal ni désactiver le déclencheur. Le conteneur web applique les migrations avec
+  `MIGRATION_DATABASE_URL` (rôle de migration) et sert l'application avec `DATABASE_URL` (rôle
+  d'exécution) ; sans `MIGRATION_DATABASE_URL` (développement, démo), `DATABASE_URL` sert aux deux.
+  Ne jamais rendre le rôle d'exécution propriétaire pour faire passer les migrations : il pourrait
+  alors désactiver le déclencheur et se redonner les droits retirés. Le rôle d'exécution reçoit les
+  droits de lecture et d'écriture sur les tables et séquences, y compris celles des migrations
+  futures (`ALTER DEFAULT PRIVILEGES FOR ROLE <rôle de migration> …`), puis le `REVOKE` ci-dessus.
 - **Service d'optimisation** : il reçoit les coordonnées des domiciles et les rendez-vous. Avec
   `OPTIMIZER_TOKEN` (même valeur sur le web et sur l'optimiseur), il refuse tout appel sans ce jeton
-  (`401`) ; sans jeton il accepte tout appel, ce que les deux services signalent au démarrage en
+  (`401`), avant même de lire la requête, sur toutes ses adresses sauf `/health` (sa documentation
+  `/docs` comprise) ; sans jeton il accepte tout appel, ce que les deux services signalent au démarrage en
   production. Il limite les calculs simultanés (2 par défaut, `429` au-delà : « réessayez dans une
   minute »), la taille des requêtes (10 Mo) et leur contenu (300 véhicules, 3 000 courses), et son
   conteneur est limité à 8 Go de mémoire. En production il reste sur un réseau privé, sans port
@@ -215,10 +232,13 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
   serveur s'arrête au démarrage si `SESSION_SECRET` est l'exemple fourni ou fait moins de 43
   caractères (`openssl rand -base64 48`).
 - **Mode démo** (`DEMO_MODE=1`, à ne jamais poser en production) : l'image Docker charge le jeu fictif
-  sur une base vide et affiche le bandeau « DÉMO — données fictives ». Sans lui (par défaut), la base
-  reste vide au premier démarrage, et en production le serveur s'arrête s'il trouve un compte
-  `@opti-taxi.test` (comptes du seed, mots de passe publics). L'ancienne variable `DEMO_DATA` n'est
-  plus lue.
+  sur une base vide et affiche le bandeau « DÉMO — données fictives ». Sans lui (par défaut dans
+  l'image), la base reste vide au premier démarrage, et en production le serveur s'arrête s'il trouve
+  un compte `@opti-taxi.test` (comptes du seed, mots de passe publics). Attention : `docker-compose.yml`
+  est la démonstration et pose `DEMO_MODE=1` par défaut sur le service `web`. Un déploiement de
+  production construit à partir de ce fichier (lot PROD-01) doit donc poser `DEMO_MODE=0`, dans son
+  `.env` ou son fichier de surcharge ; sinon il chargerait le jeu fictif et ses mots de passe publics
+  sur la base vide. L'ancienne variable `DEMO_DATA` n'est plus lue.
 - **Scripts de développement** : `pnpm db:seed`, `pnpm db:reset` et `pnpm db:history` refusent une
   base qui n'est pas sur cette machine ou qui contient des comptes étrangers au jeu fictif
   (`SEED_ALLOW_WIPE=1` pour passer outre, jamais avec `NODE_ENV=production`).

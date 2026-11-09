@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { connection } from "next/server";
 import { DemoBanner } from "@/components/demo/demo-banner";
+import { isDemoMode } from "@/lib/demo";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -23,7 +24,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   await connection();
   return (
     <html lang="fr">
-      <body className="min-h-dvh">
+      {/* Demo mode: the banner's height, which the full-height layouts leave free (globals.css). */}
+      <body className={isDemoMode() ? "min-h-dvh [--demo-banner-h:1.5rem]" : "min-h-dvh"}>
         <DemoBanner />
         {children}
       </body>

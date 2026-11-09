@@ -91,9 +91,9 @@ describe("login: audit trail of failures", () => {
     fake.user.findUnique.mockResolvedValue({ ...account, active: false });
     fake.verifyPassword.mockResolvedValue(true);
     expect((await login({ error: null, email: "" }, credentials())).error).toBe(WRONG_CREDENTIALS);
-    expect(events().map((e) => [e.action, e.entityId, (e.details as { reason: string }).reason])).toEqual([
-      ["session.login_failed", "u-driver", "wrong_password"],
-      ["session.login_failed", "u-driver", "inactive"],
+    expect(events().map((e) => [e.action, e.entityId, e.details])).toEqual([
+      ["session.login_failed", "u-driver", { reason: "wrong_password" }],
+      ["session.login_failed", "u-driver", { reason: "inactive" }],
     ]);
     expect(fake.createSession).not.toHaveBeenCalled();
   });

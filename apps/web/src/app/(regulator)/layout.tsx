@@ -6,8 +6,8 @@ export default async function RegulatorLayout({ children }: { children: React.Re
   const user = await requireUser("REGULATOR");
 
   return (
-    <div className="flex min-h-dvh">
-      <aside className="sticky top-0 hidden h-dvh print:hidden w-60 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
+    <div className="flex min-h-below-banner">
+      <aside className="sticky top-below-banner hidden h-below-banner print:hidden w-60 shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
         <div className="border-b border-slate-200 px-5 py-4">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand-700">Taxi & Ambulance V</p>
           <p className="text-lg font-semibold tracking-tight text-slate-900">Opti-Taxi</p>

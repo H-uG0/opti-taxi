@@ -50,6 +50,20 @@ def test_a_configured_token_is_required_on_optimize_and_evaluate(monkeypatch: py
 def test_the_token_is_checked_before_the_body(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPTIMIZER_TOKEN", "jeton-de-test")
     assert client.post("/optimize", json={"not": "a request"}).status_code == 401
+    # Not even parsed: a body that is no JSON at all gets 401, not 422.
+    for path in ("/optimize", "/evaluate"):
+        malformed = client.post(path, content=b"{not json", headers={"content-type": "application/json"})
+        assert malformed.status_code == 401
+        assert malformed.headers["www-authenticate"] == "Bearer"
+
+
+def test_the_api_documentation_needs_the_token_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPTIMIZER_TOKEN", "jeton-de-test")
+    for path in ("/docs", "/openapi.json", "/redoc"):
+        assert client.get(path).status_code == 401
+    assert client.get("/openapi.json", headers={"Authorization": "Bearer jeton-de-test"}).status_code == 200
+    monkeypatch.delenv("OPTIMIZER_TOKEN")
+    assert client.get("/openapi.json").status_code == 200
 
 
 def test_health_needs_no_token(monkeypatch: pytest.MonkeyPatch) -> None:

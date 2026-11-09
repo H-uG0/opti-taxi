@@ -7,6 +7,11 @@
 # creates accounts whose passwords are published in the README. Without it (the
 # default, production) the database is left empty, and the server refuses to start
 # in production if demo accounts exist (src/lib/demo.ts).
+#
+# MIGRATION_DATABASE_URL (production): the owner role of the tables, used for the
+# migrations only. The app runs with DATABASE_URL, a runtime role that owns nothing
+# and cannot alter the audit trail (README, « Journal d'audit »). Unset (development,
+# demo): DATABASE_URL for both.
 set -e
 
 # One random secret per container start unless one is given: open sessions end
@@ -16,7 +21,7 @@ if [ -z "$SESSION_SECRET" ]; then
   export SESSION_SECRET
 fi
 
-./node_modules/.bin/prisma migrate deploy
+DATABASE_URL="${MIGRATION_DATABASE_URL:-$DATABASE_URL}" ./node_modules/.bin/prisma migrate deploy
 
 users="$(node -e "const { PrismaClient } = require('@prisma/client'); const p = new PrismaClient(); p.user.count().then((n) => { console.log(n); return p.\$disconnect(); })")"
 if [ -n "$DEMO_DATA" ] && [ -z "$DEMO_MODE" ]; then

@@ -36,6 +36,8 @@ services:
       OPTIMIZER_TOKEN: ${OPTIMIZER_TOKEN:-}
       # Solves at once (2 to 4 GB each at 120 vehicles); beyond, /optimize answers 429.
       OPTIMIZER_MAX_CONCURRENT_SOLVES: ${OPTIMIZER_MAX_CONCURRENT_SOLVES:-2}
+      # Largest request body in MB; beyond, 413.
+      OPTIMIZER_MAX_BODY_MB: ${OPTIMIZER_MAX_BODY_MB:-10}
     # Two large solves at once fit; a runaway one is stopped rather than starving the machine.
     mem_limit: ${OPTIMIZER_MEM_LIMIT:-8g}
     ports:
@@ -63,10 +65,14 @@ services:
       OPTIMIZER_URL: http://optimizer:8100
       OPTIMIZER_TOKEN: ${OPTIMIZER_TOKEN:-}
       GEOCODER_URL: https://data.geopf.fr/geocodage/search
-      # 1: demo with fictitious data only (seed + history on an empty database, banner;
-      # the seed's accounts have public passwords). Never set it in production: without
-      # it the database starts empty and the server refuses to start if demo accounts exist.
-      DEMO_MODE: "1"
+      # 1 (the default of this file): demo with fictitious data only (seed + history on an
+      # empty database, banner; the seed's accounts have public passwords). A production
+      # deployment built on this file MUST set DEMO_MODE=0 (its .env or its override): the
+      # database then starts empty and the server refuses to start if demo accounts exist.
+      DEMO_MODE: ${DEMO_MODE:-1}
+      # Production with separate database roles (README, « Journal d'audit »): the migrations
+      # run as the owner role, the app as a runtime role. Empty: DATABASE_URL for both.
+      MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:-}
     ports:
       - "127.0.0.1:3100:3100"
     init: true

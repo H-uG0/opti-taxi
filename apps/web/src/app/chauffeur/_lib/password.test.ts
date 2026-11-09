@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { passwordChangeSchema, readPasswordForm } from "./password";
+import { fieldsToClear, passwordChangeSchema, readPasswordForm } from "./password";
 
 function form(entries: Record<string, string>): FormData {
   const fd = new FormData();
@@ -31,5 +31,14 @@ describe("passwordChangeSchema", () => {
       /différent de l'actuel/,
     );
     expect(errors({ current: "x", next: "a".repeat(65), confirm: "a".repeat(65) }).next).toBe("64 caractères maximum.");
+  });
+});
+
+describe("fieldsToClear", () => {
+  it("empties the fields in error only, the confirmation with a refused new password", () => {
+    expect([...fieldsToClear({ current: "Mot de passe actuel incorrect." })]).toEqual(["current"]);
+    expect([...fieldsToClear({ next: "10 caractères minimum." })].sort()).toEqual(["confirm", "next"]);
+    expect([...fieldsToClear({ confirm: "Les deux mots de passe ne correspondent pas." })]).toEqual(["confirm"]);
+    expect(fieldsToClear({}).size).toBe(0);
   });
 });

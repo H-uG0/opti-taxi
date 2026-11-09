@@ -43,8 +43,8 @@ export default async function DriverLayout({ children }: { children: React.React
   const regulator = await loadRegulatorContact();
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-lg flex-col bg-slate-50">
-      <header className="sticky top-0 z-20 shadow-sm">
+    <div className="mx-auto flex min-h-below-banner max-w-lg flex-col bg-slate-50">
+      <header className="sticky top-below-banner z-20 shadow-sm">
         <div
           className={cn(
             "flex items-center justify-between bg-brand-800 py-2 pr-2 pl-4 text-white",

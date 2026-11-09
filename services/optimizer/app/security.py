@@ -3,9 +3,10 @@
 The requests carry patients' home coordinates and appointment times, and one /optimize call at
 120 vehicles ties up a core and 2 to 4 GB of memory for about a minute. Hence:
 
-- OPTIMIZER_TOKEN: when set, /optimize and /evaluate answer 401 to any request without
-  ``Authorization: Bearer <the same token>`` (compared in constant time). Unset: open, as in
-  development, with a warning at startup. /health stays open (container health checks).
+- OPTIMIZER_TOKEN: when set, every path but /health (container health checks) answers 401 to a
+  request without ``Authorization: Bearer <the same token>`` (compared in constant time), before
+  its body is read or parsed: /optimize, /evaluate, and the /docs and /openapi.json pages too.
+  Unset: open, as in development, with a warning at startup.
 - OPTIMIZER_MAX_CONCURRENT_SOLVES (default 2, 1 to 8): solves running at once. Beyond, /optimize
   answers 429 at once rather than queueing (the web shows « réessayez dans une minute »).
 - OPTIMIZER_MAX_BODY_MB (default 10): request bodies above it get 413, before being parsed.
@@ -22,7 +23,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from fastapi import Header, HTTPException, status
+from fastapi import HTTPException, status
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
@@ -39,20 +40,41 @@ def configured_token() -> str | None:
     return token or None
 
 
-def require_token(authorization: str | None = Header(default=None)) -> None:
-    """FastAPI dependency: the bearer token must match OPTIMIZER_TOKEN when one is configured."""
-    expected = configured_token()
-    if expected is None:
-        return
+OPEN_PATHS = frozenset({"/health"})
+TOKEN_ERROR = "Jeton d'accès absent ou invalide (OPTIMIZER_TOKEN)."
+
+
+def token_accepted(authorization: str | None, expected: str) -> bool:
+    """True when ``authorization`` is ``Bearer <expected>``."""
     scheme, _, supplied = (authorization or "").partition(" ")
     supplied = supplied.strip()
     # compare_digest on bytes: constant time for equal lengths, no early exit on the first difference.
-    if scheme.lower() != "bearer" or not secrets.compare_digest(supplied.encode(), expected.encode()):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Jeton d'accès absent ou invalide (OPTIMIZER_TOKEN).",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    return scheme.lower() == "bearer" and secrets.compare_digest(supplied.encode(), expected.encode())
+
+
+class RequireToken:
+    """ASGI middleware: 401 for any path but /health without the bearer token, when one is configured.
+
+    It runs before the route, so before FastAPI reads and parses the body: a caller without the token
+    cannot make the service parse a request (up to OPTIMIZER_MAX_BODY_MB) nor read the API schema.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("path") in OPEN_PATHS:
+            await self.app(scope, receive, send)
+            return
+        expected = configured_token()
+        if expected is not None:
+            raw = dict(scope.get("headers") or []).get(b"authorization")
+            if not token_accepted(raw.decode("latin-1") if raw is not None else None, expected):
+                await _send_json(
+                    send, status.HTTP_401_UNAUTHORIZED, TOKEN_ERROR, extra_headers=[(b"www-authenticate", b"Bearer")]
+                )
+                return
+        await self.app(scope, receive, send)
 
 
 def _int_setting(name: str, default: int, low: int, high: int) -> int:
@@ -148,13 +170,19 @@ class BodySizeLimit:
         await self.app(scope, limited_receive, send)
 
 
-async def _send_json(send: Send, status_code: int, detail: str) -> None:
+async def _send_json(
+    send: Send, status_code: int, detail: str, extra_headers: list[tuple[bytes, bytes]] | None = None
+) -> None:
     body = json.dumps({"detail": detail}, ensure_ascii=False).encode()
     await send(
         {
             "type": "http.response.start",
             "status": status_code,
-            "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())],
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+                *(extra_headers or []),
+            ],
         }
     )
     await send({"type": "http.response.body", "body": body})
@@ -164,7 +192,7 @@ def log_startup_settings(slots: SolveSlots) -> None:
     """One line on the protections in force; a warning when the API is open."""
     if configured_token() is None:
         logger.warning(
-            "OPTIMIZER_TOKEN is not set: /optimize and /evaluate accept any caller. Set the same value on the "
+            "OPTIMIZER_TOKEN is not set: /optimize, /evaluate and /docs accept any caller. Set the same value on the "
             "web app and here, and keep this service on a private network (README, « Sécurité »)."
         )
     logger.info(
