@@ -33,11 +33,17 @@ export function ActionForm({
         ? Object.entries(hidden).map(([name, value]) => <input key={name} type="hidden" name={name} value={value} />)
         : null}
       {children}
-      {state.message ? (
-        <p role={state.ok ? "status" : "alert"} className={cn("text-xs font-medium", state.ok ? "text-emerald-700" : "text-red-700")}>
-          {state.message}
-        </p>
-      ) : null}
+      <ActionMessage result={state} />
     </form>
+  );
+}
+
+/** The one-line feedback of a row action (a success as status, a refusal as alert). */
+export function ActionMessage({ result }: { result: ActionResult }) {
+  if (!result.message) return null;
+  return (
+    <p role={result.ok ? "status" : "alert"} className={cn("text-xs font-medium", result.ok ? "text-emerald-700" : "text-red-700")}>
+      {result.message}
+    </p>
   );
 }

@@ -8,7 +8,7 @@ import { RECURRENCE_LEGS_LABELS } from "@/lib/labels";
 import { formatDuration, formatMinute, isIsoDate, parseMinute, WEEKDAY_LABELS, WEEKDAY_SHORT } from "@/lib/time";
 import { echoed, echoedList, INITIAL_FORM_STATE, type FormState } from "../_lib/form-state";
 import { ISO_WEEKDAYS, MAX_SESSION_MINUTES, RECURRENCE_LEGS } from "../_lib/options";
-import { recurrenceFormNotices } from "../_lib/status";
+import { recurrenceFormNotices, type FormPrescription } from "../_lib/status";
 import { FormSubmitButton, submitWithoutReset } from "./form-submit";
 import { Warning } from "./warning";
 
@@ -25,7 +25,7 @@ export type RecurrenceFormInitial = {
 };
 
 export type FacilityOption = { id: string; name: string; city: string; active: boolean };
-export type PrescriptionOption = { id: string; label: string; validFrom: string; validTo: string };
+export type PrescriptionOption = FormPrescription & { id: string; label: string };
 
 const PRESETS: { label: string; days: number[] }[] = [
   { label: "Lun Mer Ven", days: [1, 3, 5] },

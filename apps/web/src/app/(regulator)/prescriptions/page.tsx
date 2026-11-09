@@ -11,16 +11,25 @@ import { EmptyState, PageHeader } from "@/components/ui/layout";
 import { Table, TBody, Td, Th, THead } from "@/components/ui/table";
 import { attachRecurrencesToRenewal } from "../patients/actions";
 import { ActionButton } from "../patients/_components/action-button";
-import { EXPIRY_WARNING_DAYS } from "../patients/_lib/status";
+import { EXPIRY_WARNING_DAYS, uncoveredText } from "../patients/_lib/status";
 import { countByState, type WorkItem, type WorkState } from "../patients/_lib/work-list";
 import { loadPrescriptionWork } from "../patients/_lib/work-list-db";
 
 export const metadata: Metadata = { title: "Prescriptions à traiter" };
 
-const STATE_TONES: Record<WorkState, BadgeTone> = { expired: "danger", expiring: "warning", renewed: "info" };
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
-function stateLabel(item: WorkItem): string {
-  if (item.state === "renewed") return "Renouvelée : à rattacher";
+// « Renouvelée, à rattacher » is amber here as on the patients list and the patient page.
+const STATE_TONES: Record<WorkState, BadgeTone> = { expired: "danger", expiring: "warning", renewed: "warning" };
+
+function stateLabel(item: WorkItem, today: string): string {
+  if (item.state === "renewed") {
+    return item.renewal && item.renewal.validFrom > today
+      ? `Renouvelée à partir du ${formatShortDate(item.renewal.validFrom)} : à rattacher`
+      : "Renouvelée : à rattacher";
+  }
   if (item.state === "expired") return `Expirée le ${formatShortDate(item.prescription.validTo)}`;
   if (item.daysLeft === 0) return "Expire aujourd'hui";
   return item.daysLeft === 1 ? "Expire demain" : `Expire dans ${item.daysLeft} j`;
@@ -28,7 +37,9 @@ function stateLabel(item: WorkItem): string {
 
 function consequence(item: WorkItem): string {
   if (item.state === "renewed" && item.renewal) {
-    return `Les courses continuent sur le renouvellement (${formatShortDate(item.renewal.validFrom)} → ${formatShortDate(item.renewal.validTo)}) ; rattachez-y les récurrences.`;
+    const gap = item.uncovered ? ` ${capitalize(uncoveredText(item.uncovered))}.` : "";
+    const which = item.recurrences.length > 1 ? "les récurrences" : "la récurrence";
+    return `Les courses continuent sur le renouvellement (${formatShortDate(item.renewal.validFrom)} → ${formatShortDate(item.renewal.validTo)}) ; rattachez-y ${which}.${gap}`;
   }
   if (item.state === "expired") return "Plus aucune course n'est créée : saisissez la nouvelle PMT.";
   return `Plus de course après le ${formatShortDate(item.prescription.validTo)} sans nouvelle PMT.`;
@@ -106,7 +117,7 @@ export default async function PrescriptionsPage() {
                 </Td>
                 <Td className="max-w-xs">
                   <Badge tone={STATE_TONES[item.state]} className="tabular whitespace-nowrap">
-                    {stateLabel(item)}
+                    {stateLabel(item, today)}
                   </Badge>
                   <span className="mt-1 block text-xs text-slate-600">{consequence(item)}</span>
                 </Td>
@@ -129,10 +140,11 @@ export default async function PrescriptionsPage() {
                           fromPrescriptionId: item.prescription.id,
                           toPrescriptionId: item.renewal.id,
                         }}
-                        confirmMessage={`Rattacher les récurrences de ${item.patient.name} à la prescription du ${formatShortDate(item.renewal.validFrom)} au ${formatShortDate(item.renewal.validTo)} ?`}
+                        confirmMessage={`Rattacher ${item.recurrences.length > 1 ? "les récurrences" : "la récurrence"} de ${item.patient.name} à la prescription du ${formatShortDate(item.renewal.validFrom)} au ${formatShortDate(item.renewal.validTo)} ?`}
                         pendingLabel="Rattachement…"
                       >
-                        Rattacher au renouvellement
+                        {/* One line, as the « Saisir la nouvelle PMT » buttons of the column. */}
+                        <span className="whitespace-nowrap">Rattacher au renouvellement</span>
                       </ActionButton>
                     ) : (
                       <LinkButton href={`/patients/${item.patient.id}/prescriptions/nouvelle`} size="sm">

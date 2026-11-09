@@ -349,10 +349,72 @@ describe("planRecurrenceTrips — renewal not attached yet", () => {
     expect(prescriptionOn(rec, "2026-11-04")).toBeNull();
   });
 
-  it("picks the covering prescription that lasts longest", () => {
+  it("picks the renewal taking over nearest to the end, the longest of two taking over the same day", () => {
     const short = { ...renewal, id: "pre_short", validTo: fromIsoDate("2026-11-30") };
     const rec = recurrence({ prescription: ending, patient: { prescriptions: [short, renewal] } });
     expect(prescriptionOn(rec, "2026-11-04")?.id).toBe("pre_2");
+  });
+
+  it("never borrows the prescription of another series of the patient (another facility)", () => {
+    // Radiotherapy at another facility, same mode, started before the dialysis PMT ended and ending later.
+    const radiotherapy: PrescriptionForGeneration = {
+      id: "pre_radio",
+      mode: "TAP",
+      sharing: "NONE",
+      validFrom: fromIsoDate("2026-10-15"),
+      validTo: fromIsoDate("2027-01-15"),
+      recurrences: [{ facilityId: "fac_radio" }],
+    };
+    const rec = recurrence({ prescription: ending, patient: { prescriptions: [radiotherapy] } });
+    const { trips, skipped } = planRecurrenceTrips([rec], MONDAY, SUNDAY);
+    expect(summary(trips)).toEqual(["2026-11-02 OUTBOUND", "2026-11-02 RETURN"]);
+    expect(skipped.map((o) => o.date)).toEqual(["2026-11-04", "2026-11-06"]);
+    // Used by another recurrence at the same facility: the same series, its renewal.
+    const sameCare = { ...radiotherapy, recurrences: [{ facilityId: "fac_radio" }, { facilityId: "fac_1" }] };
+    expect(prescriptionOn(recurrence({ prescription: ending, patient: { prescriptions: [sameCare] } }), "2026-11-04")?.id).toBe(
+      "pre_radio",
+    );
+  });
+
+  it("prefers the real renewal to a concurrent prescription of the same mode ending later", () => {
+    // Not attached to any recurrence, so not told apart by its facility: by its dates.
+    const concurrent = { ...renewal, id: "pre_chemo", sharing: "NONE" as const, validFrom: fromIsoDate("2026-10-01"), validTo: fromIsoDate("2027-08-01") };
+    const rec = recurrence({ prescription: ending, patient: { prescriptions: [concurrent, renewal] } });
+    expect(prescriptionOn(rec, "2026-11-04")?.id).toBe("pre_2");
+    // Once the renewal is over, the concurrent one (started before it) does not continue the chain.
+    expect(prescriptionOn(rec, "2027-06-01")).toBeNull();
+  });
+
+  it("walks the renewal chain, and leaves the days between two links without trip", () => {
+    const first = { ...renewal, id: "pre_r1", validTo: fromIsoDate("2026-11-04") };
+    const second = { ...renewal, id: "pre_r2", validFrom: fromIsoDate("2026-11-06"), validTo: fromIsoDate("2027-05-05") };
+    const rec = recurrence({ prescription: ending, patient: { prescriptions: [second, first] } });
+    expect(prescriptionOn(rec, "2026-11-04")?.id).toBe("pre_r1");
+    expect(prescriptionOn(rec, "2026-11-05")).toBeNull();
+    expect(prescriptionOn(rec, "2026-11-06")?.id).toBe("pre_r2");
+    expect(prescriptionOn(rec, "2027-01-04")?.id).toBe("pre_r2");
+  });
+
+  it("takes a renewal starting a few days late, not one starting more than a month after", () => {
+    const late = { ...renewal, validFrom: fromIsoDate("2026-11-06") };
+    const rec = recurrence({ prescription: ending, patient: { prescriptions: [late] } });
+    const { trips, skipped } = planRecurrenceTrips([rec], MONDAY, SUNDAY);
+    expect(skipped.map((o) => o.date)).toEqual(["2026-11-04"]);
+    expect(trips.filter((t) => dayOf(t) === "2026-11-06").map((t) => t.prescriptionId)).toEqual(["pre_2", "pre_2"]);
+    const tooLate = { ...renewal, validFrom: fromIsoDate("2026-12-06") };
+    expect(prescriptionOn(recurrence({ prescription: ending, patient: { prescriptions: [tooLate] } }), "2026-12-07")).toBeNull();
+  });
+
+  it("keeps the old prescription before a renewal the recurrence was attached to early", () => {
+    const old: PrescriptionForGeneration = { id: "pre_old", mode: "TAP", sharing: "BOTH", ...ending };
+    const rec = recurrence({
+      prescriptionId: "pre_2",
+      prescription: renewal,
+      patient: { prescriptions: [old, { ...renewal, recurrences: [{ facilityId: "fac_1" }] }] },
+    });
+    const { trips, skipped } = planRecurrenceTrips([rec], MONDAY, SUNDAY);
+    expect(skipped).toEqual([]);
+    expect(trips.map((t) => t.prescriptionId)).toEqual(["pre_old", "pre_old", "pre_2", "pre_2", "pre_2", "pre_2"]);
   });
 
   it("reports the sessions without any valid prescription instead of dropping them silently", () => {

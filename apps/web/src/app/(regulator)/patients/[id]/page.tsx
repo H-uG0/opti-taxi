@@ -36,12 +36,15 @@ import { BackLink } from "../_components/back-link";
 import { SyncNotice } from "../_components/sync-notice";
 import { Warning } from "../_components/warning";
 import {
+  findPredecessor,
   findRenewal,
   formatWeekdays,
   mobilityModeWarning,
   needsRenewal,
   prescriptionValidity,
   recurrenceCoverageNotice,
+  uncoveredDays,
+  uncoveredText,
   validityLabel,
   type Notice,
   type ValidityState,
@@ -98,7 +101,11 @@ export default async function PatientPage({
       include: {
         prescriptions: {
           orderBy: [{ validTo: "desc" }, { validFrom: "desc" }],
-          include: { _count: { select: { recurrences: true, trips: true } } },
+          include: {
+            _count: { select: { recurrences: true, trips: true } },
+            // Facilities of the active recurrences: another series' PMT is never taken for a renewal.
+            recurrences: { where: { active: true }, select: { facilityId: true } },
+          },
         },
         recurrences: {
           orderBy: [{ active: "desc" }, { appointmentMinute: "asc" }],
@@ -112,7 +119,7 @@ export default async function PatientPage({
     db.trip.findMany({
       where: { patientId: id, serviceDate: { gte: fromIsoDate(today), lte: fromIsoDate(lastDay) } },
       orderBy: [{ serviceDate: "asc" }, { direction: "asc" }],
-      include: { facility: { select: { name: true } } },
+      include: { facility: { select: { name: true } }, recurrence: { select: { active: true } } },
     }),
     countOpenTripsByRecurrence({ patientId: id }, today),
     // Absences and cancellations of the last days (PATIENT_HISTORY_DAYS), counted on the record.
@@ -135,12 +142,15 @@ export default async function PatientPage({
   const prescriptions = patient.prescriptions.map((p) => {
     const dates = { validFrom: toIsoDate(p.validFrom), validTo: toIsoDate(p.validTo) };
     const renewal = findRenewal(p, patient.prescriptions);
+    const predecessor = findPredecessor(p, patient.prescriptions);
     return {
       ...p,
       dates,
       validity: prescriptionValidity(dates, today),
       mismatch: mobilityModeWarning(patient.mobility, p.mode),
       renewal: renewal ? { id: renewal.id, validFrom: toIsoDate(renewal.validFrom), validTo: toIsoDate(renewal.validTo) } : null,
+      predecessor: predecessor ? { validFrom: toIsoDate(predecessor.validFrom), validTo: toIsoDate(predecessor.validTo) } : null,
+      uncovered: renewal ? uncoveredDays(dates.validTo, toIsoDate(renewal.validFrom), today) : null,
     };
   });
   const prescriptionById = new Map(prescriptions.map((p) => [p.id, p]));
@@ -158,6 +168,17 @@ export default async function PatientPage({
         (b.plannedPickupMinute ?? b.appointmentMinute ?? b.readyMinute ?? 0),
   );
   const fullName = `${patient.lastName.toUpperCase()} ${patient.firstName}`;
+  // Trips of today the referential sync cancelled (e.g. patient deactivated by mistake this morning): a
+  // reactivation brings back the trips from tomorrow on only, those of today are restored by hand.
+  const todayCancelledBySync = patient.active
+    ? trips.filter(
+        (t) =>
+          toIsoDate(t.serviceDate) === today &&
+          t.status === "CANCELLED" &&
+          t.cancellationOrigin === "SYSTEM" &&
+          (t.recurrence === null || t.recurrence.active),
+      ).length
+    : 0;
   const history = patientCancellationStats(pastTrips);
   // Two active recurrences on a common day, period and time slot: a recurrence created again instead of edited?
   const overlaps = recurrenceOverlaps(
@@ -208,6 +229,16 @@ export default async function PatientPage({
         />
         <div className="space-y-2">
           <SyncNotice query={query} />
+          {todayCancelledBySync > 0 ? (
+            <Warning>
+              {todayCancelledBySync === 1
+                ? "1 course d'aujourd'hui, annulée par la synchronisation du référentiel, reste annulée : les courses du jour ne reviennent pas d'elles-mêmes. Rétablissez-la si le transport a lieu."
+                : `${todayCancelledBySync} courses d'aujourd'hui, annulées par la synchronisation du référentiel, restent annulées : les courses du jour ne reviennent pas d'elles-mêmes. Rétablissez-les si les transports ont lieu.`}{" "}
+              <Link href={`/courses?date=${today}&statut=CANCELLED`} className="font-medium underline underline-offset-2">
+                Voir les courses annulées du jour
+              </Link>
+            </Warning>
+          ) : null}
           {!patient.active ? (
             <Warning tone="info">
               Patient désactivé : ses récurrences ne génèrent plus de courses. Sa fiche et son historique sont conservés.
@@ -252,9 +283,19 @@ export default async function PatientPage({
                 <span>
                   {history.cancellations} annulation{history.cancellations > 1 ? "s" : ""} en tout
                 </span>
+                {history.withoutReason > 0 ? (
+                  <>
+                    <span aria-hidden className="text-slate-300">·</span>
+                    <span className="text-slate-500">
+                      {history.withoutReason} sans motif (avant le suivi des motifs), non comptée
+                      {history.withoutReason > 1 ? "s" : ""}
+                    </span>
+                  </>
+                ) : null}
               </span>
               <span className="mt-0.5 block text-xs text-slate-500">
-                Annulations demandées pour le patient ; tardive : moins de {lateHours} h avant la prise en charge prévue.
+                Annulations demandées pour le patient (hors séance annulée par l&apos;établissement, course confiée à un
+                confrère ou décision de la régulation) ; tardive : moins de {lateHours} h avant la prise en charge prévue.
               </span>
             </Item>
             <Item label="Notes d'accès" className="sm:col-span-2 lg:col-span-4">
@@ -307,7 +348,7 @@ export default async function PatientPage({
                   p.renewal ? (
                     <div
                       key={p.id}
-                      className="flex flex-wrap items-start justify-between gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900"
+                      className="flex flex-wrap items-start justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
                     >
                       <p className="min-w-0 flex-1">
                         {`La prescription du ${formatShortDate(p.dates.validFrom)} au ${formatShortDate(p.dates.validTo)} est renouvelée par celle du ${formatShortDate(p.renewal.validFrom)} au ${formatShortDate(p.renewal.validTo)}, mais ${
@@ -316,7 +357,7 @@ export default async function PatientPage({
                             : `${p._count.recurrences} récurrences y sont encore rattachées`
                         } : les courses continuent sur le renouvellement ; ${
                           p._count.recurrences === 1 ? "rattachez-y la récurrence" : "rattachez-y les récurrences"
-                        } pour que la fiche reste à jour.`}
+                        } pour que la fiche reste à jour.${p.uncovered ? ` Attention : ${uncoveredText(p.uncovered)}.` : ""}`}
                       </p>
                       <ActionButton
                         action={attachRecurrencesToRenewal}
@@ -479,11 +520,13 @@ export default async function PatientPage({
                   };
                   const warnings: Notice[] = [];
                   if (r.active) {
+                    const own = prescriptionById.get(r.prescription.id);
                     const coverage = recurrenceCoverageNotice(
                       { startDate: start, endDate: end },
                       prescriptionDates,
                       today,
-                      prescriptionById.get(r.prescription.id)?.renewal ?? null,
+                      own?.renewal ?? null,
+                      own?.predecessor ?? null,
                     );
                     if (coverage) warnings.push(coverage);
                     if (!r.facility.active) {

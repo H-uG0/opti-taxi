@@ -49,5 +49,13 @@ describe("prescriptionWorkItems", () => {
       ["DURAND Paul", "renewed", 6, 1],
     ]);
     expect(countByState(items)).toEqual({ expired: 1, expiring: 1, renewed: 1 });
+    expect(items.map((i) => i.uncovered)).toEqual([null, null, null]);
+  });
+
+  it("offers to attach a renewal starting late, and names the days left without any PMT", () => {
+    // Ended on 01/11, renewed from 12/11 after a late visit to the doctor.
+    const late = { id: "rx-late", validFrom: "2026-11-12", validTo: "2027-05-11" };
+    const [item] = prescriptionWorkItems([rec({ validTo: "2026-11-01", renewal: late })], TODAY);
+    expect(item).toMatchObject({ state: "renewed", renewal: late, uncovered: { from: TODAY, to: "2026-11-11" } });
   });
 });

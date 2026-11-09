@@ -15,7 +15,7 @@ import { formatPercent, PRESCRIBED_MODE_LABELS, SHARING_SCOPE_LABELS } from "@/l
 import { addDays, formatLongDate, formatShortDate, fromIsoDate, isIsoDate, startOfIsoWeek, todayIso, tomorrowIso } from "@/lib/time";
 import { currentHorizon, inHorizon } from "@/lib/trips/completion";
 import { loadRecurrencesWithoutTrip } from "@/lib/trips/missing-load";
-import { MissingRecurrencesNote } from "@/components/trips/missing-recurrences";
+import { generationStateOf, MissingRecurrencesNote } from "@/components/trips/missing-recurrences";
 import { TripCompletion } from "@/components/trips/trip-completion";
 import { DayNav } from "./day-nav";
 import { GenerateTripsForm } from "./generate-trips-form";
@@ -182,6 +182,8 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       // Read from the whole day: the outbound trip may be filtered out of the list.
       outboundNoShowTrace: trip.outboundNoShow ? outboundNoShowTrace(trip, trips) : null,
       cancellation: cancelled ? cancellationLabel(trip) : null,
+      cancellationReason: cancelled ? cancellationLabel({ ...trip, lateCancellation: false }) : null,
+      lateCancellation: cancelled && trip.lateCancellation,
       cancellationTrace: cancellationTrace(trip),
       pairedReturn: returns.get(trip.id) ?? null,
       conflicts: conflicts.get(trip.id) ?? [],
@@ -230,12 +232,11 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
           horizonEnd={horizon.to}
         />
       </div>
-      {completing ? <TripCompletion key={date} date={date} /> : null}
-      {missing.length > 0 ? (
-        <div className="mb-4">
-          <MissingRecurrencesNote missing={missing} completing={completing} />
-        </div>
-      ) : null}
+      {completing ? (
+        <TripCompletion key={date} date={date} missing={missing} onCourses className="mb-4" />
+      ) : (
+        <MissingRecurrencesNote missing={missing} state={generationStateOf(date, today, false)} onCourses className="mb-4" />
+      )}
 
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <Stat label="Courses" value={summary.total} hint={`${summary.outbound} aller · ${summary.return} retour`} />

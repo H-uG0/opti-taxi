@@ -17,6 +17,7 @@ import {
   withRefreshNotice,
   type RefreshOutcome,
 } from "@/lib/planning/refresh-routes";
+import { GENERATION_INCLUDE, prescriptionOn } from "@/lib/domain/trip-generation";
 import { completeTrips, currentHorizon, reviveOneOffTrips, type Completion } from "@/lib/trips/completion";
 import { formatShortDate, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import { activationEvent, alreadyInStateMessage, patientUpdateEvents, renewalEvents } from "./_lib/audit-events";
@@ -24,6 +25,7 @@ import { idSchema } from "./_lib/form-parse";
 import { formString, messageState, type ActionResult, type FormState } from "./_lib/form-state";
 import { parsePatientForm, parsePrescriptionForm, parseRecurrenceForm, readPatientForm, readRecurrenceForm } from "./_lib/schemas";
 import { isRenewalOf } from "./_lib/status";
+import { RENEWAL_MAX_GAP_DAYS } from "@/lib/domain/renewal";
 import {
   CANCEL,
   describeSync,
@@ -34,8 +36,10 @@ import {
   renewalTarget,
   withCompletion,
   withSyncNotice,
+  type PrescriptionRules,
   type RecurrenceSchedule,
   type SyncSummary,
+  type SyncTrip,
 } from "./_lib/trip-sync";
 import { SYNC_TX_OPTIONS, syncOpenTrips } from "./_lib/trip-sync-db";
 
@@ -93,6 +97,51 @@ async function completeHorizon(
   where: Prisma.RecurrenceWhereInput,
 ): Promise<Completion> {
   return completeTrips(tx, user, await currentHorizon(tx, todayIso()), where);
+}
+
+/**
+ * For each recurring trip, the prescription the generation would give it on
+ * its date (prescriptionOn: its recurrence's own, a renewal or the PMT
+ * renewed), read in the transaction after the change. A trip its prescription
+ * no longer covers moves to it, instead of being cancelled and then brought
+ * back, unplaced, by the completion of the horizon.
+ */
+async function generationFallback(
+  tx: Prisma.TransactionClient,
+  where: Prisma.RecurrenceWhereInput,
+): Promise<(trip: SyncTrip) => PrescriptionRules | null> {
+  const recurrences = await tx.recurrence.findMany({ where, include: GENERATION_INCLUDE });
+  const byId = new Map(recurrences.map((r) => [r.id, r]));
+  return (trip) => {
+    const rec = trip.recurrenceId ? byId.get(trip.recurrenceId) : undefined;
+    const p = rec ? prescriptionOn(rec, trip.serviceDate) : null;
+    return p ? { id: p.id, mode: p.mode, sharing: p.sharing } : null;
+  };
+}
+
+/**
+ * Trips of today that the referential sync cancelled and that a reactivation
+ * leaves cancelled: the completion never writes a day already begun, so they
+ * do not come back by themselves (their recurrence must be active).
+ */
+async function todayStillCancelled(tx: Prisma.TransactionClient, where: Prisma.TripWhereInput): Promise<number> {
+  return tx.trip.count({
+    where: {
+      AND: [
+        where,
+        { serviceDate: fromIsoDate(todayIso()), status: "CANCELLED", cancellationOrigin: "SYSTEM" },
+        { OR: [{ recurrenceId: null }, { recurrence: { active: true } }] },
+      ],
+    },
+  });
+}
+
+/** " 2 courses d'aujourd'hui restent annulées…" after a reactivation (empty when there is none). */
+function todayCancelledNote(count: number): string {
+  if (count === 0) return "";
+  return count === 1
+    ? " 1 course d'aujourd'hui reste annulée (celles du jour ne reviennent pas d'elles-mêmes) : rétablissez-la dans Courses si le transport a lieu."
+    : ` ${count} courses d'aujourd'hui restent annulées (celles du jour ne reviennent pas d'elles-mêmes) : rétablissez-les dans Courses si les transports ont lieu.`;
 }
 
 /** " 3 séances sans prescription valide : voir Prescriptions." when the horizon has sessions no prescription covers. */
@@ -225,26 +274,33 @@ export async function setPatientActive(_prev: ActionResult, formData: FormData):
   const today = todayIso();
 
   const leftRoutes = new Set<string>();
-  const summary = await db.$transaction(async (tx) => {
+  const outcome = await db.$transaction(async (tx) => {
     // Guarded on the opposite state: a stale page or a double click that
     // repeats a state already set writes nothing and traces nothing.
     const { count } = await tx.patient.updateMany({ where: { id: patientId, active: !active }, data: { active } });
     if (count === 0) return null;
     await audit(tx, user, activationEvent("patient", patientId, active));
     if (!active) {
-      return syncOpenTrips(tx, { patientId }, () => CANCEL, today, leftRoutes, user, { cause: CAUSES.patientDeactivated });
+      const sync = await syncOpenTrips(tx, { patientId }, () => CANCEL, today, leftRoutes, user, {
+        cause: CAUSES.patientDeactivated,
+      });
+      return { sync, todayCancelled: 0 };
     }
-    // The trips of the horizon come back: new ones, and those the deactivation cancelled.
+    // The trips of the horizon come back: new ones, and those the deactivation cancelled (from tomorrow on).
     const completion = await completeHorizon(tx, user, { patientId });
     const revivedOneOff = await reviveOneOffTrips(tx, user, { patientId });
-    return withCompletion(EMPTY_SYNC, { created: completion.created, revived: completion.revived + revivedOneOff });
+    return {
+      sync: withCompletion(EMPTY_SYNC, { created: completion.created, revived: completion.revived + revivedOneOff }),
+      todayCancelled: await todayStillCancelled(tx, { patientId }),
+    };
   }, SYNC_TX_OPTIONS);
-  if (!summary) {
+  if (!outcome) {
     const current = await db.patient.findUnique({ where: { id: patientId }, select: { id: true } });
     if (!current) return { ok: false, message: NOT_FOUND };
     revalidatePatients(); // the page was stale: show the current state
     return { ok: true, message: alreadyInStateMessage("patient", active) };
   }
+  const summary = outcome.sync;
   const refresh = await refreshLeftRoutes(leftRoutes);
 
   revalidatePatients();
@@ -252,7 +308,9 @@ export async function setPatientActive(_prev: ActionResult, formData: FormData):
   revalidateTrips(summary);
   return {
     ok: true,
-    message: active ? withSync("Patient réactivé.", summary) : withSync("Patient désactivé.", summary, refresh),
+    message: active
+      ? `${withSync("Patient réactivé.", summary)}${todayCancelledNote(outcome.todayCancelled)}`
+      : withSync("Patient désactivé.", summary, refresh),
   };
 }
 
@@ -325,10 +383,12 @@ export async function updatePrescription(
     });
     await audit(tx, user, { action: "prescription.update", entity: "Prescription", entityId: existing.id });
     if (!rulesChanged) return EMPTY_SYNC;
+    // A trip outside the new validity moves to the renewal (or the PMT renewed) that covers it, if any.
+    const fallback = await generationFallback(tx, { patientId: existing.patientId });
     const synced = await syncOpenTrips(
       tx,
       { prescriptionId: existing.id },
-      (trip) => prescriptionTarget(trip, rules),
+      (trip) => prescriptionTarget(trip, rules, fallback(trip)),
       today,
       leftRoutes,
       user,
@@ -395,7 +455,8 @@ export async function deletePrescription(_prev: ActionResult, formData: FormData
  * Moves every recurrence of a prescription to its renewal. The generation
  * already falls back on the renewal once the old prescription has ended
  * (lib/domain/trip-generation.ts, prescriptionOn), and on the old one for the
- * days the renewal does not cover yet: the move can be made at any time. The
+ * days the renewal does not cover yet: the move can be made at any time. Same
+ * renewal rule as the work list (lib/domain/renewal.ts). The
  * open trips inside the renewal's validity are attached to it, and the trips
  * of the horizon completed.
  */
@@ -422,7 +483,7 @@ export async function attachRecurrencesToRenewal(_prev: ActionResult, formData: 
     return {
       ok: false,
       message:
-        "Cette prescription ne prend pas la suite de l'autre (même mode, au plus tard le lendemain de sa fin) : modifiez les récurrences une à une.",
+        `Cette prescription ne prend pas la suite de l'autre (même mode, commence après elle, finit plus tard et prend le relais au plus tard ${RENEWAL_MAX_GAP_DAYS} jours après sa fin) : modifiez les récurrences une à une.`,
     };
   }
 
@@ -642,10 +703,11 @@ export async function updateRecurrence(
       },
       facility: { address: formatAddress(facility), lat: facility.lat, lng: facility.lng },
     };
+    const fallback = await generationFallback(tx, { id: existing.id });
     const synced = await syncOpenTrips(
       tx,
       { recurrenceId: existing.id },
-      (trip) => recurrenceTarget(trip, before, target),
+      (trip) => recurrenceTarget(trip, before, target, fallback(trip)),
       today,
       leftRoutes,
       user,
@@ -701,14 +763,16 @@ export async function setRecurrenceActive(_prev: ActionResult, formData: FormDat
     if (!active) {
       return {
         completion: null,
+        todayCancelled: 0,
         sync: await syncOpenTrips(tx, { recurrenceId: recurrence.id }, () => CANCEL, today, leftRoutes, user, {
           cause: CAUSES.recurrenceDeactivated,
         }),
       };
     }
-    // The trips of the horizon come back: new ones, and those the deactivation cancelled.
+    // The trips of the horizon come back: new ones, and those the deactivation cancelled (from tomorrow on).
     const completion = await completeHorizon(tx, user, { id: recurrence.id });
-    return { completion, sync: withCompletion(EMPTY_SYNC, completion) };
+    const todayCancelled = await todayStillCancelled(tx, { recurrenceId: recurrence.id, patient: { active: true } });
+    return { completion, todayCancelled, sync: withCompletion(EMPTY_SYNC, completion) };
   }, SYNC_TX_OPTIONS);
   if (!outcome) {
     const current = await db.recurrence.findUnique({ where: { id: recurrence.id }, select: { id: true } });
@@ -725,7 +789,7 @@ export async function setRecurrenceActive(_prev: ActionResult, formData: FormDat
   return {
     ok: true,
     message: outcome.completion
-      ? `${withSync("Récurrence réactivée.", summary)}${skippedNote(outcome.completion)}`
+      ? `${withSync("Récurrence réactivée.", summary)}${skippedNote(outcome.completion)}${todayCancelledNote(outcome.todayCancelled)}`
       : withSync("Récurrence désactivée.", summary, refresh),
   };
 }

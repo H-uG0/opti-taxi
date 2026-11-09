@@ -5,7 +5,6 @@ import {
   patientUpdateEvents,
   renewalEvents,
   tripCancelEvents,
-  tripCreateEvents,
   tripDetachEvents,
 } from "./audit-events";
 
@@ -75,10 +74,9 @@ describe("tripCancelEvents", () => {
   });
 });
 
-describe("tripDetachEvents / tripCreateEvents", () => {
-  it("record trip.detach and trip.create with ids and service days only", () => {
+describe("tripDetachEvents", () => {
+  it("records trip.detach with ids and service days only", () => {
     const trip = { id: "t1", serviceDate: "2026-11-04", pickupAddress: "4 avenue Jean Jaurès, 04100 Manosque" };
     expect(tripDetachEvents([trip])).toEqual([{ action: "trip.detach", entity: "Trip", entityId: "t1", serviceDate: "2026-11-04" }]);
-    expect(tripCreateEvents([trip])).toEqual([{ action: "trip.create", entity: "Trip", entityId: "t1", serviceDate: "2026-11-04" }]);
   });
 });

@@ -18,7 +18,8 @@ import { loadDayVersion } from "@/lib/planning/version";
 import { formatLongDate, isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
 import { currentHorizon, inHorizon } from "@/lib/trips/completion";
 import { loadRecurrencesWithoutTrip } from "@/lib/trips/missing-load";
-import { MissingRecurrencesNote } from "@/components/trips/missing-recurrences";
+import { generationStateOf, MissingRecurrencesNote } from "@/components/trips/missing-recurrences";
+import type { MissingRecurrence } from "@/lib/trips/missing";
 import { TripCompletion } from "@/components/trips/trip-completion";
 import { DateNav } from "./date-nav";
 import { OptimizerStatus, OptimizerStatusPending } from "./optimizer-status";
@@ -70,6 +71,20 @@ function headerDescription(view: PlanningDayView, availableVehicles: number): st
   }
 }
 
+/**
+ * Text of a day without any trip. When recurrences plan sessions that day
+ * (MissingRecurrencesNote above says why they have no trip yet), it never
+ * says that no recurrence does.
+ */
+function emptyDayText(past: boolean, missing: readonly MissingRecurrence[]): string {
+  if (past) return "Journée passée : aucune course n'y a été enregistrée.";
+  if (missing.length > 0) {
+    const sessions = missing.length > 1 ? `${missing.length} récurrences actives prévoient des séances` : "1 récurrence active prévoit une séance";
+    return `${sessions} ce jour, mais aucune course n'existe encore (voir ci-dessus). Saisissez une course ponctuelle si besoin.`;
+  }
+  return "Aucune récurrence (dialyse, chimiothérapie…) ne prévoit de séance ce jour. Saisissez une course ponctuelle si besoin.";
+}
+
 export default async function PlanningPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requireUser("REGULATOR");
   const params = await searchParams;
@@ -93,6 +108,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   const completing = inHorizon(date, horizon);
 
   const past = date < today;
+  const showMissing = !past && view.dayStatus !== "VALIDATED";
   const hasRoutes = view.vehicles.some((v) => v.route !== null);
   const availableVehicles = view.vehicles.filter((v) => v.available).length;
   const replanBlocked = replanBlockedReason(view, past);
@@ -137,7 +153,6 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
 
       <div className="space-y-4">
         <PlanningActivityBanner />
-        {completing ? <TripCompletion key={date} date={date} /> : null}
         <PlanningVersionWatcher key={`${shownVersion.version}/${shownVersion.run ?? ""}`} date={date} shown={shownVersion} />
         <Suspense fallback={<OptimizerStatusPending />}>
           <OptimizerStatus />
@@ -161,7 +176,11 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
           }
         />
         {view.dayStatus !== "EMPTY" && !past ? <TariffGapBanner gaps={view.tariffGaps} date={date} /> : null}
-        {!past && view.dayStatus !== "VALIDATED" ? <MissingRecurrencesNote missing={missing} completing={completing} /> : null}
+        {completing ? (
+          <TripCompletion key={date} date={date} missing={showMissing ? missing : []} />
+        ) : showMissing ? (
+          <MissingRecurrencesNote missing={missing} state={generationStateOf(date, today, false)} />
+        ) : null}
 
         {view.dayStatus === "EMPTY" ? (
           <>
@@ -171,13 +190,17 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
               action={
                 <LinkButton href={`/courses?date=${date}`} variant="primary">
                   <CalendarPlus aria-hidden className="size-4" />
-                  {completing ? "Voir ou saisir les courses" : "Générer ou saisir les courses"}
+                  {past
+                    ? "Voir les courses"
+                    : completing
+                      ? "Voir ou saisir les courses"
+                      : date === today
+                        ? "Saisir les courses"
+                        : "Générer ou saisir les courses"}
                 </LinkButton>
               }
             >
-              {completing
-                ? "Aucune récurrence (dialyse, chimiothérapie…) ne prévoit de course ce jour : les courses régulières sont créées d'office sur les prochains jours. Saisissez une course ponctuelle si besoin."
-                : "Les courses régulières sont créées d'office sur les prochains jours ; pour cette date, générez-les depuis la page Courses, puis revenez lancer l'optimisation."}
+              {emptyDayText(past, missing)}
             </EmptyState>
           </>
         ) : (

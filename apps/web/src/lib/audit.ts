@@ -21,8 +21,9 @@
  *   (/equipages: everyone's absences of the day);
  * - referentials: patient.*, prescription.*, recurrence.* (create, update,
  *   delete, deactivate, reactivate, attach_renewal), facility.*;
- * - trips: trip.generate (recurring trips created, one event per service day,
- *   details.created; lib/trips/completion.ts), trip.revive (a trip the
+ * - trips: trip.generate (a trip created from a recurrence, one event per
+ *   trip; lib/trips/completion.ts — older events: one per service day,
+ *   entityId null, details.created), trip.revive (a trip the
  *   referential sync had cancelled, brought back once the cause is gone),
  *   trip.generate_week (before the rolling horizon), trip.create,
  *   trip.cancel (the reason stays on the trip), trip.detach (taken off its

@@ -85,7 +85,16 @@ export default async function PatientsPage({
         postalCode: true,
         mobility: true,
         active: true,
-        prescriptions: { select: { id: true, mode: true, validFrom: true, validTo: true } },
+        prescriptions: {
+          select: {
+            id: true,
+            mode: true,
+            validFrom: true,
+            validTo: true,
+            // Facilities of the active recurrences: another series' PMT is never taken for a renewal.
+            recurrences: { where: { active: true }, select: { facilityId: true } },
+          },
+        },
         recurrences: {
           where: { active: true },
           orderBy: { appointmentMinute: "asc" },
@@ -182,7 +191,7 @@ export default async function PatientsPage({
                 const renewal = current ? findRenewal(current, patient.prescriptions) : null;
                 const renewed = Boolean(renewal && currentDates && needsRenewal(currentDates, today));
                 // Renewed, but active recurrences still on the old prescription: to attach (work list « Prescriptions »).
-                const toAttach = renewed && current ? patient.recurrences.some((r) => r.prescriptionId === current.id) : false;
+                const toAttach = renewed && current ? patient.recurrences.filter((r) => r.prescriptionId === current.id).length : 0;
                 return (
                   <tr key={patient.id} className="hover:bg-slate-50">
                     <Td className="whitespace-nowrap">
@@ -203,9 +212,9 @@ export default async function PatientsPage({
                         <div className="flex flex-col items-start gap-1">
                           <span className="whitespace-nowrap">{PRESCRIBED_MODE_LABELS[current.mode]}</span>
                           {renewed && renewal ? (
-                            <Badge tone={toAttach ? "warning" : "neutral"} className="tabular whitespace-nowrap">
-                              {toAttach
-                                ? "Renouvelée : récurrences à rattacher"
+                            <Badge tone={toAttach > 0 ? "warning" : "neutral"} className="tabular whitespace-nowrap">
+                              {toAttach > 0
+                                ? `Renouvelée : ${toAttach > 1 ? "récurrences" : "récurrence"} à rattacher`
                                 : `Renouvelée jusqu'au ${formatShortDate(toIsoDate(renewal.validTo))}`}
                             </Badge>
                           ) : (

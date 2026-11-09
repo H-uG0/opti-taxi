@@ -113,7 +113,7 @@ export async function generateWeekTrips(_prev: GenerationResult, formData: FormD
  * horizon: creates its missing recurring trips (and brings back those the
  * application cancelled). Idempotent; a page render never writes.
  */
-export async function completeDayTrips(date: string): Promise<{ changed: boolean }> {
+export async function completeDayTrips(date: string): Promise<{ changed: boolean; failed?: true }> {
   const user = await requireUser("REGULATOR");
   if (typeof date !== "string" || !isIsoDate(date)) return { changed: false };
   try {
@@ -125,7 +125,7 @@ export async function completeDayTrips(date: string): Promise<{ changed: boolean
     return { changed };
   } catch (error) {
     logError("[courses] completeDayTrips failed", error, { date });
-    return { changed: false };
+    return { changed: false, failed: true };
   }
 }
 

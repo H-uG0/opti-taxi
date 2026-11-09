@@ -111,14 +111,19 @@ describe("patientCancellationStats", () => {
         { status: "NO_SHOW", cancellationOrigin: null, cancellationReason: null, lateCancellation: false },
         cancelled({ lateCancellation: true }),
         cancelled({ cancellationReason: "HOSPITALIZATION" }),
-        // Recorded before reasons existed: still the patient's.
+        cancelled({ cancellationReason: "OWN_MEANS" }),
+        // Recorded before reasons existed: whose decision is unknown, counted apart.
         cancelled({ cancellationOrigin: null, cancellationReason: null }),
+        cancelled({ cancellationOrigin: null, cancellationReason: null, lateCancellation: true }),
         // None of these says anything about the patient.
         cancelled({ cancellationOrigin: "SYSTEM", cancellationReason: "REFERENTIAL_SYNC" }),
+        cancelled({ cancellationOrigin: "SYSTEM", cancellationReason: null }),
         cancelled({ cancellationReason: "PARTNER" }),
         cancelled({ cancellationReason: "REGULATION", lateCancellation: true }),
+        cancelled({ cancellationReason: "FACILITY", lateCancellation: true }),
+        cancelled({ cancellationReason: "DECEASED" }),
       ]),
-    ).toEqual({ noShows: 1, lateCancellations: 1, cancellations: 3 });
+    ).toEqual({ noShows: 1, lateCancellations: 1, cancellations: 3, withoutReason: 2 });
   });
 
   it("looks 90 days back", () => {

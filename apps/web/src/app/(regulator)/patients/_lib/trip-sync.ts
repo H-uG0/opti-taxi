@@ -52,6 +52,8 @@ export type SyncTrip = {
   dropoffAddress: string;
   dropoffLat: number;
   dropoffLng: number;
+  /** Recurrence that generated the trip (null for a one-off trip). */
+  recurrenceId: string | null;
   routeId: string | null;
   /** Type of the vehicle whose route serves the trip. */
   routeVehicleType: VehicleType | null;
@@ -241,10 +243,19 @@ export function planTripChange(trip: SyncTrip, target: TripTarget, todayIso: str
 
 // ---------------------------------------------------------------- targets
 
-/** A prescription changed: its trips follow its rules; those outside its new validity are cancelled. */
-export function prescriptionTarget(trip: SyncTrip, prescription: PrescriptionRules & DateRange): TripTarget {
-  if (!coversDate(prescription, trip.serviceDate)) return CANCEL;
-  return { kind: "update", prescription };
+/**
+ * A prescription changed: its trips follow its rules. A trip outside its new
+ * validity moves to `fallback` — the prescription the generation would give it
+ * that day (a recurring trip covered by the renewal, lib/domain/renewal.ts) —
+ * and is cancelled only when there is none.
+ */
+export function prescriptionTarget(
+  trip: SyncTrip,
+  prescription: PrescriptionRules & DateRange,
+  fallback: PrescriptionRules | null = null,
+): TripTarget {
+  if (coversDate(prescription, trip.serviceDate)) return { kind: "update", prescription };
+  return fallback ? { kind: "update", prescription: fallback } : CANCEL;
 }
 
 export type RecurrenceSchedule = {
@@ -273,14 +284,16 @@ export function recurrenceSchedules(
 /**
  * A recurrence changed: its trips that no longer fit its days, legs or period
  * are cancelled. The others take the new prescription when it covers their
- * date (otherwise they keep the one in force that day, or are cancelled when
- * none covers it), the new facility, and the new time — except trips whose
- * time was changed by hand, which keep it.
+ * date (otherwise they keep the one in force that day, or take `fallback`,
+ * the one the generation would give them that day — a renewal or the PMT
+ * renewed —, and are cancelled only when none covers it), the new facility,
+ * and the new time — except trips whose time was changed by hand, which keep it.
  */
 export function recurrenceTarget(
   trip: SyncTrip,
   before: RecurrenceSchedule,
   after: RecurrenceSchedule & { prescription: PrescriptionRules & DateRange; facility: Place },
+  fallback: PrescriptionRules | null = null,
 ): TripTarget {
   if (!recurrenceSchedules(after, trip.serviceDate, trip.direction)) return CANCEL;
 
@@ -288,7 +301,8 @@ export function recurrenceTarget(
   if (coversDate(after.prescription, trip.serviceDate)) {
     prescription = after.prescription;
   } else if (!trip.prescriptionValidity || !coversDate(trip.prescriptionValidity, trip.serviceDate)) {
-    return CANCEL;
+    if (!fallback) return CANCEL;
+    prescription = fallback;
   }
 
   let keyMinute: number | undefined;

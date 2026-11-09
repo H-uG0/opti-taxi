@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { startTransition, useActionState, type MouseEvent } from "react";
 import { AddressFields } from "@/components/address/address-fields";
 import type { AddressFormValues } from "@/components/address/address-utils";
 import Link from "next/link";
@@ -40,10 +40,29 @@ export function PatientForm({
   const [state, formAction, isPending] = useActionState(action, INITIAL_FORM_STATE);
   const errors = state.fieldErrors;
   const value = (key: keyof Omit<PatientFormInitial, "active" | "address">) => echoed(state, key, initial[key]);
+  const similar = state.similar ?? [];
+
+  function createAnyway(event: MouseEvent<HTMLButtonElement>) {
+    const form = event.currentTarget.form;
+    if (!form) return;
+    const formData = new FormData(form);
+    formData.set("confirmSimilar", "1");
+    startTransition(() => formAction(formData));
+  }
 
   return (
     <form action={formAction} onSubmit={submitWithoutReset(formAction)} className="max-w-3xl space-y-5" noValidate>
-      <FormMessage>{state.message}</FormMessage>
+      {similar.length > 0 ? (
+        // Not an error, and not a second alert: the list (announced once) sits by the buttons, where the save was asked.
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          {state.message}{" "}
+          <a href="#fiches-proches" className="font-medium underline underline-offset-2">
+            Voir les fiches proches
+          </a>
+        </p>
+      ) : (
+        <FormMessage>{state.message}</FormMessage>
+      )}
 
       <Fieldset legend="Identité">
         <div className="grid gap-4 sm:grid-cols-2">
@@ -137,11 +156,15 @@ export function PatientForm({
         </div>
       </Fieldset>
 
-      {state.similar && state.similar.length > 0 ? (
-        <div role="alert" className="space-y-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
+      {similar.length > 0 ? (
+        <div
+          id="fiches-proches"
+          role="alert"
+          className="scroll-mt-6 space-y-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950"
+        >
           <p className="font-semibold">Fiches proches déjà enregistrées :</p>
           <ul className="space-y-1">
-            {state.similar.map((p) => (
+            {similar.map((p) => (
               <li key={p.id}>
                 <Link
                   href={`/patients/${p.id}`}
@@ -159,7 +182,8 @@ export function PatientForm({
             S&apos;il s&apos;agit du même patient, ouvrez sa fiche (nouvel onglet) plutôt que d&apos;en créer une seconde.
             Sinon, enregistrez la nouvelle fiche.
           </p>
-          <Button type="submit" name="confirmSimilar" value="1" variant="secondary" size="sm" disabled={isPending}>
+          {/* Not a submit button: Enter in a field must keep submitting the form normally, never « quand même ». */}
+          <Button type="button" variant="secondary" size="sm" disabled={isPending} onClick={createAnyway}>
             Créer quand même
           </Button>
         </div>

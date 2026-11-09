@@ -47,18 +47,40 @@ function sessionsOf(trips: readonly DayTrip[], exceptId: string): Session[] {
 export type TripConflict = { kind: "same_leg"; otherId: string; minute: number | null } | { kind: "during_session"; start: number; end: number };
 
 /**
+ * Two trips of a patient on the same leg with key times this close are one
+ * transport typed twice (the wait allowed at a place of care, 45 min).
+ */
+export const SAME_LEG_MINUTES = 45;
+
+function keyMinuteOf(t: DayTrip): number | null {
+  return t.direction === "OUTBOUND" ? t.appointmentMinute : t.readyMinute;
+}
+
+/** Same leg, and the same care (same recurrence or facility) or key times within SAME_LEG_MINUTES. */
+function sameLeg(trip: DayTrip, other: DayTrip): boolean {
+  if (other.direction !== trip.direction) return false;
+  if (trip.recurrenceId !== null && other.recurrenceId === trip.recurrenceId) return true;
+  if (trip.facilityId !== null && other.facilityId === trip.facilityId) return true;
+  const a = keyMinuteOf(trip);
+  const b = keyMinuteOf(other);
+  return a === null || b === null || Math.abs(a - b) <= SAME_LEG_MINUTES;
+}
+
+/**
  * What another trip of the same patient that day says about `trip`: a trip on
- * the same leg (likely a duplicate: two vehicles sent for one patient), or a
- * key time falling inside another care session. Cancelled and absent trips
- * are ignored.
+ * the same leg for the same care, or at nearly the same time (likely a
+ * duplicate: two vehicles sent for one patient), or a key time falling inside
+ * another care session. Two cares of the day (dialysis in the morning, a
+ * consultation elsewhere in the afternoon) are not flagged. Cancelled and
+ * absent trips are ignored.
  */
 export function tripConflicts(trip: DayTrip, dayTrips: readonly DayTrip[]): TripConflict[] {
   if (GONE.includes(trip.status)) return [];
   const others = dayTrips.filter((t) => t.id !== trip.id && t.patientId === trip.patientId && !GONE.includes(t.status));
   const conflicts: TripConflict[] = others
-    .filter((t) => t.direction === trip.direction)
-    .map((t) => ({ kind: "same_leg", otherId: t.id, minute: t.direction === "OUTBOUND" ? t.appointmentMinute : t.readyMinute }));
-  const key = trip.direction === "OUTBOUND" ? trip.appointmentMinute : trip.readyMinute;
+    .filter((t) => sameLeg(trip, t))
+    .map((t) => ({ kind: "same_leg", otherId: t.id, minute: keyMinuteOf(t) }));
+  const key = keyMinuteOf(trip);
   if (key !== null) {
     const own = (t: DayTrip) =>
       trip.recurrenceId !== null ? t.recurrenceId === trip.recurrenceId : trip.facilityId !== null && t.facilityId === trip.facilityId;
@@ -187,9 +209,11 @@ export type RestoreCheck = {
 /** Why a cancelled trip cannot be restored, or null. */
 export function restoreBlocker(trip: RestoreCheck, todayIso: string): string | null {
   if (trip.serviceDate < todayIso) return "Date passée : une course d'un jour passé ne se rétablit pas.";
-  if (!trip.patientActive) return "Le patient est désactivé : réactivez-le d'abord (ses courses reviennent alors d'elles-mêmes).";
+  if (!trip.patientActive) {
+    return "Le patient est désactivé : réactivez-le d'abord ; ses courses à partir de demain reviennent alors d'elles-mêmes, celles d'aujourd'hui se rétablissent ici.";
+  }
   if (trip.recurrenceActive === false) {
-    return "La récurrence de cette course est désactivée : réactivez-la d'abord (ses courses reviennent alors d'elles-mêmes).";
+    return "La récurrence de cette course est désactivée : réactivez-la d'abord ; ses courses à partir de demain reviennent alors d'elles-mêmes, celles d'aujourd'hui se rétablissent ici.";
   }
   if (trip.payer === "CPAM") {
     const p = trip.prescription;

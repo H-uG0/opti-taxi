@@ -51,6 +51,7 @@ function trip(overrides: Partial<SyncTrip> = {}): SyncTrip {
     dropoffAddress: CLINIC.address,
     dropoffLat: CLINIC.lat,
     dropoffLng: CLINIC.lng,
+    recurrenceId: "r1",
     routeId: null,
     routeVehicleType: null,
     lockedVehicleId: null,
@@ -207,6 +208,14 @@ describe("nextSharingStatus", () => {
 });
 
 describe("prescriptionTarget", () => {
+  it("moves a trip outside the new validity to the renewal covering it, and cancels it only without one", () => {
+    const renewal = { id: "p2", mode: "TAP" as const, sharing: "OUTBOUND" as const };
+    expect(prescriptionTarget(trip({ serviceDate: "2026-11-20" }), { ...TAP_BOTH, validTo: "2026-11-15" }, renewal)).toEqual({
+      kind: "update",
+      prescription: renewal,
+    });
+  });
+
   it("cancels trips outside the new validity", () => {
     expect(prescriptionTarget(trip({ serviceDate: "2026-11-20" }), { ...TAP_BOTH, validTo: "2026-11-15" })).toEqual(CANCEL);
     expect(prescriptionTarget(trip(), { ...TAP_BOTH, mode: "AMBULANCE" })).toEqual({
@@ -279,6 +288,11 @@ describe("recurrenceTarget", () => {
     expect(recurrenceTarget(uncovered, before, after({ prescriptionId: "p2" }, { ...renewal, validFrom: "2027-03-10" }))).toEqual(
       CANCEL,
     );
+    // …unless the generation would put it on another PMT of the chain that day.
+    const bridge = { id: "p3", mode: "TAP" as const, sharing: "BOTH" as const };
+    expect(
+      recurrenceTarget(uncovered, before, after({ prescriptionId: "p2" }, { ...renewal, validFrom: "2027-03-10" }), bridge),
+    ).toMatchObject({ kind: "update", prescription: bridge });
   });
 });
 

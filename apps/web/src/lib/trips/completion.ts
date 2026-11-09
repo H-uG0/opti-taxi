@@ -90,9 +90,9 @@ function skippedRecurrences(recurrences: readonly LoadedRecurrence[], skipped: R
 
 /**
  * Creates the missing trips of the recurrences matching `where` over `range`
- * (never before tomorrow), and brings back, from tomorrow on, their trips the
+ * (never before tomorrow), and brings back, over the same days, their trips the
  * application cancelled that the recurrences plan again. Traced: one
- * trip.generate per day with trips created, one trip.revive per trip brought back.
+ * trip.generate per trip created, one trip.revive per trip brought back.
  */
 export async function completeTrips(
   tx: Client,
@@ -111,7 +111,7 @@ export async function completeTrips(
   const plan = planRecurrenceTrips(recurrences, from, range.to);
   const created =
     plan.trips.length > 0
-      ? await tx.trip.createManyAndReturn({ data: plan.trips, skipDuplicates: true, select: { serviceDate: true } })
+      ? await tx.trip.createManyAndReturn({ data: plan.trips, skipDuplicates: true, select: { id: true, serviceDate: true } })
       : [];
   const createdByDay = new Map<string, number>();
   for (const trip of created) {
@@ -119,34 +119,43 @@ export async function completeTrips(
     createdByDay.set(day, (createdByDay.get(day) ?? 0) + 1);
   }
 
-  const revived = await reviveRecurrenceTrips(tx, actor, { recurrence: { AND: [{ active: true }, where] } }, tomorrowIso());
-  const events: AuditEntry[] = [...createdByDay].map(([day, count]) => ({
+  const revived = await reviveRecurrenceTrips(tx, actor, { recurrence: { AND: [{ active: true }, where] } }, { from, to: range.to });
+  // One event per trip: which account's change (or page) created each row of health data.
+  const events: AuditEntry[] = created.map((trip) => ({
     action: "trip.generate",
     entity: "Trip",
-    entityId: null,
-    serviceDate: day,
-    details: { created: count },
+    entityId: trip.id,
+    serviceDate: toIsoDate(trip.serviceDate),
   }));
   await audit(tx, actor, events);
   return { createdByDay, created: created.length, revived, skipped: skippedRecurrences(recurrences, plan.skipped) };
 }
 
 /**
- * Brings back the trips of recurrences (matching `where`), from `fromIso` on,
- * that the application cancelled and that the recurrences plan again with the
- * same data the generation would create now. Returns how many.
+ * Brings back the trips of recurrences (matching `where`) of `days` (already
+ * writable: from tomorrow on) that the application cancelled and that the
+ * recurrences plan again with the same data the generation would create now.
+ * Returns how many.
  */
-async function reviveRecurrenceTrips(tx: Client, actor: AuditActor, where: Prisma.TripWhereInput, fromIso: string): Promise<number> {
+async function reviveRecurrenceTrips(tx: Client, actor: AuditActor, where: Prisma.TripWhereInput, days: DateRange): Promise<number> {
   const candidates = await tx.trip.findMany({
     where: {
-      AND: [where, { recurrenceId: { not: null }, status: "CANCELLED", cancellationOrigin: "SYSTEM", serviceDate: { gte: fromIsoDate(fromIso) } }],
+      AND: [
+        where,
+        {
+          recurrenceId: { not: null },
+          status: "CANCELLED",
+          cancellationOrigin: "SYSTEM",
+          serviceDate: { gte: fromIsoDate(days.from), lte: fromIsoDate(days.to) },
+        },
+      ],
     },
     select: { id: true, recurrenceId: true, serviceDate: true, direction: true, sharingStatus: true },
   });
   if (candidates.length === 0) return 0;
   const dates = candidates.map((t) => toIsoDate(t.serviceDate)).sort();
-  const first = dates[0] ?? fromIso;
-  const last = dates.at(-1) ?? fromIso;
+  const first = dates[0] ?? days.from;
+  const last = dates.at(-1) ?? days.to;
   const recurrences = await tx.recurrence.findMany({
     where: { id: { in: [...new Set(candidates.map((t) => t.recurrenceId ?? ""))] } },
     include: GENERATION_INCLUDE,

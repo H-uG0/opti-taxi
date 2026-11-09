@@ -45,11 +45,22 @@ describe("tripConflicts", () => {
   it("flags a consultation during another care session", () => {
     const consultation = trip("x1", { direction: "RETURN", recurrenceId: null, facilityId: "clinic", appointmentMinute: null, readyMinute: 600 });
     const conflicts = tripConflicts(consultation, [outbound, back, consultation]);
-    expect(conflicts).toEqual([
-      { kind: "same_leg", otherId: "r1", minute: 690 },
-      { kind: "during_session", start: 450, end: 690 },
-    ]);
-    expect(conflictLabel(conflicts[1]!, "RETURN")).toBe("Pendant une autre séance du patient (07:30 → 11:30)");
+    // 1 h 30 before the end of the dialysis, elsewhere: not the same leg, but during the session.
+    expect(conflicts).toEqual([{ kind: "during_session", start: 450, end: 690 }]);
+    expect(conflictLabel(conflicts[0]!, "RETURN")).toBe("Pendant une autre séance du patient (07:30 → 11:30)");
+  });
+
+  it("flags a second trip to the same facility whatever the time", () => {
+    const again = trip("x1", { recurrenceId: null, appointmentMinute: 900 });
+    expect(tripConflicts(again, [outbound, back, again])).toEqual([{ kind: "same_leg", otherId: "a1", minute: 450 }]);
+  });
+
+  it("does not flag two cares of the day at other places and times", () => {
+    // Dialysis 07:30 → 11:30 at one place, a consultation 15:00 → 16:00 elsewhere (two recurrences).
+    const consultation = trip("c1", { recurrenceId: "rec2", facilityId: "clinic", appointmentMinute: 900 });
+    const consultationBack = trip("c2", { direction: "RETURN", recurrenceId: "rec2", facilityId: "clinic", appointmentMinute: null, readyMinute: 960 });
+    const day = [outbound, back, consultation, consultationBack];
+    for (const t of day) expect(tripConflicts(t, day)).toEqual([]);
   });
 
   it("says nothing for the two legs of one care, another patient, or a cancelled trip", () => {

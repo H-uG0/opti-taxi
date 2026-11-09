@@ -5,12 +5,14 @@
  * - expired, no renewal: no trip any more;
  * - ending soon, no renewal: no trip after its end;
  * - renewed but the recurrences still point to it: trips go on with the
- *   renewal (the generation falls back on it), but the recurrences are to attach.
+ *   renewal (the generation falls back on it, lib/domain/renewal.ts: the same
+ *   rule), but the recurrences are to attach — and a renewal starting late
+ *   leaves days without any trip (`uncovered`).
  * Pure module (dates "YYYY-MM-DD"): the page and the navigation counter share its rule.
  */
 import type { PrescribedMode } from "@prisma/client";
 import { addDays } from "@/lib/time";
-import { daysBetween, EXPIRY_WARNING_DAYS } from "./status";
+import { daysBetween, EXPIRY_WARNING_DAYS, uncoveredDays } from "./status";
 
 type Period = { startDate: string; endDate: string | null };
 type Validity = { validFrom: string; validTo: string };
@@ -39,6 +41,8 @@ export type WorkItem = {
   /** The renewal registered (same mode, takes over), to attach the recurrences to. */
   renewal: ({ id: string } & Validity) | null;
   state: WorkState;
+  /** Days still to come between the end of the prescription and the start of its renewal: no trip. */
+  uncovered: { from: string; to: string } | null;
   /** Days until the end of the prescription (negative once ended). */
   daysLeft: number;
   /** Summaries of the recurrences still attached ("Lun Mer Ven 07:30 — Dialyse"). */
@@ -70,6 +74,7 @@ export function prescriptionWorkItems(recurrences: readonly WorkRecurrence[], to
       prescription: rec.prescription,
       renewal: rec.renewal,
       state: rec.renewal ? "renewed" : daysLeft < 0 ? "expired" : "expiring",
+      uncovered: rec.renewal ? uncoveredDays(rec.prescription.validTo, rec.renewal.validFrom, todayIso) : null,
       daysLeft,
       recurrences: [rec.summary],
     });

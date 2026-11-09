@@ -47,7 +47,7 @@ function fakeTx() {
   };
   tx.recurrence.findMany.mockResolvedValue([recurrence()]);
   tx.trip.createManyAndReturn.mockImplementation(async ({ data }: { data: { serviceDate: Date }[] }) =>
-    data.map((t) => ({ serviceDate: t.serviceDate })),
+    data.map((t, i) => ({ id: `new-${i}`, serviceDate: t.serviceDate })),
   );
   tx.trip.findMany.mockResolvedValue([]);
   tx.trip.updateMany.mockResolvedValue({ count: 1 });
@@ -71,7 +71,7 @@ beforeEach(() => {
 });
 
 describe("completeTrips", () => {
-  it("creates the missing trips of the range, never before tomorrow, and traces one trip.generate per day", async () => {
+  it("creates the missing trips of the range, never before tomorrow, and traces one trip.generate per trip", async () => {
     const range = { from: addDays(todayIso(), -3), to: addDays(TOMORROW, 1) };
 
     const result = await completeTrips(tx as unknown as Prisma.TransactionClient, ACTOR, range, { patientId: "p1" });
@@ -81,9 +81,10 @@ describe("completeTrips", () => {
     expect(created.data.map((t) => t.serviceDate)).toEqual([fromIsoDate(TOMORROW), fromIsoDate(addDays(TOMORROW, 1))]);
     expect(result.created).toBe(2);
     expect(events(tx)).toEqual([
-      { action: "trip.generate", entityId: null, details: { created: 1 } },
-      { action: "trip.generate", entityId: null, details: { created: 1 } },
+      { action: "trip.generate", entityId: "new-0", details: undefined },
+      { action: "trip.generate", entityId: "new-1", details: undefined },
     ]);
+    expect(created).toMatchObject({ select: { id: true, serviceDate: true } });
     // The caller's filter narrows the recurrences.
     expect(tx.recurrence.findMany.mock.calls[0]![0].where.AND[1]).toEqual({ patientId: "p1" });
   });
@@ -116,9 +117,13 @@ describe("completeTrips", () => {
 
     const result = await completeTrips(tx as unknown as Prisma.TransactionClient, ACTOR, { from: TOMORROW, to: TOMORROW });
 
-    // Only the application's cancellations from tomorrow on are looked at.
+    // Only the application's cancellations of the days completed are looked at (never another date).
     const where = tx.trip.findMany.mock.calls[0]![0].where.AND[1];
-    expect(where).toMatchObject({ status: "CANCELLED", cancellationOrigin: "SYSTEM", serviceDate: { gte: fromIsoDate(TOMORROW) } });
+    expect(where).toMatchObject({
+      status: "CANCELLED",
+      cancellationOrigin: "SYSTEM",
+      serviceDate: { gte: fromIsoDate(TOMORROW), lte: fromIsoDate(TOMORROW) },
+    });
     expect(tx.trip.updateMany).toHaveBeenCalledTimes(1);
     const { where: guarded, data } = tx.trip.updateMany.mock.calls[0]![0];
     expect(guarded).toEqual({ id: "t-sys", status: "CANCELLED", cancellationOrigin: "SYSTEM" });

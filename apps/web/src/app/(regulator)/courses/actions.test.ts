@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addDays, startOfIsoWeek, todayIso } from "@/lib/time";
 import { cancelTrip, completeDayTrips, generateWeekTrips, restoreTrip } from "./actions";
 import { INITIAL_ACTION_RESULT } from "./trip-form";
@@ -170,9 +170,15 @@ describe("cancelTrip", () => {
 describe("generation of the recurring trips", () => {
   const today = todayIso();
   const tomorrow = addDays(today, 1);
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it("generates the week from tomorrow at the earliest, and names the recurrences without a valid prescription", async () => {
-    const weekStart = startOfIsoWeek(today);
+    // A Wednesday: the current week still has days from tomorrow on (on a Sunday it would be over).
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-11T09:00:00.000Z"));
+    const weekStart = startOfIsoWeek(todayIso());
     fake.completeTrips.mockResolvedValue({
       created: 3,
       revived: 0,
@@ -185,7 +191,8 @@ describe("generation of the recurring trips", () => {
     const result = await generateWeekTrips({ ok: false, message: null, skipped: [] }, fd);
 
     const range = fake.completeTrips.mock.calls[0]![2];
-    expect(range).toEqual({ from: tomorrow > weekStart ? tomorrow : weekStart, to: addDays(weekStart, 6) });
+    expect(weekStart).toBe("2026-11-09");
+    expect(range).toEqual({ from: "2026-11-12", to: "2026-11-15" });
     expect(result.ok).toBe(true);
     expect(result.message).toMatch(/3 courses créées\.$/);
     expect(result.skipped.map((r) => r.patientName)).toEqual(["MARTIN Jean"]);
@@ -205,6 +212,8 @@ describe("generation of the recurring trips", () => {
   it("completes a date of the horizon once its page is shown, and nothing outside it", async () => {
     fake.completeTrips.mockResolvedValue({ created: 2, revived: 1, createdByDay: new Map(), skipped: [] });
     expect(await completeDayTrips(tomorrow)).toEqual({ changed: true });
+    fake.completeTrips.mockRejectedValueOnce(new Error("database down"));
+    expect(await completeDayTrips(tomorrow)).toEqual({ changed: false, failed: true });
     expect(fake.completeTrips.mock.calls[0]![2]).toEqual({ from: tomorrow, to: tomorrow });
 
     fake.completeTrips.mockClear();

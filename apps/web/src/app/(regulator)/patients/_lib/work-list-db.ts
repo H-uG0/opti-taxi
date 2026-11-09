@@ -9,18 +9,29 @@ import { prescriptionWorkItems, workListLimit, type WorkItem } from "./work-list
  * count query, the same rule as needsPrescriptionWork.
  */
 export async function countPrescriptionWork(todayIso: string): Promise<number> {
-  const today = fromIsoDate(todayIso);
-  const limit = fromIsoDate(workListLimit(todayIso));
+  // Dates bound as "YYYY-MM-DD" and cast: a JS Date would be bound as a timestamp with time zone, and compared
+  // in the session's time zone.
+  const today = todayIso;
+  const limit = workListLimit(todayIso);
   const rows = await db.$queryRaw<{ count: number }[]>`
     SELECT COUNT(DISTINCT r."prescriptionId")::int AS "count"
     FROM "Recurrence" r
     JOIN "Prescription" p ON p."id" = r."prescriptionId"
     JOIN "Patient" pa ON pa."id" = r."patientId"
     WHERE r."active" AND pa."active"
-      AND p."validTo" <= ${limit}
-      AND (r."endDate" IS NULL OR (r."endDate" > p."validTo" AND r."endDate" >= ${today}))`;
+      AND p."validTo" <= ${limit}::date
+      AND (r."endDate" IS NULL OR (r."endDate" > p."validTo" AND r."endDate" >= ${today}::date))`;
   return rows[0]?.count ?? 0;
 }
+
+/** A prescription with the facilities of its active recurrences: another series' PMT is never its renewal. */
+const PRESCRIPTION_SERIES = {
+  id: true,
+  mode: true,
+  validFrom: true,
+  validTo: true,
+  recurrences: { where: { active: true }, select: { facilityId: true } },
+} as const;
 
 /** The work list itself (read only). */
 export async function loadPrescriptionWork(todayIso: string): Promise<WorkItem[]> {
@@ -37,15 +48,9 @@ export async function loadPrescriptionWork(todayIso: string): Promise<WorkItem[]
       startDate: true,
       endDate: true,
       facility: { select: { name: true } },
-      prescription: { select: { id: true, mode: true, validFrom: true, validTo: true } },
+      prescription: { select: PRESCRIPTION_SERIES },
       patient: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          city: true,
-          prescriptions: { select: { id: true, mode: true, validFrom: true, validTo: true } },
-        },
+        select: { id: true, firstName: true, lastName: true, city: true, prescriptions: { select: PRESCRIPTION_SERIES } },
       },
     },
   });

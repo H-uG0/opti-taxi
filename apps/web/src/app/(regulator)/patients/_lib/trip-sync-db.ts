@@ -35,6 +35,7 @@ const syncTripSelect = {
   dropoffAddress: true,
   dropoffLat: true,
   dropoffLng: true,
+  recurrenceId: true,
   routeId: true,
   lockedVehicleId: true,
   route: { select: { vehicle: { select: { type: true } } } },

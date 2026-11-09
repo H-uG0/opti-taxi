@@ -53,25 +53,26 @@ export function needsRenewal(p: { validFrom: string; validTo: string }, todayIso
   return state === "expired" || state === "expiring";
 }
 
-type DatedPrescription = { id: string; mode: PrescribedMode; validFrom: Date; validTo: Date };
+// One renewal rule for the generation, the work list, the badges and « Rattacher » (lib/domain/renewal.ts).
+export { findPredecessor, findRenewal, isRenewalOf } from "@/lib/domain/renewal";
 
-/**
- * `next` renews `p`: same mode, it takes over at the latest the day after `p`
- * ends, and it lasts longer.
- */
-export function isRenewalOf(p: DatedPrescription, next: DatedPrescription): boolean {
-  if (next.id === p.id || next.mode !== p.mode) return false;
-  const end = toIsoDate(p.validTo);
-  return toIsoDate(next.validTo) > end && toIsoDate(next.validFrom) <= addDays(end, 1);
+/** Days with no prescription between a PMT ending on `endOfPrevious` and the next one, from today on. */
+export function uncoveredDays(endOfPrevious: string, startOfNext: string, todayIso: string): { from: string; to: string } | null {
+  const dayAfter = addDays(endOfPrevious, 1);
+  const from = dayAfter > todayIso ? dayAfter : todayIso;
+  const to = addDays(startOfNext, -1);
+  return from <= to ? { from, to } : null;
 }
 
-/** The prescription renewing `p` (the one lasting longest), or null. */
-export function findRenewal<T extends DatedPrescription>(p: T, prescriptions: readonly T[]): T | null {
-  let best: T | null = null;
-  for (const next of prescriptions) {
-    if (isRenewalOf(p, next) && (!best || next.validTo > best.validTo)) best = next;
-  }
-  return best;
+/** "aucune PMT du 02/11/2026 au 04/11/2026 : pas de course ces jours-là". */
+export function uncoveredText(days: { from: string; to: string }): string {
+  return days.from === days.to
+    ? `aucune PMT le ${formatShortDate(days.from)} : pas de course ce jour-là`
+    : `aucune PMT du ${formatShortDate(days.from)} au ${formatShortDate(days.to)} : pas de course ces jours-là`;
+}
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /**
@@ -130,18 +131,22 @@ function firstDayToCome(recurrence: Period, todayIso: string): string {
  * recurrence, on the patient page. An open-ended recurrence outliving its
  * PMT is normal (renewals): it is only flagged once the end is near
  * (EXPIRY_WARNING_DAYS), and calmly when the renewal is already registered.
+ * Before the PMT starts, the sessions go on with the PMT it renews
+ * (`predecessor`, a recurrence attached early): only days none covers are flagged.
  */
 export function recurrenceCoverageNotice(
   recurrence: Period,
   prescription: ValidityRange,
   todayIso: string,
   renewal: ValidityRange | null = null,
+  predecessor: ValidityRange | null = null,
 ): Notice | null {
   if (recurrence.endDate !== null && recurrence.endDate < todayIso) return null;
   const validity = prescriptionValidity(prescription, todayIso);
   const end = formatShortDate(prescription.validTo);
+  const gap = renewal ? uncoveredDays(prescription.validTo, renewal.validFrom, todayIso) : null;
   const renewed = renewal
-    ? `PMT renouvelée (${formatShortDate(renewal.validFrom)} → ${formatShortDate(renewal.validTo)}) : les courses continuent dessus ; rattachez-y la récurrence`
+    ? `PMT renouvelée (${formatShortDate(renewal.validFrom)} → ${formatShortDate(renewal.validTo)}) : les courses continuent dessus ; rattachez-y la récurrence${gap ? `. ${capitalize(uncoveredText(gap))}` : ""}`
     : null;
 
   if (validity.state === "expired") {
@@ -151,13 +156,23 @@ export function recurrenceCoverageNotice(
   }
   if (validity.state === "expiring" && outlives(recurrence, prescription)) {
     return renewed
-      ? { tone: "info", text: `${renewed}.` }
+      ? { tone: gap ? "warning" : "info", text: `${renewed}.` }
       : {
           tone: "warning",
           text: `${validityLabel(prescription, todayIso)} (${end}) : sans renouvellement, plus de course après cette date.`,
         };
   }
-  if (firstDayToCome(recurrence, todayIso) < prescription.validFrom) {
+  const first = firstDayToCome(recurrence, todayIso);
+  if (first < prescription.validFrom) {
+    if (predecessor && predecessor.validFrom <= first && first <= predecessor.validTo) {
+      const before = uncoveredDays(predecessor.validTo, prescription.validFrom, todayIso);
+      return before
+        ? {
+            tone: "warning",
+            text: `Courses sur la PMT précédente jusqu'au ${formatShortDate(predecessor.validTo)}, puis ${uncoveredText(before)}.`,
+          }
+        : null;
+    }
     return {
       tone: "warning",
       text: `La PMT ne commence que le ${formatShortDate(prescription.validFrom)} : pas de course avant cette date.`,
@@ -166,25 +181,51 @@ export function recurrenceCoverageNotice(
   return null;
 }
 
+/**
+ * The prescription chosen in the recurrence form, with the PMT it renews
+ * (`previous`) and its renewal (`next`) when registered (lib/domain/renewal.ts):
+ * the sessions use them before it starts and after it ends.
+ */
+export type FormPrescription = ValidityRange & { previous?: ValidityRange | null; next?: ValidityRange | null };
+
 /** Hints of the recurrence form about the chosen prescription's validity. */
-export function recurrenceFormNotices(recurrence: Period, prescription: ValidityRange, todayIso: string): Notice[] {
+export function recurrenceFormNotices(recurrence: Period, prescription: FormPrescription, todayIso: string): Notice[] {
   const notices: Notice[] = [];
-  if (firstDayToCome(recurrence, todayIso) < prescription.validFrom) {
-    notices.push({
-      tone: "warning",
-      text: `La prescription ne commence que le ${formatShortDate(prescription.validFrom)} : aucune course ne sera générée avant cette date.`,
-    });
+  const first = firstDayToCome(recurrence, todayIso);
+  if (first < prescription.validFrom) {
+    const previous = prescription.previous;
+    if (previous && previous.validFrom <= first && first <= previous.validTo) {
+      const before = uncoveredDays(previous.validTo, prescription.validFrom, todayIso);
+      notices.push({
+        tone: before ? "warning" : "info",
+        text: `Avant le ${formatShortDate(prescription.validFrom)}, les courses restent sur la prescription précédente (jusqu'au ${formatShortDate(previous.validTo)})${before ? ` ; ${uncoveredText(before)}` : ""}.`,
+      });
+    } else {
+      notices.push({
+        tone: "warning",
+        text: `La prescription ne commence que le ${formatShortDate(prescription.validFrom)} : aucune course ne sera générée avant cette date.`,
+      });
+    }
   }
   if (outlives(recurrence, prescription)) {
     const end = formatShortDate(prescription.validTo);
-    notices.push(
-      prescription.validTo < todayIso
-        ? { tone: "danger", text: `Cette prescription a expiré le ${end} : aucune course ne sera générée.` }
-        : {
-            tone: "info",
-            text: `Courses générées jusqu'au ${end} (fin de la prescription) ; pour la suite, saisissez le renouvellement : les courses continueront dessus.`,
-          },
-    );
+    const next = prescription.next;
+    if (next) {
+      const gap = uncoveredDays(prescription.validTo, next.validFrom, todayIso);
+      notices.push({
+        tone: gap ? "warning" : "info",
+        text: `${prescription.validTo < todayIso ? `Cette prescription a expiré le ${end} ; les courses continuent` : `Courses générées sur cette prescription jusqu'au ${end}, puis`} sur son renouvellement (${formatShortDate(next.validFrom)} → ${formatShortDate(next.validTo)})${gap ? ` ; ${uncoveredText(gap)}` : ""}.`,
+      });
+    } else {
+      notices.push(
+        prescription.validTo < todayIso
+          ? { tone: "danger", text: `Cette prescription a expiré le ${end} : aucune course ne sera générée.` }
+          : {
+              tone: "info",
+              text: `Courses générées jusqu'au ${end} (fin de la prescription) ; pour la suite, saisissez le renouvellement : les courses continueront dessus.`,
+            },
+      );
+    }
   }
   return notices;
 }

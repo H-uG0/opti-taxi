@@ -4,9 +4,10 @@
  * (recurrence, date, direction), so regenerating a week never duplicates.
  *
  * A trip needs a prescription valid on its date: the recurrence's own, or,
- * once it has ended (the renewal is not attached yet), another prescription of
- * the patient with the same mode that covers the date. Occurrences without
- * any are reported (skipped), never silently dropped.
+ * once it has ended (the renewal is not attached yet), its renewal — and
+ * before it starts (a recurrence attached early to a renewal), the PMT it
+ * renews (lib/domain/renewal.ts: never another series' prescription).
+ * Occurrences without any are reported (skipped), never silently dropped.
  *
  * No server-only import: the seed calls generateTrips with its own client.
  * The server side (horizon, revival, audit) is lib/trips/completion.ts.
@@ -14,6 +15,7 @@
 import type { Prisma, PrescribedMode, RecurrenceLegs, SharingScope, SharingStatus, TripDirection } from "@prisma/client";
 import { addDays, fromIsoDate, isoWeekday, toIsoDate } from "@/lib/time";
 import { NO_CANCELLATION } from "./cancellation";
+import { prescriptionCovering } from "./renewal";
 import { allowedVehicleTypesFor, formatAddress, initialSharingStatus, nextSharingStatus, sharingAllowedFor } from "./rules";
 
 type Place = { address: string; postalCode: string; city: string; lat: number; lng: number };
@@ -24,6 +26,8 @@ export type PrescriptionForGeneration = {
   sharing: SharingScope;
   validFrom: Date;
   validTo: Date;
+  /** Care facilities of the active recurrences attached to it: tells another series' PMT from a renewal. */
+  recurrences?: readonly { facilityId: string }[];
 };
 
 export type RecurrenceForGeneration = {
@@ -38,16 +42,32 @@ export type RecurrenceForGeneration = {
   startDate: Date;
   endDate: Date | null;
   active: boolean;
-  /** `prescriptions`: all the patient's prescriptions, to fall back on a renewal not attached yet. */
+  /** `prescriptions`: all the patient's prescriptions, to fall back on a renewal not attached yet (or the PMT renewed). */
   patient: Place & { active: boolean; prescriptions?: readonly PrescriptionForGeneration[] };
   facility: Place;
   /** The prescription the recurrence is attached to. */
   prescription: Omit<PrescriptionForGeneration, "id">;
 };
 
-/** What a recurrence query includes for the generation (patient with all their prescriptions, facility, prescription). */
+/**
+ * What a recurrence query includes for the generation: the patient with all their prescriptions (and the
+ * facilities of the active recurrences using each), the facility, the prescription.
+ */
 export const GENERATION_INCLUDE = {
-  patient: { include: { prescriptions: { select: { id: true, mode: true, sharing: true, validFrom: true, validTo: true } } } },
+  patient: {
+    include: {
+      prescriptions: {
+        select: {
+          id: true,
+          mode: true,
+          sharing: true,
+          validFrom: true,
+          validTo: true,
+          recurrences: { where: { active: true }, select: { facilityId: true } },
+        },
+      },
+    },
+  },
   facility: true,
   prescription: true,
 } satisfies Prisma.RecurrenceInclude;
@@ -58,24 +78,18 @@ function covers(p: { validFrom: Date; validTo: Date }, isoDate: string): boolean
 
 /**
  * The prescription a trip of `rec` uses on `isoDate`: the recurrence's own when
- * it covers the date; otherwise the patient's other prescription of the same
- * mode covering it (the one lasting longest: a renewal). Null when none does.
+ * it covers the date; otherwise the link of its renewal chain (or, before it
+ * starts, of the PMTs it renews) covering it, never a PMT of another series of
+ * care (lib/domain/renewal.ts). Null when none does.
  */
 export function prescriptionOn(
-  rec: Pick<RecurrenceForGeneration, "prescriptionId" | "prescription" | "patient">,
+  rec: Pick<RecurrenceForGeneration, "prescriptionId" | "prescription" | "patient" | "facilityId">,
   isoDate: string,
 ): PrescriptionForGeneration | null {
-  if (covers(rec.prescription, isoDate)) return { id: rec.prescriptionId, ...rec.prescription };
-  let best: PrescriptionForGeneration | null = null;
-  for (const p of rec.patient.prescriptions ?? []) {
-    if (p.id === rec.prescriptionId || p.mode !== rec.prescription.mode || !covers(p, isoDate)) continue;
-    const better =
-      !best ||
-      p.validTo.getTime() > best.validTo.getTime() ||
-      (p.validTo.getTime() === best.validTo.getTime() && p.validFrom.getTime() > best.validFrom.getTime());
-    if (better) best = p;
-  }
-  return best;
+  const own: PrescriptionForGeneration = { ...rec.prescription, id: rec.prescriptionId };
+  if (covers(own, isoDate)) return own;
+  const others = (rec.patient.prescriptions ?? []).filter((p) => p.id !== own.id);
+  return prescriptionCovering(own, others, new Set([rec.facilityId]), isoDate);
 }
 
 /** The recurrence plans a care session on this date (active, patient active, weekday and period), whatever the prescription. */

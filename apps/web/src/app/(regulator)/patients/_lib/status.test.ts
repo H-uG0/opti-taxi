@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { fromIsoDate } from "@/lib/time";
 import {
   daysBetween,
+  findPredecessor,
   findRenewal,
   formatRecurrenceSummary,
   formatWeekdays,
@@ -12,6 +13,8 @@ import {
   prescriptionValidity,
   recurrenceCoverageNotice,
   recurrenceFormNotices,
+  uncoveredDays,
+  uncoveredText,
   validityLabel,
 } from "./status";
 
@@ -139,6 +142,29 @@ describe("recurrenceCoverageNotice (patient page)", () => {
     ).toEqual({ tone: "warning", text: "La PMT ne commence que le 16/11/2026 : pas de course avant cette date." });
   });
 
+  it("stays silent before a renewal attached early, while the PMT it renews covers the days before", () => {
+    const early = { validFrom: "2026-11-11", validTo: "2027-05-10" };
+    expect(recurrenceCoverageNotice({ startDate: "2026-05-01", endDate: null }, early, TODAY, null, endingPmt)).toBeNull();
+    // A gap between the two: only those days are flagged.
+    expect(
+      recurrenceCoverageNotice({ startDate: "2026-05-01", endDate: null }, { ...early, validFrom: "2026-11-13" }, TODAY, null, endingPmt),
+    ).toEqual({
+      tone: "warning",
+      text: "Courses sur la PMT précédente jusqu'au 10/11/2026, puis aucune PMT du 11/11/2026 au 12/11/2026 : pas de course ces jours-là.",
+    });
+  });
+
+  it("says when a renewal starting late leaves days without trip", () => {
+    const notice = recurrenceCoverageNotice({ startDate: "2026-05-01", endDate: null }, endingPmt, TODAY, {
+      validFrom: "2026-11-14",
+      validTo: "2027-05-13",
+    });
+    expect(notice).toEqual({
+      tone: "warning",
+      text: "PMT renouvelée (14/11/2026 → 13/05/2027) : les courses continuent dessus ; rattachez-y la récurrence. Aucune PMT du 11/11/2026 au 13/11/2026 : pas de course ces jours-là.",
+    });
+  });
+
   it("says nothing about a recurrence that has ended", () => {
     expect(recurrenceCoverageNotice({ startDate: "2026-01-01", endDate: "2026-10-01" }, endingPmt, TODAY)).toBeNull();
   });
@@ -175,6 +201,23 @@ describe("recurrenceFormNotices (recurrence form)", () => {
     const notices = recurrenceFormNotices({ startDate: "2026-11-02", endDate: null }, { validFrom: "2026-01-01", validTo: "2026-10-31" }, TODAY);
     expect(notices.map((n) => n.tone)).toEqual(["danger"]);
   });
+
+  it("tells that the sessions use the PMT renewed before, and the renewal after", () => {
+    const renewal = { validFrom: "2026-11-20", validTo: "2027-05-19", previous: { validFrom: "2026-05-20", validTo: "2026-11-19" } };
+    expect(recurrenceFormNotices({ startDate: "2026-11-02", endDate: "2027-05-19" }, renewal, TODAY)).toEqual([
+      {
+        tone: "info",
+        text: "Avant le 20/11/2026, les courses restent sur la prescription précédente (jusqu'au 19/11/2026).",
+      },
+    ]);
+    const expired = { validFrom: "2026-01-01", validTo: "2026-10-31", next: { validFrom: "2026-11-04", validTo: "2027-05-03" } };
+    expect(recurrenceFormNotices({ startDate: "2026-11-02", endDate: null }, expired, TODAY)).toEqual([
+      {
+        tone: "warning",
+        text: "Cette prescription a expiré le 31/10/2026 ; les courses continuent sur son renouvellement (04/11/2026 → 03/05/2027) ; aucune PMT du 02/11/2026 au 03/11/2026 : pas de course ces jours-là.",
+      },
+    ]);
+  });
 });
 
 describe("renewals", () => {
@@ -186,19 +229,48 @@ describe("renewals", () => {
   });
   const current = p("a", "TAP", "2026-05-01", "2026-11-07");
 
-  it("recognises a same-mode prescription taking over the next day at the latest", () => {
+  it("recognises a later same-mode prescription taking over within a month of the end", () => {
     expect(isRenewalOf(current, p("b", "TAP", "2026-11-08", "2027-05-07"))).toBe(true);
     expect(isRenewalOf(current, p("overlap", "TAP", "2026-10-15", "2027-04-14"))).toBe(true);
-    expect(isRenewalOf(current, p("gap", "TAP", "2026-11-09", "2027-05-08"))).toBe(false);
+    // Renewed a few days late: still the renewal (the days in between have no trip).
+    expect(isRenewalOf(current, p("gap", "TAP", "2026-11-12", "2027-05-11"))).toBe(true);
+    expect(isRenewalOf(current, p("limit", "TAP", "2026-12-09", "2027-06-08"))).toBe(true);
+    expect(isRenewalOf(current, p("too late", "TAP", "2026-12-10", "2027-06-09"))).toBe(false);
+    // Started before it: a concurrent prescription, not its renewal.
+    expect(isRenewalOf(current, p("before", "TAP", "2026-04-01", "2027-04-01"))).toBe(false);
     expect(isRenewalOf(current, p("mode", "AMBULANCE", "2026-11-08", "2027-05-07"))).toBe(false);
     expect(isRenewalOf(current, p("shorter", "TAP", "2026-06-01", "2026-11-07"))).toBe(false);
     expect(isRenewalOf(current, current)).toBe(false);
   });
 
-  it("picks the renewal lasting longest", () => {
+  it("picks the renewal taking over nearest to the end, the longest on a tie", () => {
     const list = [current, p("b", "TAP", "2026-11-08", "2027-02-07"), p("c", "TAP", "2026-11-01", "2027-05-07")];
-    expect(findRenewal(current, list)?.id).toBe("c");
+    expect(findRenewal(current, list)?.id).toBe("b");
+    expect(findRenewal(current, [current, p("b", "TAP", "2026-11-08", "2027-02-07"), p("d", "TAP", "2026-11-08", "2027-05-07")])?.id).toBe("d");
     expect(findRenewal(current, [current])).toBeNull();
+  });
+
+  it("never takes another series' prescription for a renewal", () => {
+    const dialysis = { ...current, recurrences: [{ facilityId: "dialysis" }] };
+    const radiotherapy = { ...p("radio", "TAP", "2026-10-01", "2027-01-31"), recurrences: [{ facilityId: "radiotherapy" }] };
+    expect(findRenewal(dialysis, [dialysis, radiotherapy])).toBeNull();
+    // Without recurrences to compare with (all moved already), the dates decide.
+    expect(findRenewal(current, [current, radiotherapy])?.id).toBe("radio");
+    // The PMT a recurrence was attached to early comes after the one it renews.
+    const renewal = { ...p("b", "TAP", "2026-11-08", "2027-05-07"), recurrences: [{ facilityId: "dialysis" }] };
+    expect(findPredecessor(renewal, [current, renewal])?.id).toBe("a");
+    expect(findPredecessor(renewal, [{ ...current, recurrences: [{ facilityId: "radiotherapy" }] }, renewal])).toBeNull();
+  });
+
+  it("names the days left without any PMT between two prescriptions, from today on", () => {
+    expect(uncoveredDays("2026-11-01", "2026-11-05", TODAY)).toEqual({ from: "2026-11-02", to: "2026-11-04" });
+    expect(uncoveredDays("2026-10-20", "2026-11-05", TODAY)).toEqual({ from: TODAY, to: "2026-11-04" });
+    expect(uncoveredDays("2026-11-01", "2026-11-02", TODAY)).toBeNull();
+    expect(uncoveredDays("2026-10-01", "2026-10-05", TODAY)).toBeNull();
+    expect(uncoveredText({ from: "2026-11-02", to: "2026-11-04" })).toBe(
+      "aucune PMT du 02/11/2026 au 04/11/2026 : pas de course ces jours-là",
+    );
+    expect(uncoveredText({ from: "2026-11-04", to: "2026-11-04" })).toBe("aucune PMT le 04/11/2026 : pas de course ce jour-là");
   });
 
   it("drops the red badge once renewed", () => {

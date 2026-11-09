@@ -161,16 +161,26 @@ export function patientHistoryStart(todayIso: string): string {
   return addDays(todayIso, -PATIENT_HISTORY_DAYS);
 }
 
-export type PatientCancellationStats = { noShows: number; lateCancellations: number; cancellations: number };
+export type PatientCancellationStats = {
+  noShows: number;
+  lateCancellations: number;
+  cancellations: number;
+  /** Cancelled before reasons were recorded: whose decision it was is unknown, so they are counted apart. */
+  withoutReason: number;
+};
 
-/** Cancellations that say nothing about the patient: handed over to a partner company, decided by the regulation. */
-const NOT_THE_PATIENTS: readonly (CancellationReason | null)[] = ["PARTNER", "REGULATION", "REFERENTIAL_SYNC"];
+/**
+ * Cancellations that say nothing about the patient's reliability: the sync's,
+ * a trip handed over to a partner company, the regulation's own decision, a
+ * session the facility cancelled or moved, a death.
+ */
+const NOT_THE_PATIENTS: readonly CancellationReason[] = ["PARTNER", "REGULATION", "REFERENTIAL_SYNC", "FACILITY", "DECEASED"];
 
 /**
  * What the patient page counts: « patient absent » (NO_SHOW), and the
  * cancellations a person recorded for the patient's sake, late ones apart.
- * The sync's, a partner company's trip and the regulation's own decisions
- * say nothing about the patient.
+ * Those of NOT_THE_PATIENTS are left out; those without a reason (recorded
+ * before reasons existed, by a person or by the old sync) are counted apart.
  */
 export function patientCancellationStats(
   trips: readonly {
@@ -180,12 +190,15 @@ export function patientCancellationStats(
     lateCancellation: boolean;
   }[],
 ): PatientCancellationStats {
-  const stats: PatientCancellationStats = { noShows: 0, lateCancellations: 0, cancellations: 0 };
+  const stats: PatientCancellationStats = { noShows: 0, lateCancellations: 0, cancellations: 0, withoutReason: 0 };
   for (const trip of trips) {
     if (trip.status === "NO_SHOW") stats.noShows += 1;
-    if (trip.status !== "CANCELLED" || trip.cancellationOrigin === "SYSTEM" || NOT_THE_PATIENTS.includes(trip.cancellationReason)) {
+    if (trip.status !== "CANCELLED" || trip.cancellationOrigin === "SYSTEM") continue;
+    if (trip.cancellationReason === null) {
+      stats.withoutReason += 1;
       continue;
     }
+    if (NOT_THE_PATIENTS.includes(trip.cancellationReason)) continue;
     stats.cancellations += 1;
     if (trip.lateCancellation) stats.lateCancellations += 1;
   }

@@ -10,7 +10,7 @@ const fake = vi.hoisted(() => {
   const models = {
     patient: { findUnique: vi.fn(), updateMany: vi.fn(), update: vi.fn(), findMany: vi.fn(), create: vi.fn() },
     recurrence: { findFirst: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
-    trip: { findMany: vi.fn(), updateMany: vi.fn() },
+    trip: { findMany: vi.fn(), updateMany: vi.fn(), count: vi.fn() },
     auditEvent: { createMany: vi.fn() },
     appSettings: { findUnique: vi.fn(async () => ({ tripHorizonDays: 14 })) },
   };
@@ -89,6 +89,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   fake.auditEvent.createMany.mockResolvedValue({ count: 1 });
   fake.trip.findMany.mockResolvedValue([]);
+  fake.trip.count.mockResolvedValue(0);
   fake.completeTrips.mockResolvedValue({ created: 0, revived: 0, createdByDay: new Map(), skipped: [] });
   fake.reviveOneOffTrips.mockResolvedValue(0);
 });
@@ -105,6 +106,22 @@ describe("reactivation", () => {
     expect(fake.reviveOneOffTrips.mock.calls[0]![2]).toEqual({ patientId: "p1" });
     expect(recorded()).toEqual([{ action: "patient.reactivate", entityId: "p1" }]);
     expect(result).toEqual({ ok: true, message: "Patient réactivé. Courses à venir : 4 créées, 7 rétablies." });
+  });
+
+  it("says which trips of today stay cancelled: the completion never writes a day already begun", async () => {
+    fake.patient.updateMany.mockResolvedValue({ count: 1 });
+    fake.trip.count.mockResolvedValue(2);
+
+    const result = await setPatientActive(INITIAL_ACTION_RESULT, form({ patientId: "p1", active: "true" }));
+
+    expect(fake.trip.count.mock.calls[0]![0].where.AND).toEqual([
+      { patientId: "p1" },
+      { serviceDate: expect.any(Date), status: "CANCELLED", cancellationOrigin: "SYSTEM" },
+      { OR: [{ recurrenceId: null }, { recurrence: { active: true } }] },
+    ]);
+    expect(result.message).toBe(
+      "Patient réactivé. 2 courses d'aujourd'hui restent annulées (celles du jour ne reviennent pas d'elles-mêmes) : rétablissez-les dans Courses si les transports ont lieu.",
+    );
   });
 
   it("completes a reactivated recurrence's trips and says which sessions have no valid prescription", async () => {
