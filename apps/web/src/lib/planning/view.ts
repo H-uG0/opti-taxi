@@ -26,6 +26,7 @@ import type { RunDetails } from "@/lib/optimizer/run-details";
 import { returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
 import { computeDayKpis as computeDashboardDayKpis, type KpiRoute, type KpiTrip } from "@/lib/kpis";
 import { VIOLATION_LABELS } from "@/lib/labels";
+import { remainingPart } from "@/lib/staff/route-crew";
 import { formatMinute } from "@/lib/time";
 import { vehicleShade } from "./colors";
 import { resolveTripRefs, type TripName } from "./move";
@@ -104,6 +105,9 @@ export type RawRoute = {
   breakStartMinute: number | null;
   breakEndMinute: number | null;
   validatedAt: Date | null;
+  /** People of the route (« Changer l'équipage »); absent in older tests: unknown. */
+  driverId?: string | null;
+  crewMateId?: string | null;
   driver: Person | null;
   crewMate: Person | null;
   stops: RawStop[];
@@ -432,6 +436,12 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
       validatedAt: route.validatedAt?.toISOString() ?? null,
       tripCount: new Set(stops.map((s) => s.tripId)).size,
       stops: stops.map(toStopView),
+      driverId: route.driverId ?? null,
+      crewMateId: route.crewMateId ?? null,
+      remaining: remainingPart(
+        route,
+        stops.map((s) => ({ ...s, tripStatus: rawTripById.get(s.tripId)?.status ?? "PLANNED" })),
+      ),
     };
   };
 

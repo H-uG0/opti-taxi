@@ -25,6 +25,8 @@ export type IssuesPanelProps = {
   vehicleIssues: VehicleIssue[];
   /** Why the day cannot be re-optimized now (validated, past, started, computation running), or null. */
   replanBlocked?: string | null;
+  /** Validated or started day: a crew changes on the route itself (« Changer l'équipage »). */
+  crewChangeOnRoute?: boolean;
   trips: Record<string, TripView>;
   vehicleLabels: Record<string, string>;
   planned: boolean;
@@ -101,16 +103,25 @@ function Section({
 }
 
 /** What to do about vehicles to review, said once for the section (when re-optimizing is not possible now, why). */
-function vehicleIssuesIntro(issues: readonly VehicleIssue[], date: string, replanBlocked: string | null): ReactNode {
+function vehicleIssuesIntro(
+  issues: readonly VehicleIssue[],
+  date: string,
+  replanBlocked: string | null,
+  crewChangeOnRoute: boolean,
+): ReactNode {
   const changed = issues.some((issue) => issue.changes.length > 0);
   const compliance = issues.some((issue) => issue.compliance.length > 0);
+  let changedText: string | null = null;
+  if (changed) {
+    if (crewChangeOnRoute) {
+      changedText =
+        "Changements survenus depuis le calcul : pour remplacer une personne sans réoptimiser, sélectionnez le véhicule puis « Changer l'équipage ». ";
+    } else if (replanBlocked) changedText = `Changements survenus depuis le calcul. ${replanBlocked} `;
+    else changedText = "Changements survenus depuis le calcul : réoptimisez pour appliquer les équipages du jour. ";
+  }
   return (
     <>
-      {changed
-        ? replanBlocked
-          ? `Changements survenus depuis le calcul. ${replanBlocked} `
-          : "Changements survenus depuis le calcul : réoptimisez pour appliquer les équipages du jour. "
-        : null}
+      {changedText}
       {compliance ? "Échéance dépassée : vérifiez le véhicule avant de le faire rouler. " : null}
       <Link href={`/equipages?date=${date}`} className="font-medium text-brand-700 underline-offset-2 hover:underline">
         Équipages du jour
@@ -130,6 +141,7 @@ export function IssuesPanel({
   returnsToCheck,
   vehicleIssues,
   replanBlocked = null,
+  crewChangeOnRoute = false,
   trips,
   vehicleLabels,
   planned,
@@ -165,7 +177,7 @@ export function IssuesPanel({
               icon={<CarFront aria-hidden className="size-3.5" />}
               title={`Véhicules à revoir (${vehicleIssues.length})`}
               tone="red"
-              intro={vehicleIssuesIntro(vehicleIssues, date, replanBlocked)}
+              intro={vehicleIssuesIntro(vehicleIssues, date, replanBlocked, crewChangeOnRoute)}
             >
               {vehicleIssues.map((issue) => (
                 <li key={issue.vehicleId}>

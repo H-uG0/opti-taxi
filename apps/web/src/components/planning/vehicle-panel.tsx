@@ -1,6 +1,7 @@
 "use client";
 
-import { X } from "lucide-react";
+import type { ReactNode } from "react";
+import { TriangleAlert, X } from "lucide-react";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
@@ -13,11 +14,17 @@ import { formatMinute } from "@/lib/time";
 export function VehiclePanel({
   vehicle,
   trips,
+  issues = [],
+  crewAction,
   onSelectTrip,
   onClose,
 }: {
   vehicle: VehicleRowView;
   trips: Record<string, TripView>;
+  /** What to fix on this vehicle (route-issues.ts): an absent driver, a crew changed since the computation… */
+  issues?: string[];
+  /** « Changer l'équipage » (planning page). */
+  crewAction?: ReactNode;
   onSelectTrip: (tripId: string) => void;
   onClose: () => void;
 }) {
@@ -70,7 +77,18 @@ export function VehiclePanel({
         ) : (
           <p className="text-slate-500">Aucune course ce jour.</p>
         )}
+        {issues.length > 0 ? (
+          <ul className="space-y-0.5 pt-1 text-xs text-amber-900">
+            {issues.map((issue) => (
+              <li key={issue} className="flex items-start gap-1.5">
+                <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+                <span>{issue}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
+      {crewAction}
 
       {route ? (
         <ol className="max-h-96 overflow-y-auto border-t border-slate-100 px-2 py-2">

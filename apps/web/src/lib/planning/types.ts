@@ -49,6 +49,11 @@ export type RouteView = {
   validatedAt: string | null;
   tripCount: number;
   stops: StopView[];
+  /** People of the route (null: unknown or none). */
+  driverId: string | null;
+  crewMateId: string | null;
+  /** What is left to drive (lib/staff/route-crew.ts remainingPart); null once every stop is closed. */
+  remaining: { start: number; end: number } | null;
 };
 
 export type VehicleRowView = {

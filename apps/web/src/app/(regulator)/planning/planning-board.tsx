@@ -12,8 +12,10 @@ import type { DroppedLock } from "@/lib/optimizer/build-request";
 import type { TimeRange } from "@/lib/planning/timeline";
 import type { VehicleIssue } from "@/lib/planning/route-issues";
 import type { TripView, UnassignedView, VehicleRowView, ViolationView } from "@/lib/planning/types";
+import type { CrewChoice } from "@/lib/staff/route-crew";
 import { STOP_KIND_LABELS } from "@/lib/labels";
 import { formatMinute } from "@/lib/time";
+import { RouteCrewChange, type CrewChangeMode } from "./route-crew-form";
 import { TripPanel } from "./trip-panel";
 
 export type PlanningBoardProps = {
@@ -32,6 +34,12 @@ export type PlanningBoardProps = {
   /** Why locks cannot change (past date), or null. */
   lockBlocked: string | null;
   initialTripId: string | null;
+  /** « Changer l'équipage » of a route: people offered, where the change happens, what blocks it now. */
+  crewChoices: CrewChoice[];
+  crewChangeMode: CrewChangeMode;
+  crewChangeBlocked: string | null;
+  /** Plan version shown (actions on a stale page are refused). */
+  version: string;
 };
 
 const ACTIVE = (t: TripView) => t.status !== "CANCELLED" && t.status !== "NO_SHOW";
@@ -52,6 +60,10 @@ export function PlanningBoard({
   replanBlocked,
   lockBlocked,
   initialTripId,
+  crewChoices,
+  crewChangeMode,
+  crewChangeBlocked,
+  version,
 }: PlanningBoardProps) {
   const tripsById = useMemo(() => Object.fromEntries(trips.map((t) => [t.id, t])), [trips]);
   const vehicleLabels = useMemo(() => Object.fromEntries(vehicles.map((v) => [v.id, v.label])), [vehicles]);
@@ -172,7 +184,25 @@ export function PlanningBoard({
               onClose={clear}
             />
           ) : selectedVehicle ? (
-            <VehiclePanel vehicle={selectedVehicle} trips={tripsById} onSelectTrip={selectTrip} onClose={clear} />
+            <VehiclePanel
+              vehicle={selectedVehicle}
+              trips={tripsById}
+              issues={vehicleIssues.find((issue) => issue.vehicleId === selectedVehicle.id)?.changes ?? []}
+              crewAction={
+                <RouteCrewChange
+                  // Fresh selects for another vehicle, or after the route's crew changed.
+                  key={`${selectedVehicle.id}/${selectedVehicle.route?.driverId ?? ""}/${selectedVehicle.route?.crewMateId ?? ""}`}
+                  date={date}
+                  vehicle={selectedVehicle}
+                  choices={crewChoices}
+                  version={version}
+                  mode={crewChangeMode}
+                  blocked={crewChangeBlocked}
+                />
+              }
+              onSelectTrip={selectTrip}
+              onClose={clear}
+            />
           ) : (
             <p className="flex items-start gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600">
               <MousePointerClick aria-hidden className="mt-0.5 size-4 shrink-0 text-slate-400" />
@@ -190,6 +220,7 @@ export function PlanningBoard({
             returnsToCheck={returnsToCheck}
             vehicleIssues={vehicleIssues}
             replanBlocked={replanBlocked}
+            crewChangeOnRoute={crewChangeMode === "route"}
             trips={tripsById}
             vehicleLabels={vehicleLabels}
             planned={planned}

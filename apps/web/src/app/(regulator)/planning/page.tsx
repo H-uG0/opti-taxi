@@ -112,6 +112,8 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   const hasRoutes = view.vehicles.some((v) => v.route !== null);
   const availableVehicles = view.vehicles.filter((v) => v.available).length;
   const replanBlocked = replanBlockedReason(view, past);
+  // A validated or started day keeps its routes: their crew changes on the route itself.
+  const dayLocked = view.dayStatus === "VALIDATED" || view.dayStatus === "MIXED" || view.dayStarted;
   const runningReason = runningReasonOf(view);
   const optimizeBlocked = replanBlocked ?? (view.kpis.tripsTotal === 0 ? "Aucune course à planifier ce jour." : null);
   const optimizeLabel = hasRoutes ? "Réoptimiser" : date === tomorrow ? "Optimiser demain" : `Optimiser le ${formatDayMonth(date)}`;
@@ -237,6 +239,10 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
               replanBlocked={replanBlocked ?? runningReason}
               lockBlocked={past ? "Date passée : les verrous ne servent plus." : null}
               initialTripId={initialTripId}
+              crewChoices={view.crewChoices}
+              crewChangeMode={past ? "none" : dayLocked ? "route" : "equipages"}
+              crewChangeBlocked={runningReason}
+              version={shownVersion.version}
             />
           </>
         )}

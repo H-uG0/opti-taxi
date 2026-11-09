@@ -11,6 +11,7 @@ import {
   vehicleInputSelect,
 } from "@/lib/optimizer/build-request";
 import { readRunDetails, type RunDetails } from "@/lib/optimizer/run-details";
+import { crewChoices, type CrewChoice } from "@/lib/staff/route-crew";
 import { fromIsoDate } from "@/lib/time";
 import { vehicleIssues } from "./route-issues";
 import type { PlanningDayView } from "./types";
@@ -39,7 +40,9 @@ const personSelect = { select: { firstName: true, lastName: true } } as const;
 /** Account that recorded a sharing answer or a stop status: its name only. */
 const recorderSelect = { select: { name: true } } as const;
 
-export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView & { timeLimitSec: number }> {
+export async function loadPlanningDay(
+  isoDate: string,
+): Promise<PlanningDayView & { timeLimitSec: number; crewChoices: CrewChoice[] }> {
   const serviceDate = fromIsoDate(isoDate);
   const [settings, defaultVehicles, crewContext, trips, routes, lastRun, planRun, tariffs] = await Promise.all([
     getSettings(db),
@@ -149,6 +152,14 @@ export async function loadPlanningDay(isoDate: string): Promise<PlanningDayView 
     vehicleIssues: issues,
     baseColors: VEHICLE_TYPE_HEX,
   });
+  // « Changer l'équipage » of a route: everyone active, with their absence and route of the day.
+  const labelOf = new Map(defaultVehicles.map((v) => [v.id, v.label]));
+  const choices = crewChoices(
+    isoDate,
+    [...crewContext.people.values()],
+    crewContext.input.absences,
+    routes.map((r) => ({ vehicleId: r.vehicleId, vehicleLabel: labelOf.get(r.vehicleId) ?? "Véhicule", driverId: r.driverId, crewMateId: r.crewMateId })),
+  );
   // view.timeLimitSec: the solver budget scaled with the day's trips, not the bare setting.
-  return view;
+  return { ...view, crewChoices: choices };
 }
