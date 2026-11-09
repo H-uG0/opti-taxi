@@ -155,7 +155,16 @@ pnpm optimizer:test     # optimizer : pytest (solveur, validateur, API, contrat)
 - Production : hébergeur certifié HDS obligatoire, conformité RGPD.
 - Le géocodage n'envoie que l'adresse saisie (jamais le nom du patient) à la Base Adresse Nationale (IGN Géoplateforme) ; il se désactive en vidant `GEOCODER_URL`.
 - La PWA chauffeur ne met aucune page en cache hors ligne (téléphone perdu = pas de données patients).
-- **Sessions** : jeton signé de 12 h, revérifié en base à chaque requête. La déconnexion ferme les
+  Son service worker (`apps/web/public/sw.js`, écrit à la main) ne garde que l'icône, le numéro de la
+  régulation et l'heure de la dernière synchronisation, pour une page « Pas de réseau » quand
+  l'application est rouverte sans connexion. Les statuts tapés hors réseau attendent dans une file sur le
+  téléphone (IndexedDB : identifiant de l'arrêt, action, heure du geste, rien d'autre) et partent au
+  retour du réseau ; le serveur les enregistre à l'heure du geste (bornée : pas dans le futur, au plus
+  3 h avant, jamais avant la prise en charge) et garde aussi l'heure de réception.
+- **Sessions** : jeton signé de 12 h, revérifié en base à chaque requête. Celle d'un chauffeur est
+  prolongée de 12 h dès qu'il en reste moins de 5 et que l'application joint le serveur (statut,
+  ouverture, retour sur l'écran) ; la feuille de route affiche « Session valable jusqu'à HH:MM » et
+  prévient 30 min avant la fin. La déconnexion ferme les
   sessions du compte sur tous ses appareils. Désactiver un chauffeur ou son accès, ou lui donner un
   nouveau mot de passe ou une nouvelle adresse e-mail, coupe sa session ouverte dès sa prochaine action
   ou actualisation ; une réactivation ne la fait pas revenir (le chauffeur se reconnecte).
