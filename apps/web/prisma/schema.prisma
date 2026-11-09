@@ -234,6 +234,8 @@ model Recurrence {
   trips        Trip[]
 
   @@index([patientId])
+  // Facility pages and the sync of a moved facility read its recurrences.
+  @@index([facilityId])
 }
 
 model Trip {
@@ -299,6 +301,9 @@ model Trip {
   @@unique([recurrenceId, serviceDate, direction])
   @@index([serviceDate])
   @@index([patientId, serviceDate])
+  // Sync of a changed prescription or a moved facility: its trips to come (patients/_lib/trip-sync-db.ts).
+  @@index([prescriptionId])
+  @@index([facilityId, serviceDate])
 }
 
 /// Dépôt : lieu de rattachement des véhicules (départ et retour des tournées) et du personnel.
