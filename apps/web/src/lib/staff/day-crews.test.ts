@@ -73,7 +73,9 @@ describe("resolveDayCrews", () => {
       "Chauffeur attitré indisponible (taxi1 TAXI1 : absence du 09/11/2026 au 13/11/2026)",
       "Chauffeur remplaçant proposé : spare_a SPARE_A",
     ]);
-    expect(result.absent).toEqual([{ driverId: "taxi1", startDate: "2026-11-09", endDate: "2026-11-13" }]);
+    expect(result.absent).toEqual([
+      { driverId: "taxi1", startDate: "2026-11-09", endDate: "2026-11-13", text: "Absence du 09/11/2026 au 13/11/2026" },
+    ]);
   });
 
   it("serves a vehicle missing its default driver before a spare vehicle", () => {
@@ -143,8 +145,10 @@ describe("resolveDayCrews", () => {
   });
 
   it("blocks a fixed crew whose member is absent or unqualified", () => {
-    const absent = plan({ absences: [{ ...leave("taxi1"), kind: "ON_CALL" }], saved: [{ vehicleId: "Taxi A", driverId: "taxi1", crewMateId: null }] });
+    const absent = plan({ absences: [{ ...leave("taxi1"), kind: "SICK" }], saved: [{ vehicleId: "Taxi A", driverId: "taxi1", crewMateId: null }] });
     expect(crewOf(absent, "Taxi A").blocked).toBe("taxi1 TAXI1 : absence le 09/11/2026");
+    const onCall = plan({ absences: [{ ...leave("taxi1"), kind: "ON_CALL" }], saved: [{ vehicleId: "Taxi A", driverId: "taxi1", crewMateId: null }] });
+    expect(crewOf(onCall, "Taxi A").blocked).toBe("taxi1 TAXI1 : garde le 09/11/2026");
     const unqualified = plan({ saved: [{ vehicleId: "Taxi A", driverId: "aux2", crewMateId: null }] });
     expect(crewOf(unqualified, "Taxi A").blocked).toBe("aux2 AUX2 n'a pas la qualification requise pour ce poste");
   });
@@ -205,18 +209,30 @@ describe("absences", () => {
     expect(absenceOn("p", "2026-11-11", list)).not.toBeNull();
     expect(absenceOn("p", "2026-11-12", list)).toBeNull();
     expect(absenceText({ kind: "SICK", startDate: "2026-11-09", endDate: "2026-11-09" })).toBe("Arrêt maladie le 09/11/2026");
-    expect(planningAbsenceText({ startDate: "2026-11-09", endDate: "2026-11-09" })).toBe("Absence le 09/11/2026");
-    expect(planningAbsenceText({ startDate: "2026-11-09", endDate: "2026-11-11" })).toBe("Absence du 09/11/2026 au 11/11/2026");
+    expect(planningAbsenceText({ kind: "SICK", startDate: "2026-11-09", endDate: "2026-11-09" })).toBe("Absence le 09/11/2026");
+    expect(planningAbsenceText({ kind: "LEAVE", startDate: "2026-11-09", endDate: "2026-11-11" })).toBe("Absence du 09/11/2026 au 11/11/2026");
+    expect(planningAbsenceText({ kind: "OTHER", startDate: "2026-11-09", endDate: "2026-11-09" })).toBe("Absence le 09/11/2026");
+    // Duties the regulator needs to know about keep their name.
+    expect(planningAbsenceText({ kind: "ON_CALL", startDate: "2026-11-11", endDate: "2026-11-11" })).toBe("Garde le 11/11/2026");
+    expect(planningAbsenceText({ kind: "TRAINING", startDate: "2026-11-12", endDate: "2026-11-13" })).toBe("Formation du 12/11/2026 au 13/11/2026");
   });
 
-  it("never lets the reason of an absence reach the planning (crews, problems, absent list)", () => {
-    for (const kind of ["SICK", "LEAVE", "TRAINING", "ON_CALL", "OTHER"] as const) {
-      const sick = { ...leave("taxi1"), kind };
-      const proposed = plan({ absences: [sick] });
-      const fixed = plan({ absences: [sick], saved: [{ vehicleId: "Taxi A", driverId: "taxi1", crewMateId: null }] });
+  it("never lets a private reason reach the planning (crews, problems, absent list)", () => {
+    // Leave, sick leave and other reasons all read « absence »: none can be told from the others.
+    for (const kind of ["SICK", "LEAVE", "OTHER"] as const) {
+      const absence = { ...leave("taxi1"), kind };
+      const proposed = plan({ absences: [absence] });
+      const fixed = plan({ absences: [absence], saved: [{ vehicleId: "Taxi A", driverId: "taxi1", crewMateId: null }] });
       const shown = JSON.stringify([proposed, fixed]);
-      expect(shown).not.toMatch(/maladie|congé|formation|garde|SICK|LEAVE|TRAINING|ON_CALL|"kind"/i);
+      expect(shown).not.toMatch(/maladie|congé|formation|garde|SICK|LEAVE|TRAINING|ON_CALL|OTHER|"kind"/i);
       expect(shown).toMatch(/absence le 09\/11\/2026/);
     }
+  });
+
+  it("names the duties the regulator needs: on-call duty and training", () => {
+    const shown = JSON.stringify(plan({ absences: [{ ...leave("taxi1"), kind: "ON_CALL" }, { ...leave("taxi2"), kind: "TRAINING" }] }));
+    expect(shown).toMatch(/garde le 09\/11\/2026/i);
+    expect(shown).toMatch(/formation le 09\/11\/2026/i);
+    expect(shown).not.toMatch(/ON_CALL|TRAINING|"kind"/);
   });
 });

@@ -21,8 +21,10 @@
  *
  * The reason of a person's absence (sick leave is health data about an
  * employee) never leaves this module: the crews, their problems and the
- * absent list say « absence » only (planningAbsenceText). The reason shows on
- * the person's own sheet alone (absenceText).
+ * absent list say « absence » for leave, sick leave and other reasons alike
+ * (planningAbsenceText), so none can be told from the others. Duty reasons
+ * the regulator needs (on-call duty, training) keep their name. The full
+ * reason shows on the person's own sheet alone (absenceText).
  */
 import type { AbsenceKind, Qualification, VehicleType } from "@prisma/client";
 import { REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
@@ -77,7 +79,8 @@ export type DayCrewPlan = {
   /** Active vehicles, in display order. */
   crews: DayCrewView[];
   /** People absent that day, without the reason (planning screens only need « absent »). */
-  absent: { driverId: string; startDate: string; endDate: string }[];
+  /** People absent that day, with what the planning may say (planningAbsenceText): never a private reason. */
+  absent: { driverId: string; startDate: string; endDate: string; text: string }[];
   /** Active people working that weekday, not absent, with no seat. */
   idle: string[];
 };
@@ -147,14 +150,17 @@ export function absenceText(absence: Pick<DatedAbsence, "kind" | "startDate" | "
   return datedText(ABSENCE_KIND_LABELS[absence.kind], absence);
 }
 
+/** Reasons the planning screens name: duties, not private matters. */
+const DUTY_KINDS: Partial<Record<AbsenceKind, string>> = { ON_CALL: "Garde", TRAINING: "Formation" };
+
 /**
- * "Absence du 10/11/2026 au 14/11/2026", "Absence le 10/11/2026": what the
- * planning screens show (crews, crew problems, absent list), whatever the
- * reason, so a sick leave cannot be told from a holiday there. A noun, so it
- * reads right for anyone.
+ * What the planning screens show (crews, crew problems, absent list): "Garde
+ * le 11/11/2026" or "Formation du …" for a duty, "Absence du 10/11/2026 au
+ * 14/11/2026" for leave, sick leave and any other reason alike, so a sick
+ * leave cannot be told from a holiday there. A noun, so it reads right for anyone.
  */
-export function planningAbsenceText(absence: Pick<DatedAbsence, "startDate" | "endDate">): string {
-  return datedText("Absence", absence);
+export function planningAbsenceText(absence: Pick<DatedAbsence, "kind" | "startDate" | "endDate">): string {
+  return datedText(DUTY_KINDS[absence.kind] ?? "Absence", absence);
 }
 
 const SEAT_LABEL: Record<Seat, string> = { driver: "Chauffeur", crewMate: "Équipier" };
@@ -345,7 +351,12 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
     .map((p) => ({ person: p, absence: absenceOn(p.id, date, absences) }))
     .filter((x): x is { person: StaffPerson; absence: DatedAbsence } => x.absence !== null)
     .sort((x, y) => comparePeople(x.person, y.person))
-    .map(({ absence }) => ({ driverId: absence.driverId, startDate: absence.startDate, endDate: absence.endDate }));
+    .map(({ absence }) => ({
+      driverId: absence.driverId,
+      startDate: absence.startDate,
+      endDate: absence.endDate,
+      text: planningAbsenceText(absence),
+    }));
   const idle = pool.filter((p) => proposable(p) && !taken.has(p.id)).map((p) => p.id);
 
   return { date, crews, absent, idle };

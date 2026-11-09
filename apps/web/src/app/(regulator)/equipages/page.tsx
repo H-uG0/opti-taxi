@@ -133,7 +133,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
                       <Link href={`/chauffeurs/${a.driverId}`} className="font-medium underline-offset-2 hover:underline">
                         {nameOf(a.driverId)}
                       </Link>{" "}
-                      — {planningAbsenceText(a).toLowerCase()}
+                      — {a.text.toLowerCase()}
                     </li>
                   ))}
                 </ul>
