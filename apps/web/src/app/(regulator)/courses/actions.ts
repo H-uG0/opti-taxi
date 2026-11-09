@@ -8,6 +8,7 @@ import { audit, auditRead, type AuditEntry } from "@/lib/audit";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { CANCELLATION_REASON_LABELS, isLateCancellation, NO_CANCELLATION, userCancellation } from "@/lib/domain/cancellation";
+import { conflictLabel, restoreBlocker, tripConflicts } from "@/lib/domain/duplicates";
 import { isSameEpisode } from "@/lib/domain/no-show";
 import { formatAddress } from "@/lib/domain/rules";
 import { getSettings } from "@/lib/domain/settings";
@@ -228,10 +229,12 @@ export async function createTrip(prev: NewTripState, formData: FormData): Promis
   }
 
   const data = buildNewTripData(input, patient, prescription, destination);
+  let createdId: string;
   try {
-    await db.$transaction(async (tx) => {
+    createdId = await db.$transaction(async (tx) => {
       const created = await tx.trip.create({ data, select: { id: true } });
       await audit(tx, user, { action: "trip.create", entity: "Trip", entityId: created.id, serviceDate: input.serviceDate });
+      return created.id;
     }, TX_OPTIONS);
   } catch (error) {
     logError("[courses] createTrip failed", error, { patientId: patient.id });
@@ -239,7 +242,9 @@ export async function createTrip(prev: NewTripState, formData: FormData): Promis
   }
 
   revalidateTripViews();
-  redirect(`/courses?date=${input.serviceDate}&notice=created`);
+  // The list names the new trip: a trip of the same patient that day (same leg, or during another session) is
+  // warned about there, without blocking (tripConflicts).
+  redirect(`/courses?date=${input.serviceDate}&notice=created&course=${encodeURIComponent(createdId)}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -413,14 +418,50 @@ export async function cancelTrip(_prev: ActionResult, formData: FormData): Promi
   };
 }
 
+/** What a restoration checks first, and the patient's other trips of the day (a duplicate is warned about). */
+const RESTORE_SELECT = {
+  id: true,
+  status: true,
+  serviceDate: true,
+  payer: true,
+  patientId: true,
+  recurrenceId: true,
+  facilityId: true,
+  direction: true,
+  appointmentMinute: true,
+  readyMinute: true,
+  patient: { select: { active: true } },
+  recurrence: { select: { active: true } },
+  prescription: { select: { validFrom: true, validTo: true } },
+} satisfies Prisma.TripSelect;
+
+/**
+ * « Rétablir la course » : refused on a past date, for an inactive patient or
+ * recurrence (reactivating them brings their trips back), or for a CPAM trip
+ * no prescription covers; a trip of the same patient, day and leg is warned
+ * about (two vehicles for one patient), without blocking.
+ */
 export async function restoreTrip(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
   const user = await requireUser("REGULATOR");
   const parsed = tripIdSchema.safeParse(formData.get("tripId"));
   if (!parsed.success) return failure("Course introuvable.");
 
-  const trip = await db.trip.findUnique({ where: { id: parsed.data }, select: { id: true, status: true, serviceDate: true } });
+  const trip = await db.trip.findUnique({ where: { id: parsed.data }, select: RESTORE_SELECT });
   if (!trip) return failure("Course introuvable.");
   if (!canRestore(trip.status)) return failure("Seule une course annulée peut être rétablie.");
+  const blocker = restoreBlocker(
+    {
+      serviceDate: toIsoDate(trip.serviceDate),
+      payer: trip.payer,
+      patientActive: trip.patient.active,
+      recurrenceActive: trip.recurrence ? trip.recurrence.active : null,
+      prescription: trip.prescription
+        ? { validFrom: toIsoDate(trip.prescription.validFrom), validTo: toIsoDate(trip.prescription.validTo) }
+        : null,
+    },
+    todayIso(),
+  );
+  if (blocker) return failure(blocker);
 
   const detached = await detachInTransaction(async (tx) => {
     const updated = await tx.trip.updateMany({
@@ -434,9 +475,23 @@ export async function restoreTrip(_prev: ActionResult, formData: FormData): Prom
   });
   if (!detached) return failure(CONCURRENT_CHANGE);
 
-  const refresh = await refreshLeftRoutes(detached.routeIds);
+  const [refresh, sameDay] = await Promise.all([
+    refreshLeftRoutes(detached.routeIds),
+    db.trip.findMany({
+      where: { patientId: trip.patientId, serviceDate: trip.serviceDate },
+      select: { id: true, patientId: true, recurrenceId: true, facilityId: true, direction: true, status: true, appointmentMinute: true, readyMinute: true },
+    }),
+  ]);
   revalidateTripViews();
-  return { ok: true, message: `Course rétablie : elle sera placée à la prochaine optimisation.${noticeOf(refresh)}` };
+  const warning = tripConflicts({ ...trip, status: "PLANNED" }, sameDay)
+    .map((conflict) => conflictLabel(conflict, trip.direction))
+    .join(" ; ");
+  return {
+    ok: true,
+    message: `Course rétablie : elle sera placée à la prochaine optimisation.${noticeOf(refresh)}${
+      warning ? ` Attention : ${warning}. Vérifiez qu'il ne s'agit pas d'un doublon.` : ""
+    }`,
+  };
 }
 
 export async function rescheduleTrip(_prev: ActionResult, formData: FormData): Promise<ActionResult> {

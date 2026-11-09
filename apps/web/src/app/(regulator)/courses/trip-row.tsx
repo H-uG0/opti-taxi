@@ -81,6 +81,8 @@ export type TripRowData = {
   cancellationTrace: RecordTrace | null;
   /** Outbound trip: the return of the same care, still open, that « Annuler » offers to cancel along. */
   pairedReturn: { id: string; keyMinute: number | null } | null;
+  /** Another trip of the patient that day on the same leg, or during another session (possible duplicate). */
+  conflicts: string[];
 };
 
 export const TRIP_TABLE_COLUMNS = 8;
@@ -106,6 +108,14 @@ export function TripRow({ trip }: { trip: TripRowData }) {
           <span className="mt-0.5 flex flex-wrap items-center gap-1">
             <Badge tone={trip.direction === "OUTBOUND" ? "brand" : "neutral"}>{DIRECTION_LABELS[trip.direction]}</Badge>
             {trip.origin ? null : <span className="text-xs text-slate-500">Ponctuelle</span>}
+            {trip.conflicts.length > 0 ? (
+              <span title={trip.conflicts.join(" ; ")}>
+                <Badge tone="warning" className="whitespace-nowrap">
+                  <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
+                  Doublon ?
+                </Badge>
+              </span>
+            ) : null}
           </span>
           {trip.outboundNoShow ? (
             <>
@@ -202,6 +212,18 @@ export function TripRow({ trip }: { trip: TripRowData }) {
 function TripDetails({ trip }: { trip: TripRowData }) {
   return (
     <div className="grid gap-3 lg:grid-cols-3">
+      {trip.conflicts.length > 0 ? (
+        <p
+          role="note"
+          className="flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-sm text-amber-950 lg:col-span-3"
+        >
+          <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <span>
+            <span className="font-semibold">Doublon possible.</span> {trip.conflicts.join(" ; ")}. Vérifiez qu&apos;un seul
+            véhicule ira chercher le patient ; sinon, annulez l&apos;une des courses.
+          </span>
+        </p>
+      ) : null}
       {trip.outboundNoShow ? (
         <p
           role="note"

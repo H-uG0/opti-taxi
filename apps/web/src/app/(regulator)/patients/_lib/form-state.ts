@@ -9,10 +9,15 @@ export type FieldErrors = Record<string, string[] | undefined>;
 /** Raw submitted values, echoed back so a rejected form keeps what was typed. */
 export type FormValues = Record<string, string | string[]>;
 
+/** An existing patient that may be the one being created (same name, phone or address). */
+export type SimilarPatient = { id: string; name: string; city: string; active: boolean; reasons: string[] };
+
 export type FormState = {
   message: string | null;
   fieldErrors: FieldErrors;
   values: FormValues | null;
+  /** Patient creation: records that may be the same person; « Créer quand même » confirms. */
+  similar?: SimilarPatient[];
 };
 
 export const INITIAL_FORM_STATE: FormState = { message: null, fieldErrors: {}, values: null };

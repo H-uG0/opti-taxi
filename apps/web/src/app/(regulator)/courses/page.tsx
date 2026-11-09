@@ -7,6 +7,7 @@ import { Card, CardBody, EmptyState, PageHeader, Stat } from "@/components/ui/la
 import { Table, TBody, THead, Th } from "@/components/ui/table";
 import { auditRead } from "@/lib/audit";
 import { cancellationLabel } from "@/lib/domain/cancellation";
+import { conflictLabel, tripConflicts } from "@/lib/domain/duplicates";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { OUTBOUND_NO_SHOW_ADVICE, returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
@@ -127,6 +128,12 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
   const shortNames = new Map(trips.map((trip) => [trip.id, shortPatientName(trip.patient)]));
   const visible = sortTrips(filterTrips(dayTrips, filters));
   const returns = pairedReturns(trips);
+  // Same patient, same day: a trip on the same leg, or during another care session (two vehicles for one patient?).
+  const conflicts = new Map(
+    trips.map((trip) => [trip.id, tripConflicts(trip, trips).map((c) => conflictLabel(c, trip.direction))] as const),
+  );
+  const createdId = Array.isArray(params.course) ? params.course[0] : params.course;
+  const createdConflicts = createdId ? (conflicts.get(createdId) ?? []) : [];
 
   const rows: TripRowData[] = visible.map((trip) => {
     const answer = sharingAnswerTrace(trip);
@@ -177,6 +184,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       cancellation: cancelled ? cancellationLabel(trip) : null,
       cancellationTrace: cancellationTrace(trip),
       pairedReturn: returns.get(trip.id) ?? null,
+      conflicts: conflicts.get(trip.id) ?? [],
     };
   });
 
@@ -197,8 +205,17 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       />
 
       {params.notice === "created" ? (
-        <div className="mb-4">
+        <div className="mb-4 space-y-2">
           <FormMessage tone="success">Course créée. Elle sera placée à la prochaine optimisation du planning.</FormMessage>
+          {createdConflicts.length > 0 ? (
+            <p role="note" className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-amber-700" />
+              <span>
+                Attention : {createdConflicts.join(" ; ")}. Vérifiez qu&apos;il ne s&apos;agit pas d&apos;un doublon (deux
+                véhicules pour un même patient) ; sinon, annulez l&apos;une des deux courses.
+              </span>
+            </p>
+          ) : null}
         </div>
       ) : null}
 

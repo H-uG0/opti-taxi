@@ -7,6 +7,7 @@ import { Pencil, Plus } from "lucide-react";
 import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { recurrenceOverlaps } from "@/lib/domain/duplicates";
 import {
   cancellationLabel,
   DEFAULT_LATE_CANCELLATION_HOURS,
@@ -158,6 +159,19 @@ export default async function PatientPage({
   );
   const fullName = `${patient.lastName.toUpperCase()} ${patient.firstName}`;
   const history = patientCancellationStats(pastTrips);
+  // Two active recurrences on a common day, period and time slot: a recurrence created again instead of edited?
+  const overlaps = recurrenceOverlaps(
+    patient.recurrences.map((r) => ({
+      id: r.id,
+      active: r.active,
+      weekdays: r.weekdays,
+      appointmentMinute: r.appointmentMinute,
+      sessionMinutes: r.sessionMinutes,
+      startDate: toIsoDate(r.startDate),
+      endDate: r.endDate ? toIsoDate(r.endDate) : null,
+    })),
+  );
+  const recurrenceById = new Map(patient.recurrences.map((r) => [r.id, r]));
 
   return (
     <div className="space-y-6">
@@ -477,6 +491,14 @@ export default async function PatientPage({
                     }
                     if (end !== null && end < today) {
                       warnings.push({ tone: "warning", text: `Récurrence terminée le ${formatShortDate(end)}.` });
+                    }
+                    for (const otherId of overlaps.get(r.id) ?? []) {
+                      const other = recurrenceById.get(otherId);
+                      if (!other) continue;
+                      warnings.push({
+                        tone: "warning",
+                        text: `Chevauche la récurrence ${formatWeekdays(other.weekdays)} ${formatMinute(other.appointmentMinute)}${other.label ? ` (${other.label})` : ""} : mêmes jours et même créneau. Doublon ? Désactivez l'une des deux.`,
+                      });
                     }
                   }
                   return (

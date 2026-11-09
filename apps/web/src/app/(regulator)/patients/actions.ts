@@ -4,9 +4,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { audit } from "@/lib/audit";
+import { audit, auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { SIMILARITY_LABELS, similarPatients } from "@/lib/domain/duplicates";
 import { formatAddress } from "@/lib/domain/rules";
 import { evaluate } from "@/lib/optimizer/client";
 import {
@@ -21,7 +22,7 @@ import { formatShortDate, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import { activationEvent, alreadyInStateMessage, patientUpdateEvents, renewalEvents } from "./_lib/audit-events";
 import { idSchema } from "./_lib/form-parse";
 import { formString, messageState, type ActionResult, type FormState } from "./_lib/form-state";
-import { parsePatientForm, parsePrescriptionForm, parseRecurrenceForm, readRecurrenceForm } from "./_lib/schemas";
+import { parsePatientForm, parsePrescriptionForm, parseRecurrenceForm, readPatientForm, readRecurrenceForm } from "./_lib/schemas";
 import { isRenewalOf } from "./_lib/status";
 import {
   CANCEL,
@@ -107,10 +108,42 @@ function skippedNote(completion: Completion): string {
 
 // Every change below is traced (lib/audit.ts) in the transaction that writes it.
 
+/**
+ * Creates the patient. Before the first save, existing records that may be
+ * the same person (same name without accents, same phone or same address)
+ * are shown; « Créer quand même » (confirmSimilar) saves anyway.
+ */
 export async function createPatient(_prev: FormState, formData: FormData): Promise<FormState> {
   const user = await requireUser("REGULATOR");
   const parsed = parsePatientForm(formData);
   if (!parsed.success) return parsed.state;
+
+  if (formString(formData, "confirmSimilar") !== "1") {
+    // Few fields of every record, compared in memory: accents and phone formats are not comparable in SQL here.
+    const existing = await db.patient.findMany({
+      select: { id: true, firstName: true, lastName: true, phone: true, address: true, postalCode: true, city: true, active: true },
+    });
+    const similar = similarPatients(parsed.data, existing);
+    if (similar.length > 0) {
+      // Names and towns of other patients are shown: a read of their records.
+      await auditRead(user, { action: "patient_list.view", entity: "Patient", entityId: null });
+      return {
+        ...messageState(
+          similar.length === 1
+            ? "Une fiche proche existe déjà : vérifiez qu'il ne s'agit pas du même patient."
+            : `${similar.length} fiches proches existent déjà : vérifiez qu'il ne s'agit pas du même patient.`,
+          readPatientForm(formData).values,
+        ),
+        similar: similar.slice(0, 10).map(({ patient, reasons }) => ({
+          id: patient.id,
+          name: `${patient.lastName.toUpperCase()} ${patient.firstName}`,
+          city: patient.city,
+          active: patient.active,
+          reasons: reasons.map((reason) => SIMILARITY_LABELS[reason]),
+        })),
+      };
+    }
+  }
 
   const patient = await db.$transaction(async (tx) => {
     const created = await tx.patient.create({ data: parsed.data, select: { id: true } });

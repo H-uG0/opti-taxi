@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { setPatientActive, setRecurrenceActive, updatePatient } from "./actions";
+import { createPatient, setPatientActive, setRecurrenceActive, updatePatient } from "./actions";
 import { INITIAL_ACTION_RESULT, INITIAL_FORM_STATE } from "./_lib/form-state";
 
 // The server actions run against a fake Prisma client: these tests check which
@@ -8,7 +8,7 @@ import { INITIAL_ACTION_RESULT, INITIAL_FORM_STATE } from "./_lib/form-state";
 // (vi.hoisted and vi.mock run before the imports above.)
 const fake = vi.hoisted(() => {
   const models = {
-    patient: { findUnique: vi.fn(), updateMany: vi.fn(), update: vi.fn() },
+    patient: { findUnique: vi.fn(), updateMany: vi.fn(), update: vi.fn(), findMany: vi.fn(), create: vi.fn() },
     recurrence: { findFirst: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
     trip: { findMany: vi.fn(), updateMany: vi.fn() },
     auditEvent: { createMany: vi.fn() },
@@ -255,5 +255,49 @@ describe("updatePatient", () => {
     // The other save already cancelled the trips; the home did not move.
     expect(fake.trip.findMany).not.toHaveBeenCalled();
     expect(redirect).toHaveBeenCalledWith("/patients/p1");
+  });
+});
+
+describe("createPatient", () => {
+  const fields = {
+    lastName: "Dupont",
+    firstName: "Hélène",
+    phone: "06 12 34 56 78",
+    address: "4 avenue Jean Jaurès",
+    postalCode: "04100",
+    city: "Manosque",
+    lat: "43.8297",
+    lng: "5.7864",
+    mobility: "SEATED",
+    accessNotes: "",
+    active: "on",
+  };
+  const existing = { id: "p9", firstName: "Helene", lastName: "DUPONT", phone: null, address: "1 rue A", postalCode: "13001", city: "Marseille", active: true };
+
+  beforeEach(() => {
+    fake.patient.create.mockResolvedValue({ id: "new" });
+  });
+
+  it("shows the records that may be the same patient before creating anything", async () => {
+    fake.patient.findMany.mockResolvedValue([existing]);
+
+    const state = await createPatient(INITIAL_FORM_STATE, form(fields));
+
+    expect(fake.patient.create).not.toHaveBeenCalled();
+    expect(state.similar).toEqual([{ id: "p9", name: "DUPONT Helene", city: "Marseille", active: true, reasons: ["même nom"] }]);
+    expect(state.values?.lastName).toBe("Dupont");
+    expect(recorded()).toEqual([{ action: "patient_list.view", entityId: null }]);
+  });
+
+  it("creates the patient once « Créer quand même » confirms, or when no record is close", async () => {
+    fake.patient.findMany.mockResolvedValue([existing]);
+    await createPatient(INITIAL_FORM_STATE, form({ ...fields, confirmSimilar: "1" }));
+    expect(fake.patient.findMany).not.toHaveBeenCalled();
+    expect(fake.patient.create).toHaveBeenCalledTimes(1);
+    expect(redirect).toHaveBeenCalledWith("/patients/new");
+
+    fake.patient.findMany.mockResolvedValue([{ ...existing, firstName: "Paul" }]);
+    await createPatient(INITIAL_FORM_STATE, form(fields));
+    expect(fake.patient.create).toHaveBeenCalledTimes(2);
   });
 });

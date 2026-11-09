@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { addDays, startOfIsoWeek, todayIso } from "@/lib/time";
-import { cancelTrip, completeDayTrips, generateWeekTrips } from "./actions";
+import { cancelTrip, completeDayTrips, generateWeekTrips, restoreTrip } from "./actions";
 import { INITIAL_ACTION_RESULT } from "./trip-form";
 
 // The trips screen actions against a fake Prisma client: which writes are
 // guarded, what they write and which audit events are recorded, not the database.
 const fake = vi.hoisted(() => {
   const models = {
-    trip: { findUnique: vi.fn(), updateMany: vi.fn() },
+    trip: { findUnique: vi.fn(), updateMany: vi.fn(), findMany: vi.fn() },
     routeStop: { findMany: vi.fn() },
     appSettings: { upsert: vi.fn(), findUnique: vi.fn() },
     auditEvent: { createMany: vi.fn() },
@@ -71,6 +71,7 @@ beforeEach(() => {
   fake.trip.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => rows.get(where.id) ?? null);
   fake.trip.updateMany.mockResolvedValue({ count: 1 });
   fake.routeStop.findMany.mockResolvedValue([]);
+  fake.trip.findMany.mockResolvedValue([]);
   fake.appSettings.upsert.mockResolvedValue({ id: 1, lateCancellationHours: 2 });
   fake.auditEvent.createMany.mockResolvedValue({ count: 1 });
   fake.appSettings.findUnique.mockResolvedValue({ tripHorizonDays: 14 });
@@ -211,5 +212,62 @@ describe("generation of the recurring trips", () => {
     expect(await completeDayTrips(addDays(today, 15))).toEqual({ changed: false });
     expect(await completeDayTrips("demain")).toEqual({ changed: false });
     expect(fake.completeTrips).not.toHaveBeenCalled();
+  });
+});
+
+describe("restoreTrip", () => {
+  const today = todayIso();
+  /** A cancelled CPAM outbound trip of tomorrow, as restoreTrip reads it. */
+  function cancelled(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "t1",
+      status: "CANCELLED",
+      serviceDate: new Date(`${addDays(today, 1)}T00:00:00.000Z`),
+      payer: "CPAM",
+      patientId: "p1",
+      recurrenceId: "rec1",
+      facilityId: "f1",
+      direction: "OUTBOUND",
+      appointmentMinute: 450,
+      readyMinute: null,
+      patient: { active: true },
+      recurrence: { active: true },
+      prescription: { validFrom: new Date("2020-01-01T00:00:00.000Z"), validTo: new Date("2099-12-31T00:00:00.000Z") },
+      ...overrides,
+    };
+  }
+
+  it("refuses an inactive patient, a past date or a CPAM trip without a valid prescription, writing nothing", async () => {
+    for (const overrides of [
+      { patient: { active: false } },
+      { recurrence: { active: false } },
+      { serviceDate: new Date(`${addDays(today, -1)}T00:00:00.000Z`) },
+      { prescription: null },
+    ]) {
+      fake.trip.findUnique.mockResolvedValueOnce(cancelled(overrides));
+      const result = await restoreTrip(INITIAL_ACTION_RESULT, form({ tripId: "t1" }));
+      expect(result.ok).toBe(false);
+    }
+    expect(fake.trip.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("restores the trip, clears its cancellation and warns about another outbound trip of the patient that day", async () => {
+    fake.trip.findUnique.mockResolvedValue(cancelled());
+    fake.trip.findMany.mockResolvedValue([
+      { id: "t1", patientId: "p1", recurrenceId: "rec1", facilityId: "f1", direction: "OUTBOUND", status: "CANCELLED", appointmentMinute: 450, readyMinute: null },
+      { id: "t9", patientId: "p1", recurrenceId: null, facilityId: "f1", direction: "OUTBOUND", status: "PLANNED", appointmentMinute: 455, readyMinute: null },
+    ]);
+
+    const result = await restoreTrip(INITIAL_ACTION_RESULT, form({ tripId: "t1" }));
+
+    expect(fake.trip.updateMany.mock.calls[0]![0].data).toMatchObject({
+      status: "PLANNED",
+      cancellationReason: null,
+      cancellationOrigin: null,
+      cancelledAt: null,
+    });
+    expect(recorded()).toEqual([{ action: "trip.restore", entityId: "t1" }]);
+    expect(result.ok).toBe(true);
+    expect(result.message).toMatch(/Attention : Le patient a déjà un aller ce jour \(RDV 07:35\)\. Vérifiez/);
   });
 });

@@ -15,12 +15,14 @@ import { Button } from "@/components/ui/button";
  * next one would silently post values nobody chose (sharing, mode,
  * mobility, legs, weekdays…). Submitting this way keeps the form exactly as
  * typed. The form keeps `action={formAction}` so it still posts before
- * hydration.
+ * hydration. The button clicked is posted with its name and value, as a
+ * native submit would (e.g. « Créer quand même »).
  */
 export function submitWithoutReset(dispatch: (formData: FormData) => void) {
   return (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    const formData = new FormData(event.currentTarget, submitter instanceof HTMLButtonElement && submitter.name ? submitter : null);
     startTransition(() => dispatch(formData));
   };
 }
