@@ -240,8 +240,8 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
           Un nouveau calcul (« Réoptimiser », « Déplacer vers… ») remplace toutes les tournées du jour. Il n&apos;est
           enregistré d&apos;office que s&apos;il ne comporte pas plus de violations de contraintes que le planning en
           place, et dans les limites ci-dessous ; sinon le planning affiche le comparatif et vous choisissez de remplacer
-          ou de garder les tournées actuelles. Un déplacement qui laisserait d&apos;autres courses sans véhicule est
-          toujours refusé.
+          ou de garder les tournées actuelles. Un déplacement qui laisserait d&apos;autres courses sans véhicule
+          demande toujours confirmation, en nommant ces courses.
         </Explanation>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field

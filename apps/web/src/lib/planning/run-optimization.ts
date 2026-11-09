@@ -46,7 +46,6 @@ import { lockPlanningDay } from "./day-lock";
 import { emptyPlanIssue } from "./empty-plan";
 import { lockAction } from "./lock";
 import {
-  MOVE_REFUSED_PREFIX,
   movePlacementIssue,
   moveRequestIssue,
   resolveTripRefs,
@@ -375,7 +374,10 @@ function successMessage(kind: RunKind, saved: SavePlanResult, plan: PlanResponse
  * Saves the computed plan of run `runId`, unless it is worse than (or as
  * invalid as) the routes in place: it then waits for the regulator's word
  * (AWAITING_CONFIRMATION). A move that leaves other trips without a vehicle
- * is refused outright.
+ * waits too, the question naming those trips: a full re-solve often swaps a
+ * trip or two, and refusing every such move made « Déplacer vers… » fail most
+ * of the time (local insertion, which does not touch the other routes, is the
+ * real cure: feat/deplacement-rapide).
  */
 async function finishRun(args: {
   kind: RunKind;
@@ -439,25 +441,24 @@ async function finishRun(args: {
       kind,
       lockChange: lock?.change,
       check: ({ comparison, version }) => {
+        // A move that would leave other trips without a vehicle is never applied silently: the question
+        // names them. A trip the computation was not given (left out of the request since) is not lost by
+        // the move, and routes that can no longer be driven are not counted at all.
+        let lostByMove = "";
         if (move) {
-          // A trip the computation was not given (left out of the request since) is not lost by the move:
-          // it goes to the confirmation below. Routes that can no longer be driven are not counted at all.
           const sent = new Set(request.trips.map((t) => t.id));
           const others = comparison.lostTripIds.filter((id) => id !== move.tripId && sent.has(id));
           if (others.length > 0) {
             const named = others.slice(0, 3).map(tripRef).join(", ");
             const more = others.length > 3 ? ` et ${others.length - 3} autre${others.length > 4 ? "s" : ""}` : "";
-            throw new ReplaceRefused(
-              "move",
-              `${MOVE_REFUSED_PREFIX} : le nouveau calcul laisserait sans véhicule ${plural(others.length, "autre course", "autres courses")} (${named}${more}). Le planning n'a pas été modifié.`,
-            );
+            lostByMove = `le nouveau calcul laisserait sans véhicule ${plural(others.length, "autre course", "autres courses")} (${named}${more}). `;
           }
         }
         const concerns = replaceConcerns(comparison, thresholds);
-        if (concerns.length > 0) {
+        if (concerns.length > 0 || lostByMove) {
           const question = comparisonQuestion(comparison, concerns, kind === "restore" ? "Le planning précédent" : "Ce calcul");
           const asked = move
-            ? `Déplacement de ${tripRef(move.tripId)} vers ${move.vehicleLabel} : ${lowerFirst(question)}`
+            ? `Déplacement de ${tripRef(move.tripId)} vers ${move.vehicleLabel} : ${lostByMove}${lostByMove ? question : lowerFirst(question)}`
             : question;
           throw new ReplaceRefused("confirm", asked, comparison, version);
         }

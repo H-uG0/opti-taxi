@@ -255,7 +255,7 @@ describe("never replacing the routes in place silently with a worse plan", () =>
     expect(await runOptimization(DATE, REGULATOR)).toMatchObject({ ok: true });
   });
 
-  it("refuses a move that would leave other trips without a vehicle, naming them by id only", async () => {
+  it("holds a move that would leave other trips without a vehicle, naming them (by id only in the run)", async () => {
     const stop = (kind: "PICKUP" | "DROPOFF") => ({ tripId: "t1", kind });
     fake.optimize.mockResolvedValue({
       ok: true,
@@ -263,19 +263,24 @@ describe("never replacing the routes in place silently with a worse plan", () =>
     });
     savePlanComparing({ current: figures(2), next: figures(1), lostTripIds: ["t2"] });
     fake.db.trip.findMany.mockResolvedValue([{ id: "t2", direction: "RETURN", patient: { firstName: "Paul", lastName: "Durand" } }]);
+    // The plan version, read around the undo of the move's lock while the plan waits.
+    const version = { routes: 2, routesAt: new Date("2026-11-09T08:00:00Z"), stops: 8, trips: 4, tripsAt: new Date("2026-11-09T08:00:00Z") };
+    fake.db.$queryRaw.mockResolvedValue([version]);
     const outcome = await runOptimization(DATE, REGULATOR, { move: { ...MOVE, previousLock: null } });
 
-    expect(outcome).toMatchObject({ ok: false, moveRejected: true });
-    // Every trip named, with its leg: the regulator can tell which patients the move would leave out.
-    expect((outcome as { error: string }).error).toMatch(/laisserait sans véhicule 1 autre course \(le retour de Paul Durand\)/);
-    const stored = fake.db.optimizationRun.update.mock.calls.at(-1)![0] as { data: { status: string; error: string } };
-    expect(stored.data.status).toBe("FAILED");
-    expect(stored.data.error).toContain(tripRef("t2"));
-    expect(stored.data.error).not.toContain(PATIENT);
-    expect(stored.data.error).not.toContain("Durand");
-    // The lock the move set is put back.
+    // Not refused any more (a full re-solve often swaps a trip): the regulator decides, knowing which patients.
+    expect(outcome).toMatchObject({ ok: false, needsConfirmation: true });
+    expect((outcome as { error: string }).error).toMatch(
+      /laisserait sans véhicule 1 autre course \(le retour de Paul Durand\)\. Ce calcul sert 1 course contre 2/,
+    );
+    const stored = fake.db.optimizationRun.update.mock.calls.at(-1)![0] as { data: { status: string; details: unknown } };
+    expect(stored.data.status).toBe("AWAITING_CONFIRMATION");
+    const details = JSON.stringify(stored.data.details);
+    expect(details).toContain(tripRef("t2"));
+    expect(details).not.toContain(PATIENT);
+    expect(details).not.toContain("Durand");
+    // The move's lock is undone while the plan waits, and set again if the regulator confirms.
     expect(fake.db.trip.updateMany).toHaveBeenCalledWith({ where: { id: "t1", lockedVehicleId: "vsl_gre" }, data: { lockedVehicleId: null } });
-    expect(audited()).toEqual(["trip.unlock"]);
   });
 
   it("does not blame a move for trips the computation was not given: they wait for confirmation", async () => {
