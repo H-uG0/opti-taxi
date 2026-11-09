@@ -152,3 +152,18 @@ export function allPoints(vehicles: MapVehicle[], trips: MapTrip[]): MapPoint[] 
     ...trips.flatMap((t) => [t.pickup, t.dropoff]),
   ];
 }
+
+/** Key of the selection the map fits to: it fits again only when this key changes. */
+export function selectionKey(tripId: string | null, vehicleId: string | null): string {
+  return `${tripId ?? ""}|${vehicleId ?? ""}`;
+}
+
+/**
+ * Should the map fly to the selection? Only when the selection itself changed
+ * (not when the data of an unchanged selection was refreshed after an action,
+ * which would undo the regulator's own pan and zoom), and not when the click
+ * that changed it was made on the map (the clicked point is already in view).
+ */
+export function shouldFitSelection(previousKey: string | null, key: string, fromMap: boolean): boolean {
+  return key !== previousKey && !fromMap && key !== selectionKey(null, null);
+}

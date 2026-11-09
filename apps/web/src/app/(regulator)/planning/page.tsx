@@ -78,7 +78,8 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   const initialTripId = requestedTrip && view.trips.some((t) => t.id === requestedTrip) ? requestedTrip : null;
 
   return (
-    <PlanningActivityProvider timeLimitSec={view.timeLimitSec}>
+    // Keyed by date: an action's progress or result never shows on another date.
+    <PlanningActivityProvider key={date} timeLimitSec={view.timeLimitSec}>
       <PageHeader
         title={
           <span className="flex flex-wrap items-center gap-2">
@@ -161,6 +162,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
               timeRange={view.timeRange}
               planned={hasRoutes}
               replanBlocked={replanBlocked}
+              lockBlocked={past ? "Date passée : les verrous ne servent plus." : null}
               initialTripId={initialTripId}
             />
           </>

@@ -20,7 +20,13 @@ export default function PlanningError({ error, retry }: { error: unknown; retry:
         </Button>
       }
     >
-      Vérifiez que la base de données est démarrée (port 5433), puis réessayez.
+      Réessayez dans un instant. Si le problème continue, prévenez la personne qui gère l&apos;application
+      {digest ? " en lui donnant la référence ci-dessous" : ""}.
+      {process.env.NODE_ENV === "development" ? (
+        <span className="mt-2 block text-xs text-slate-500">
+          En développement : vérifiez que la base de données est démarrée (port 5433).
+        </span>
+      ) : null}
       {digest ? <span className="mt-1 block text-xs text-slate-400">Référence : {digest}</span> : null}
     </EmptyState>
   );

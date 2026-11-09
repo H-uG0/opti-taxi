@@ -5,6 +5,8 @@ import {
   depotsCollection,
   routesCollection,
   selectionCollection,
+  selectionKey,
+  shouldFitSelection,
   stopsCollection,
   unassignedCollection,
   type MapTrip,
@@ -59,5 +61,28 @@ describe("planning map layers", () => {
       [5.37, 43.3],
       [6.08, 44.56],
     ]);
+  });
+});
+
+describe("map fit on selection", () => {
+  const trip = selectionKey("t1", "v1");
+
+  it("fits when a new trip or vehicle is selected from the timeline or the list", () => {
+    expect(shouldFitSelection(null, trip, false)).toBe(true);
+    expect(shouldFitSelection(selectionKey(null, "v1"), trip, false)).toBe(true);
+    expect(shouldFitSelection(trip, selectionKey("t2", "v1"), false)).toBe(true);
+  });
+
+  it("keeps the regulator's view when the data of the same selection is refreshed after an action", () => {
+    expect(shouldFitSelection(trip, trip, false)).toBe(false);
+  });
+
+  it("does not move the map for a click made on the map, nor when nothing is selected", () => {
+    expect(shouldFitSelection(null, trip, true)).toBe(false);
+    expect(shouldFitSelection(trip, selectionKey(null, null), false)).toBe(false);
+  });
+
+  it("fits again when the selected trip moved to another vehicle", () => {
+    expect(shouldFitSelection(trip, selectionKey("t1", "v2"), false)).toBe(true);
   });
 });

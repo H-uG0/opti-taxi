@@ -11,6 +11,8 @@ import {
   depotsCollection,
   routesCollection,
   selectionCollection,
+  selectionKey,
+  shouldFitSelection,
   stopsCollection,
   unassignedCollection,
   type MapPoint,
@@ -159,10 +161,18 @@ export function PlanningMap({
   const callbacks = useRef({ onSelectTrip, onSelectVehicle });
   const selectionFromMap = useRef(false);
   const fittedKey = useRef<string | null>(null);
+  /** Selection the map last fitted to (selectionKey). */
+  const fittedSelection = useRef<string | null>(null);
+  /** The current selection, read by the click handler (created once). */
+  const currentTripId = useRef(selectedTripId);
 
   useEffect(() => {
     callbacks.current = { onSelectTrip, onSelectVehicle };
   }, [onSelectTrip, onSelectVehicle]);
+
+  useEffect(() => {
+    currentTripId.current = selectedTripId;
+  }, [selectedTripId]);
 
   // Create the map once.
   useEffect(() => {
@@ -236,9 +246,16 @@ export function PlanningMap({
       const hit = hits[0];
       if (!hit) return;
       const props = hit.properties ?? {};
-      selectionFromMap.current = true;
-      if (typeof props.tripId === "string") callbacks.current.onSelectTrip(props.tripId);
-      else if (typeof props.vehicleId === "string") callbacks.current.onSelectVehicle(props.vehicleId);
+      if (typeof props.tripId === "string") {
+        // The trip already selected: the selection does not change, so no effect would clear the flag.
+        if (props.tripId === currentTripId.current) return;
+        selectionFromMap.current = true;
+        callbacks.current.onSelectTrip(props.tripId);
+      } else if (typeof props.vehicleId === "string") {
+        // A vehicle click always changes the selection (select, or toggle off).
+        selectionFromMap.current = true;
+        callbacks.current.onSelectVehicle(props.vehicleId);
+      }
     });
 
     return () => {
@@ -271,10 +288,12 @@ export function PlanningMap({
     setSource(map, "selection", selectionCollection(trip));
     applySelection(map, selectedVehicleId, selectedTripId);
 
-    if (selectionFromMap.current) {
-      selectionFromMap.current = false;
-      return;
-    }
+    const key = selectionKey(selectedTripId, selectedVehicleId);
+    const fromMap = selectionFromMap.current;
+    selectionFromMap.current = false;
+    const fitNow = shouldFitSelection(fittedSelection.current, key, fromMap);
+    fittedSelection.current = key;
+    if (!fitNow) return;
     if (trip) {
       fit(map, [trip.pickup, trip.dropoff], true);
     } else if (selectedVehicleId) {

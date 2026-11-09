@@ -27,6 +27,8 @@ export type PlanningBoardProps = {
   timeRange: TimeRange;
   planned: boolean;
   replanBlocked: string | null;
+  /** Why locks cannot change (past date), or null. */
+  lockBlocked: string | null;
   initialTripId: string | null;
 };
 
@@ -45,6 +47,7 @@ export function PlanningBoard({
   timeRange,
   planned,
   replanBlocked,
+  lockBlocked,
   initialTripId,
 }: PlanningBoardProps) {
   const tripsById = useMemo(() => Object.fromEntries(trips.map((t) => [t.id, t])), [trips]);
@@ -161,6 +164,7 @@ export function PlanningBoard({
               violations={violations.filter((v) => v.tripId === selectedTrip.id)}
               date={date}
               replanBlocked={replanBlocked}
+              lockBlocked={lockBlocked}
               onSelectTrip={selectTrip}
               onClose={clear}
             />

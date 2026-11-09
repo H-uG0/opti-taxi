@@ -30,6 +30,8 @@ export type TripPanelProps = {
   date: string;
   /** Why the day cannot be re-optimized (validated, past, started), or null. */
   replanBlocked: string | null;
+  /** Why locks cannot change (past date), or null. */
+  lockBlocked: string | null;
   onSelectTrip: (tripId: string) => void;
   onClose: () => void;
 };
@@ -51,7 +53,17 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-export function TripPanel({ trip, trips, vehicles, violations, date, replanBlocked, onSelectTrip, onClose }: TripPanelProps) {
+export function TripPanel({
+  trip,
+  trips,
+  vehicles,
+  violations,
+  date,
+  replanBlocked,
+  lockBlocked,
+  onSelectTrip,
+  onClose,
+}: TripPanelProps) {
   const { busy, run } = usePlanningActivity();
   const selectId = useId();
   const [target, setTarget] = useState("");
@@ -227,8 +239,9 @@ export function TripPanel({ trip, trips, vehicles, violations, date, replanBlock
             <Button
               size="sm"
               variant="secondary"
-              disabled={busy}
+              disabled={busy || lockBlocked !== null}
               onClick={() => run("Défigeage de la course…", () => unlockTrip(trip.id))}
+              title={lockBlocked ?? "L'optimisation pourra de nouveau changer la course de véhicule"}
             >
               <LockOpen aria-hidden className="size-3.5" />
               Défiger
@@ -237,9 +250,9 @@ export function TripPanel({ trip, trips, vehicles, violations, date, replanBlock
             <Button
               size="sm"
               variant="secondary"
-              disabled={busy}
+              disabled={busy || lockBlocked !== null}
               onClick={() => run("Verrouillage de la course…", () => lockTrip(trip.id))}
-              title="La course restera sur ce véhicule à la prochaine optimisation"
+              title={lockBlocked ?? "La course restera sur ce véhicule à la prochaine optimisation"}
             >
               <Lock aria-hidden className="size-3.5" />
               Figer
