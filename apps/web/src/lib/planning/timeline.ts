@@ -23,14 +23,17 @@ const MIN_SPAN = 6 * 60;
 const MAX_MINUTE = 2 * 24 * 60;
 
 /**
- * Hour-aligned range covering every shift, route and stop given, or the
- * default 05:00–21:00 when there is nothing to show. At least 6 hours wide.
+ * Hour-aligned range covering every shift, route and stop given, and the
+ * `windows` (where the « À placer » row draws the trips without a vehicle),
+ * or the default 05:00–21:00 when there is nothing to show. At least 6 hours
+ * wide.
  */
 export function computeTimeRange(
   rows: Array<{ shift: TimeRange | null; route: RouteLike | null }>,
   fallback: TimeRange = DEFAULT_TIME_RANGE,
+  windows: readonly TimeRange[] = [],
 ): TimeRange {
-  const values: number[] = [];
+  const values: number[] = windows.flatMap((w) => [w.start, w.end]);
   for (const row of rows) {
     if (row.shift) values.push(row.shift.start, row.shift.end);
     if (row.route) {

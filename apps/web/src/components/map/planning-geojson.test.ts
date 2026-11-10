@@ -19,6 +19,7 @@ const vehicles: MapVehicle[] = [
   {
     id: "v1",
     label: "Taxi 1",
+    type: "TAXI",
     color: "#c27c0e",
     depot,
     stops: [
@@ -26,7 +27,7 @@ const vehicles: MapVehicle[] = [
       { tripId: "a", kind: "DROPOFF", lat: 43.52, lng: 5.44, title: "07:30" },
     ],
   },
-  { id: "v2", label: "Taxi 2", color: "#8a5a0a", depot, stops: [] },
+  { id: "v2", label: "Taxi 2", type: "TAXI", color: "#8a5a0a", depot, stops: [] },
 ];
 const trips: MapTrip[] = [
   { id: "a", title: "A", pickup: { lat: 43.31, lng: 5.39 }, dropoff: { lat: 43.52, lng: 5.44 }, vehicleId: "v1" },
@@ -48,6 +49,12 @@ describe("planning map layers", () => {
 
   it("lists stops and shared depots once", () => {
     expect(stopsCollection(vehicles).features.map((f) => f.properties.kind)).toEqual(["PICKUP", "DROPOFF"]);
+    // What the stop's marker needs: its shape (the vehicle's type), filled or hollow, the vehicle's color.
+    expect(stopsCollection([{ ...vehicles[0]!, type: "AMBULANCE", color: "#1D4ED8" }]).features[0]?.properties).toMatchObject({
+      kind: "PICKUP",
+      type: "AMBULANCE",
+      color: "#1d4ed8",
+    });
     const depots = depotsCollection(vehicles);
     expect(depots.features).toHaveLength(1);
     expect(depots.features[0]?.properties.title).toBe("Dépôt Marseille : Taxi 1, Taxi 2");
@@ -65,6 +72,12 @@ describe("planning map layers", () => {
       [6.08, 44.56],
     ]);
     expect(unassigned.features[1]?.properties.title).toBe("Prise en charge · B (à placer)");
+  });
+
+  it("draws the trips of a day not optimized yet as plain pick-ups « à planifier », not as trips left without a vehicle", () => {
+    const pending = unassignedCollection(trips, false);
+    expect(pending.features.map((f) => [f.properties.tripId, f.properties.role, f.geometry.type])).toEqual([["b", "pending", "Point"]]);
+    expect(pending.features[0]?.properties.title).toBe("Prise en charge · B (à planifier)");
   });
 
   it("puts a warning sign at the pick-up of each trip in violation, once", () => {

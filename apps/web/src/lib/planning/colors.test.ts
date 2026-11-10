@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest";
+import { VEHICLE_TYPE_HEX } from "@/components/ui/badge";
 import { DISPLAY_PALETTE, displayColors, hexToRgb, readableTextColor, relativeLuminance } from "./colors";
+
+/** Hue (degrees) and saturation (0 to 1, HSL) of a hex color. */
+function hueAndSaturation(hex: string): { hue: number; saturation: number } {
+  const [r, g, b] = hexToRgb(hex).map((c) => c / 255) as [number, number, number];
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  if (delta === 0) return { hue: 0, saturation: 0 };
+  const saturation = delta / (1 - Math.abs(max + min - 1));
+  const hue = max === r ? ((g - b) / delta) % 6 : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
+  return { hue: (hue * 60 + 360) % 360, saturation };
+}
+
+/** Red, orange, amber or brown: hues from 345° to 45°, unless greyish. */
+const redOrAmber = (hex: string) => {
+  const { hue, saturation } = hueAndSaturation(hex);
+  return saturation > 0.3 && (hue <= 45 || hue >= 345);
+};
 
 describe("display colors of the vehicles shown", () => {
   it("gives the vehicles shown distinct colors in display order, and repeats the palette beyond it", () => {
@@ -21,12 +40,12 @@ describe("display colors of the vehicles shown", () => {
     expect(displayColors(["a"], "a").size).toBe(1);
   });
 
-  it("keeps red and amber for problems and trips without a vehicle", () => {
+  it("keeps red and amber for problems and trips without a vehicle, and leaves the type colors alone", () => {
+    // The check itself: the map's trips without a vehicle (amber-700), the alerts' red, the taxi's amber, a brown.
+    for (const hex of ["#b45309", "#dc2626", "#c27c0e", "#92400e", "#be123c", "#f59e0b"]) expect(redOrAmber(hex)).toBe(true);
     for (const color of DISPLAY_PALETTE) {
-      const [r, g, b] = hexToRgb(color);
-      // Neither red (#dc2626, the old ambulance color and the alerts) nor amber / orange.
-      expect(r > 150 && g < 120 && b < 120).toBe(false);
-      expect(r > 180 && g > 100 && b < 60).toBe(false);
+      expect(redOrAmber(color), color).toBe(false);
+      expect(Object.values(VEHICLE_TYPE_HEX).map((c) => c.toLowerCase())).not.toContain(color);
     }
   });
 

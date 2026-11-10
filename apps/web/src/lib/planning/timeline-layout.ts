@@ -142,12 +142,18 @@ export type TripTarget = {
   lane: number | null;
 };
 
+/** A group of close targets reaches this many target widths from its start at most (see clickTargets). */
+const MAX_GROUP_WIDTHS = 2;
+
 /**
  * Click targets of blocks: each block's target is centred on it and at least
  * `minMinutes` wide (the minutes of 24 px at the current zoom), kept inside
  * the range; targets that would overlap become one target listing their
- * trips. With `perLane`, each lane keeps its own targets (a band of the track
- * each); otherwise they are merged across lanes.
+ * trips. A chain of trips minutes apart does not make one group for hours: a
+ * target starting 2 widths or more after its group's start begins the next
+ * group, the two touching (unless a trip of the group runs on under it).
+ * With `perLane`, each lane keeps its own targets (a band of the track each);
+ * otherwise they are merged across lanes.
  */
 export function clickTargets(
   blocks: readonly TripBlock[],
@@ -164,16 +170,25 @@ export function clickTargets(
     return { block: b, from, to: from + width, lane: perLane ? b.lane : 0 };
   });
   type Hit = (typeof hits)[number];
-  const groups: Array<{ hits: Hit[]; from: number; to: number; lane: number }> = [];
+  /** `blocksTo`: where the group's last trip ends (its block, not its target). */
+  const groups: Array<{ hits: Hit[]; from: number; to: number; lane: number; blocksTo: number }> = [];
   const lanes = [...new Set(hits.map((h) => h.lane))].sort((a, b) => a - b);
   for (const lane of lanes) {
     const inLane = hits.filter((h) => h.lane === lane).sort((a, b) => a.from - b.from || a.block.from - b.block.from);
     for (const hit of inLane) {
       const current = groups.at(-1);
       if (current && current.lane === lane && hit.from < current.to) {
-        current.hits.push(hit);
-        current.to = Math.max(current.to, hit.to);
-      } else groups.push({ hits: [hit], from: hit.from, to: hit.to, lane });
+        const longEnough = hit.from - current.from >= MAX_GROUP_WIDTHS * minMinutes;
+        // Cut only where the group's trips end (half a target at most under the next one), never a long trip.
+        if (!longEnough || current.blocksTo - hit.from >= minMinutes / 2) {
+          current.hits.push(hit);
+          current.to = Math.max(current.to, hit.to);
+          current.blocksTo = Math.max(current.blocksTo, hit.block.to);
+          continue;
+        }
+        current.to = hit.from;
+      }
+      groups.push({ hits: [hit], from: hit.from, to: hit.to, lane, blocksTo: hit.block.to });
     }
   }
   return groups

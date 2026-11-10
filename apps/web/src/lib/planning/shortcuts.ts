@@ -11,7 +11,7 @@ export const PLANNING_SHORTCUTS: readonly ShortcutHelp[] = [
   { keys: ["/"], label: "Chercher un patient, un véhicule, un chauffeur" },
   { keys: ["["], label: "Jour précédent" },
   { keys: ["]"], label: "Jour suivant" },
-  { keys: ["F"], label: "Figer ou défiger la course sélectionnée" },
+  { keys: ["F"], label: "Figer ou défiger la course sélectionnée (recours exceptionnel : va au bouton « Défiger » sans l'activer)" },
   { keys: ["D"], label: "Aller à « Déplacer vers… » de la course sélectionnée" },
   { keys: ["N"], label: "Problème suivant de « À traiter »" },
   { keys: ["Échap"], label: "Désélectionner, fermer une liste" },
@@ -29,13 +29,18 @@ export const TIMELINE_KEYS: readonly ShortcutHelp[] = [
 
 type TargetLike = { closest?: (selector: string) => unknown; isContentEditable?: boolean } | null;
 
+/** Inputs that take no text: a key pressed on them is free for the shortcuts (the zoom's radios, the filters' boxes). */
+const NOT_TEXT = ["radio", "checkbox", "button", "submit", "reset", "range", "color", "file", "image"]
+  .map((type) => `:not([type='${type}'])`)
+  .join("");
+
 /** True when a key typed there is text or belongs to a dialog (a shortcut must not steal it). */
 export function isTypingTarget(target: EventTarget | null): boolean {
   const element = target as TargetLike;
   if (!element || typeof element.closest !== "function") return false;
   return (
     element.isContentEditable === true ||
-    element.closest("input, textarea, select, [contenteditable='true'], [role='dialog'], [role='alertdialog']") !== null
+    element.closest(`input${NOT_TEXT}, textarea, select, [contenteditable='true'], [role='dialog'], [role='alertdialog']`) !== null
   );
 }
 
@@ -45,21 +50,26 @@ type KeyLike = {
   metaKey: boolean;
   altKey: boolean;
   target: EventTarget | null;
+  repeat?: boolean;
   defaultPrevented?: boolean;
   getModifierState?: (key: string) => boolean;
 };
 
 /**
- * Whether a key press may run a one-key shortcut: not while typing, not with
- * Ctrl, Alt or Cmd (the browser's own shortcuts), except AltGr, which French
- * keyboards need for « [ » and « ] » (Windows reports it as Ctrl + Alt).
+ * Whether a key press may run a one-key shortcut: not while typing, not a
+ * key held down (its repeats would undo or redo the action), not with Ctrl,
+ * Alt or Cmd (the browser's own shortcuts). Except where a keyboard needs the
+ * modifier to type the character: AltGr (Windows reports it as Ctrl + Alt)
+ * and, on a Mac, Option, for « [ », « ] », « / », « ? » (never for a letter).
  */
 export function isShortcutKey(e: KeyLike): boolean {
-  if (e.defaultPrevented || isTypingTarget(e.target)) return false;
-  const altGraph = e.getModifierState?.("AltGraph") === true;
+  if (e.defaultPrevented || e.repeat === true || isTypingTarget(e.target)) return false;
   if (e.metaKey) return false;
-  if ((e.ctrlKey || e.altKey) && !altGraph) return false;
-  return true;
+  if (!e.ctrlKey && !e.altKey) return true;
+  if (e.getModifierState?.("AltGraph") === true) return true;
+  // Option (⌥) on a Mac: `key` already holds the character it typed, e.g. « [ » for ⌥⇧5 on a French keyboard.
+  const printedSign = e.key.length === 1 && !/\p{L}|\p{N}|\s/u.test(e.key);
+  return e.altKey && !e.ctrlKey && printedSign;
 }
 
 export type IssueTarget = { kind: "trip" | "vehicle"; id: string };

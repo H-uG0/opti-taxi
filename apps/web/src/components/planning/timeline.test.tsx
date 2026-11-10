@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { useSyncExternalStore } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { depotGroupViews } from "@/lib/planning/filter";
 import type { TripView, VehicleRowView, ViolationView } from "@/lib/planning/types";
 import { indexViolations } from "@/lib/planning/violation-index";
 import { planningFixture, tripView, vehicleRow } from "@/test/planning-fixtures";
-import { Timeline } from "./timeline";
+import { Timeline, type TimelineProps } from "./timeline";
 
 afterEach(cleanup);
 
@@ -280,5 +281,232 @@ describe("Timeline from the keyboard", () => {
     const stops = Array.from(screen.getByRole("grid").querySelectorAll<HTMLElement>("[tabindex='0']"));
     expect(stops).toHaveLength(1);
     expect(stops[0]!.getAttribute("aria-label")).toContain("Gérard Blanc");
+  });
+});
+
+/** The timeline as an element, to render it again with other props (zoom, selection). */
+function timelineElement(
+  props: Partial<TimelineProps> = {},
+  data: { trips: Record<string, TripView>; vehicles: VehicleRowView[] } = planningFixture(),
+) {
+  const { trips, vehicles } = data;
+  return (
+    <Timeline
+      groups={depotGroupViews("2026-11-10", vehicles, vehicles, Object.values(trips), trips)}
+      trips={trips}
+      range={RANGE}
+      selectedTripId={null}
+      selectedVehicleId={null}
+      onSelectTrip={vi.fn()}
+      onSelectVehicle={vi.fn()}
+      {...props}
+    />
+  );
+}
+
+/** Three trips 12 minutes apart on Taxi 1: one « +3 » target at the whole day's width. */
+function closeTrips() {
+  const stop = (id: string, tripId: string, kind: "PICKUP" | "DROPOFF", sequence: number, minute: number) => ({
+    id,
+    sequence,
+    tripId,
+    kind,
+    lat: 43.3,
+    lng: 5.4,
+    address: "Marseille",
+    arrivalMinute: minute,
+    startMinute: minute,
+    departureMinute: minute + 2,
+    loadAfter: kind === "PICKUP" ? 1 : 0,
+    completed: false,
+  });
+  const names = ["Monique Aubert", "Gérard Blanc", "Colette Imbert"];
+  const trips = Object.fromEntries(
+    names.map((patientName, i) => [
+      `t${i}`,
+      tripView({ id: `t${i}`, patientName, coPassengerTripIds: [], shared: false, plannedPickupMinute: 600 + i * 12, plannedDropoffMinute: 608 + i * 12 }),
+    ]),
+  );
+  const base = vehicleRow();
+  const route = {
+    ...base.route!,
+    tripCount: 3,
+    stops: names.flatMap((_, i) => [stop(`p${i}`, `t${i}`, "PICKUP", i * 2, 600 + i * 12), stop(`d${i}`, `t${i}`, "DROPOFF", i * 2 + 1, 608 + i * 12)]),
+  };
+  return { trips, vehicles: [vehicleRow({ route })] };
+}
+
+describe("Timeline: the selected trip's appointment", () => {
+  it("says a late drop-off and a session's end in the panel's words, under the pinned headers and column", () => {
+    const { trips, vehicles } = planningFixture();
+    const late = { ...trips, "trip-a": { ...trips["trip-a"]!, plannedDropoffMinute: 455 } };
+    render(timelineElement({ selectedTripId: "trip-a", selectedVehicleId: "taxi-1" }, { trips: late, vehicles }));
+    const mark = rowOf("taxi-1").querySelector<HTMLElement>("[data-appointment-mark]")!;
+    expect(mark.textContent).toBe("RDV 07:30 · 5 min de retard");
+    // Its track is a stacking context of its own: the line (z-index inside the track) never paints over the
+    // sticky axis (z-30), « À placer » (27), the depot headers (25) or the vehicle column (22).
+    const track = mark.closest<HTMLElement>("[role='gridcell']")!;
+    expect(track.className).toContain("isolate");
+    cleanup();
+
+    const back = { ...trips, "trip-a": { ...trips["trip-a"]!, direction: "RETURN" as const, appointmentMinute: null, readyMinute: 655 } };
+    render(timelineElement({ selectedTripId: "trip-a", selectedVehicleId: "taxi-1" }, { trips: back, vehicles }));
+    expect(rowOf("taxi-1").querySelector("[data-appointment-mark]")?.textContent).toBe("Fin de séance 10:55");
+  });
+});
+
+describe("Timeline zoom", () => {
+  const VISIBLE = 800;
+  const COLUMN = 224;
+  beforeEach(() => {
+    // Layout jsdom does not compute: the vehicle column, and the track as many times wider as the zoom says.
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute("role") !== "columnheader") return 0;
+      if (this.classList.contains("sticky")) return COLUMN;
+      const factor = /\* ([\d.]+)\)/.exec(this.closest<HTMLElement>("[role='grid']")?.style.getPropertyValue("--track-w") ?? "")?.[1];
+      return VISIBLE * (factor ? Number(factor) : 1);
+    });
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.querySelector(":scope > [role='grid']") ? COLUMN + VISIBLE : 0;
+    });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const box = () => screen.getByRole("grid").parentElement!;
+  /** Minute at the middle of the visible track. */
+  const middle = (zoomWidth: number) => RANGE.start + ((box().scrollLeft + VISIBLE / 2) / zoomWidth) * (RANGE.end - RANGE.start);
+
+  it("from the whole day, centers the selected trip, whatever an earlier zoom had scrolled to", () => {
+    const { rerender } = render(timelineElement({ zoom: "4h" }));
+    // 4 h, scrolled to the evening, back to the whole day, the earliest trip selected, then 2 h.
+    box().scrollLeft = 2000;
+    fireEvent.scroll(box());
+    rerender(timelineElement({ zoom: "day" }));
+    expect(box().scrollLeft).toBe(0);
+    rerender(timelineElement({ zoom: "day", selectedTripId: "trip-a", selectedVehicleId: "taxi-1" }));
+    rerender(timelineElement({ zoom: "2h", selectedTripId: "trip-a", selectedVehicleId: "taxi-1" }));
+    // Trip A: 06:55 – 07:20, its middle at 07:07:30.
+    expect(middle(VISIBLE * 6.5)).toBeCloseTo(427.5, 1);
+  });
+
+  it("with nothing selected, starts at the first route (not the empty early hours), then keeps the middle", () => {
+    const { rerender } = render(timelineElement({ zoom: "day" }));
+    rerender(timelineElement({ zoom: "4h" }));
+    // Taxi 1 leaves at 06:40: at the left edge, 5 % of the view before it.
+    const track4h = VISIBLE * 3.25;
+    expect(RANGE.start + (box().scrollLeft / track4h) * 780).toBeCloseTo(400 - 0.05 * 240, 1);
+    const center = middle(track4h);
+    rerender(timelineElement({ zoom: "2h" }));
+    expect(middle(VISIBLE * 6.5)).toBeCloseTo(center, 1);
+  });
+});
+
+describe("Timeline: the list of a « +3 »", () => {
+  it("keeps the focus inside until a choice or Escape, which gives it back to its target", () => {
+    render(timelineElement({ onZoomChange: vi.fn() }, closeTrips()));
+    const cluster = screen.getByRole("button", { name: /^3 courses de 10:00/ });
+    fireEvent.click(cluster);
+    const dialog = screen.getByRole("dialog");
+    const buttons = within(dialog).getAllByRole("button");
+    expect(document.activeElement).toBe(buttons[0]);
+    // Tab from the last one wraps to the first, Shift + Tab from the first to the last.
+    buttons.at(-1)!.focus();
+    fireEvent.keyDown(buttons.at(-1)!, { key: "Tab" });
+    expect(document.activeElement).toBe(buttons[0]);
+    fireEvent.keyDown(buttons[0]!, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(buttons.at(-1));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(cluster);
+  });
+
+  it("« Zoomer sur ce créneau » zooms in and gives the focus to the first trip's target, not to the page", () => {
+    const onZoomChange = vi.fn();
+    const data = closeTrips();
+    const { rerender } = render(timelineElement({ onZoomChange }, data));
+    fireEvent.click(screen.getByRole("button", { name: /^3 courses de 10:00/ }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Zoomer sur ce créneau" }));
+    expect(onZoomChange).toHaveBeenCalledWith("2h");
+    rerender(timelineElement({ onZoomChange, zoom: "2h" }, data));
+    expect((document.activeElement as HTMLElement | null)?.dataset.tripIds?.split(" ")).toContain("t0");
+  });
+});
+
+describe("Timeline from the keyboard: Tab stop and depot headers", () => {
+  const tabbable = () =>
+    Array.from(screen.getByRole("grid").querySelectorAll<HTMLButtonElement>("button")).filter((b) => !b.disabled && b.tabIndex >= 0);
+
+  it("stays one Tab stop when a depot's button is enabled or disabled without the timeline drawing again", async () => {
+    // A depot's « Défiger », re-rendered alone (busy, a plan refreshed) as LockScopeButtons is.
+    const store = { disabled: true, listeners: new Set<() => void>() };
+    const set = (disabled: boolean) => {
+      store.disabled = disabled;
+      for (const listener of store.listeners) listener();
+    };
+    function DepotUnlock() {
+      const disabled = useSyncExternalStore(
+        (listener) => {
+          store.listeners.add(listener);
+          return () => store.listeners.delete(listener);
+        },
+        () => store.disabled,
+      );
+      return (
+        <button type="button" disabled={disabled}>
+          Défiger le dépôt
+        </button>
+      );
+    }
+    render(timelineElement({ onToggleGroup: vi.fn(), groupActions: () => <DepotUnlock /> }));
+    expect(tabbable()).toHaveLength(1);
+    act(() => set(false));
+    expect(tabbable()).toHaveLength(1);
+    expect(tabbable()[0]!.textContent).toBe("Dépôt Manosque");
+
+    // The Tab stop itself disabled: another item takes it.
+    const unlock = screen.getAllByRole("button", { name: "Défiger le dépôt" })[0]!;
+    act(() => unlock.focus());
+    expect(tabbable()).toEqual([unlock]);
+    act(() => set(true));
+    await waitFor(() => expect(tabbable()).toHaveLength(1));
+    expect(tabbable()[0]!.textContent).toBe("Dépôt Manosque");
+  });
+
+  it("keeps the time across a depot's header: ↓ lands on its fold toggle, the next ↓ on the trip at the same time", () => {
+    // Positions jsdom does not compute: the vehicle column at 0–200 px, the track from 224 px, 8 px per percent.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const percent = (value: string) => (value.endsWith("%") ? parseFloat(value) : null);
+      const left = percent(this.style.left);
+      const width = percent(this.style.width);
+      const x = left !== null ? 224 + left * 8 : 0;
+      const w = width !== null ? width * 8 : 200;
+      return { x, y: 0, left: x, right: x + w, top: 0, bottom: 10, width: w, height: 10, toJSON: () => ({}) } as DOMRect;
+    });
+    const { trips, vehicles } = planningFixture();
+    const taxi = vehicles[0]!;
+    const manosque = vehicles.map((v) =>
+      v.id === "vsl-2"
+        ? {
+            ...v,
+            available: true,
+            unavailableReason: null,
+            route: { ...taxi.route!, tripCount: 1, stops: taxi.route!.stops.filter((s) => s.tripId === "trip-a").map((s) => ({ ...s, tripId: "trip-m" })) },
+          }
+        : v,
+    );
+    const withM = { ...trips, "trip-m": tripView({ id: "trip-m", patientName: "Marcel Morel", vehicleId: "vsl-2", coPassengerTripIds: [], shared: false }) };
+    render(timelineElement({ onToggleGroup: vi.fn(), groupActions: () => <button type="button">Figer le dépôt</button> }, { trips: withM, vehicles: manosque }));
+    const start = screen.getByRole("button", { name: /Marcel Morel/ });
+    act(() => start.focus());
+    fireEvent.keyDown(start, { key: "ArrowDown" });
+    expect(document.activeElement?.textContent).toBe("Dépôt Marseille");
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    expect((document.activeElement as HTMLElement).dataset.tripIds).toMatch(/trip-a|trip-b/);
+    // ← → still reach the depot's own buttons from its toggle.
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    expect(document.activeElement?.textContent).toBe("Dépôt Marseille");
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
+    expect(document.activeElement?.textContent).toBe("Figer le dépôt");
+    vi.restoreAllMocks();
   });
 });

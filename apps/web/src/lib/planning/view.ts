@@ -35,7 +35,8 @@ import { formatMinute } from "@/lib/time";
 import { vehicleShade } from "./colors";
 import { resolveTripRefs, type TripName } from "./move";
 import type { VehicleIssue } from "./route-issues";
-import { coPassengers, computeTimeRange } from "./timeline";
+import { coPassengers, computeTimeRange, DEFAULT_TIME_RANGE } from "./timeline";
+import { unassignedWindow } from "./timeline-layout";
 import type {
   DayKpis,
   DayStatus,
@@ -587,6 +588,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
   const violationsKnown = !input.planRun || input.planRun.valid !== false || planDetails !== null;
 
   const activeTrips = input.trips.filter((t) => isActiveTrip(t.status)).length;
+  const waitWindows = { beforeAppointmentMin: input.settings.waitBeforeAppointmentMin, afterSessionMin: input.settings.waitAfterSessionMin };
 
   return {
     date: input.date,
@@ -606,8 +608,16 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     vehicleIssues: input.vehicleIssues ?? [],
     lastRun: runView(input.lastRun, input.details, input.settings.solverTimeLimitSec, now, naming),
     planRun: runView(input.planRun, input.details, input.settings.solverTimeLimitSec, now, naming),
-    timeRange: computeTimeRange(rows),
-    waitWindows: { beforeAppointmentMin: input.settings.waitBeforeAppointmentMin, afterSessionMin: input.settings.waitAfterSessionMin },
+    // The windows of the trips without a vehicle too: one left out because no shift covers its time is drawn.
+    timeRange: computeTimeRange(
+      rows,
+      DEFAULT_TIME_RANGE,
+      trips.flatMap((t) => {
+        const slot = t.vehicleId === null && isActiveTrip(t.status) ? unassignedWindow(t, waitWindows) : null;
+        return slot ? [slot] : [];
+      }),
+    ),
+    waitWindows,
     dayStarted:
       input.trips.some((t) => FIELD_STATUSES.includes(t.status)) ||
       input.routes.some((r) => r.stops.some((s) => s.completedAt !== null)),

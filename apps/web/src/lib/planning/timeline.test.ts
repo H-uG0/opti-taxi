@@ -29,6 +29,13 @@ describe("computeTimeRange", () => {
     expect(computeTimeRange([{ shift: { start: 600, end: 700 }, route: null }])).toEqual({ start: 600, end: 960 });
   });
 
+  it("covers the windows given too (trips without a vehicle outside the shifts)", () => {
+    const rows = [{ shift: { start: 420, end: 1200 }, route: null }];
+    expect(computeTimeRange(rows, DEFAULT_TIME_RANGE, [{ start: 1230, end: 1245 }])).toEqual({ start: 420, end: 1260 });
+    expect(computeTimeRange(rows, DEFAULT_TIME_RANGE, [{ start: 350, end: 380 }])).toEqual({ start: 300, end: 1200 });
+    expect(computeTimeRange([], DEFAULT_TIME_RANGE, [{ start: 600, end: 630 }])).toEqual({ start: 600, end: 960 });
+  });
+
   it("positions minutes as clamped percentages", () => {
     const range = { start: 360, end: 1080 };
     expect(percentOf(720, range)).toBe(50);

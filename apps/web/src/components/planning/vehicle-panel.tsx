@@ -41,7 +41,7 @@ export function VehiclePanel({
             <span className="truncate">{vehicle.label}</span>
           </h2>
           <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
-            <VehicleTypeBadge type={vehicle.type} />
+            <VehicleTypeBadge type={vehicle.type} dot={false} />
             <span>{vehicle.registration}</span>
             <span aria-hidden>·</span>
             <span>dépôt {vehicle.depot.label}</span>

@@ -17,6 +17,8 @@ export type MapStop = MapPoint & {
 export type MapVehicle = {
   id: string;
   label: string;
+  /** Told on the map by the shape of its stops (taxi: disc, VSL: square, ambulance: cross). */
+  type: "TAXI" | "VSL" | "AMBULANCE";
   color: string;
   depot: MapPoint & { label: string };
   /** Ordered stops of its route (empty when the vehicle has no route). */
@@ -60,16 +62,20 @@ export function routesCollection(
   };
 }
 
+/** The stops of the routes, with what their marker needs: kind (filled or hollow), vehicle type (shape), color. */
 export function stopsCollection(
   vehicles: MapVehicle[],
-): FeatureCollection<PointGeometry, { tripId: string; vehicleId: string; kind: string; color: string; title: string }> {
+): FeatureCollection<
+  PointGeometry,
+  { tripId: string; vehicleId: string; kind: string; type: MapVehicle["type"]; color: string; title: string }
+> {
   return {
     type: "FeatureCollection",
     features: vehicles.flatMap((v) =>
       v.stops.map((s) => ({
         type: "Feature" as const,
         geometry: { type: "Point" as const, coordinates: position(s) },
-        properties: { tripId: s.tripId, vehicleId: v.id, kind: s.kind, color: v.color, title: s.title },
+        properties: { tripId: s.tripId, vehicleId: v.id, kind: s.kind, type: v.type, color: v.color.toLowerCase(), title: s.title },
       })),
     ),
   };
@@ -101,11 +107,25 @@ export function depotsCollection(
 
 /**
  * Trips without a vehicle: a dashed line from the pick-up (filled diamond) to
- * the drop-off (hollow diamond), unlike the routes' round stops.
+ * the drop-off (hollow diamond), unlike the routes' stops. Before the day is
+ * optimized (`planned` false) every trip is « à planifier », not a problem:
+ * only a plain dot at its pick-up.
  */
 export function unassignedCollection(
   trips: MapTrip[],
-): FeatureCollection<PointGeometry | LineGeometry, { tripId: string; title: string; role: "line" | "pickup" | "dropoff" }> {
+  planned = true,
+): FeatureCollection<
+  PointGeometry | LineGeometry,
+  { tripId: string; title: string; role: "line" | "pickup" | "dropoff" | "pending" }
+> {
+  if (!planned) {
+    return {
+      type: "FeatureCollection",
+      features: trips
+        .filter((t) => t.vehicleId === null)
+        .map((t) => pointFeature(t.pickup, { tripId: t.id, title: `Prise en charge · ${t.title} (à planifier)`, role: "pending" as const })),
+    };
+  }
   return {
     type: "FeatureCollection",
     features: trips

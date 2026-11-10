@@ -34,6 +34,7 @@ import {
   zoomIn,
   ZOOM_LABELS,
   ZOOM_LEVELS,
+  ZOOM_VISIBLE_MINUTES,
   type TripBlock,
   type WaitWindows,
   type ZoomLevel,
@@ -44,7 +45,7 @@ import { formatPercent, ROUTE_STATUS_LABELS, VEHICLE_TYPE_SHORT } from "@/lib/la
 import { formatDuration, formatMinute } from "@/lib/time";
 import { ClusterPopover } from "./cluster-popover";
 import { ReturnToCheckMark, SHARED_STRIPES, span, TrackTrips, type OpenCluster } from "./timeline-track";
-import { ROVING_PREFERRED, ROVING_ROW, useRovingGrid } from "./use-roving-grid";
+import { ROVING_ANCHOR, ROVING_PREFERRED, ROVING_ROW, useRovingGrid } from "./use-roving-grid";
 
 export type { DepotGroupView as TimelineGroup } from "@/lib/planning/filter";
 
@@ -199,6 +200,7 @@ const TimelineRow = memo(function TimelineRow({
   const route = row.route;
   const layout = useMemo(() => (route ? routeBlocks(route.stops) : { blocks: [] as TripBlock[], lanes: 1 }), [route]);
   const slots = useMemo(() => freeSlots(row.shift, route), [row.shift, route]);
+  const slotsId = useId();
   const companions = useMemo(() => new Set(selectedTrip?.coPassengerTripIds ?? []), [selectedTrip]);
   const emptyRatio = route && route.distanceKm > 0 ? route.emptyKm / route.distanceKm : null;
   const crew = (row.driverName ?? "Sans chauffeur") + (row.crewMateName ? ` + ${row.crewMateName}` : "");
@@ -260,6 +262,8 @@ const TimelineRow = memo(function TimelineRow({
           {...(selected && !tripSelectedHere ? { [ROVING_PREFERRED]: "" } : {})}
           onClick={() => onSelectVehicle(row.id)}
           aria-pressed={selected}
+          // The free slots are said with the vehicle when the arrows reach it (the row's own name may hide its content).
+          aria-describedby={slots.length > 0 ? slotsId : undefined}
           title={[row.label, crewLine, row.unavailableReason ? `Indisponible : ${row.unavailableReason}` : null].filter(Boolean).join("\n")}
           className="block w-full min-w-0 rounded text-left focus-visible:outline-2 focus-visible:outline-brand-600"
         >
@@ -272,7 +276,7 @@ const TimelineRow = memo(function TimelineRow({
             <span className="sr-only">
               {row.label}, dépôt {row.depot.label}
             </span>
-            {labelSaysType ? null : <VehicleTypeBadge type={row.type} />}
+            {labelSaysType ? null : <VehicleTypeBadge type={row.type} dot={false} />}
             {violationMark}
             {compact && route ? (
               <span className="tabular shrink-0 text-[11px] text-slate-500">
@@ -314,7 +318,7 @@ const TimelineRow = memo(function TimelineRow({
           ) : null}
         </button>
         {slots.length > 0 ? (
-          <span className="sr-only">
+          <span id={slotsId} className="sr-only">
             {slots.length > 1 ? "Créneaux libres" : "Créneau libre"} :{" "}
             {slots.map((s) => `${formatMinute(s.start)} – ${formatMinute(s.end)}`).join(", ")}.
           </span>
@@ -324,7 +328,8 @@ const TimelineRow = memo(function TimelineRow({
       <div
         role="gridcell"
         aria-label={route ? `Tournée de ${label} : ${pluralize(route.tripCount, "course")}` : `${label} : aucune course`}
-        className={cn("relative self-center overflow-hidden rounded", compact ? "my-0.5 h-6" : "my-1.5 h-12")}
+        // isolate: what the track draws (blocks, targets, the appointment line) stays under the pinned axis, rows and column.
+        className={cn("relative isolate self-center overflow-hidden rounded", compact ? "my-0.5 h-6" : "my-1.5 h-12")}
         style={row.shift || off ? OFF_SHIFT_STYLE : undefined}
       >
         {row.shift ? (
@@ -488,20 +493,20 @@ const PinnedUnassignedRow = memo(function PinnedUnassignedRow({
           className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-amber-900"
           title="Le créneau où chaque course sans véhicule doit être servie : arrivée avant le RDV (aller), prise en charge après la séance (retour)"
         >
-          À placer
+          <span className="shrink-0 whitespace-nowrap">À placer</span>
           <span className="tabular rounded-full bg-white px-1.5 text-xs font-medium ring-1 ring-amber-300">
             {tripIds.length}
             <span className="sr-only"> {tripIds.length > 1 ? "courses sans véhicule" : "course sans véhicule"}</span>
           </span>
           <span className="truncate text-xs font-normal text-amber-900/80">
-            {missing > 0 ? `dont ${missing} sans horaire` : "créneau à servir"}
+            {missing > 0 ? `dont ${missing} sans horaire` : "créneau à tenir"}
           </span>
         </p>
       </div>
       <div
         role="gridcell"
         aria-label={`Courses à placer : ${pluralize(tripIds.length, "course")}`}
-        className="relative my-0.5 h-6 self-center overflow-hidden rounded bg-white/70"
+        className="relative isolate my-0.5 h-6 self-center overflow-hidden rounded bg-white/70"
       >
         <div aria-hidden className="pointer-events-none absolute inset-0" style={gridLines(range, geometry.gridStep)} />
         <TrackTrips
@@ -660,10 +665,20 @@ export function Timeline({
   }, []);
   const roving = useRovingGrid(grid, { selectionKey: `${selectedTripId ?? ""}|${selectedVehicleId ?? ""}`, reveal });
 
-  /** Minute at the middle of the visible track, kept while scrolling: a zoom keeps it in the middle. */
+  /** Minute at the middle of the visible track, kept while scrolling zoomed in: a closer zoom keeps it in the middle. */
   const centerMinute = useRef<number | null>(null);
-  /** Where « Zoomer sur ce créneau » asked to look. */
+  /** Where « Zoomer sur ce créneau » asked to look, and the trip whose target then takes the focus. */
   const pendingCenter = useRef<number | null>(null);
+  const pendingFocus = useRef<string | null>(null);
+  /** The trip to focus once the new zoom is drawn and measured. */
+  const focusAfterZoom = useRef<string | null>(null);
+  /** Start of the first route (else of the first shift): where a zoom with nothing selected starts. */
+  const firstActivity = useMemo(() => {
+    const rows = groups.flatMap((g) => g.rows);
+    const routeStarts = rows.flatMap((r) => (r.route ? [r.route.startMinute] : []));
+    const starts = routeStarts.length > 0 ? routeStarts : rows.flatMap((r) => (r.shift ? [r.shift.start] : []));
+    return starts.length > 0 ? Math.max(range.start, Math.min(...starts)) : range.start;
+  }, [groups, range.start]);
   const trackViewport = () => {
     const box = scroller.current;
     const column = box?.querySelector<HTMLElement>("[data-timeline-axis] [role='columnheader']")?.offsetWidth ?? 0;
@@ -676,19 +691,26 @@ export function Timeline({
     centerMinute.current = range.start + ((box.scrollLeft + width / 2) / track) * spanMinutes;
   };
 
-  // A new zoom keeps the same time in the middle (or the trip selected, or the slot asked for).
+  // A new zoom shows the slot asked for (« Zoomer sur ce créneau »); from the whole day (or on loading), the
+  // selected trip in the middle, else the first route from the left edge; from « 4 h » to « 2 h », the time that
+  // was in the middle.
   const lastZoom = useRef<ZoomLevel | null>(null);
   useLayoutEffect(() => {
     if (lastZoom.current === zoom) return;
-    const first = lastZoom.current === null;
+    const previous = lastZoom.current;
     lastZoom.current = zoom;
+    focusAfterZoom.current = pendingFocus.current;
+    pendingFocus.current = null;
     const { box, width } = trackViewport();
     const track = trackHeader.current?.offsetWidth ?? 0;
-    if (!box || track <= 0) return;
     if (zoom === "day") {
-      box.scrollLeft = 0;
+      if (box) box.scrollLeft = 0;
+      // The whole day in view: nothing is « in the middle » any more, the next zoom starts from the selection.
+      centerMinute.current = null;
+      pendingCenter.current = null;
       return;
     }
+    if (!box || track <= 0) return;
     const trip = selectedTripId ? trips[selectedTripId] : undefined;
     // The middle of the selected trip: its block, or its window when it has no vehicle.
     const slot = trip && trip.vehicleId === null ? unassignedWindow(trip, waitWindows) : null;
@@ -699,14 +721,31 @@ export function Timeline({
         : trip.plannedPickupMinute !== null && trip.plannedDropoffMinute !== null
           ? (trip.plannedPickupMinute + trip.plannedDropoffMinute) / 2
           : (trip.plannedPickupMinute ?? trip.appointmentMinute ?? trip.readyMinute);
-    const minute = pendingCenter.current ?? (first ? tripMinute : (centerMinute.current ?? tripMinute));
+    const fromWholeDay = previous === null || previous === "day";
+    const minute = pendingCenter.current ?? (fromWholeDay ? tripMinute : (centerMinute.current ?? tripMinute)) ?? null;
     pendingCenter.current = null;
-    if (minute === null || minute === undefined) return;
-    box.scrollLeft = Math.max(0, ((minute - range.start) / spanMinutes) * track - width / 2);
-    centerMinute.current = minute;
+    const pxOf = (m: number) => ((m - range.start) / spanMinutes) * track;
+    // Nothing to center on: the first route starts near the left edge (not the empty early hours).
+    box.scrollLeft = Math.max(0, minute !== null ? pxOf(minute) - width / 2 : pxOf(firstActivity) - width * 0.05);
+    centerMinute.current = range.start + ((box.scrollLeft + width / 2) / track) * spanMinutes;
     // Only when the zoom changes: the selection's own effect below moves the box otherwise.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom]);
+
+  // « Zoomer sur ce créneau »: the focus goes to the trip's target once the zoomed track is drawn (the « +3 » it came
+  // from is gone), not back to the top of the page.
+  useLayoutEffect(() => {
+    const tripId = focusAfterZoom.current;
+    const box = scroller.current;
+    if (!tripId || !box) return;
+    const target = Array.from(box.querySelectorAll<HTMLElement>("[data-trip-ids]")).find((t) =>
+      (t.dataset.tripIds ?? "").split(" ").includes(tripId),
+    );
+    if (target && document.activeElement !== target) target.focus({ preventScroll: true });
+    // Done once the track is measured at this zoom: its targets will not be merged or split again.
+    const measured = trackHeader.current?.offsetWidth ?? 0;
+    if (measured === 0 || Math.abs(measured - trackPx) < 4) focusAfterZoom.current = null;
+  });
 
   // Any selection (search, map, « À traiter », link) brings its row, and its trip when zoomed in, into view.
   useEffect(() => {
@@ -847,6 +886,8 @@ export function Timeline({
                     <button
                       type="button"
                       tabIndex={-1}
+                      // ↑ ↓ land here, never on the depot's « Figer » / « Défiger » (← → from here).
+                      {...{ [ROVING_ANCHOR]: "" }}
                       onClick={() => onToggleGroup?.(group.id)}
                       aria-expanded={!folded}
                       aria-controls={bodyId}
@@ -926,8 +967,10 @@ export function Timeline({
           onZoom={() => {
             if (!nextZoom || !onZoomChange) return;
             pendingCenter.current = (cluster.from + cluster.to) / 2;
-            // Straight to the closest zoom: the trips of a « +3 » are minutes apart.
-            onZoomChange("2h");
+            pendingFocus.current =
+              selectedTripId && cluster.tripIds.includes(selectedTripId) ? selectedTripId : (cluster.tripIds[0] ?? null);
+            // The closest zoom where the whole slot fits: « 2 h » for trips minutes apart, « 4 h » for a longer chain.
+            onZoomChange(zoom === "day" && cluster.to - cluster.from > ZOOM_VISIBLE_MINUTES["2h"] * 0.9 ? "4h" : "2h");
           }}
           onClose={closeCluster}
         />
@@ -1014,7 +1057,7 @@ export function TimelineLegend({ showReturnToCheck = false }: { showReturnToChec
       ) : null}
       <li className="text-slate-500">
         Couleur : celle du véhicule, la même sur la carte. Le type (taxi, VSL, ambulance) est dans le nom ou la pastille du
-        véhicule.
+        véhicule, et sur la carte dans la forme de ses arrêts.
       </li>
     </ul>
   );

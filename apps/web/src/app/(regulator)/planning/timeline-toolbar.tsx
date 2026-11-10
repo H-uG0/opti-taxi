@@ -127,7 +127,7 @@ function HelpDialog({ showReturnToCheck }: { showReturnToCheck: boolean }) {
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "?" || e.ctrlKey || e.metaKey) return;
+      if (e.key !== "?" || e.ctrlKey || e.metaKey || e.repeat) return;
       const inHelp = (e.target as HTMLElement | null)?.closest?.("[data-planning-help]") != null;
       if (!inHelp && isTypingTarget(e.target)) return;
       e.preventDefault();

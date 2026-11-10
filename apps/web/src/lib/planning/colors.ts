@@ -41,12 +41,14 @@ export function vehicleShade(baseHex: string, index: number): string {
 /**
  * Colors of the vehicles shown on the timeline and the map (UX-05): one hue
  * per vehicle, in display order, instead of 8 shades of its type color. No
- * red nor amber: red says a problem (return to check, unavailable) and amber
- * a trip without a vehicle or a pause. Dark enough for a line on the light
- * map; the type of the vehicle is told by its label or badge.
+ * red, orange, amber nor brown (hues from 345° to 45°): red says a problem
+ * (return to check, unavailable) and amber a trip without a vehicle or a
+ * pause. None of the type colors either (the VSL blue #2563eb). Dark enough
+ * for a line on the light map; the type of the vehicle is told by its label or
+ * badge, and on the map by the shape of its stops.
  */
 export const DISPLAY_PALETTE = [
-  "#2563eb", // blue
+  "#1d4ed8", // blue
   "#16a34a", // green
   "#9333ea", // purple
   "#0891b2", // cyan
@@ -54,7 +56,7 @@ export const DISPLAY_PALETTE = [
   "#65a30d", // olive
   "#1e3a8a", // navy
   "#0d9488", // teal
-  "#92400e", // brown
+  "#be185d", // raspberry
   "#4f46e5", // indigo
   "#475569", // slate
   "#166534", // dark green

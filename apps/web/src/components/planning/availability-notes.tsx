@@ -55,7 +55,7 @@ export function AvailabilityNotes({ skipped, notes, inline = false }: { skipped:
         {skipped.map((s) => (
           <li key={s.vehicleId} className="flex min-w-0 items-baseline gap-2">
             <span className="shrink-0 self-center">
-              <VehicleTypeBadge type={s.type} />
+              <VehicleTypeBadge type={s.type} dot={false} />
             </span>
             <span className="shrink-0 font-medium text-slate-900">{s.label}</span>
             {/* Wrapped, not cut: a title tooltip is out of reach on touch screens and from the keyboard. */}

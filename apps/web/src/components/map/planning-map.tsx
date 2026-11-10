@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { LngLatBounds, MapLibreMap, NavigationControl, Popup, type GeoJSONSource, type MapLayerMouseEvent } from "maplibre-gl";
 import { Focus, Maximize2, Map as MapIcon } from "lucide-react";
 import { cn } from "@/components/ui/cn";
-import { diamondIcon, warningIcon } from "./map-icons";
+import { VEHICLE_TYPE_SHORT } from "@/lib/labels";
+import { diamondIcon, STOP_ICON_PATTERN, stopIcon, warningIcon, type StopShapeType } from "./map-icons";
 import { AXIS_CENTER, AXIS_ZOOM, configuredStyleUrl, OSM_RASTER_STYLE } from "./map-style";
 import {
   allPoints,
@@ -36,8 +37,12 @@ export type PlanningMapProps = {
   fitUnassigned?: boolean;
   /** Only the selection is shown (« Sélection seule »). */
   selectionOnly?: boolean;
-  /** Turns « Sélection seule » on or off; null: nothing is selected (the button is disabled). */
+  /** Turns « Sélection seule » on or off; null: the button is disabled (off, and nothing selected). */
   onSelectionOnlyChange?: ((on: boolean) => void) | null;
+  /** « Sélection seule » is on but waits for a selection (the map shows everything meanwhile). */
+  selectionOnlyWaiting?: boolean;
+  /** The day has been optimized: a trip without a vehicle is « à placer » (diamonds); before, a plain pick-up « à planifier ». */
+  planned?: boolean;
 };
 
 /** Amber of a trip without a vehicle (the timeline's « À placer »). */
@@ -45,7 +50,9 @@ const UNASSIGNED_COLOR = "#b45309";
 
 const STYLE_TIMEOUT_MS = 8_000;
 const FIT_PADDING = 48;
-const INTERACTIVE_LAYERS = ["violations", "stops", "unassigned-points", "unassigned-line", "routes-line"] as const;
+const INTERACTIVE_LAYERS = ["violations", "stops", "unassigned-points", "pending-points", "unassigned-line", "routes-line"] as const;
+/** Stops drawn at twice their size for sharp screens: 15 px. */
+const STOP_ICON_PX = 30;
 
 type SetData = Parameters<GeoJSONSource["setData"]>[0];
 
@@ -117,21 +124,33 @@ function addPlanningLayers(map: MapLibreMap) {
     paint: { "line-color": UNASSIGNED_COLOR, "line-width": 2.5, "line-dasharray": [1.5, 1.5] },
   });
   map.addLayer({
-    id: "stops",
+    id: "pending-points",
     type: "circle",
-    source: "stops",
+    source: "unassigned",
+    filter: ["==", ["get", "role"], "pending"],
     paint: {
       "circle-radius": 5,
-      "circle-color": ["case", ["==", ["get", "kind"], "PICKUP"], ["get", "color"], "#ffffff"],
-      "circle-stroke-color": ["case", ["==", ["get", "kind"], "PICKUP"], "#ffffff", ["get", "color"]],
+      "circle-color": "#ffffff",
+      "circle-stroke-color": "#475569",
       "circle-stroke-width": 2,
+    },
+  });
+  // The shape tells the vehicle's type, the color the vehicle; the images are drawn when first needed (stopImage).
+  map.addLayer({
+    id: "stops",
+    type: "symbol",
+    source: "stops",
+    layout: {
+      "icon-image": ["concat", "stop:", ["get", "type"], ":", ["get", "kind"], ":", ["get", "color"]],
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
     },
   });
   map.addLayer({
     id: "unassigned-points",
     type: "symbol",
     source: "unassigned",
-    filter: ["!=", ["get", "role"], "line"],
+    filter: ["match", ["get", "role"], ["pickup", "dropoff"], true, false],
     layout: {
       "icon-image": ["case", ["==", ["get", "role"], "pickup"], "unassigned-pickup", "unassigned-dropoff"],
       "icon-allow-overlap": true,
@@ -169,13 +188,16 @@ function applySelection(map: MapLibreMap, vehicleId: string | null, tripId: stri
   const isVehicle = ["==", ["get", "vehicleId"], vehicleId ?? ""];
   map.setPaintProperty("routes-line", "line-opacity", vehicleId ? ["case", isVehicle, 1, 0.22] : 0.85);
   map.setPaintProperty("routes-line", "line-width", vehicleId ? ["case", isVehicle, 5, 2.5] : 3);
-  map.setPaintProperty("stops", "circle-opacity", vehicleId ? ["case", isVehicle, 1, 0.3] : 1);
-  map.setPaintProperty("stops", "circle-stroke-opacity", vehicleId ? ["case", isVehicle, 1, 0.3] : 1);
-  map.setPaintProperty(
-    "stops",
-    "circle-radius",
-    tripId ? ["case", ["==", ["get", "tripId"], tripId], 8, 5] : 5,
-  );
+  map.setPaintProperty("stops", "icon-opacity", vehicleId ? ["case", isVehicle, 1, 0.3] : 1);
+  map.setLayoutProperty("stops", "icon-size", tripId ? ["case", ["==", ["get", "tripId"], tripId], 1.5, 1] : 1);
+}
+
+/** The image of a stop the style asks for (« stop:VSL:PICKUP:#1d4ed8 »), drawn once. */
+function addStopImage(map: MapLibreMap, id: string) {
+  const match = STOP_ICON_PATTERN.exec(id);
+  if (!match || map.hasImage(id)) return;
+  const [, type, kind, color] = match;
+  map.addImage(id, stopIcon(STOP_ICON_PX, type as StopShapeType, color!, kind as "PICKUP" | "DROPOFF"), { pixelRatio: 2 });
 }
 
 export function PlanningMap({
@@ -189,6 +211,8 @@ export function PlanningMap({
   fitUnassigned = true,
   selectionOnly = false,
   onSelectionOnlyChange = null,
+  selectionOnlyWaiting = false,
+  planned = true,
 }: PlanningMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -269,6 +293,7 @@ export function PlanningMap({
       popup.remove();
     };
 
+    map.on("styleimagemissing", (e: { id: string }) => addStopImage(map, e.id));
     map.on("load", () => {
       window.clearTimeout(timer);
       addPlanningLayers(map);
@@ -311,13 +336,13 @@ export function PlanningMap({
     setSource(map, "routes", routesCollection(vehicles));
     setSource(map, "stops", stopsCollection(vehicles));
     setSource(map, "depots", depotsCollection(vehicles));
-    setSource(map, "unassigned", unassignedCollection(trips));
+    setSource(map, "unassigned", unassignedCollection(trips, planned));
     setSource(map, "violations", violationsCollection(vehicles, trips));
     if (fittedKey.current !== datasetKey) {
       fittedKey.current = datasetKey;
       fit(map, allPoints(vehicles, trips, fitUnassigned), false);
     }
-  }, [ready, vehicles, trips, datasetKey, fitUnassigned]);
+  }, [ready, vehicles, trips, datasetKey, fitUnassigned, planned]);
 
   // Selection.
   useEffect(() => {
@@ -371,9 +396,11 @@ export function PlanningMap({
             title={
               onSelectionOnlyChange === null
                 ? "Sélectionnez une course ou un véhicule pour ne voir qu'elle ou que lui"
-                : selectionOnly
-                  ? "Revenir aux tournées de la frise"
-                  : "N'afficher que la course ou le véhicule sélectionné"
+                : selectionOnlyWaiting
+                  ? "S'appliquera à la prochaine sélection ; cliquez pour revenir aux tournées de la frise"
+                  : selectionOnly
+                    ? "Revenir aux tournées de la frise"
+                    : "N'afficher que la course ou le véhicule sélectionné"
             }
             className={cn(MAP_BUTTON, selectionOnly && "border-brand-300 bg-brand-50 text-brand-900 hover:bg-brand-50")}
           >
@@ -385,7 +412,7 @@ export function PlanningMap({
           <p className="rounded bg-white/90 px-1.5 py-0.5 text-[11px] text-slate-500">Fond de carte OpenStreetMap (raster)</p>
         ) : null}
       </div>
-      <MapLegend />
+      <MapLegend planned={planned} />
       {!ready ? (
         <div className="absolute inset-0 grid place-items-center rounded-lg bg-slate-50 px-6 text-center text-sm text-slate-500">
           {webglAvailable
@@ -400,8 +427,23 @@ export function PlanningMap({
 const MAP_BUTTON =
   "inline-flex min-h-6 items-center gap-1.5 rounded-md border border-slate-300 bg-white/95 px-2 py-1 text-xs font-medium text-slate-700 shadow-xs hover:bg-white focus-visible:outline-2 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:opacity-50";
 
+/** The marker of a stop in the legend (the map's own shapes, at their size). */
+function StopSwatch({ shape, hollow = false }: { shape: StopShapeType; hollow?: boolean }) {
+  const fill = hollow ? "#ffffff" : "#475569";
+  const stroke = hollow ? "#475569" : "#ffffff";
+  return (
+    <svg viewBox="0 0 16 16" className="size-4 drop-shadow-[0_0_0.5px_rgb(15_23_42)]">
+      {shape === "TAXI" ? <circle cx="8" cy="8" r="6.5" fill={fill} stroke={stroke} strokeWidth="2" /> : null}
+      {shape === "VSL" ? <rect x="2" y="2" width="12" height="12" fill={fill} stroke={stroke} strokeWidth="2" /> : null}
+      {shape === "AMBULANCE" ? (
+        <path d="M5.5 1h5v4.5H15v5h-4.5V15h-5v-4.5H1v-5h4.5Z" fill={fill} stroke={stroke} strokeWidth="1.6" strokeLinejoin="miter" />
+      ) : null}
+    </svg>
+  );
+}
+
 /** Key to the map's symbols, folded into a button at the bottom left (the map is small beside the timeline). */
-function MapLegend() {
+function MapLegend({ planned }: { planned: boolean }) {
   const [open, setOpen] = useState(false);
   const item = "flex items-center gap-2";
   const swatch = "inline-flex w-6 shrink-0 items-center justify-center";
@@ -413,17 +455,27 @@ function MapLegend() {
           aria-label="Légende de la carte"
           className="max-h-56 w-64 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white/95 p-2 text-xs text-slate-700 shadow-md"
         >
-          <li className={item}>
-            <span aria-hidden className={swatch}>
-              <span className="size-3 rounded-full border-2 border-white bg-blue-600 ring-1 ring-slate-300" />
-            </span>
-            Prise en charge (couleur du véhicule)
+          <li className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {(["TAXI", "VSL", "AMBULANCE"] as const).map((type) => (
+              <span key={type} className="inline-flex items-center gap-1">
+                <span aria-hidden className="inline-flex">
+                  <StopSwatch shape={type} />
+                </span>
+                {VEHICLE_TYPE_SHORT[type]}
+              </span>
+            ))}
           </li>
           <li className={item}>
             <span aria-hidden className={swatch}>
-              <span className="size-3 rounded-full border-2 border-blue-600 bg-white" />
+              <StopSwatch shape="TAXI" />
             </span>
-            Dépose
+            Prise en charge : pleine, couleur du véhicule
+          </li>
+          <li className={item}>
+            <span aria-hidden className={swatch}>
+              <StopSwatch shape="TAXI" hollow />
+            </span>
+            Dépose : creuse
           </li>
           <li className={item}>
             <span aria-hidden className={swatch}>
@@ -437,13 +489,22 @@ function MapLegend() {
             </span>
             Dépôt
           </li>
-          <li className={item}>
-            <span aria-hidden className={cn(swatch, "gap-0.5")}>
-              <span className="size-2 rotate-45 border border-slate-900" style={{ background: UNASSIGNED_COLOR }} />
-              <span className="h-0 w-2 border-t-2 border-dashed" style={{ borderColor: UNASSIGNED_COLOR }} />
-            </span>
-            À placer : prise en charge → dépose (losanges)
-          </li>
+          {planned ? (
+            <li className={item}>
+              <span aria-hidden className={cn(swatch, "gap-0.5")}>
+                <span className="size-2 rotate-45 border border-slate-900" style={{ background: UNASSIGNED_COLOR }} />
+                <span className="h-0 w-2 border-t-2 border-dashed" style={{ borderColor: UNASSIGNED_COLOR }} />
+              </span>
+              À placer : prise en charge → dépose (losanges)
+            </li>
+          ) : (
+            <li className={item}>
+              <span aria-hidden className={swatch}>
+                <span className="size-3 rounded-full border-2 border-slate-600 bg-white" />
+              </span>
+              Course à planifier (prise en charge)
+            </li>
+          )}
           <li className={item}>
             <span aria-hidden className={swatch}>
               <svg viewBox="0 0 18 18" className="size-4">
@@ -459,7 +520,7 @@ function MapLegend() {
             </span>
             Course sélectionnée (trait : prise en charge → dépose)
           </li>
-          <li className="pt-0.5 text-slate-500">Une couleur par véhicule, la même que dans la frise.</li>
+          <li className="pt-0.5 text-slate-500">Une couleur par véhicule, la même que dans la frise ; la forme dit son type.</li>
         </ul>
       ) : null}
       <button

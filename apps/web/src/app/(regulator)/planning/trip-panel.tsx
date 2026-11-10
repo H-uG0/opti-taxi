@@ -97,13 +97,21 @@ export function TripPanel({
   const moveSelect = useRef<HTMLSelectElement>(null);
 
   // « F »: Figer / Défiger, « D »: « Déplacer vers… » (the same controls, so the same rules and confirmations).
+  const exceptional = trip.exceptionalAmbulance === true;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!isShortcutKey(e)) return;
       const key = e.key.toLowerCase();
       if (key === "f" && lockButton.current && !lockButton.current.disabled) {
+        // The focus on another trip of the timeline (the arrows move it without selecting): « F » would act on a
+        // trip the regulator is not looking at.
+        const focusedTrips = (e.target as HTMLElement | null)?.closest?.<HTMLElement>("[data-trip-ids]")?.dataset.tripIds;
+        if (focusedTrips !== undefined && !focusedTrips.split(" ").includes(trip.id)) return;
         e.preventDefault();
-        lockButton.current.click();
+        // « Défiger » an exceptional ambulance also withdraws the measure: one key never does that, it only goes to
+        // the button, next to its warning.
+        if (exceptional) lockButton.current.focus();
+        else lockButton.current.click();
       } else if (key === "d" && moveSelect.current && !moveSelect.current.disabled) {
         e.preventDefault();
         moveSelect.current.focus();
@@ -111,7 +119,7 @@ export function TripPanel({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [trip.id, exceptional]);
 
   const vehicleById = new Map(vehicles.map((v) => [v.id, v]));
   const current = trip.vehicleId ? vehicleById.get(trip.vehicleId) : undefined;
@@ -164,7 +172,7 @@ export function TripPanel({
             {trip.payer === "PRIVATE" ? <Badge>{PAYER_LABELS.PRIVATE}</Badge> : null}
             {trip.exceptionalAmbulance ? <Badge tone="warning">Recours exceptionnel</Badge> : null}
             {trip.allowedVehicleTypes.map((t) => (
-              <VehicleTypeBadge key={t} type={t} />
+              <VehicleTypeBadge key={t} type={t} dot={false} />
             ))}
           </p>
         </div>

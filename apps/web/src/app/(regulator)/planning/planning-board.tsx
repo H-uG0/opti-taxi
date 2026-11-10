@@ -201,11 +201,12 @@ export function PlanningBoard({
           : (vehicles.find((v) => v.id === next.target.id)?.label ?? "Véhicule");
       if (next.target.kind === "trip") selectTrip(next.target.id);
       else showVehicle(next.target.id);
-      setAnnounce(`À traiter, ${next.index + 1} sur ${issues.length} : ${name}`);
+      // Named after the panel's title: « Courses à planifier » before the first optimization.
+      setAnnounce(`${planned ? "À traiter" : "Courses à planifier"}, ${next.index + 1} sur ${issues.length} : ${name}`);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [issues, selection, tripsById, vehicles, selectTrip, showVehicle]);
+  }, [issues, planned, selection, tripsById, vehicles, selectTrip, showVehicle]);
 
   // The panel shows the new selection from its top (it scrolls in its own box).
   const panelBox = useRef<HTMLDivElement>(null);
@@ -270,7 +271,8 @@ export function PlanningBoard({
   const unassignedIds = useMemo(() => (planned ? unassigned.map((u) => u.tripId) : []), [planned, unassigned]);
 
   // « Sélection seule »: the map keeps the selected trip, its vehicle and its co-passengers' vehicles, or the
-  // selected vehicle; with nothing selected it shows what the timeline shows.
+  // selected vehicle; with nothing selected it shows what the timeline shows, the button staying on (and able to be
+  // turned off) until the next selection.
   const hasSelection = selectedTrip !== null || selectedVehicle !== null;
   const selectionOnly = filter.mapSelectionOnly && hasSelection;
   const mapVehicleIds = useMemo(() => {
@@ -290,6 +292,7 @@ export function PlanningBoard({
         .map((v) => ({
           id: v.id,
           label: v.label,
+          type: v.type,
           color: colorOf(v),
           depot: v.depot,
           stops: (v.route?.stops ?? []).map((s) => ({
@@ -324,14 +327,15 @@ export function PlanningBoard({
     [trips, selectionOnly, selection.tripId, mapVehicleIds, violationIndex],
   );
   // The map frames the vehicles kept again when the filter changes; narrowed to depots, it frames their routes
-  // only (a trip without a vehicle belongs to no depot: it would pull the map away from them).
+  // only (a trip without a vehicle belongs to no depot: it would pull the map away from them). Not when the
+  // selection changes: the map's own selection effect frames it, except after a click on the map itself.
   const mapKey = [
     date,
     filter.depots.join(","),
     filter.types.join(","),
     filter.states.join(","),
     filter.hideFree,
-    selectionOnly ? `sel:${selection.tripId ?? ""}:${selection.vehicleId ?? ""}` : "",
+    filter.mapSelectionOnly ? "sel" : "",
   ].join("|");
   const setZoom = useCallback((zoom: ZoomLevel) => setFilter({ ...filter, zoom }), [filter, setFilter]);
 
@@ -522,8 +526,12 @@ export function PlanningBoard({
               onSelectVehicle={selectVehicle}
               datasetKey={mapKey}
               fitUnassigned={filter.depots.length === 0 || selectionOnly}
-              selectionOnly={selectionOnly}
-              onSelectionOnlyChange={hasSelection ? (on) => setFilter({ ...filter, mapSelectionOnly: on }) : null}
+              selectionOnly={filter.mapSelectionOnly}
+              selectionOnlyWaiting={filter.mapSelectionOnly && !hasSelection}
+              onSelectionOnlyChange={
+                hasSelection || filter.mapSelectionOnly ? (on) => setFilter({ ...filter, mapSelectionOnly: on }) : null
+              }
+              planned={planned}
             />
           </Card>
         </div>

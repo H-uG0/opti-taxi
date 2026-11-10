@@ -317,6 +317,14 @@ describe("buildPlanningView", () => {
     expect(started.dayStarted).toBe(true);
   });
 
+  it("widens the time range to the window of a trip without a vehicle no shift covers (the « À placer » row draws it)", () => {
+    const late = trip("late", { direction: "RETURN", appointmentMinute: null, readyMinute: 1230 });
+    const view = buildPlanningView(input({ trips: [...input().trips, late] }));
+    // Session ending at 20:30, picked up until 20:45 (+ 15 min): the range ends at 21:00, not at 19:00.
+    expect(view.timeRange.end).toBe(1260);
+    expect(view.timeRange.start).toBe(360);
+  });
+
   it("gives the solver budget an optimization launched now would get, scaled with the trips sent", () => {
     expect(buildPlanningView(input()).timeLimitSec).toBe(10);
     // A run in progress shows its own budget, from the trips it sent.

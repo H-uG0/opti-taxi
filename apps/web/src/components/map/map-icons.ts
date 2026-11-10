@@ -1,8 +1,9 @@
 /**
  * Small marker images of the planning map, drawn pixel by pixel (no canvas,
- * no font: the raster fallback style has no glyphs): the diamonds of a trip
- * without a vehicle and the warning sign of a violation. Pure, so it can be
- * unit-tested; MapLibre takes the result as is (map.addImage).
+ * no font: the raster fallback style has no glyphs): the stops of a route, one
+ * shape per vehicle type, the diamonds of a trip without a vehicle and the
+ * warning sign of a violation. Pure, so it can be unit-tested; MapLibre takes
+ * the result as is (map.addImage).
  */
 import { hexToRgb } from "@/lib/planning/colors";
 
@@ -26,13 +27,17 @@ function insideDistance(p: Point, polygon: readonly Point[]): number {
 
 type Paint = { fill: string; stroke: string; strokeWidth: number; extra?: (x: number, y: number) => boolean };
 
-function paint(size: number, polygon: readonly Point[], { fill, stroke, strokeWidth, extra }: Paint): IconImage {
+/** Signed distance to the border of a shape, positive inside. */
+type Shape = readonly Point[] | ((p: Point) => number);
+
+function paint(size: number, shape: Shape, { fill, stroke, strokeWidth, extra }: Paint): IconImage {
   const data = new Uint8Array(size * size * 4);
   const fillRgb = hexToRgb(fill);
   const strokeRgb = hexToRgb(stroke);
+  const distance = typeof shape === "function" ? shape : (p: Point) => insideDistance(p, shape);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const d = insideDistance([x + 0.5, y + 0.5], polygon);
+      const d = distance([x + 0.5, y + 0.5]);
       const alpha = Math.min(1, Math.max(0, d + 0.5));
       if (alpha <= 0) continue;
       const rgb = d < strokeWidth || extra?.(x + 0.5, y + 0.5) ? strokeRgb : fillRgb;
@@ -62,6 +67,57 @@ export function diamondIcon(size: number, color: string, hollow: boolean): IconI
     strokeWidth: hollow ? size * 0.16 : size * 0.07,
   });
 }
+
+export type StopShapeType = "TAXI" | "VSL" | "AMBULANCE";
+
+/** The square of a VSL, the cross of an ambulance (its two bars), in a `size` box. */
+function square(size: number): Point[] {
+  const lo = size * 0.12;
+  const hi = size - lo;
+  return [
+    [lo, lo],
+    [hi, lo],
+    [hi, hi],
+    [lo, hi],
+  ];
+}
+
+function bar(x0: number, y0: number, x1: number, y1: number): Point[] {
+  return [
+    [x0, y0],
+    [x1, y0],
+    [x1, y1],
+    [x0, y1],
+  ];
+}
+
+/** Where each type's stop is inside (signed distance): taxi a disc, VSL a square, ambulance a cross. */
+function stopShape(type: StopShapeType, size: number): Shape {
+  const c = size / 2;
+  if (type === "TAXI") return ([x, y]: Point) => c - 1 - Math.hypot(x - c, y - c);
+  if (type === "VSL") return square(size);
+  const arm = size * 0.22;
+  const across = bar(1, c - arm, size - 1, c + arm);
+  const down = bar(c - arm, 1, c + arm, size - 1);
+  return (p: Point) => Math.max(insideDistance(p, across), insideDistance(p, down));
+}
+
+/**
+ * A stop of a route, by the shape of its vehicle's type (taxi: disc, VSL:
+ * square, ambulance: cross) at its vehicle's color: filled with a white
+ * border at a pick-up, white inside with a colored border at a drop-off.
+ */
+export function stopIcon(size: number, type: StopShapeType, color: string, kind: "PICKUP" | "DROPOFF"): IconImage {
+  const pickup = kind === "PICKUP";
+  return paint(size, stopShape(type, size), {
+    fill: pickup ? color : "#ffffff",
+    stroke: pickup ? "#ffffff" : color,
+    strokeWidth: size * (pickup ? 0.1 : 0.13),
+  });
+}
+
+/** Image name of a stop (`stopIcon`), built by the map's style expression from the stop's properties. */
+export const STOP_ICON_PATTERN = /^stop:(TAXI|VSL|AMBULANCE):(PICKUP|DROPOFF):(#[0-9a-f]{6})$/i;
 
 /** A warning sign: amber triangle, dark border and « ! ». */
 export function warningIcon(size: number): IconImage {

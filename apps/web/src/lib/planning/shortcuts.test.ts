@@ -32,6 +32,30 @@ describe("one-key shortcuts", () => {
     expect(isShortcutKey(key("[", document.body, { ctrlKey: true, altKey: true, altGraph: true }))).toBe(true);
     expect(isShortcutKey({ ...key("n", document.body), defaultPrevented: true })).toBe(false);
   });
+
+  it("accept Option on a Mac for the signs it types (« [ », « ] », « / »), never for a letter", () => {
+    // ⌥⇧5 on a French Mac keyboard: altKey, no AltGraph, the key is already « [ ».
+    expect(isShortcutKey(key("[", document.body, { altKey: true }))).toBe(true);
+    expect(isShortcutKey(key("]", document.body, { altKey: true }))).toBe(true);
+    expect(isShortcutKey(key("/", document.body, { altKey: true }))).toBe(true);
+    expect(isShortcutKey(key("ƒ", document.body, { altKey: true }))).toBe(false);
+    expect(isShortcutKey(key("n", document.body, { altKey: true }))).toBe(false);
+    expect(isShortcutKey(key("[", document.body, { altKey: true, ctrlKey: true }))).toBe(false);
+    expect(isShortcutKey(key("[", document.body, { altKey: true, metaKey: true }))).toBe(false);
+  });
+
+  it("ignore a key held down: its repeats would undo the action (« F ») or race through the list (« N »)", () => {
+    expect(isShortcutKey({ ...key("f", document.body), repeat: true })).toBe(false);
+    expect(isShortcutKey({ ...key("f", document.body), repeat: false })).toBe(true);
+  });
+
+  it("stay on when the focus is on a radio button or a check box (the zoom, the filters), not on a text field", () => {
+    document.body.innerHTML = `<input id="r" type="radio"/><input id="c" type="checkbox"/><input id="s" type="search"/><input id="d" type="date"/><select id="l"></select><textarea id="t"></textarea>`;
+    expect(isTypingTarget(document.getElementById("r"))).toBe(false);
+    expect(isTypingTarget(document.getElementById("c"))).toBe(false);
+    expect(isShortcutKey(key("]", document.getElementById("r")))).toBe(true);
+    for (const id of ["s", "d", "l", "t"]) expect(isTypingTarget(document.getElementById(id))).toBe(true);
+  });
 });
 
 describe("« N » through « À traiter »", () => {

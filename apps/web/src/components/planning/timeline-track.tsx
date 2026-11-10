@@ -291,17 +291,27 @@ export function TrackTrips({
   );
 }
 
-/** The selected trip's appointment (or end of session) across the row, flagged under 5 min of margin. */
+/** « marge 3 min », « 5 min de retard » (dropped off after the appointment), as the trip's panel says it. */
+function marginText(marginMin: number): string {
+  return marginMin < 0 ? `${formatDuration(-marginMin)} de retard` : `marge ${formatDuration(marginMin)}`;
+}
+
+/**
+ * The selected trip's appointment (or end of session) across the row, flagged
+ * under 5 min of margin. Above the trips of its track, which isolates it: it
+ * scrolls under the pinned axis, rows and vehicle column like the blocks.
+ */
 function AppointmentLine({ mark, range, compact }: { mark: AppointmentMark; range: TimeRange; compact: boolean }) {
   const left = percentOf(mark.minute, range);
-  const margin = mark.tight && mark.marginMin !== null ? ` · marge ${formatDuration(mark.marginMin)}` : "";
-  const label = mark.kind === "appointment" ? `RDV ${formatMinute(mark.minute)}${margin}` : `Fin ${formatMinute(mark.minute)}`;
+  const margin = mark.tight && mark.marginMin !== null ? ` · ${marginText(mark.marginMin)}` : "";
+  const label =
+    mark.kind === "appointment" ? `RDV ${formatMinute(mark.minute)}${margin}` : `Fin de séance ${formatMinute(mark.minute)}`;
   return (
     <span
       aria-hidden
       data-appointment-mark
       className={cn(
-        "pointer-events-none absolute inset-y-0 z-30 w-0 border-l-2",
+        "pointer-events-none absolute inset-y-0 z-[21] w-0 border-l-2",
         mark.tight ? "border-dashed border-amber-600" : "border-slate-900",
       )}
       style={{ left: `${left}%` }}

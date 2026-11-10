@@ -193,6 +193,38 @@ describe("TripPanel (panneau course)", () => {
     expect(screen.getByRole("button", { name: /Figer/ }).getAttribute("aria-keyshortcuts")).toBe("F");
   });
 
+  it("acts once for « F » held down (its repeats are ignored)", async () => {
+    renderPanel(planningFixture().trips["trip-a"]!);
+    fireEvent.keyDown(document.body, { key: "f" });
+    fireEvent.keyDown(document.body, { key: "f", repeat: true });
+    fireEvent.keyDown(document.body, { key: "f", repeat: true });
+    await waitFor(() => expect(actions.lockTrip).toHaveBeenCalledTimes(1));
+    expect(actions.unlockTrip).not.toHaveBeenCalled();
+  });
+
+  it("never withdraws an exceptional ambulance with « F »: the key only goes to « Défiger », next to its warning", () => {
+    renderPanel({ ...planningFixture().trips["trip-a"]!, vehicleId: "amb-1", lockedVehicleId: "amb-1", exceptionalAmbulance: true });
+    fireEvent.keyDown(document.body, { key: "f" });
+    expect(actions.unlockTrip).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /Défiger/ }));
+  });
+
+  it("does nothing with « F » while the keyboard is on another trip of the timeline", async () => {
+    renderPanel(planningFixture().trips["trip-a"]!);
+    const other = document.createElement("button");
+    other.dataset.tripIds = "trip-b";
+    const cluster = document.createElement("button");
+    cluster.dataset.tripIds = "trip-b trip-a";
+    document.body.append(other, cluster);
+    fireEvent.keyDown(other, { key: "f" });
+    expect(actions.lockTrip).not.toHaveBeenCalled();
+    // A « +2 » holding the selected trip is the same trip.
+    fireEvent.keyDown(cluster, { key: "f" });
+    await waitFor(() => expect(actions.lockTrip).toHaveBeenCalledWith("trip-a", "taxi-1"));
+    other.remove();
+    cluster.remove();
+  });
+
   it("closes from its button", () => {
     const { onClose } = renderPanel(planningFixture().trips["trip-a"]!);
     fireEvent.click(screen.getByRole("button", { name: "Fermer le détail de la course" }));

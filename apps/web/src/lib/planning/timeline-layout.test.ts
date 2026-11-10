@@ -114,6 +114,27 @@ describe("click targets", () => {
       { tripIds: ["b"], from: 1180, to: 1200, lane: null },
     ]);
   });
+
+  it("splits a chain of trips minutes apart into several « +N », touching, never one for hours", () => {
+    // The whole day at 1 440 px: 24 px ≈ 41 min; ten 20-minute trips, one every 30 min from 06:52.
+    const chain = Array.from({ length: 10 }, (_, i) => block(`t${i}`, 412 + 30 * i, 432 + 30 * i));
+    const targets = clickTargets(chain, 41, RANGE, false);
+    expect(targets.length).toBeGreaterThan(2);
+    // Each trip in one target, in time order; no target over 3 widths; neighbours touch, never overlap.
+    expect(targets.flatMap((t) => t.tripIds)).toEqual(chain.map((b) => b.tripId));
+    for (const t of targets) {
+      expect(t.to - t.from).toBeGreaterThanOrEqual(41);
+      expect(t.to - t.from).toBeLessThanOrEqual(3 * 41);
+    }
+    for (let i = 1; i < targets.length; i++) expect(targets[i]!.from).toBeGreaterThanOrEqual(targets[i - 1]!.to);
+    expect(targets[1]!.from).toBe(targets[0]!.to);
+  });
+
+  it("keeps a long trip and the short ones under it in one target (its target is never cut)", () => {
+    // Two hours on board in one lane, short trips in the other, merged (compact density).
+    const long = [block("long", 600, 720, 0), block("s1", 610, 620, 1), block("s2", 650, 660, 1), block("s3", 700, 710, 1)];
+    expect(clickTargets(long, 41, RANGE, false).map((t) => t.tripIds)).toEqual([["long", "s1", "s2", "s3"]]);
+  });
 });
 
 describe("free slots", () => {

@@ -4,13 +4,8 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Car, Search, UserRound } from "lucide-react";
 import { cn } from "@/components/ui/cn";
 import { searchPlanning, type SearchResult } from "@/lib/planning/search";
+import { isShortcutKey } from "@/lib/planning/shortcuts";
 import type { TripView, VehicleRowView } from "@/lib/planning/types";
-
-/** True when a key typed there is text (the « / » shortcut must not steal it). */
-function isTyping(target: EventTarget | null): boolean {
-  const element = target as HTMLElement | null;
-  return element !== null && (element.isContentEditable || element.closest("input, textarea, select, [contenteditable='true']") !== null);
-}
 
 /**
  * Search box of the planning (« / » from anywhere on the page): a patient, a
@@ -44,7 +39,8 @@ export function PlanningSearch({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
+      // The rule of every shortcut of the help: not while typing nor in a dialog (« Aide », a « +3 » list).
+      if (e.key !== "/" || !isShortcutKey(e)) return;
       e.preventDefault();
       input.current?.focus();
       input.current?.select();

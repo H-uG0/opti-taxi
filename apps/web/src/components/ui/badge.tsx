@@ -37,10 +37,14 @@ export const VEHICLE_TYPE_HEX = {
   AMBULANCE: "#dc2626",
 } as const;
 
-export function VehicleTypeBadge({ type }: { type: keyof typeof VEHICLE_TYPE_SHORT }) {
+/**
+ * The vehicle type, with a dot of its color. `dot={false}` on the planning screens: there a colored dot is the
+ * vehicle's own display color (timeline, map), never its type's.
+ */
+export function VehicleTypeBadge({ type, dot = true }: { type: keyof typeof VEHICLE_TYPE_SHORT; dot?: boolean }) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-800 ring-1 ring-inset ring-slate-200">
-      <span aria-hidden className="size-2 rounded-full" style={{ background: VEHICLE_TYPE_COLORS[type] }} />
+      {dot ? <span aria-hidden className="size-2 rounded-full" style={{ background: VEHICLE_TYPE_COLORS[type] }} /> : null}
       {VEHICLE_TYPE_SHORT[type]}
     </span>
   );

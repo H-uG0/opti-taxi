@@ -70,7 +70,7 @@ export function DateNav({
       <LinkButton
         href={href(addDays(date, -1))}
         aria-label="Jour précédent"
-        title={shortcuts ? "Jour précédent ( [ )" : "Jour précédent"}
+        title={shortcuts ? "Jour précédent ([)" : "Jour précédent"}
         aria-keyshortcuts={shortcuts ? "[" : undefined}
       >
         <LinkIcon>
@@ -100,7 +100,7 @@ export function DateNav({
       <LinkButton
         href={href(addDays(date, 1))}
         aria-label="Jour suivant"
-        title={shortcuts ? "Jour suivant ( ] )" : "Jour suivant"}
+        title={shortcuts ? "Jour suivant (])" : "Jour suivant"}
         aria-keyshortcuts={shortcuts ? "]" : undefined}
       >
         <LinkIcon>
