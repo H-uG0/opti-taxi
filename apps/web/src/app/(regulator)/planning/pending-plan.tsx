@@ -36,6 +36,7 @@ const KIND_LABEL: Record<NonNullable<RunView["kind"]>, string> = {
   optimize: "Le calcul",
   move: "Le déplacement",
   restore: "Le retour au planning précédent",
+  place: "Le placement des courses non affectées",
 };
 
 /** At most this many trips or violations are named; the rest is counted. */

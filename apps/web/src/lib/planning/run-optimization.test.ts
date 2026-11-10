@@ -52,9 +52,15 @@ vi.mock("@/lib/optimizer/persist", () => ({
   savePlan: fake.savePlan,
 }));
 
-const { confirmPendingRun, discardPendingRun, restorePreviousPlan, runOptimization, withdrawLapsedProposals } = await import(
-  "./run-optimization"
-);
+const {
+  confirmPendingRun,
+  discardPendingRun,
+  NO_ROUTES_TO_KEEP_ERROR,
+  NOTHING_TO_PLACE_ERROR,
+  restorePreviousPlan,
+  runOptimization,
+  withdrawLapsedProposals,
+} = await import("./run-optimization");
 const { planVersionToken, requestHash } = await import("./version");
 
 const DATE = "2099-03-02";
@@ -654,5 +660,124 @@ describe("withdrawLapsedProposals (recours exceptionnel)", () => {
     await withdrawLapsedProposals(fake.db as unknown as Parameters<typeof withdrawLapsedProposals>[0], REGULATOR, DATE);
     expect(fake.db.trip.updateMany).not.toHaveBeenCalled();
     expect(fake.audit).not.toHaveBeenCalled();
+  });
+});
+
+describe("« Placer les non affectées » (runOptimization placeOnly)", () => {
+  /** The request as the day's input builds it: its trips with their locks (pins included). */
+  const buildFromInput = (day: { trips: Array<{ id: string; lockedVehicleId: string | null }> }) => ({
+    ...build(),
+    request: { ...build().request, trips: day.trips.map((t) => ({ id: t.id, lockedVehicleId: t.lockedVehicleId })) },
+  });
+  /** t2 is in the route of taxi_mrs, t1 has no vehicle. */
+  const assigned = [{ id: "t2", route: { vehicleId: "taxi_mrs" } }];
+
+  beforeEach(() => {
+    fake.build.mockImplementation(buildFromInput);
+    fake.db.trip.findMany.mockImplementation(async (args: { where: { routeId?: unknown } }) => (args.where.routeId ? assigned : []));
+    fake.db.route.findMany.mockResolvedValue([
+      {
+        vehicleId: "taxi_mrs",
+        stops: [
+          { tripId: "t2", kind: "PICKUP", sequence: 1 },
+          { tripId: "t2", kind: "DROPOFF", sequence: 2 },
+        ],
+      },
+    ]);
+  });
+
+  it("sends the trips in a route locked on its vehicle for this computation only, and names what it placed", async () => {
+    const route = (vehicleId: string, tripId: string) => ({ vehicleId, stops: [{ tripId, kind: "PICKUP" }, { tripId, kind: "DROPOFF" }] });
+    fake.optimize.mockResolvedValue({
+      ok: true,
+      data: { ...planIgnoringTheMove(), routes: [route("taxi_mrs", "t2"), route("vsl_gre", "t1")], unassigned: [] },
+    });
+    savePlanComparing({ current: figures(1), next: figures(2), lostTripIds: [] });
+
+    const outcome = await runOptimization(DATE, REGULATOR, { placeOnly: true });
+
+    const sent = fake.optimize.mock.calls[0]![0] as { trips: Array<{ id: string; lockedVehicleId: string | null }> };
+    expect(sent.trips).toEqual([
+      { id: "t1", lockedVehicleId: null },
+      { id: "t2", lockedVehicleId: "taxi_mrs" },
+    ]);
+    // Nothing written on the trips: the pin lives in the request only.
+    expect(fake.db.trip.updateMany).not.toHaveBeenCalled();
+    // The run counts the regulator's locks, not the pins.
+    expect(fake.db.optimizationRun.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ lockedCount: 0 }) }));
+    // Saved with the regulator's locks only (the pins are not locks).
+    expect(fake.savePlan.mock.calls[0]![1]).toMatchObject({ kind: "place", lockedCount: 0 });
+    expect(fake.audit).toHaveBeenCalledWith(
+      expect.anything(),
+      REGULATOR,
+      expect.objectContaining({ action: "plan.optimize", details: { mode: "place_unassigned" } }),
+    );
+    expect(outcome).toMatchObject({
+      ok: true,
+      message: expect.stringMatching(/^1 course placée sur 1 non affectée, les autres courses restent sur leur véhicule : /),
+    });
+  });
+
+  it("keeps a lock the regulator set, even on another vehicle", async () => {
+    fake.loadInput.mockResolvedValue(input({ t2: "vsl_gre" }));
+    savePlanComparing({ current: figures(1), next: figures(1), lostTripIds: [] });
+    await runOptimization(DATE, REGULATOR, { placeOnly: true });
+    const sent = fake.optimize.mock.calls[0]![0] as { trips: Array<{ id: string; lockedVehicleId: string | null }> };
+    expect(sent.trips.find((t) => t.id === "t2")?.lockedVehicleId).toBe("vsl_gre");
+    expect(fake.db.optimizationRun.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ lockedCount: 1 }) }));
+  });
+
+  it("refuses without routes in place, or without a trip to place, before any run", async () => {
+    fake.db.trip.findMany.mockResolvedValue([]);
+    expect(await runOptimization(DATE, REGULATOR, { placeOnly: true })).toEqual({ ok: false, error: NO_ROUTES_TO_KEEP_ERROR });
+
+    fake.db.trip.findMany.mockResolvedValue([...assigned, { id: "t1", route: { vehicleId: "vsl_gre" } }]);
+    expect(await runOptimization(DATE, REGULATOR, { placeOnly: true })).toEqual({ ok: false, error: NOTHING_TO_PLACE_ERROR });
+    expect(fake.db.optimizationRun.create).not.toHaveBeenCalled();
+    expect(fake.optimize).not.toHaveBeenCalled();
+  });
+
+  it("waits for confirmation like any computation, and is confirmed with the same pins", async () => {
+    fake.optimize.mockResolvedValue({ ok: true, data: { ...planIgnoringTheMove(), routes: [] } });
+    savePlanComparing({ current: figures(2), next: figures(1), lostTripIds: ["t2"] });
+    const outcome = await runOptimization(DATE, REGULATOR, { placeOnly: true });
+    expect(outcome).toMatchObject({ ok: false, needsConfirmation: true });
+    const stored = fake.db.optimizationRun.update.mock.calls.at(-1)![0] as {
+      data: { details: Record<string, unknown> & { kind: string; pending: { placeOnly?: boolean; requestHash: string } } };
+    };
+    expect(stored.data.details.kind).toBe("place");
+    expect(stored.data.details.pending.placeOnly).toBe(true);
+    // Hashed with the pins: a confirmation that forgot them would find « the day's data changed ».
+    expect(stored.data.details.pending.requestHash).toBe(
+      requestHash(buildFromInput({ trips: [{ id: "t1", lockedVehicleId: null }, { id: "t2", lockedVehicleId: "taxi_mrs" }] }).request),
+    );
+
+    fake.db.optimizationRun.findUnique.mockImplementation(async (args: { select: { serviceDate?: boolean } }) =>
+      args.select.serviceDate
+        ? {
+            id: "run-1",
+            serviceDate: new Date(`${DATE}T00:00:00Z`),
+            status: "AWAITING_CONFIRMATION",
+            finishedAt: null,
+            kpis: null,
+            // As stored by a real computation (the fake plan above has no solver status nor warnings).
+            details: {
+              ...stored.data.details,
+              solverStatus: "OK",
+              warnings: [],
+              pending: { ...stored.data.details.pending, response: planResponse() },
+            },
+          }
+        : { status: "AWAITING_CONFIRMATION" },
+    );
+    savePlanComparing({ current: figures(2), next: figures(1), lostTripIds: ["t2"] });
+    const confirmed = await confirmPendingRun("run-1", REGULATOR);
+    expect(confirmed).toMatchObject({ ok: true, message: expect.stringMatching(/^Courses non affectées placées : /) });
+    expect(fake.savePlan.mock.calls.at(-1)![1]).toMatchObject({ kind: "place", lockedCount: 0 });
+    expect(fake.audit).toHaveBeenLastCalledWith(
+      expect.anything(),
+      REGULATOR,
+      expect.objectContaining({ action: "plan.optimize", details: { confirmed: true, mode: "place_unassigned" } }),
+    );
   });
 });

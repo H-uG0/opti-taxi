@@ -390,6 +390,11 @@ export async function savePlan(
     /** The trip lock changed with this plan, kept in the run's details (restoring the plan replaced undoes it). */
     lockChange?: LockChange;
     /**
+     * Locks set by the regulator, when the request carries others (« Placer les non affectées » pins
+     * every trip in a route for that computation only); by default, the locks of the request.
+     */
+    lockedCount?: number;
+    /**
      * Called in the transaction when this first plan computed with OSRM starts the traffic calibration
      * over (AppSettings.trafficChangedAt): the caller records it in the audit trail.
      */
@@ -484,6 +489,7 @@ export async function savePlan(
           error: null,
           // kpis: exactly the optimizer KPIs (PlanResponse.kpis).
           ...summary,
+          ...(args.lockedCount !== undefined ? { lockedCount: args.lockedCount } : {}),
           // Solver status, violation list, warnings and unassigned reasons (see run-details.ts), the
           // comparison with the routes replaced and their stop sequences.
           details: runDetailsJson(response, {

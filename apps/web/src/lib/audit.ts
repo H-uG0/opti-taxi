@@ -15,7 +15,8 @@
  *   new prescription and new recurrence forms), prescription.view and
  *   recurrence.view (edit forms, on the Patient: a prescription can be
  *   deleted), facility.view (patients treated there), trip_list.view
- *   (/courses), plan.view (/planning), roadmap.view (driver, today or
+ *   (/courses), plan.view (/planning: the day's patients, addresses, phones,
+ *   access notes and trip notes), roadmap.view (driver, today or
  *   tomorrow), shared_arrivals.view (Facility when a facility's sheet is
  *   opened), driver.view (/chauffeurs/[id]: absences), day_crew.view
  *   (/equipages: everyone's absences of the day);
@@ -36,9 +37,13 @@
  *   serve it there or did not answer; or no longer in force: unlocked, moved
  *   off the ambulance, the plan computed with it discarded);
  * - planning: plan.optimize (details.confirmed when the regulator replaced the
- *   routes in place with a plan that waited for confirmation), plan.restore
+ *   routes in place with a plan that waited for confirmation; details.mode
+ *   "place_unassigned" for « Placer les non affectées »), plan.restore
  *   (« Revenir au planning précédent »), plan.discard (a waiting plan not
- *   kept), plan.validate, plan.reopen;
+ *   kept), plan.validate, plan.reopen, plan.lock and plan.unlock (« Figer » or
+ *   « Défiger » a route, a depot or the whole day: one event per action, on
+ *   the Route, the Depot or the day, details.scope and details.trips, the
+ *   number of trips changed);
  * - field, on the Trip (stops are deleted by re-optimizations): stop.pickup,
  *   stop.dropoff, stop.no_show, stop.undo_pickup, stop.undo_dropoff
  *   (details.observedAt: the time of the gesture, when the status was sent

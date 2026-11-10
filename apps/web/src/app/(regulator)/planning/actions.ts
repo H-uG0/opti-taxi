@@ -1,5 +1,6 @@
 "use server";
 
+import type { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
@@ -15,6 +16,7 @@ import {
 } from "@/lib/optimizer/build-request";
 import { logError } from "@/lib/log";
 import { DATABASE_ERROR, PLAN_CHANGED_ERROR, planningErrorMessage, UNEXPECTED_ERROR } from "@/lib/planning/action-errors";
+import { lockMessage, tripsToLock, tripsToUnlock, unlockMessage, type LockScope, type ScopeTrip } from "@/lib/planning/bulk-lock";
 import { lockPlanningDay } from "@/lib/planning/day-lock";
 import { loadPlanningDay } from "@/lib/planning/load";
 import { LOCKED, lockAction, notLockedOn } from "@/lib/planning/lock";
@@ -110,6 +112,25 @@ export async function optimizeDay(date: string): Promise<PlanningActionResult> {
     if (!parsed.success) return INVALID_DATE;
 
     const outcome = await runOptimization(parsed.data, user);
+    refreshPages();
+    return toResult(outcome);
+  });
+}
+
+/**
+ * « Placer les non affectées » : a computation where every trip already in a
+ * route is sent locked on its vehicle for that computation only (nothing is
+ * written on the trips), so that only the trips without a vehicle are placed
+ * and no other trip changes vehicle. Saved like any computation (comparison
+ * with the routes in place, audit event plan.optimize with details.mode).
+ */
+export async function placeUnassigned(date: string): Promise<PlanningActionResult> {
+  const user = await requireUser("REGULATOR");
+  return guarded("placeUnassigned", async () => {
+    const parsed = dateSchema.safeParse(date);
+    if (!parsed.success) return INVALID_DATE;
+
+    const outcome = await runOptimization(parsed.data, user, { placeOnly: true });
     refreshPages();
     return toResult(outcome);
   });
@@ -503,6 +524,157 @@ export async function unlockTrip(tripId: string): Promise<PlanningActionResult> 
         ? "Course défigée et recours exceptionnel à l'ambulance retiré : la prochaine optimisation la confiera à un taxi ou un VSL, ou la laissera sans véhicule."
         : "Course défigée : la prochaine optimisation pourra la changer de véhicule.",
     };
+  });
+}
+
+const scopeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("route"), vehicleId: idSchema }),
+  z.object({ kind: z.literal("depot"), depotId: idSchema }),
+  z.object({ kind: z.literal("day") }),
+]);
+
+/** The trips of `isoDate` a lock of `scope` may change, and the scope's name (vehicle label, depot name). */
+async function loadLockScope(
+  tx: Prisma.TransactionClient,
+  isoDate: string,
+  scope: LockScope,
+): Promise<{ trips: ScopeTrip[]; inScope: (vehicleId: string) => boolean; name: string | null; routeId: string | null } | null> {
+  const serviceDate = fromIsoDate(isoDate);
+  let vehicleIds: Set<string> | null = null;
+  let name: string | null = null;
+  let routeId: string | null = null;
+  if (scope.kind === "route") {
+    const route = await tx.route.findFirst({
+      where: { serviceDate, vehicleId: scope.vehicleId },
+      select: { id: true, vehicle: { select: { label: true } } },
+    });
+    if (!route) return null;
+    vehicleIds = new Set([scope.vehicleId]);
+    name = route.vehicle.label;
+    routeId = route.id;
+  } else if (scope.kind === "depot") {
+    const depot = await tx.depot.findUnique({ where: { id: scope.depotId }, select: { name: true, vehicles: { select: { id: true } } } });
+    if (!depot) return null;
+    vehicleIds = new Set(depot.vehicles.map((v) => v.id));
+    name = depot.name;
+  }
+  const ids = vehicleIds ? [...vehicleIds] : null;
+  const rows = await tx.trip.findMany({
+    where: {
+      serviceDate,
+      ...(ids ? { OR: [{ route: { is: { vehicleId: { in: ids } } } }, { lockedVehicleId: { in: ids } }] } : {}),
+    },
+    select: { id: true, status: true, lockedVehicleId: true, exceptionalAmbulanceAt: true, route: { select: { vehicleId: true } } },
+  });
+  return {
+    trips: rows.map((t) => ({
+      id: t.id,
+      status: t.status,
+      lockedVehicleId: t.lockedVehicleId,
+      routeVehicleId: t.route?.vehicleId ?? null,
+      exceptionalAmbulance: t.exceptionalAmbulanceAt !== null,
+    })),
+    inScope: (vehicleId) => vehicleIds === null || vehicleIds.has(vehicleId),
+    name,
+    routeId,
+  };
+}
+
+/** The audit event of a bulk lock or unlock: one per action, on the route, the depot or the day. */
+function lockScopeEvent(
+  action: "plan.lock" | "plan.unlock",
+  isoDate: string,
+  scope: LockScope,
+  routeId: string | null,
+  trips: number,
+): AuditEntry {
+  if (scope.kind === "route") {
+    return { action, entity: "Route", entityId: routeId, serviceDate: isoDate, details: { scope: "route", vehicleId: scope.vehicleId, trips } };
+  }
+  if (scope.kind === "depot") {
+    return { action, entity: "Depot", entityId: scope.depotId, serviceDate: isoDate, details: { scope: "depot", trips } };
+  }
+  return { action, entity: "Route", entityId: null, serviceDate: isoDate, details: { scope: "day", trips } };
+}
+
+/**
+ * « Figer la tournée », « Figer le dépôt », « Figer toute la journée » : every
+ * active trip of the scope's routes not locked yet is locked on the vehicle of
+ * its route, in one transaction and one audit event (plan.lock). A trip already
+ * locked keeps its lock. Under the planning lock of the date, on the version
+ * the regulator saw.
+ */
+export async function lockRoutes(date: string, scope: LockScope, shownVersion: string): Promise<PlanningActionResult> {
+  const user = await requireUser("REGULATOR");
+  return guarded("lockRoutes", async () => {
+    const parsed = z.object({ date: dateSchema, scope: scopeSchema }).safeParse({ date, scope });
+    if (!parsed.success) return { ok: false, error: "Tournées à figer invalides : rechargez la page." };
+    const isoDate = parsed.data.date;
+    const past = pastDateError(isoDate);
+    if (past) return past;
+    if (typeof shownVersion !== "string" || (await loadPlanVersion(db, isoDate)) !== shownVersion) return STALE_PLAN;
+
+    const outcome = await db.$transaction(async (tx) => {
+      await lockPlanningDay(tx, isoDate);
+      if ((await loadPlanVersion(tx, isoDate)) !== shownVersion) return "stale" as const;
+      const loaded = await loadLockScope(tx, isoDate, parsed.data.scope);
+      if (!loaded) return "stale" as const;
+      const plan = tripsToLock(loaded.trips, loaded.inScope);
+      let locked = 0;
+      for (const [vehicleId, ids] of plan.byVehicle) {
+        // Still unlocked and still on that vehicle's route when written.
+        const { count } = await tx.trip.updateMany({
+          where: { id: { in: ids }, lockedVehicleId: null, route: { is: { vehicleId } } },
+          data: { lockedVehicleId: vehicleId },
+        });
+        locked += count;
+      }
+      if (locked > 0) await audit(tx, user, lockScopeEvent("plan.lock", isoDate, parsed.data.scope, loaded.routeId, locked));
+      return { message: lockMessage(parsed.data.scope, loaded.name, locked, plan), changed: locked > 0 };
+    }, PLANNING_TX_OPTIONS);
+    if (outcome === "stale") return STALE_PLAN;
+    if (outcome.changed) refreshPages();
+    return { ok: true, message: outcome.message };
+  });
+}
+
+/**
+ * « Défiger la tournée », « Défiger le dépôt », « Défiger toute la journée » :
+ * every lock on one of the scope's vehicles, or on a trip of one of its
+ * routes, is removed in one transaction and one audit event (plan.unlock).
+ * An exceptional ambulance stays locked (« Défiger » withdraws it: its own
+ * panel does it). Under the planning lock of the date, on the version the
+ * regulator saw.
+ */
+export async function unlockRoutes(date: string, scope: LockScope, shownVersion: string): Promise<PlanningActionResult> {
+  const user = await requireUser("REGULATOR");
+  return guarded("unlockRoutes", async () => {
+    const parsed = z.object({ date: dateSchema, scope: scopeSchema }).safeParse({ date, scope });
+    if (!parsed.success) return { ok: false, error: "Tournées à défiger invalides : rechargez la page." };
+    const isoDate = parsed.data.date;
+    const past = pastDateError(isoDate);
+    if (past) return past;
+    if (typeof shownVersion !== "string" || (await loadPlanVersion(db, isoDate)) !== shownVersion) return STALE_PLAN;
+
+    const outcome = await db.$transaction(async (tx) => {
+      await lockPlanningDay(tx, isoDate);
+      if ((await loadPlanVersion(tx, isoDate)) !== shownVersion) return "stale" as const;
+      const loaded = await loadLockScope(tx, isoDate, parsed.data.scope);
+      if (!loaded) return "stale" as const;
+      const plan = tripsToUnlock(loaded.trips, loaded.inScope);
+      const { count } =
+        plan.ids.length > 0
+          ? await tx.trip.updateMany({
+              where: { id: { in: plan.ids }, lockedVehicleId: { not: null }, exceptionalAmbulanceAt: null },
+              data: { lockedVehicleId: null },
+            })
+          : { count: 0 };
+      if (count > 0) await audit(tx, user, lockScopeEvent("plan.unlock", isoDate, parsed.data.scope, loaded.routeId, count));
+      return { message: unlockMessage(parsed.data.scope, loaded.name, count, plan), changed: count > 0 };
+    }, PLANNING_TX_OPTIONS);
+    if (outcome === "stale") return STALE_PLAN;
+    if (outcome.changed) refreshPages();
+    return { ok: true, message: outcome.message };
   });
 }
 

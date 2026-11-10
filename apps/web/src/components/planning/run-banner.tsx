@@ -11,6 +11,7 @@ const PLAN_RUN_LABEL: Record<NonNullable<RunView["kind"]>, string> = {
   optimize: "Dernier calcul",
   move: "Dernier calcul (déplacement)",
   restore: "Planning précédent rétabli",
+  place: "Dernier calcul (placement des non affectées)",
 };
 
 /** What a run not kept was (« Calcul du … non retenu »). */
@@ -18,6 +19,7 @@ const NOT_KEPT_LABEL: Record<NonNullable<RunView["kind"]>, string> = {
   optimize: "Calcul",
   move: "Déplacement",
   restore: "Retour au planning précédent",
+  place: "Placement des non affectées",
 };
 
 /**

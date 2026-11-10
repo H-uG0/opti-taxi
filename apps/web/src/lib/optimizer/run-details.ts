@@ -14,8 +14,12 @@ import { z } from "zod";
 import type { PlanComparison, PlanSnapshot } from "@/lib/planning/plan-compare";
 import { planResponseSchema, unassignedSchema, violationSchema, type PlanResponse, type Violation } from "./contract";
 
-/** What produced a run: « Optimiser », « Déplacer vers… » or « Revenir au planning précédent ». */
-export type RunKind = "optimize" | "move" | "restore";
+/**
+ * What produced a run: « Optimiser », « Déplacer vers… », « Revenir au planning
+ * précédent » or « Placer les non affectées » (the trips in a route sent
+ * locked on their vehicle for that computation only).
+ */
+export type RunKind = "optimize" | "move" | "restore" | "place";
 
 /**
  * A trip lock changed with a plan, from `from` to `to` (null: no lock):
@@ -66,6 +70,12 @@ export type PendingPlan = {
    * restored lock is not written yet).
    */
   lockChange: LockChange | null;
+  /**
+   * « Placer les non affectées »: the request pinned every trip in a route to
+   * its vehicle (lib/planning/place-unassigned.ts); rebuilt the same way when
+   * the plan is confirmed. Absent: false.
+   */
+  placeOnly?: boolean;
 };
 
 /** The OptimizationRun columns the details are read from. */
@@ -106,7 +116,7 @@ const detailsSchema = z.object({
   warnings: z.array(z.string()),
   unassigned: z.array(unassignedSchema),
   trafficSource: z.string().optional(),
-  kind: z.enum(["optimize", "move", "restore"]).optional(),
+  kind: z.enum(["optimize", "move", "restore", "place"]).optional(),
   comparison: comparisonSchema.optional(),
   previous: snapshotSchema.optional(),
   evaluatedAt: z.string().optional(),
@@ -119,6 +129,7 @@ const pendingSchema = z.object({
   requestHash: z.string(),
   basedOnVersion: z.string(),
   lockChange: lockChangeSchema.nullable(),
+  placeOnly: z.boolean().optional(),
 });
 
 /** Legacy layout: the optimizer KPIs plus the details under the `details` key. */

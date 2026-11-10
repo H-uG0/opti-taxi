@@ -47,6 +47,7 @@ import { lockPlanningDay } from "./day-lock";
 import { emptyPlanIssue } from "./empty-plan";
 import { isExceptionalAmbulanceTrip } from "./exceptional-ambulance";
 import { lockAction } from "./lock";
+import { pinAssignedTrips } from "./place-unassigned";
 import {
   movePlacementIssue,
   moveRequestIssue,
@@ -86,6 +87,12 @@ export type RunOutcome =
 export type RunOptions = {
   /** « Déplacer vers… » : save the plan only if it serves this trip with this vehicle. */
   move?: MoveTarget;
+  /**
+   * « Placer les non affectées » : every trip in a route is sent locked on its
+   * vehicle for this computation only (never written), so that only the trips
+   * without a vehicle are placed (lib/planning/place-unassigned.ts).
+   */
+  placeOnly?: boolean;
 };
 
 /**
@@ -96,6 +103,10 @@ export const PLANNING_TX_OPTIONS = { maxWait: 15_000, timeout: 60_000 } as const
 
 export const OPTIMIZATION_IN_PROGRESS_ERROR =
   "Une optimisation de cette date est en cours : attendez la fin du calcul puis rechargez la page.";
+
+export const NO_ROUTES_TO_KEEP_ERROR =
+  "Aucune tournée en place ce jour : lancez l'optimisation de la journée, qui place toutes les courses.";
+export const NOTHING_TO_PLACE_ERROR = "Aucune course sans véhicule à placer : toutes les courses du jour sont dans une tournée.";
 
 function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
   return `${count} ${count > 1 ? pluralForm : singular}`;
@@ -170,6 +181,15 @@ export async function unassignedByLastPlan(isoDate: string): Promise<ReadonlySet
   });
   const details = run ? readRunDetails(run) : null;
   return new Set(details?.unassigned.map((u) => u.tripId) ?? []);
+}
+
+/** Trips of isoDate in a route, with the vehicle of that route (« Placer les non affectées »). */
+async function loadAssignments(isoDate: string): Promise<Map<string, string>> {
+  const rows = await db.trip.findMany({
+    where: { serviceDate: fromIsoDate(isoDate), routeId: { not: null } },
+    select: { id: true, route: { select: { vehicleId: true } } },
+  });
+  return new Map(rows.flatMap((row) => (row.route ? [[row.id, row.route.vehicleId] as const] : [])));
 }
 
 /**
@@ -389,6 +409,8 @@ async function startRun(
   user: Pick<SessionUser, "id">,
   request: OptimizeRequest,
   solverTimeLimitSec: number,
+  /** Locks set by the regulator, when the request carries others (« Placer les non affectées »). */
+  lockedCount: number = request.trips.filter((t) => t.lockedVehicleId).length,
 ): Promise<string | null> {
   const serviceDate = fromIsoDate(isoDate);
   const run = await db.$transaction(async (tx) => {
@@ -409,7 +431,7 @@ async function startRun(
         status: "RUNNING",
         requestedById: user.id,
         tripsCount: request.trips.length,
-        lockedCount: request.trips.filter((t) => t.lockedVehicleId).length,
+        lockedCount,
       },
       select: { id: true },
     });
@@ -462,7 +484,14 @@ const AUDIT_ACTION: Record<RunKind, "plan.optimize" | "plan.restore"> = {
   optimize: "plan.optimize",
   move: "plan.optimize",
   restore: "plan.restore",
+  place: "plan.optimize",
 };
+
+/** Audit details of a saved plan: how it was computed when not a plain optimization. */
+function auditDetails(kind: RunKind, confirmed: boolean): { details?: { confirmed?: boolean; mode?: string } } {
+  const details = { ...(confirmed ? { confirmed: true } : {}), ...(kind === "place" ? { mode: "place_unassigned" } : {}) };
+  return Object.keys(details).length > 0 ? { details } : {};
+}
 
 /**
  * "Planning optimisé : 62/64 courses servies · 10 tournées dont 2 modifiées · calcul 10 s · …";
@@ -475,6 +504,7 @@ function successMessage(
   plan: PlanResponse,
   build: BuildResult,
   changes: RouteChanges | null = null,
+  place: ReadonlySet<string> | null = null,
 ): string {
   const kept = kind === "optimize" && changes !== null && changes.changed === 0 && changes.removed === 0 && changes.total > 0;
   let routes = plural(saved.routes, "tournée");
@@ -489,6 +519,15 @@ function successMessage(
   if (tariffNote) parts.push(tariffNote);
   const violations = plan.validation.violations.length;
   if (violations > 0) parts.push(`${plural(violations, "violation")} à vérifier`);
+  if (kind === "place" && place) {
+    const left = new Set(plan.unassigned.map((u) => u.tripId));
+    const placed = [...place].filter((id) => !left.has(id)).length;
+    const what =
+      placed === 0
+        ? `Aucune des ${plural(place.size, "course non affectée", "courses non affectées")} n'a trouvé de place, les autres courses restent sur leur véhicule`
+        : `${plural(placed, "course placée", "courses placées")} sur ${plural(place.size, "non affectée", "non affectées")}, les autres courses restent sur leur véhicule`;
+    return `${what} : ${parts.join(" · ")}.`;
+  }
   const what =
     kind === "restore" ? "Planning précédent rétabli" : kept ? "Planning en place conservé, aucun meilleur trouvé" : "Planning optimisé";
   return `${what} : ${parts.join(" · ")}.`;
@@ -520,6 +559,10 @@ async function finishRun(args: {
   lock?: { change: LockChange; written: boolean } | null;
   /** The routes in place when the computation started, as stored: the message says how many it changed. */
   inPlace?: RouteSequences | null;
+  /** « Placer les non affectées » : the trips without a vehicle it was asked to place. */
+  place?: ReadonlySet<string> | null;
+  /** Locks set by the regulator when the request also carries the pins of « Placer les non affectées ». */
+  lockedCount?: number;
 }): Promise<RunOutcome> {
   const { kind, isoDate, user, runId, build, plan, move } = args;
   const lock = args.lock ?? null;
@@ -554,7 +597,13 @@ async function finishRun(args: {
   try {
     // The event commits with the saved plan, or rolls back with it (kept routes, blocked day, database error).
     const traced = withBeforeCommit(db, async (tx) => {
-      await audit(tx, user, { action: AUDIT_ACTION[kind], entity: "OptimizationRun", entityId: runId, serviceDate: isoDate });
+      await audit(tx, user, {
+        action: AUDIT_ACTION[kind],
+        entity: "OptimizationRun",
+        entityId: runId,
+        serviceDate: isoDate,
+        ...auditDetails(kind, false),
+      });
       // A restoration puts back, with the routes, the lock the move it undoes had replaced.
       if (lock && !lock.written) await writeLockChange(tx, user, isoDate, lock.change);
       await withdrawLapsedProposals(tx, user, isoDate);
@@ -567,6 +616,7 @@ async function finishRun(args: {
       crews: build.crews,
       kind,
       lockChange: lock?.change,
+      ...(args.lockedCount !== undefined ? { lockedCount: args.lockedCount } : {}),
       onTrafficReset: (tx) => auditTrafficReset(tx, user, runId, isoDate),
       check: ({ comparison, version }) => {
         // A move that would leave other trips without a vehicle is never applied silently: the question
@@ -630,6 +680,7 @@ async function finishRun(args: {
                 requestHash: requestHash(request),
                 basedOnVersion,
                 lockChange: lock?.change ?? null,
+                ...(kind === "place" ? { placeOnly: true } : {}),
               },
             }),
           },
@@ -642,7 +693,7 @@ async function finishRun(args: {
     return failRun(runId, "Le planning calculé n'a pas pu être enregistré (erreur de base de données). Relancez l'optimisation.", meta);
   }
   const changes = args.inPlace ? changedRoutes(args.inPlace, plan.routes) : null;
-  return { ok: true, runId, message: successMessage(kind, saved, plan, build, changes) };
+  return { ok: true, runId, message: successMessage(kind, saved, plan, build, changes, args.place ?? null) };
 }
 
 /**
@@ -656,10 +707,25 @@ async function finishRun(args: {
  */
 export async function runOptimization(isoDate: string, user: Actor, options: RunOptions = {}): Promise<RunOutcome> {
   await completeDayBeforeRun(isoDate, user);
-  const prepared = await prepareRequest(isoDate);
+  // « Placer les non affectées » : the trips in a route go locked on its vehicle, for this computation only.
+  const assignments = options.placeOnly ? await loadAssignments(isoDate) : null;
+  if (assignments && assignments.size === 0) return { ok: false, error: NO_ROUTES_TO_KEEP_ERROR };
+  let pinned: ReadonlySet<string> = new Set();
+  const prepared = await prepareRequest(
+    isoDate,
+    assignments
+      ? (day) => {
+          const pinnedInput = pinAssignedTrips(day, assignments);
+          pinned = pinnedInput.pinned;
+          return pinnedInput.input;
+        }
+      : undefined,
+  );
   if (!prepared.ok) return { ok: false, error: prepared.error };
   const { input, build } = prepared;
   const { move } = options;
+  const toPlace = assignments ? new Set(build.request.trips.filter((t) => !assignments.has(t.id)).map((t) => t.id)) : null;
+  if (toPlace && toPlace.size === 0) return { ok: false, error: NOTHING_TO_PLACE_ERROR };
   const moveLock = moveLockChange(move);
   if (move) {
     const issue = moveRequestIssue(build, move);
@@ -669,7 +735,8 @@ export async function runOptimization(isoDate: string, user: Actor, options: Run
     }
   }
 
-  const runId = await startRun(isoDate, user, build.request, input.settings.solverTimeLimitSec);
+  const ownLocks = build.request.trips.filter((t) => t.lockedVehicleId && !pinned.has(t.id)).length;
+  const runId = await startRun(isoDate, user, build.request, input.settings.solverTimeLimitSec, ownLocks);
   if (!runId) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
   const inPlace = await loadRoutesInPlace(isoDate, build.request);
   const result: OptimizerResult<PlanResponse> = await optimize(
@@ -677,7 +744,7 @@ export async function runOptimization(isoDate: string, user: Actor, options: Run
   );
   if (!result.ok) return failRun(runId, result.error);
   return finishRun({
-    kind: move ? "move" : "optimize",
+    kind: move ? "move" : toPlace ? "place" : "optimize",
     isoDate,
     user,
     runId,
@@ -687,6 +754,8 @@ export async function runOptimization(isoDate: string, user: Actor, options: Run
     move,
     lock: moveLock ? { change: moveLock, written: true } : null,
     inPlace: inPlace?.stored,
+    place: toPlace,
+    ...(toPlace ? { lockedCount: ownLocks } : {}),
   });
 }
 
@@ -758,8 +827,21 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
   if (!pending) return dropPendingRun(run.id, run.details, `${NOT_KEPT_PREFIX} : calcul illisible. Relancez l'optimisation.`);
 
   const { lockChange } = pending;
+  // « Placer les non affectées » : pinned again to the routes in place (unchanged since, or the request differs).
+  const assignments = pending.placeOnly ? await loadAssignments(isoDate) : null;
+  const relocked = withLockChange(lockChange);
+  let pinned: ReadonlySet<string> = new Set();
   // The lock a move set was undone while the plan waited (a restored one is not written yet): the request is rebuilt with it.
-  const prepared = await prepareRequest(isoDate, withLockChange(lockChange));
+  const prepared = await prepareRequest(
+    isoDate,
+    assignments
+      ? (day) => {
+          const pinnedInput = pinAssignedTrips(relocked(day), assignments);
+          pinned = pinnedInput.pinned;
+          return pinnedInput.input;
+        }
+      : relocked,
+  );
   if (!prepared.ok) return dropPendingRun(run.id, run.details, `${NOT_KEPT_PREFIX} : ${prepared.error}`);
   const { build } = prepared;
   if (requestHash(build.request) !== pending.requestHash) return dropPendingRun(run.id, run.details, INPUT_CHANGED_ERROR);
@@ -772,7 +854,7 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
         entity: "OptimizationRun",
         entityId: run.id,
         serviceDate: isoDate,
-        details: { confirmed: true },
+        ...auditDetails(kind, true),
       });
       if (lockChange) {
         await writeLockChange(tx, user, isoDate, lockChange, kind === "move" ? "trip.move" : lockAction(lockChange.to));
@@ -789,6 +871,7 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
       // The computation ended when it was put on hold, not when the regulator confirmed it.
       finishedAt: run.finishedAt ?? undefined,
       lockChange: lockChange ?? undefined,
+      ...(assignments ? { lockedCount: build.request.trips.filter((t) => t.lockedVehicleId && !pinned.has(t.id)).length } : {}),
       onTrafficReset: (tx) => auditTrafficReset(tx, user, run.id, isoDate),
       // Under the planning lock of the date, which discardPendingRun takes too: never both confirmed and discarded.
       check: async ({ tx, version }) => {
@@ -804,7 +887,8 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
     logError("[planning] saving a confirmed plan failed", error, { runId: run.id, serviceDate: isoDate });
     return { ok: false, error: "Le planning n'a pas pu être enregistré (erreur de base de données). Réessayez." };
   }
-  const what = kind === "restore" ? "Planning précédent rétabli" : "Nouveau planning enregistré";
+  const what =
+    kind === "restore" ? "Planning précédent rétabli" : kind === "place" ? "Courses non affectées placées" : "Nouveau planning enregistré";
   return { ok: true, runId: run.id, message: `${what} : ${saved.served}/${saved.served + saved.unassigned} courses servies · ${plural(saved.routes, "tournée")}.` };
 }
 

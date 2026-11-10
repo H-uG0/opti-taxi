@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CheckCheck, LockOpen, Sparkles } from "lucide-react";
+import { CheckCheck, ListPlus, LockOpen, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { optimizeDay, reopenDay, validateDay } from "./actions";
+import { optimizeDay, placeUnassigned, reopenDay, validateDay } from "./actions";
 import { usePlanningActivity } from "./planning-activity";
 
 export type ToolbarProps = {
@@ -17,6 +17,11 @@ export type ToolbarProps = {
   runningReason: string | null;
   canValidate: boolean;
   canReopen: boolean;
+  /**
+   * Trips without a vehicle on a planned day: « Placer les non affectées »
+   * places them without moving the other trips to another vehicle. 0: no button.
+   */
+  unassignedCount?: number;
 };
 
 const RUNNING_ELSEWHERE = "Une optimisation de cette date est en cours sur un autre poste : attendez la fin du calcul.";
@@ -29,6 +34,7 @@ export function PlanningToolbar({
   runningReason,
   canValidate,
   canReopen,
+  unassignedCount = 0,
 }: ToolbarProps) {
   const { busy, run, remoteRunning, optimizerOffline } = usePlanningActivity();
   const [confirmation, setConfirmation] = useState<string | null>(null);
@@ -78,6 +84,23 @@ export function PlanningToolbar({
         <span id="optimize-blocked" className="sr-only">
           {optimizeOff}
         </span>
+      ) : null}
+
+      {unassignedCount > 0 ? (
+        <Button
+          variant="secondary"
+          onClick={() => run("Placement des courses non affectées…", () => placeUnassigned(date), { long: true })}
+          disabled={busy || optimizeOff !== null}
+          title={
+            optimizeOff ??
+            `Place ${unassignedCount > 1 ? `les ${unassignedCount} courses non affectées` : "la course non affectée"} dans les tournées en place : les autres courses restent sur leur véhicule pour ce calcul (sans être figées), leurs horaires peuvent bouger`
+          }
+          aria-describedby={optimizeOff ? "optimize-blocked" : undefined}
+        >
+          <ListPlus aria-hidden className="size-4" />
+          Placer les non affectées
+          <span className="tabular rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-900">{unassignedCount}</span>
+        </Button>
       ) : null}
 
       {canValidate ? (

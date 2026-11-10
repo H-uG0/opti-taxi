@@ -488,6 +488,11 @@ describe("contract fixtures", () => {
     expect(write?.data.details).toMatchObject({ comparison: { current: null, lostTripIds: [] } });
     expect(write?.data.details).not.toHaveProperty("previous");
 
+    // « Placer les non affectées » : the run counts the regulator's locks, not the pins of its request.
+    const placed = fakeClient();
+    await savePlan(placed.prisma, { runId: "run_p", isoDate: request.date, request, response, now: NOW, kind: "place", lockedCount: 0 });
+    expect(placed.runWrites[0]?.data).toMatchObject({ lockedCount: 0, details: expect.objectContaining({ kind: "place" }) });
+
     const stored = JSON.parse(JSON.stringify({ id: "run_1", kpis: write?.data.kpis, details: write?.data.details }));
     expect(readRunDetails(stored)).toEqual({
       runId: "run_1",

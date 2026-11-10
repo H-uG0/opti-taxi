@@ -208,8 +208,8 @@ export type RunView = {
    * during the computation. The next optimization marks it FAILED.
    */
   interrupted: boolean;
-  /** « Optimiser », « Déplacer vers… » or « Revenir au planning précédent »; null for a run saved before. */
-  kind: "optimize" | "move" | "restore" | null;
+  /** « Optimiser », « Déplacer vers… », « Revenir au planning précédent » or « Placer les non affectées »; null for a run saved before. */
+  kind: "optimize" | "move" | "restore" | "place" | null;
   /**
    * AWAITING_CONFIRMATION: the question asked (patients named), the figures
    * side by side, the trips served in place it would leave without a vehicle
