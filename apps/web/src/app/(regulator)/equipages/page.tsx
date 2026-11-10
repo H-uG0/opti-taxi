@@ -11,16 +11,20 @@ import { isSimulatedDay } from "@/lib/simulated-day";
 import { loadDayCrewContext } from "@/lib/optimizer/build-request";
 import { vehicleIssues } from "@/lib/planning/route-issues";
 import { replanBlocker } from "@/lib/planning/run-optimization";
-import { absenceOn, isQualified, planningAbsenceText, staffName } from "@/lib/staff/day-crews";
+import { compareLabels, comparePeople, compareVehiclesByDepot } from "@/lib/fleet/order";
+import { absenceOn, depotDistanceKm, isQualified, planningAbsenceText, staffName } from "@/lib/staff/day-crews";
 import { formatLongDate, fromIsoDate, isIsoDate, isoWeekday, todayIso, tomorrowIso } from "@/lib/time";
 import { DateNav } from "../planning/date-nav";
 import { Callout } from "../vehicules/_lib/ui";
-import { CrewForm, type CrewPersonOption, type CrewRow } from "./crew-form";
+import { CrewForm, type CrewDepots, type CrewPersonOption, type CrewRow } from "./crew-form";
+import { QUALIFICATION_SHORT, QUALIFICATIONS } from "../chauffeurs/schema";
 import { crewOrigin } from "./schema";
 
 export const metadata: Metadata = { title: "Équipages" };
 
-const TYPE_ORDER: Record<VehicleType, number> = { TAXI: 0, VSL: 1, AMBULANCE: 2 };
+/** The filter of the page (depot, « à traiter seulement ») follows from one date to the next. */
+const KEPT_PARAMS = ["depot", "etat"] as const;
+
 const TYPES: VehicleType[] = ["TAXI", "VSL", "AMBULANCE"];
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -56,6 +60,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
   });
   const depotName = new Map(depots.map((d) => [d.id, d.name]));
   const crewOf = new Map(plan.crews.map((c) => [c.vehicleId, c]));
+  const flagged = new Set(issues.map((issue) => issue.vehicleId));
   const weekday = isoWeekday(date);
 
   const rows: CrewRow[] = vehicles
@@ -80,24 +85,17 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
         issues: crew?.issues ?? [],
         blocked: crew?.blocked ?? null,
         unavailable: crew?.unavailable ?? false,
+        flagged: flagged.has(v.id),
       };
     })
-    .sort(
-      (a, b) =>
-        a.depotName.localeCompare(b.depotName, "fr") ||
-        TYPE_ORDER[a.type] - TYPE_ORDER[b.type] ||
-        a.label.localeCompare(b.label, "fr", { numeric: true }),
-    );
+    // The same order everywhere (lib/fleet/order.ts): depot, type, label in numeric order.
+    .sort(compareVehiclesByDepot);
 
   const assigned = new Set(rows.flatMap((r) => [r.driverId, r.crewMateId]).filter((id): id is string => id !== null));
-  const labelOf = new Map(vehicles.map((v) => [v.id, v.label]));
-  const vehicleOfPerson = new Map<string, string>();
-  for (const crew of plan.crews) {
-    for (const id of [crew.driverId, crew.crewMateId]) if (id && !vehicleOfPerson.has(id)) vehicleOfPerson.set(id, crew.vehicleId);
-  }
+  // The people once for the whole page: each seat builds its choices when it is opened (crew-form.tsx).
   const people: CrewPersonOption[] = input.people
     .filter((p) => p.active || assigned.has(p.id))
-    .sort((a, b) => a.lastName.localeCompare(b.lastName, "fr") || a.firstName.localeCompare(b.firstName, "fr"))
+    .sort(comparePeople)
     .map((p) => {
       const absence = absenceOn(p.id, date, input.absences);
       return {
@@ -109,10 +107,19 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
         worksThatDay: p.workDays.includes(weekday),
         canDrive: Object.fromEntries(TYPES.map((t) => [t, isQualified(p, t, "driver")])) as Record<VehicleType, boolean>,
         canCrew: isQualified(p, "AMBULANCE", "crewMate"),
-        vehicleId: vehicleOfPerson.get(p.id) ?? null,
-        vehicleLabel: labelOf.get(vehicleOfPerson.get(p.id) ?? "") ?? null,
+        qualifications: QUALIFICATIONS.filter((q) => p.qualifications.includes(q))
+          .map((q) => QUALIFICATION_SHORT[q])
+          .join(", "),
       };
     });
+  // Names and straight-line distances between depots: the choices of a seat say how far a person comes from.
+  const depotPlaces = input.depots ?? [];
+  const crewDepots: CrewDepots = {
+    names: Object.fromEntries([...depots].sort((a, b) => compareLabels(a.name, b.name)).map((d) => [d.id, d.name])),
+    km: Object.fromEntries(
+      depotPlaces.map((a) => [a.id, Object.fromEntries(depotPlaces.map((b) => [b.id, Math.round(depotDistanceKm(a, b))]))]),
+    ),
+  };
 
   const nameOf = (id: string) => {
     const p = context.people.get(id);
@@ -120,13 +127,16 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
   };
   const ready = plan.crews.filter((c) => c.blocked === null).length;
   const parked = plan.crews.filter((c) => c.parked).length;
-  const blocked = plan.crews.length - ready - parked;
+  const unavailable = plan.crews.filter((c) => c.unavailable).length;
+  // An out-of-service vehicle is not « à revoir »: nobody can make it work that day.
+  const blocked = plan.crews.length - ready - parked - unavailable;
   const hasSavedCrews = input.saved.length > 0;
   const fixedCount = rows.filter((r) => r.fixed !== null).length;
   const summary = [
     `${ready} véhicule${ready > 1 ? "s" : ""} avec équipage`,
     // A seat nobody fills, or hours over 6 hours without a legal break: the problems column says which.
     blocked > 0 ? `${blocked} non planifié${blocked > 1 ? "s" : ""} (équipage à revoir)` : null,
+    unavailable > 0 ? `${unavailable} indisponible${unavailable > 1 ? "s" : ""}` : null,
     parked > 0 ? `${parked} laissé${parked > 1 ? "s" : ""} au dépôt` : null,
     `${plan.absent.length} absence${plan.absent.length > 1 ? "s" : ""}`,
   ].filter(Boolean);
@@ -141,7 +151,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
           </span>
         }
         description={summary.join(" · ")}
-        actions={<DateNav date={date} tomorrow={tomorrow} basePath="/equipages" />}
+        actions={<DateNav date={date} tomorrow={tomorrow} basePath="/equipages" keepParams={KEPT_PARAMS} />}
       />
 
       <div className="space-y-6">
@@ -204,7 +214,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
           garder le remplaçant proposé.
         </p>
 
-        <CrewForm date={date} rows={rows} people={people} locked={locked} hasSavedCrews={hasSavedCrews} />
+        <CrewForm date={date} rows={rows} people={people} depots={crewDepots} locked={locked} hasSavedCrews={hasSavedCrews} />
 
         <div className="grid gap-6 md:grid-cols-2">
           <Card>
@@ -225,7 +235,8 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
                 </ul>
               )}
               <p className="mt-3 text-xs text-slate-500">
-                Les absences se saisissent dans la fiche de chaque chauffeur ; leur motif n&apos;est visible que là.
+                Les absences se saisissent dans la fiche de chaque chauffeur. Gardes et formations sont nommées ici ; les
+                autres motifs ne sont visibles que sur la fiche.
               </p>
             </CardBody>
           </Card>

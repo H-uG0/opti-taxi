@@ -1,18 +1,24 @@
 "use client";
 
-import { useActionState, useState, type ChangeEvent } from "react";
+import { useActionState, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useFormStatus } from "react-dom";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { VehicleType } from "@prisma/client";
 import { Pin, Undo2 } from "lucide-react";
 import { Badge, VehicleTypeBadge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FormMessage, Select } from "@/components/ui/form";
-import { TBody, THead, Table, Td, Th } from "@/components/ui/table";
-import { SubmitButton } from "@/components/ui/submit-button";
+import { cn } from "@/components/ui/cn";
+import { FilterBar, FilterCheckbox, FilterSelect } from "@/components/ui/filter-bar";
+import { FormMessage } from "@/components/ui/form";
+import { SearchSelect, type SearchSelectOption } from "@/components/ui/search-select";
+import { GroupHeaderRow, TBody, THead, Table, Td, Th } from "@/components/ui/table";
 import { IDLE_STATE, valueOf, type FieldErrors, type FormValues } from "@/lib/forms";
 import { formatInstant } from "@/lib/planning/format";
 import { shiftText, type CrewIssue, type Seat } from "@/lib/staff/day-crews";
 import { formatShortDate } from "@/lib/time";
 import { saveDayCrews } from "./actions";
+import { assignmentsOf, seatOptions, type CrewPersonOption, type DepotInfo } from "./person-options";
 import {
   crewMateField,
   driverField,
@@ -25,21 +31,9 @@ import {
   versionField,
   type CrewOrigin,
 } from "./schema";
+import { depotSummaries, needsAttention, parseCrewFilter, TO_HANDLE, type DepotSummary } from "./summary";
 
-export type CrewPersonOption = {
-  id: string;
-  name: string;
-  active: boolean;
-  depotId: string | null;
-  /** "absence du … au …", or null when not absent that day. */
-  absence: string | null;
-  worksThatDay: boolean;
-  canDrive: Record<VehicleType, boolean>;
-  canCrew: boolean;
-  /** Label of the vehicle the person is on that day (crew of the day), or null. */
-  vehicleId: string | null;
-  vehicleLabel: string | null;
-};
+export type { CrewPersonOption } from "./person-options";
 
 export type CrewRow = {
   vehicleId: string;
@@ -67,7 +61,12 @@ export type CrewRow = {
   blocked: string | null;
   /** Out of service that day: no crew to choose. */
   unavailable: boolean;
+  /** « Équipage à revoir » of the planning (a change since the routes were computed, an overdue deadline). */
+  flagged: boolean;
 };
+
+/** Depot names and straight-line distances between depots (km), for the choices of a seat. */
+export type CrewDepots = { names: Record<string, string>; km: Record<string, Record<string, number>> };
 
 const ORIGIN_TONES: Record<CrewOrigin, BadgeTone> = {
   fixed: "brand",
@@ -77,56 +76,62 @@ const ORIGIN_TONES: Record<CrewOrigin, BadgeTone> = {
   none: "danger",
 };
 
-function optionLabel(person: CrewPersonOption, row: CrewRow, seat: Seat): string {
-  const notes: string[] = [];
-  if (!person.active) notes.push("désactivé");
-  if (person.absence) notes.push(person.absence);
-  else if (!person.worksThatDay) notes.push("hors de ses jours habituels");
-  if (!(seat === "driver" ? person.canDrive[row.type] : person.canCrew)) notes.push("non qualifié");
-  if (person.vehicleLabel && person.vehicleId !== row.vehicleId) notes.push(`sur ${person.vehicleLabel}`);
-  if (person.depotId !== row.depotId) notes.push("autre dépôt");
-  return notes.length > 0 ? `${person.name} (${notes.join(", ")})` : person.name;
-}
+const COLUMNS = 6;
+
+type SeatValues = { driver: string; mate: string };
 
 export function CrewForm({
   date,
   rows,
   people,
+  depots,
   locked,
   hasSavedCrews,
 }: {
   date: string;
   rows: CrewRow[];
   people: CrewPersonOption[];
+  depots: CrewDepots;
   /** Why the crews of this date can no longer change, or null. */
   locked: string | null;
   hasSavedCrews: boolean;
 }) {
   const [state, formAction] = useActionState(saveDayCrews, IDLE_STATE);
   const echoed = state.status === "error" ? state.values : null;
-  const errors = state.fieldErrors;
 
   return (
-    // Remount on every response so the selects show the echoed values.
+    // Remount on every response so the seats show the echoed values (or the saved crews).
     <CrewFormBody
       key={state.submissionId}
       date={date}
       rows={rows}
       people={people}
+      depots={depots}
       locked={locked}
       hasSavedCrews={hasSavedCrews}
       action={formAction}
       echoed={echoed}
-      errors={errors}
+      errors={state.fieldErrors}
       message={state.message ? { tone: state.status === "error" ? "error" : "success", text: state.message } : null}
     />
   );
+}
+
+function shownValue(row: CrewRow, seat: Seat): string {
+  return seat === "driver" && row.origin === "parked" ? PARK_VALUE : ((seat === "driver" ? row.driverId : row.crewMateId) ?? "");
+}
+
+function isDirty(row: CrewRow, value: SeatValues | undefined): boolean {
+  if (row.unavailable || !value) return false;
+  const park = value.driver === PARK_VALUE;
+  return value.driver !== shownValue(row, "driver") || (row.type === "AMBULANCE" && !park && value.mate !== shownValue(row, "crewMate"));
 }
 
 function CrewFormBody({
   date,
   rows,
   people,
+  depots,
   locked,
   hasSavedCrews,
   action,
@@ -137,6 +142,7 @@ function CrewFormBody({
   date: string;
   rows: CrewRow[];
   people: CrewPersonOption[];
+  depots: CrewDepots;
   locked: string | null;
   hasSavedCrews: boolean;
   action: (formData: FormData) => void;
@@ -144,286 +150,483 @@ function CrewFormBody({
   errors: FieldErrors;
   message: { tone: "error" | "success"; text: string } | null;
 }) {
-  const shownValue = (row: CrewRow, seat: Seat) =>
-    seat === "driver" && row.origin === "parked" ? PARK_VALUE : ((seat === "driver" ? row.driverId : row.crewMateId) ?? "");
-  // Rows whose selects differ from the crew shown: only they are written.
-  const [dirty, setDirty] = useState<Set<string>>(
+  const params = useSearchParams();
+  const depotIds = useMemo(() => new Set(rows.map((r) => r.depotId)), [rows]);
+  const filter = parseCrewFilter(params, depotIds);
+  const depotInfo: DepotInfo = useMemo(
+    () => ({
+      names: new Map(Object.entries(depots.names)),
+      km: new Map(Object.entries(depots.km).map(([id, row]) => [id, new Map(Object.entries(row))])),
+    }),
+    [depots],
+  );
+  const peopleById = useMemo(() => new Map(people.map((p) => [p.id, p])), [people]);
+
+  // The seats as chosen: the form's state (rows hidden by a filter keep theirs).
+  const [values, setValues] = useState<Map<string, SeatValues>>(
     () =>
-      new Set(
-        echoed
-          ? rows
-              .filter(
-                (row) =>
-                  !row.unavailable &&
-                  (valueOf(echoed, driverField(row.vehicleId)) !== shownValue(row, "driver") ||
-                    (row.type === "AMBULANCE" && valueOf(echoed, crewMateField(row.vehicleId)) !== shownValue(row, "crewMate"))),
-              )
-              .map((row) => row.vehicleId)
-          : [],
+      new Map(
+        rows.map((row) => [
+          row.vehicleId,
+          echoed
+            ? { driver: valueOf(echoed, driverField(row.vehicleId)), mate: valueOf(echoed, crewMateField(row.vehicleId)) }
+            : { driver: shownValue(row, "driver"), mate: shownValue(row, "crewMate") },
+        ]),
       ),
   );
-
-  // Rows whose driver select says « Laisser au dépôt »: their crew mate select is off (nobody on board).
-  const [parkedRows, setParkedRows] = useState<Set<string>>(
-    () =>
-      new Set(
-        rows
-          .filter((row) => (echoed ? valueOf(echoed, driverField(row.vehicleId)) : shownValue(row, "driver")) === PARK_VALUE)
-          .map((row) => row.vehicleId),
-      ),
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  const dirty = useMemo(() => new Set(rows.filter((row) => isDirty(row, values.get(row.vehicleId))).map((r) => r.vehicleId)), [rows, values]);
+  const assignments = useMemo(() => assignmentsOf(rows, values), [rows, values]);
+  const summaries = useMemo(() => depotSummaries(rows, values, people, assignments), [rows, values, people, assignments]);
+  const flagged = useMemo(() => new Set(rows.filter((r) => r.flagged).map((r) => r.vehicleId)), [rows]);
+  const withError = (row: CrewRow) => Boolean(errors[driverField(row.vehicleId)] || errors[crewMateField(row.vehicleId)]);
+  // A row with a refused seat stays on screen whatever the filter: its message is there.
+  const visible = rows.filter(
+    (row) =>
+      withError(row) ||
+      ((filter.depot === null || row.depotId === filter.depot) && (!filter.toHandle || needsAttention(row, flagged, dirty))),
   );
+  const toHandle = rows.filter((row) => needsAttention(row, flagged, dirty)).length;
+  const errorRows = rows.filter(withError);
 
-  const toggle = (set: Set<string>, id: string, on: boolean) => {
-    if (set.has(id) === on) return set;
-    const next = new Set(set);
-    if (on) next.add(id);
-    else next.delete(id);
-    return next;
-  };
+  // Unsaved changes are not lost by closing or reloading the tab without a warning.
+  useEffect(() => {
+    if (dirty.size === 0) return;
+    const onUnload = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", onUnload);
+    return () => window.removeEventListener("beforeunload", onUnload);
+  }, [dirty.size]);
 
-  const onSeatChange = (row: CrewRow) => (event: ChangeEvent<HTMLSelectElement>) => {
-    const form = event.currentTarget.form;
-    if (!form) return;
-    const current = (field: string) => (form.elements.namedItem(field) as HTMLSelectElement | null)?.value ?? "";
-    const park = current(driverField(row.vehicleId)) === PARK_VALUE;
-    const changed =
-      current(driverField(row.vehicleId)) !== shownValue(row, "driver") ||
-      (row.type === "AMBULANCE" && !park && current(crewMateField(row.vehicleId)) !== shownValue(row, "crewMate"));
-    setDirty((previous) => toggle(previous, row.vehicleId, changed));
-    setParkedRows((previous) => toggle(previous, row.vehicleId, park));
-  };
+  const setSeat = (vehicleId: string, seat: Seat, value: string) =>
+    setValues((previous) => {
+      const next = new Map(previous);
+      const current = next.get(vehicleId) ?? { driver: "", mate: "" };
+      next.set(vehicleId, seat === "driver" ? { ...current, driver: value } : { ...current, mate: value });
+      return next;
+    });
 
   const fixedRows = rows.filter((row) => row.fixed !== null);
   const authors = [...new Set(fixedRows.map((row) => row.fixed?.by).filter((by): by is string => Boolean(by)))];
   const many = fixedRows.length > 1;
   const by = authors.length > 0 ? ` (par ${authors.join(", ")})` : "";
-  const resetQuestion = [
-    `Revenir aux propositions automatiques pour tout le ${formatShortDate(date)} ?`,
-    `${many ? `Les ${fixedRows.length} équipages fixés` : "L'équipage fixé"}${by} ${many ? "seront oubliés" : "sera oublié"}.`,
-    dirty.size > 0 ? "Vos modifications non enregistrées seront perdues." : "",
-    "Un équipage qu'un collègue a fixé ou modifié depuis l'affichage de la page est gardé.",
-  ]
-    .filter(Boolean)
-    .join("\n");
   const canFix = (row: CrewRow) => !row.unavailable && row.blocked === null && row.proposedSeats.length > 0;
+  const setDepot = (depotId: string | null) => {
+    const next = new URLSearchParams(window.location.search);
+    if (depotId) next.set("depot", depotId);
+    else next.delete("depot");
+    window.history.replaceState(null, "", `${window.location.pathname}?${next.toString()}`);
+  };
+  const filtered = filter.depot !== null || filter.toHandle;
 
   return (
-    <form action={action} className="space-y-4">
-      <input type="hidden" name="date" value={date} />
-      {message ? <FormMessage tone={message.tone}>{message.text}</FormMessage> : null}
-      <fieldset disabled={locked !== null} className="space-y-4">
-        <Table>
-          <THead>
-            <tr>
-              <Th>Véhicule</Th>
-              <Th>Chauffeur</Th>
-              <Th>Équipier</Th>
-              <Th>Horaire</Th>
-              <Th>Origine</Th>
-              <Th>Remarques</Th>
-            </tr>
-          </THead>
-          <TBody>
-            {rows.map((row, index) => {
-              const depotHeader = index === 0 || rows[index - 1]?.depotId !== row.depotId;
-              const driverValue = echoed ? valueOf(echoed, driverField(row.vehicleId)) : shownValue(row, "driver");
-              const mateValue = echoed ? valueOf(echoed, crewMateField(row.vehicleId)) : shownValue(row, "crewMate");
-              const driverError = errors[driverField(row.vehicleId)];
-              const mateError = errors[crewMateField(row.vehicleId)];
-              const isDirty = dirty.has(row.vehicleId);
-              const hasError = row.issues.some((issue) => issue.level === "error") && !row.unavailable;
-              return [
-                depotHeader ? (
-                  <tr key={`depot-${row.depotId}`} className="bg-slate-50">
-                    <Td colSpan={6} className="text-xs font-semibold tracking-wide text-slate-600 uppercase">
-                      Dépôt {row.depotName}
-                    </Td>
-                  </tr>
-                ) : null,
-                <tr key={row.vehicleId} className={isDirty ? "bg-amber-50/60" : hasError ? "bg-red-50/40" : undefined}>
-                  <Td className="whitespace-nowrap">
-                    <span className="flex items-center gap-2">
-                      <VehicleTypeBadge type={row.type} />
-                      <span className="font-medium text-slate-900">{row.label}</span>
-                    </span>
-                    <span className="font-mono text-xs text-slate-500">{row.registration}</span>
-                  </Td>
-                  {row.unavailable ? (
-                    <Td colSpan={3} className="text-sm text-slate-500">
-                      <input type="hidden" name={versionField(row.vehicleId)} value={row.savedVersion ?? ""} />
-                      Véhicule indisponible ce jour : pas d&apos;équipage.{" "}
-                      <a href={`/vehicules/${row.vehicleId}`} className="underline">
-                        Voir la fiche
-                      </a>
-                    </Td>
-                  ) : (
-                    <>
-                      <Td className="min-w-48">
-                        <input type="hidden" name={shownDriverField(row.vehicleId)} value={shownValue(row, "driver")} />
-                        <input type="hidden" name={versionField(row.vehicleId)} value={row.savedVersion ?? ""} />
-                        <Select
-                          name={driverField(row.vehicleId)}
-                          defaultValue={driverValue}
-                          onChange={onSeatChange(row)}
-                          aria-label={`Chauffeur de ${row.label}`}
-                          aria-invalid={Boolean(driverError)}
-                        >
-                          {row.origin === "parked" ? (
-                            <option value={PARK_VALUE}>— Laissé au dépôt ce jour —</option>
-                          ) : (
-                            <>
-                              <option value="">— Aucun chauffeur —</option>
-                              <option value={PARK_VALUE}>Laisser au dépôt ce jour</option>
-                            </>
-                          )}
-                          {people.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {optionLabel(p, row, "driver")}
-                            </option>
-                          ))}
-                        </Select>
-                        {driverError ? <p className="mt-1 text-xs font-medium text-red-700">{driverError}</p> : null}
+    <div className="space-y-3">
+      <FilterBar
+        action="/equipages"
+        label="Filtrer les véhicules"
+        resetHref={`/equipages?date=${date}`}
+        filtered={filtered}
+        mode="replace"
+        hidden={{ date }}
+      >
+        <FilterSelect
+          name="depot"
+          label="Dépôt"
+          value={filter.depot ?? ""}
+          allLabel="Tous les dépôts"
+          options={summaries.map((s) => ({ value: s.depotId, label: s.depotName }))}
+          className="w-52"
+        />
+        <FilterCheckbox name="etat" value={TO_HANDLE} label={`À traiter seulement (${toHandle})`} checked={filter.toHandle} />
+      </FilterBar>
+
+      <DepotStrip summaries={summaries} selected={filter.depot} onSelect={setDepot} />
+
+      <form action={action} className="space-y-3">
+        <input type="hidden" name="date" value={date} />
+        {/* min-w-0: a fieldset is as wide as its content by default, the table would widen the page instead of scrolling in its frame. */}
+        <fieldset disabled={locked !== null} className="min-w-0 space-y-3">
+          {/* Every row's crew as shown and as chosen, whatever the filter shows: only the changed rows are written. */}
+          {rows.map((row) => (
+            <SeatInputs key={row.vehicleId} row={row} value={values.get(row.vehicleId)} />
+          ))}
+          <p className="text-sm text-slate-600" aria-live="polite">
+            {filtered ? `${visible.length} véhicule${visible.length > 1 ? "s" : ""} affiché${visible.length > 1 ? "s" : ""} sur ${rows.length}` : `${rows.length} véhicules`}
+            , par dépôt, type et numéro.
+          </p>
+          {visible.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-8 text-center text-sm text-slate-600">
+              {filter.toHandle ? "Rien à traiter pour ces filtres." : "Aucun véhicule pour ces filtres."}
+            </p>
+          ) : (
+            <Table>
+              <caption className="sr-only">Équipages du {formatShortDate(date)}, par dépôt</caption>
+              <THead>
+                <tr>
+                  <Th>Véhicule</Th>
+                  <Th>Chauffeur</Th>
+                  <Th>Équipier</Th>
+                  <Th>Horaire</Th>
+                  <Th>Origine</Th>
+                  <Th>Remarques</Th>
+                </tr>
+              </THead>
+              <TBody>
+                {visible.map((row, index) => {
+                  const depotHeader = index === 0 || visible[index - 1]?.depotId !== row.depotId;
+                  const summary = depotHeader ? summaries.find((s) => s.depotId === row.depotId) : undefined;
+                  const value = values.get(row.vehicleId) ?? { driver: "", mate: "" };
+                  const parked = value.driver === PARK_VALUE;
+                  const driverError = errors[driverField(row.vehicleId)];
+                  const mateError = errors[crewMateField(row.vehicleId)];
+                  const changed = dirty.has(row.vehicleId);
+                  const hasError = row.issues.some((issue) => issue.level === "error") && !row.unavailable;
+                  const personLabel = (id: string, empty: string) =>
+                    id === "" ? empty : id === PARK_VALUE ? "Laissé au dépôt ce jour" : (peopleById.get(id)?.name ?? "Personne inconnue");
+                  const optionsOf = (seat: Seat) => () =>
+                    seatOptions(
+                      people,
+                      { vehicleId: row.vehicleId, type: row.type, depotId: row.depotId, seat, otherSeatValue: seat === "driver" ? value.mate : value.driver },
+                      assignments,
+                      depotInfo,
+                      seat === "driver" ? driverSpecial(row) : [{ value: "", label: "— Aucun équipier —" }],
+                    );
+                  return [
+                    summary ? <DepotHeader key={`depot-${row.depotId}`} summary={summary} /> : null,
+                    <tr
+                      key={row.vehicleId}
+                      id={`vehicule-${row.vehicleId}`}
+                      className={cn("scroll-mt-40", changed ? "bg-amber-50/60" : hasError ? "bg-red-50/40" : undefined)}
+                    >
+                      <Td className="max-w-56">
+                        <span className="flex items-center gap-2">
+                          <VehicleTypeBadge type={row.type} />
+                          <span className="font-medium text-slate-900">{row.label}</span>
+                        </span>
+                        <span className="font-mono text-xs text-slate-500">{row.registration}</span>
                       </Td>
-                      <Td className="min-w-48">
-                        {row.type === "AMBULANCE" ? (
-                          <>
-                            <input type="hidden" name={shownCrewMateField(row.vehicleId)} value={shownValue(row, "crewMate")} />
-                            <Select
-                              name={crewMateField(row.vehicleId)}
-                              defaultValue={mateValue}
-                              onChange={onSeatChange(row)}
-                              // Left at the depot: nobody on board.
-                              disabled={parkedRows.has(row.vehicleId)}
-                              aria-label={`Équipier de ${row.label}`}
-                              aria-invalid={Boolean(mateError)}
+                      {row.unavailable ? (
+                        <Td colSpan={3} className="text-sm text-slate-500">
+                          Pas d&apos;équipage ce jour.{" "}
+                          <Link href={`/vehicules/${row.vehicleId}`} className="underline">
+                            Voir la fiche
+                          </Link>
+                        </Td>
+                      ) : (
+                        <>
+                          <Td className="w-52 min-w-48">
+                            <SearchSelect
+                              value={value.driver}
+                              onChange={(v) => setSeat(row.vehicleId, "driver", v)}
+                              options={optionsOf("driver")}
+                              selectedLabel={personLabel(value.driver, row.origin === "parked" ? "— Laissé au dépôt —" : "— Aucun chauffeur —")}
+                              label={`Chauffeur de ${row.label}`}
+                              invalid={Boolean(driverError)}
+                              describedBy={driverError ? `erreur-${row.vehicleId}-driver` : undefined}
+                            />
+                            {driverError ? (
+                              <p id={`erreur-${row.vehicleId}-driver`} className="mt-1 text-xs font-medium text-red-700">
+                                {driverError}
+                              </p>
+                            ) : null}
+                          </Td>
+                          <Td className="w-52 min-w-48">
+                            {row.type === "AMBULANCE" ? (
+                              <>
+                                <SearchSelect
+                                  value={parked ? "" : value.mate}
+                                  onChange={(v) => setSeat(row.vehicleId, "crewMate", v)}
+                                  options={optionsOf("crewMate")}
+                                  selectedLabel={parked ? "— Personne à bord —" : personLabel(value.mate, "— Aucun équipier —")}
+                                  label={`Équipier de ${row.label}`}
+                                  // Left at the depot: nobody on board.
+                                  disabled={parked}
+                                  invalid={Boolean(mateError)}
+                                  describedBy={mateError ? `erreur-${row.vehicleId}-mate` : undefined}
+                                />
+                                {mateError ? (
+                                  <p id={`erreur-${row.vehicleId}-mate`} className="mt-1 text-xs font-medium text-red-700">
+                                    {mateError}
+                                  </p>
+                                ) : null}
+                              </>
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
+                            )}
+                          </Td>
+                          <Td className="tabular text-sm whitespace-nowrap text-slate-700">
+                            {row.shift ? shiftText(row.shift) : <span className="text-slate-400">—</span>}
+                          </Td>
+                        </>
+                      )}
+                      <Td>
+                        <span className="flex flex-col items-start gap-1">
+                          <span className="flex flex-wrap gap-1">
+                            <Badge tone={row.unavailable ? "warning" : ORIGIN_TONES[row.origin]} className="whitespace-nowrap">
+                              {row.unavailable ? "Indisponible" : ORIGIN_LABELS[row.origin]}
+                            </Badge>
+                            {row.fixed && row.proposedSeats.length > 0 ? (
+                              <Badge tone="info" className="whitespace-nowrap">
+                                Remplaçant proposé
+                              </Badge>
+                            ) : null}
+                            {changed ? <Badge tone="warning">Modifié</Badge> : null}
+                          </span>
+                          {canFix(row) ? (
+                            <Button
+                              type="submit"
+                              name="intent"
+                              value={`${FIX_INTENT}${row.vehicleId}`}
+                              variant="ghost"
+                              size="sm"
+                              className="-ml-2.5 text-xs whitespace-nowrap"
+                              // Submitting it would drop the other rows' changes: save them first.
+                              disabled={dirty.size > 0}
+                              title="Garder ce remplaçant même si les absences ou les équipages fixés changent"
                             >
-                              <option value="">— Aucun équipier —</option>
-                              {people.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {optionLabel(p, row, "crewMate")}
-                                </option>
-                              ))}
-                            </Select>
-                            {mateError ? <p className="mt-1 text-xs font-medium text-red-700">{mateError}</p> : null}
-                          </>
+                              <Pin aria-hidden className="size-3.5" />
+                              Fixer cette proposition
+                            </Button>
+                          ) : null}
+                          {row.fixed && !row.unavailable ? (
+                            <>
+                              <span className="max-w-40 text-xs text-slate-500">
+                                {row.fixed.by ? `par ${row.fixed.by}, ` : ""}le {formatInstant(row.fixed.version)}
+                              </span>
+                              <Button
+                                type="submit"
+                                name="intent"
+                                value={`${UNFIX_INTENT}${row.vehicleId}`}
+                                variant="ghost"
+                                size="sm"
+                                className="-ml-2.5 text-xs whitespace-nowrap"
+                                // Submitting it would drop the other rows' changes: save them first (said in the bar).
+                                disabled={dirty.size > 0}
+                                title="Oublier l'équipage fixé de ce véhicule : il reprend la proposition automatique"
+                              >
+                                <Undo2 aria-hidden className="size-3.5" />
+                                Revenir à la proposition
+                              </Button>
+                            </>
+                          ) : null}
+                        </span>
+                      </Td>
+                      <Td className="min-w-40 text-xs">
+                        {row.issues.length === 0 ? (
+                          <span className="text-slate-400">—</span>
                         ) : (
-                          <span className="text-xs text-slate-400">—</span>
+                          <ul className="space-y-0.5">
+                            {row.issues.map((issue, i) => (
+                              // An out-of-service vehicle has nothing to fix here: its reason is not an alarm.
+                              <li key={i} className={issue.level === "error" && !row.unavailable ? "font-medium text-red-700" : "text-slate-600"}>
+                                {issue.message}
+                                {issue.workTime && row.driverId ? (
+                                  <Link href={`/chauffeurs/${row.driverId}`} className="block underline">
+                                    Ouvrir la fiche du chauffeur
+                                  </Link>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
                         )}
                       </Td>
-                      <Td className="tabular text-sm whitespace-nowrap text-slate-700">
-                        {row.shift ? shiftText(row.shift) : <span className="text-slate-400">—</span>}
-                      </Td>
-                    </>
-                  )}
-                  <Td>
-                    <span className="flex flex-col items-start gap-1">
-                      <span className="flex flex-wrap gap-1">
-                        <Badge tone={row.unavailable ? "warning" : ORIGIN_TONES[row.origin]} className="whitespace-nowrap">
-                          {row.unavailable ? "Indisponible" : ORIGIN_LABELS[row.origin]}
-                        </Badge>
-                        {row.fixed && row.proposedSeats.length > 0 ? (
-                          <Badge tone="info" className="whitespace-nowrap">
-                            Remplaçant proposé
-                          </Badge>
-                        ) : null}
-                        {isDirty ? <Badge tone="warning">Modifié</Badge> : null}
-                      </span>
-                      {canFix(row) ? (
-                        <Button
-                          type="submit"
-                          name="intent"
-                          value={`${FIX_INTENT}${row.vehicleId}`}
-                          variant="ghost"
-                          size="sm"
-                          className="-ml-2.5 text-xs whitespace-nowrap"
-                          // Submitting it would drop the other rows' changes: save them first.
-                          disabled={dirty.size > 0}
-                          title="Garder ce remplaçant même si les absences ou les équipages fixés changent"
-                        >
-                          <Pin aria-hidden className="size-3.5" />
-                          Fixer cette proposition
-                        </Button>
-                      ) : null}
-                      {row.fixed && !row.unavailable ? (
-                        <>
-                          <span className="max-w-40 text-xs text-slate-500">
-                            {row.fixed.by ? `par ${row.fixed.by}, ` : ""}le {formatInstant(row.fixed.version)}
-                          </span>
-                          <Button
-                            type="submit"
-                            name="intent"
-                            value={`${UNFIX_INTENT}${row.vehicleId}`}
-                            variant="ghost"
-                            size="sm"
-                            className="-ml-2.5 text-xs whitespace-nowrap"
-                            // Submitting it would drop the other rows' changes: save them first (said in the footer).
-                            disabled={dirty.size > 0}
-                            title="Oublier l'équipage fixé de ce véhicule : il reprend la proposition automatique"
-                          >
-                            <Undo2 aria-hidden className="size-3.5" />
-                            Revenir à la proposition
-                          </Button>
-                        </>
-                      ) : null}
-                    </span>
-                  </Td>
-                  <Td className="min-w-48 text-xs">
-                    {row.issues.length === 0 ? (
-                      <span className="text-slate-400">—</span>
-                    ) : (
-                      <ul className="space-y-0.5">
-                        {row.issues.map((issue, i) => (
-                          <li key={i} className={issue.level === "error" ? "font-medium text-red-700" : "text-slate-600"}>
-                            {issue.message}
-                            {issue.workTime && row.driverId ? (
-                              <a href={`/chauffeurs/${row.driverId}`} className="block underline">
-                                Ouvrir la fiche du chauffeur
-                              </a>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </Td>
-                </tr>,
-              ];
-            })}
-          </TBody>
-        </Table>
-        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-200 pt-4">
-          <div className="mr-auto max-w-2xl space-y-1 text-xs text-slate-500">
-            <p>
-              Seules les lignes modifiées sont enregistrées et deviennent des équipages fixés : l&apos;optimisation les
-              utilise tels quels, et propose un remplaçant si une personne fixée devient absente. Les autres lignes restent
-              des propositions qui suivent les absences ; « Fixer cette proposition » garde un remplaçant proposé.
-            </p>
-            {dirty.size > 0 && (fixedRows.length > 0 || rows.some(canFix)) ? (
-              <p className="font-medium text-amber-800">
-                Modifications en cours : enregistrez-les (ou rechargez la page pour les abandonner) avant « Revenir à la
-                proposition » ou « Fixer cette proposition ».
+                    </tr>,
+                  ];
+                })}
+              </TBody>
+            </Table>
+          )}
+
+          {/* Always in view at the bottom of the screen: the result, the rows to fix, the changes to save. */}
+          <div className="sticky bottom-0 z-20 -mx-1 space-y-2 rounded-t-lg border border-b-0 border-slate-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_-6px_rgb(15_23_42/0.15)] backdrop-blur">
+            {message ? <FormMessage tone={message.tone}>{message.text}</FormMessage> : null}
+            {errorRows.length > 0 ? (
+              <p className="text-sm text-red-800">
+                À corriger :{" "}
+                {errorRows.map((row, i) => (
+                  <span key={row.vehicleId}>
+                    {i > 0 ? ", " : null}
+                    <a href={`#vehicule-${row.vehicleId}`} className="font-medium underline">
+                      {row.label}
+                    </a>
+                  </span>
+                ))}
               </p>
             ) : null}
+            {confirmingReset ? (
+              <div className="flex flex-wrap items-center justify-end gap-3" role="group" aria-label="Confirmer le retour aux propositions">
+                <p className="mr-auto max-w-3xl text-sm text-slate-800">
+                  Revenir aux propositions automatiques pour tout le {formatShortDate(date)} ?{" "}
+                  {many ? `Les ${fixedRows.length} équipages fixés` : "L'équipage fixé"}
+                  {by} {many ? "seront oubliés" : "sera oublié"}.
+                  {dirty.size > 0 ? " Vos modifications non enregistrées seront perdues." : ""} Un équipage qu&apos;un collègue a fixé
+                  ou modifié depuis l&apos;affichage de la page est gardé.
+                </p>
+                <Button variant="ghost" onClick={() => setConfirmingReset(false)}>
+                  Garder les équipages
+                </Button>
+                <IntentSubmit intent="reset" variant="danger" pendingLabel="Retour aux propositions…" autoFocus>
+                  Revenir aux propositions
+                </IntentSubmit>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                <div className="mr-auto max-w-2xl space-y-1 text-xs text-slate-500">
+                  {dirty.size > 0 ? (
+                    <p className="text-sm font-medium text-amber-800">
+                      {dirty.size > 1 ? `${dirty.size} modifications non enregistrées` : "1 modification non enregistrée"}
+                      {fixedRows.length > 0 || rows.some(canFix)
+                        ? " : enregistrez-les (ou rechargez la page pour les abandonner) avant « Revenir à la proposition » ou « Fixer cette proposition »."
+                        : "."}
+                    </p>
+                  ) : (
+                    <p>
+                      Seules les lignes modifiées sont enregistrées et deviennent des équipages fixés : l&apos;optimisation les
+                      utilise tels quels, et propose un remplaçant si une personne fixée devient absente. Les autres lignes restent
+                      des propositions qui suivent les absences.
+                    </p>
+                  )}
+                </div>
+                {hasSavedCrews ? (
+                  <Button variant="secondary" onClick={() => setConfirmingReset(true)}>
+                    Revenir aux propositions (tout le jour)
+                  </Button>
+                ) : null}
+                <IntentSubmit intent="save" pendingLabel="Enregistrement…" disabled={dirty.size === 0}>
+                  {dirty.size === 0
+                    ? "Aucune modification"
+                    : `Enregistrer ${dirty.size > 1 ? `les ${dirty.size} modifications` : "la modification"}`}
+                </IntentSubmit>
+              </div>
+            )}
           </div>
-          {hasSavedCrews ? (
-            <Button
-              type="submit"
-              name="intent"
-              value="reset"
-              variant="secondary"
-              onClick={(event) => {
-                if (!window.confirm(resetQuestion)) event.preventDefault();
-              }}
+        </fieldset>
+      </form>
+    </div>
+  );
+}
+
+/** Choices of a driver seat that are not a person. */
+function driverSpecial(row: CrewRow): SearchSelectOption[] {
+  return row.origin === "parked"
+    ? [{ value: PARK_VALUE, label: "— Laissé au dépôt ce jour —" }]
+    : [
+        { value: "", label: "— Aucun chauffeur —" },
+        { value: PARK_VALUE, label: "Laisser au dépôt ce jour", hint: "Le véhicule ne roule pas, sans chercher de remplaçant" },
+      ];
+}
+
+/** The seats of a row as hidden fields: the crew shown, its version and the crew chosen (read by readCrewForm). */
+function SeatInputs({ row, value }: { row: CrewRow; value: SeatValues | undefined }) {
+  if (row.unavailable) return <input type="hidden" name={versionField(row.vehicleId)} value={row.savedVersion ?? ""} />;
+  const parked = value?.driver === PARK_VALUE;
+  return (
+    <>
+      <input type="hidden" name={versionField(row.vehicleId)} value={row.savedVersion ?? ""} />
+      <input type="hidden" name={shownDriverField(row.vehicleId)} value={shownValue(row, "driver")} />
+      <input type="hidden" name={driverField(row.vehicleId)} value={value?.driver ?? ""} />
+      {row.type === "AMBULANCE" ? (
+        <>
+          <input type="hidden" name={shownCrewMateField(row.vehicleId)} value={shownValue(row, "crewMate")} />
+          {/* Left at the depot: nobody on board, no crew mate sent. */}
+          {parked ? null : <input type="hidden" name={crewMateField(row.vehicleId)} value={value?.mate ?? ""} />}
+        </>
+      ) : null}
+    </>
+  );
+}
+
+/** A submit button that shows its pending label only when it is the one that sent the form. */
+function IntentSubmit({
+  intent,
+  pendingLabel,
+  children,
+  disabled,
+  variant = "primary",
+  autoFocus,
+}: {
+  intent: string;
+  pendingLabel: string;
+  children: ReactNode;
+  disabled?: boolean;
+  variant?: "primary" | "danger";
+  autoFocus?: boolean;
+}) {
+  const { pending, data } = useFormStatus();
+  const mine = pending && data?.get("intent") === intent;
+  return (
+    <Button type="submit" name="intent" value={intent} variant={variant} disabled={pending || disabled} aria-busy={mine} autoFocus={autoFocus}>
+      {mine ? pendingLabel : children}
+    </Button>
+  );
+}
+
+/** The depot's heading in the table: its seats and the free people of the depot, next to its rows. */
+function DepotHeader({ summary }: { summary: DepotSummary }) {
+  const free = summary.free;
+  return (
+    <GroupHeaderRow colSpan={COLUMNS}>
+      <span className="font-semibold tracking-wide text-slate-700 uppercase">Dépôt {summary.depotName}</span>
+      <span className="ml-2">
+        {summary.filled}/{summary.seats} postes pourvus
+        {summary.missing > 0 ? <span className="font-medium text-red-700"> · {summary.missing} manquant{summary.missing > 1 ? "s" : ""}</span> : null}
+      </span>
+      <span className="ml-2 text-slate-500">
+        · {free.length === 0 ? "aucun libre" : `${free.length} libre${free.length > 1 ? "s" : ""} : `}
+        {free.slice(0, 8).map((p, i) => (
+          <span key={p.id}>
+            {i > 0 ? ", " : null}
+            <span className="text-slate-700">{p.name}</span> ({p.qualifications})
+          </span>
+        ))}
+        {free.length > 8 ? `, et ${free.length - 8} autres` : null}
+      </span>
+    </GroupHeaderRow>
+  );
+}
+
+/** Summary of every depot, pinned at the top of the screen; a tile shows (or stops showing) that depot only. */
+function DepotStrip({
+  summaries,
+  selected,
+  onSelect,
+}: {
+  summaries: DepotSummary[];
+  selected: string | null;
+  onSelect: (depotId: string | null) => void;
+}) {
+  if (summaries.length < 2) return null;
+  return (
+    <nav
+      aria-label="Postes par dépôt"
+      className="sticky top-below-banner z-20 -mx-1 bg-slate-50/95 px-1 py-2 backdrop-blur"
+    >
+      <ul className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+        {summaries.map((s) => (
+          <li key={s.depotId}>
+            <button
+              type="button"
+              aria-pressed={selected === s.depotId}
+              onClick={() => onSelect(selected === s.depotId ? null : s.depotId)}
+              title={selected === s.depotId ? "Afficher tous les dépôts" : `Afficher le dépôt ${s.depotName} seulement`}
+              className={cn(
+                "w-full rounded-md border px-2.5 py-1.5 text-left text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
+                selected === s.depotId ? "border-brand-400 bg-brand-50" : "border-slate-200 bg-white hover:bg-slate-50",
+              )}
             >
-              Revenir aux propositions (tout le jour)
-            </Button>
-          ) : null}
-          <SubmitButton name="intent" value="save" pendingLabel="Enregistrement…" disabled={dirty.size === 0}>
-            {dirty.size === 0
-              ? "Aucune modification"
-              : `Enregistrer ${dirty.size > 1 ? `les ${dirty.size} modifications` : "la modification"}`}
-          </SubmitButton>
-        </div>
-      </fieldset>
-    </form>
+              <span className="block truncate text-sm font-semibold text-slate-900">{s.depotName}</span>
+              <span className="tabular block text-slate-600">
+                {s.filled}/{s.seats} postes
+                {s.missing > 0 ? <span className="font-semibold text-red-700"> · {s.missing} manquant{s.missing > 1 ? "s" : ""}</span> : null}
+              </span>
+              <span className="tabular block text-slate-500">
+                {s.free.length} libre{s.free.length > 1 ? "s" : ""}
+                {s.unavailable > 0 ? ` · ${s.unavailable} indisponible${s.unavailable > 1 ? "s" : ""}` : ""}
+                {s.parked > 0 ? ` · ${s.parked} au dépôt` : ""}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
   );
 }
