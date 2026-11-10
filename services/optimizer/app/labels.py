@@ -18,7 +18,7 @@ def hhmm(minute: int) -> str:
 
 def km_text(value: float) -> str:
     """Kilometres with one decimal and a French decimal comma."""
-    return f"{value:.1f}".replace(".", ",") + " km"
+    return f"{value:.1f}".replace(".", ",") + "\u00a0km"
 
 
 def types_text(types: Iterable[VehicleType]) -> str:
@@ -26,4 +26,4 @@ def types_text(types: Iterable[VehicleType]) -> str:
 
 
 def vehicle_name(vehicle: Vehicle) -> str:
-    return f"« {vehicle.label or vehicle.id} »"
+    return f"«\u202f{vehicle.label or vehicle.id}\u202f»"

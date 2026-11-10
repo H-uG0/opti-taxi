@@ -105,7 +105,7 @@ def test_vehicle_without_grid_earns_nothing_and_is_reported() -> None:
     lone = Vehicle.model_validate(raw)
     other = Vehicle.model_validate({**raw, "id": "amb_2", "label": "Amb 2"})
     assert book.for_trip(Trip.model_validate(trip("t", "p", "OUTBOUND", HOME_A, AIX_FAC, appointment=600)), lone) is None
-    assert book.missing_warnings([lone, other]) == ["Pas de grille tarifaire pour Amb Gap, Amb 2 (AMBULANCE) : CA estimé à 0"]
+    assert book.missing_warnings([lone, other]) == ["Pas de grille tarifaire pour Amb Gap, Amb 2 (AMBULANCE)\u00a0: CA estimé à 0"]
 
 
 def test_unknown_tariff_reference_is_refused() -> None:

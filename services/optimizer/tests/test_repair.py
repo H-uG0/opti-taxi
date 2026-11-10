@@ -47,6 +47,7 @@ NO_DEADLINE_SEC = 300.0
 MARSEILLE_FAC = FACILITIES["fac_marseille_timone"][1]
 LUNCH_BREAK = {"windowStartMin": 690, "windowEndMin": 840, "durationMin": 30}
 NBSP = solver.NBSP
+NNBSP = solver.NNBSP
 
 
 def day_model(raw: dict[str, Any]) -> solver._DayModel:
@@ -347,7 +348,7 @@ def test_a_trip_left_out_says_what_keeps_each_compatible_vehicle_from_taking_it(
     [left] = plan.unassigned
     assert left.reason.startswith(f"{solver.REASON_DROPPED_PREFIX} 11:00 à ")
     assert f"{NBSP}: Amb 1 transporte un autre patient de 11:" in left.reason
-    assert f"{NBSP}; Amb 2 transporte un autre patient de 11:" in left.reason
+    assert f"{NNBSP}; Amb 2 transporte un autre patient de 11:" in left.reason
 
 
 def test_a_trip_left_out_counts_the_vehicles_when_there_are_many() -> None:
@@ -386,7 +387,7 @@ def test_the_reason_names_what_keeps_each_ambulance_away_not_what_it_does_meanwh
     reason = left_out_reason_of(seed_small_place_day(), AMBULANCE_RETURN)
     assert reason == (
         f"{solver.REASON_DROPPED_PREFIX} 11:30 à 11:54{NBSP}: "
-        f"Ambulance 1 (Marseille) ne peut pas l'intercaler entre ses arrêts de 10:55 et 12:31{NBSP}; "
+        f"Ambulance 1 (Marseille) ne peut pas l'intercaler entre ses arrêts de 10:55 et 12:31{NNBSP}; "
         "Ambulance 2 (Gap) ne peut pas rejoindre ensuite son arrêt de 13:16"
     )
 

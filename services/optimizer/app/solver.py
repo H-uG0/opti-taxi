@@ -211,6 +211,8 @@ MIN_PROBE_SEC = 0.5
 """Shortest search from one start worth running: below it, only the cheapest start is searched."""
 
 NBSP = "\u00a0"
+# Before « ; », « ! », « ? » and inside « »: a narrow no-break space (as the web, lot UI-07).
+NNBSP = "\u202f"
 """Non-breaking space, before « : » and « ; » in the reasons of the trips left out (French
 typography: a narrow panel never starts a line with the punctuation)."""
 REASON_DROPPED_PREFIX = "Pas de place dans les tournées pour le trajet de"
@@ -244,7 +246,7 @@ LEFT_OUT_KINDS: dict[str, tuple[str, str]] = {
 """Singular and plural of each kind of obstacle counted in the reason of a trip left out
 (_DayModel.left_out_reason, _DayModel._obstacle)."""
 REASON_DROPPED_TIME_LIMIT = (
-    "Non placée dans le temps de calcul imparti : augmenter le temps de calcul (Paramètres) ou placer la course à la main"
+    "Non placée dans le temps de calcul imparti\u00a0: augmenter le temps de calcul (Paramètres) ou placer la course à la main"
 )
 REASON_NO_SOLUTION = "Aucune solution trouvée dans le temps de calcul imparti"
 REASON_DROPPED_ON_BOARD = (
@@ -252,11 +254,11 @@ REASON_DROPPED_ON_BOARD = (
     "des patients transportés ensemble"
 )
 REASON_DROPPED_WORK_TIME = (
-    "Pas de place dans les tournées sans dépasser 6 h de travail sans pause de 20 min "
+    "Pas de place dans les tournées sans dépasser 6\u00a0h de travail sans pause de 20\u00a0min "
     "(Code du travail, art. L. 3121-16)"
 )
 WARNING_FIRST_SOLUTION_FAILED = (
-    "Construction initiale des tournées interrompue par la limite de temps (serveur chargé ?) : "
+    "Construction initiale des tournées interrompue par la limite de temps (serveur chargé\u202f?)\u00a0: "
     "planning construit par une méthode de secours, relancer l'optimisation peut placer davantage de courses"
 )
 
@@ -327,7 +329,7 @@ def usable_fleet(ctx: PlanContext) -> tuple[list[FleetVehicle], list[str]]:
     for vehicle in ctx.request.vehicles:
         plan = break_plan(vehicle)
         if plan.mode is BreakMode.IMPOSSIBLE:
-            warnings.append(f"{vehicle_name(vehicle)} non utilisé : sa pause ne peut pas être placée dans son horaire")
+            warnings.append(f"{vehicle_name(vehicle)} non utilisé\u00a0: sa pause ne peut pas être placée dans son horaire")
             continue
         shift = effective_shift(vehicle, plan)
         fleet.append(FleetVehicle(vehicle, plan, shift, work_limit_min(vehicle, plan, shift)))
@@ -360,14 +362,14 @@ def screen_trip(ctx: PlanContext, trip: Trip, fleet: Sequence[FleetVehicle]) -> 
     if trip.locked_vehicle_id is not None:
         locked = ctx.vehicles.get(trip.locked_vehicle_id)
         if locked is None:
-            return [], f"Véhicule figé « {trip.locked_vehicle_id} » absent de la flotte du jour"
+            return [], f"Véhicule figé «\u202f{trip.locked_vehicle_id}\u202f» absent de la flotte du jour"
         if locked.type not in trip.allowed_vehicle_types:
             return [], (
                 f"Véhicule figé {vehicle_name(locked)} d'un type non autorisé pour cette course "
-                f"(autorisés : {types_text(trip.allowed_vehicle_types)})"
+                f"(autorisés\u00a0: {types_text(trip.allowed_vehicle_types)})"
             )
         if all(member.vehicle.id != locked.id for member in fleet):
-            return [], f"Véhicule figé {vehicle_name(locked)} inutilisable : sa pause ne tient pas dans son horaire"
+            return [], f"Véhicule figé {vehicle_name(locked)} inutilisable\u00a0: sa pause ne tient pas dans son horaire"
 
     typed = [i for i, member in enumerate(fleet) if is_compatible(trip, member.vehicle)]
     if not typed:
@@ -383,7 +385,7 @@ def screen_trip(ctx: PlanContext, trip: Trip, fleet: Sequence[FleetVehicle]) -> 
         else f"fin de séance à {hhmm(trip.ready_min or 0)}"
     )
     return [], (
-        f"Horaires inatteignables ({when}) : aucun véhicule compatible ne peut assurer la course "
+        f"Horaires inatteignables ({when})\u00a0: aucun véhicule compatible ne peut assurer la course "
         "depuis son dépôt dans ses heures de service"
     )
 
@@ -1590,7 +1592,7 @@ class _DayModel:
             )
         if len(found) <= MAX_NAMED_VEHICLES:
             names = [_label(self.fleet[v].vehicle) for v in candidates]
-            return f"{NBSP}; ".join(f"{name} {what}" for name, (_, what) in zip(names, found, strict=True))
+            return f"{NNBSP}; ".join(f"{name} {what}" for name, (_, what) in zip(names, found, strict=True))
         counts = {kind: sum(1 for k, _ in found if k == kind) for kind in LEFT_OUT_KINDS}
         if len([count for count in counts.values() if count]) == 1:
             kind = next(kind for kind, count in counts.items() if count)
@@ -2248,8 +2250,8 @@ def time_limit_warning(time_limit_sec: int, dropped: int, trip_count: int) -> st
     """French warning when the search was cut short with trips left unplaced."""
     recommended = recommended_time_limit_sec(trip_count)
     advice = (
-        f"un temps de calcul plus long (environ {recommended} s pour {trip_count} courses) peut en placer davantage"
+        f"un temps de calcul plus long (environ {recommended}\u00a0s pour {trip_count} courses) peut en placer davantage"
         if recommended > time_limit_sec
         else "un temps de calcul plus long peut en placer davantage"
     )
-    return f"Recherche interrompue par la limite de {time_limit_sec} s : {dropped} course(s) non placée(s) ; {advice}"
+    return f"Recherche interrompue par la limite de {time_limit_sec}\u00a0s\u00a0: {dropped} course(s) non placée(s)\u202f; {advice}"

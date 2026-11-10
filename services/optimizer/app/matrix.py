@@ -286,12 +286,12 @@ def build_matrix(
             matrix, unrouted = osrm_matrix(keys, osrm_url, transport=transport)
         except (httpx.HTTPError, OsrmError, ValueError, TypeError, KeyError) as error:
             warnings.append(
-                f"OSRM indisponible ({type(error).__name__}: {error}) : temps et distances estimés à vol d'oiseau"
+                f"OSRM indisponible ({type(error).__name__}: {error})\u00a0: temps et distances estimés à vol d'oiseau"
             )
         else:
             if unrouted:
                 warnings.append(
-                    f"{unrouted} trajet(s) introuvable(s) dans OSRM : estimation à vol d'oiseau pour ces trajets"
+                    f"{unrouted} trajet(s) introuvable(s) dans OSRM\u00a0: estimation à vol d'oiseau pour ces trajets"
                 )
             return matrix, warnings
     return haversine_matrix(keys), warnings

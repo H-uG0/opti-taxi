@@ -199,7 +199,7 @@ class TariffBook:
             if self.get(vehicle.tariff_id) is None:
                 missing.setdefault(vehicle.type, []).append(vehicle.label or vehicle.id)
         return [
-            f"Pas de grille tarifaire pour {', '.join(labels)} ({vehicle_type}) : CA estimé à 0"
+            f"Pas de grille tarifaire pour {', '.join(labels)} ({vehicle_type})\u00a0: CA estimé à 0"
             for vehicle_type, labels in missing.items()
         ]
 

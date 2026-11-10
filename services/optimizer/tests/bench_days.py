@@ -81,7 +81,7 @@ def main() -> None:
         kpis = plan.kpis
         print(
             f"{name}: {kpis.trips_served}/{kpis.trips_total} served, {half} half-served, margin {kpis.margin:.0f}, "
-            f"score {score:.0f}, {len(plan.validation.violations)} violation(s), {elapsed:.1f} s, {plan.meta.solver_status}",
+            f"score {score:.0f}, {len(plan.validation.violations)} violation(s), {elapsed:.1f}\u00a0s, {plan.meta.solver_status}",
             flush=True,
         )
         totals["served"] += kpis.trips_served

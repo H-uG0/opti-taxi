@@ -54,7 +54,7 @@ def test_busy_day_serves_most_trips_at_the_default_budget(busy_plan: PlanRespons
     served = busy_plan.kpis.trips_served
     ratio = served / REFERENCE_SERVED_LONG_RUN
     logger.info("busy day: %d trips served in %d s, %.0f %% of a %d s run", served, DEFAULT_BUDGET_SEC, ratio * 100, LONG_BUDGET_SEC)
-    assert ratio >= MIN_SERVED_RATIO, f"{served} trips served in {DEFAULT_BUDGET_SEC} s, {ratio:.0%} of a long run"
+    assert ratio >= MIN_SERVED_RATIO, f"{served} trips served in {DEFAULT_BUDGET_SEC}\u00a0s, {ratio:.0%} of a long run"
 
 
 def test_busy_day_unplaced_trips_say_whether_more_time_would_help(busy_plan: PlanResponse) -> None:
@@ -78,7 +78,7 @@ def test_tiny_budget_still_completes_the_first_solution_and_the_breaks() -> None
     plan = optimize(1)
     assert plan.validation.valid, plan.validation.violations[:5]
     assert plan.kpis.trips_served >= 100
-    assert any(w.startswith("Recherche interrompue par la limite de 1 s") for w in plan.meta.warnings)
+    assert any(w.startswith("Recherche interrompue par la limite de 1\u00a0s") for w in plan.meta.warnings)
 
 
 @pytest.mark.skipif(not os.environ.get("OPTIMIZER_SLOW_TESTS"), reason="30 s run: set OPTIMIZER_SLOW_TESTS=1")
@@ -98,7 +98,7 @@ def test_default_budget_reaches_most_of_a_long_run(busy_plan: PlanResponse) -> N
 
 
 
-@pytest.mark.skipif(not os.environ.get("OPTIMIZER_SLOW_TESTS"), reason="~1 min: set OPTIMIZER_SLOW_TESTS=1")
+@pytest.mark.skipif(not os.environ.get("OPTIMIZER_SLOW_TESTS"), reason="~1\u00a0min: set OPTIMIZER_SLOW_TESTS=1")
 @pytest.mark.parametrize(("trips", "budget_sec"), [(300, 38), (480, 60)], ids=["300", "480"])
 def test_large_fleet_gets_a_full_plan_within_the_web_timeout(trips: int, budget_sec: int) -> None:
     """120 vehicles (scale of V, tests/bench_fleet.py) at the budget the web sends (1 s per 8 trips):

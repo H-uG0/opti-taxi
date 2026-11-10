@@ -195,7 +195,7 @@ def test_wait_on_board_at_the_facility_counts_in_the_total_wait() -> None:
     found = [v for v in validate(req, routes, matrix) if v.code == "TOTAL_WAIT"]
     # 30 min before + 15 min after the session + 10 min in the parked taxi: 55 min, not 45.
     assert [v.trip_id for v in found] == ["a_ret"]
-    assert "55 min" in found[0].message and "dont 10 min à bord" in found[0].message
+    assert "55\u00a0min" in found[0].message and "dont 10\u00a0min à bord" in found[0].message
 
 
 def test_ride_time() -> None:
@@ -203,7 +203,7 @@ def test_ride_time() -> None:
     rides = {v.trip_id: v.message for v in validate(req, routes, matrix) if v.code == "RIDE_TIME"}
     # A rides through B's pickup (5 min) and the 10 min wait, B through A's dropoff: over direct + 5.
     assert set(rides) == {"a_ret", "b_ret"}
-    assert "trajet direct + 5 min" in rides["a_ret"]
+    assert "trajet direct + 5\u00a0min" in rides["a_ret"]
     assert "a_ret" not in rides["a_ret"]  # an id means nothing to the regulator: trip_id carries it
     req, routes, matrix = dialysis_returns()
     assert not [v for v in validate(req, routes, matrix) if v.code == "RIDE_TIME"]

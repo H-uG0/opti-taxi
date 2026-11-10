@@ -136,7 +136,7 @@ def test_unassigned_reasons() -> None:
     plan = optimize(request([vehicle("taxi", MARSEILLE)], trips))
     reasons = {u.trip_id: u.reason for u in plan.unassigned}
     assert "Aucun véhicule de type autorisé (Ambulance)" in reasons["needs_ambulance"]
-    assert "Véhicule figé « veh_unknown »" in reasons["locked_missing"]
+    assert "Véhicule figé «\u202fveh_unknown\u202f»" in reasons["locked_missing"]
     assert reasons["too_early"].startswith("Horaires inatteignables")
     assert "ok" not in reasons
     assert plan.validation.valid
@@ -226,7 +226,7 @@ def test_dropped_trips_reason_depends_on_whether_the_search_settled(monkeypatch:
     cut = optimize(raw)
     assert cut.kpis.trips_served == 1 and len(cut.unassigned) == 2
     assert all(u.reason == solver.REASON_DROPPED_TIME_LIMIT for u in cut.unassigned)
-    assert any(w.startswith("Recherche interrompue par la limite de 1 s : 2 course(s) non placée(s)") for w in cut.meta.warnings)
+    assert any(w.startswith("Recherche interrompue par la limite de 1\u00a0s\u00a0: 2 course(s) non placée(s)") for w in cut.meta.warnings)
 
     monkeypatch.setattr(solver._DayModel, "search", search_ending_with("ROUTING_SUCCESS"))
     settled = optimize(raw)
@@ -258,8 +258,8 @@ def test_time_limit_advice() -> None:
     assert solver.recommended_time_limit_sec(160) == 20
     warning = solver.time_limit_warning(10, 12, 160)
     assert warning == (
-        "Recherche interrompue par la limite de 10 s : 12 course(s) non placée(s) ; "
-        "un temps de calcul plus long (environ 20 s pour 160 courses) peut en placer davantage"
+        "Recherche interrompue par la limite de 10\u00a0s\u00a0: 12 course(s) non placée(s)\u202f; "
+        "un temps de calcul plus long (environ 20\u00a0s pour 160 courses) peut en placer davantage"
     )
     assert "environ" not in solver.time_limit_warning(30, 2, 160)
 

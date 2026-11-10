@@ -105,7 +105,7 @@ def _service(settings: Settings, trip: Trip, kind: StopKind) -> int:
 
 
 def _duration_text(minutes: int) -> str:
-    return f"{minutes // 60} h {minutes % 60:02d}"
+    return f"{minutes // 60}\u00a0h\u00a0{minutes % 60:02d}"
 
 
 # --------------------------------------------------------------------------- references (/evaluate)
@@ -131,18 +131,18 @@ def check_plan_references(
         if vehicle is None:
             out.add(
                 "UNKNOWN_REFERENCE",
-                f"Véhicule inconnu « {plan.vehicle_id} » dans le planning : ses {len(plan.stops)} arrêt(s) sont ignorés",
+                f"Véhicule inconnu «\u202f{plan.vehicle_id}\u202f» dans le planning\u00a0: ses {len(plan.stops)} arrêt(s) sont ignorés",
                 vehicle_id=plan.vehicle_id,
             )
             continue
         if plan.vehicle_id in sequences:
-            warnings.append(f"Véhicule {vehicle_name(vehicle)} présent plusieurs fois dans le planning : tournées mises bout à bout")
+            warnings.append(f"Véhicule {vehicle_name(vehicle)} présent plusieurs fois dans le planning\u00a0: tournées mises bout à bout")
         sequence = sequences.setdefault(plan.vehicle_id, [])
         for stop in plan.stops:
             if stop.trip_id not in trips:
                 out.add(
                     "UNKNOWN_REFERENCE",
-                    f"Course inconnue « {stop.trip_id} » dans la tournée de {vehicle_name(vehicle)}",
+                    f"Course inconnue «\u202f{stop.trip_id}\u202f» dans la tournée de {vehicle_name(vehicle)}",
                     trip_id=stop.trip_id,
                     vehicle_id=plan.vehicle_id,
                 )
@@ -177,7 +177,7 @@ def validate(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix)
     for route_no, route in enumerate(routes):
         vehicle = vehicles.get(route.vehicle_id)
         if vehicle is None:
-            out.add("UNKNOWN_REFERENCE", f"Véhicule inconnu « {route.vehicle_id} » dans le planning", vehicle_id=route.vehicle_id)
+            out.add("UNKNOWN_REFERENCE", f"Véhicule inconnu «\u202f{route.vehicle_id}\u202f» dans le planning", vehicle_id=route.vehicle_id)
             continue
         stops: list[tuple[Stop, Trip]] = []
         for stop in route.stops:
@@ -185,7 +185,7 @@ def validate(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix)
             if trip is None:
                 out.add(
                     "UNKNOWN_REFERENCE",
-                    f"Course inconnue « {stop.trip_id} » dans la tournée de {vehicle_name(vehicle)}",
+                    f"Course inconnue «\u202f{stop.trip_id}\u202f» dans la tournée de {vehicle_name(vehicle)}",
                     trip_id=stop.trip_id,
                     vehicle_id=vehicle.id,
                 )
@@ -270,7 +270,7 @@ def _facility_wait(trip: Trip, occurrences: Mapping[str, list[_Occurrence]], sta
 
 
 def _on_board_text(minutes: int) -> str:
-    return f", dont {minutes} min à bord du véhicule à l'arrêt" if minutes else ""
+    return f", dont {minutes}\u00a0min à bord du véhicule à l'arrêt" if minutes else ""
 
 
 def _check_total_wait(
@@ -294,8 +294,8 @@ def _check_total_wait(
         if total > maximum:
             out.add(
                 "TOTAL_WAIT",
-                f"Attente cumulée de {total} min au lieu de soins (aller {before[0]} min{_on_board_text(before[1])} "
-                f"+ retour {after[0]} min{_on_board_text(after[1])}, maximum {settings.max_total_wait_min} min)",
+                f"Attente cumulée de {total}\u00a0min au lieu de soins (aller {before[0]}\u00a0min{_on_board_text(before[1])} "
+                f"+ retour {after[0]}\u00a0min{_on_board_text(after[1])}, maximum {settings.max_total_wait_min}\u00a0min)",
                 trip_id=ret.id,
                 vehicle_id=after[2],
             )
@@ -307,8 +307,8 @@ def _check_total_wait(
             leg = "avant le rendez-vous" if trip.direction == "OUTBOUND" else "après la séance"
             out.add(
                 "TOTAL_WAIT",
-                f"Attente de {wait[0]} min au lieu de soins {leg}{_on_board_text(wait[1])} "
-                f"(maximum {settings.max_total_wait_min} min)",
+                f"Attente de {wait[0]}\u00a0min au lieu de soins {leg}{_on_board_text(wait[1])} "
+                f"(maximum {settings.max_total_wait_min}\u00a0min)",
                 trip_id=trip.id,
                 vehicle_id=wait[2],
             )
@@ -375,15 +375,15 @@ class _RouteCheck:
             if self.vehicle.type not in trip.allowed_vehicle_types:
                 self.out.add(
                     "VEHICLE_TYPE",
-                    f"Course {trip.id} sur {vehicle_name(self.vehicle)} ({types_text([self.vehicle.type])}) : "
-                    f"type non autorisé (autorisés : {types_text(trip.allowed_vehicle_types)})",
+                    f"Course {trip.id} sur {vehicle_name(self.vehicle)} ({types_text([self.vehicle.type])})\u00a0: "
+                    f"type non autorisé (autorisés\u00a0: {types_text(trip.allowed_vehicle_types)})",
                     trip_id=trip.id,
                     vehicle_id=vid,
                 )
             if trip.locked_vehicle_id is not None and trip.locked_vehicle_id != vid:
                 self.out.add(
                     "LOCK",
-                    f"Course {trip.id} figée sur « {trip.locked_vehicle_id} » mais placée sur {vehicle_name(self.vehicle)}",
+                    f"Course {trip.id} figée sur «\u202f{trip.locked_vehicle_id}\u202f» mais placée sur {vehicle_name(self.vehicle)}",
                     trip_id=trip.id,
                     vehicle_id=vid,
                 )
@@ -431,7 +431,7 @@ class _RouteCheck:
                 stop, trip = self.stops[k]
                 self.out.add(
                     "TIME_WINDOW",
-                    f"Horaire intenable : {KIND_LABELS[stop.kind]} de la course {trip.id} prévue à {hhmm(next_start)}, "
+                    f"Horaire intenable\u00a0: {KIND_LABELS[stop.kind]} de la course {trip.id} prévue à {hhmm(next_start)}, "
                     f"impossible avant {hhmm(departure + needed)}",
                     trip_id=trip.id,
                     vehicle_id=vid,
@@ -466,14 +466,14 @@ class _RouteCheck:
                 self.out.add(
                     "TIME_WINDOW",
                     f"Arrivée au lieu de soins à {hhmm(start)}, après le rendez-vous de {hhmm(appointment)} "
-                    f"(retard de {start - appointment} min)",
+                    f"(retard de {start - appointment}\u00a0min)",
                     trip_id=trip.id,
                     vehicle_id=vid,
                 )
             elif start < appointment - margin - TIME_TOLERANCE_MIN:
                 self.out.add(
                     "TIME_WINDOW",
-                    f"Arrivée au lieu de soins à {hhmm(start)}, plus de {margin} min avant le rendez-vous de {hhmm(appointment)}",
+                    f"Arrivée au lieu de soins à {hhmm(start)}, plus de {margin}\u00a0min avant le rendez-vous de {hhmm(appointment)}",
                     trip_id=trip.id,
                     vehicle_id=vid,
                 )
@@ -490,7 +490,7 @@ class _RouteCheck:
             elif start > ready + margin + TIME_TOLERANCE_MIN:
                 self.out.add(
                     "TIME_WINDOW",
-                    f"Prise en charge à {hhmm(start)}, plus de {margin} min après la fin de séance ({hhmm(ready)})",
+                    f"Prise en charge à {hhmm(start)}, plus de {margin}\u00a0min après la fin de séance ({hhmm(ready)})",
                     trip_id=trip.id,
                     vehicle_id=vid,
                 )
@@ -527,13 +527,13 @@ class _RouteCheck:
             off_route_before = min(we, route.start_min) - ws >= duration
             off_route_after = we - max(ws, route.end_min) >= duration
             if not (off_route_before or off_route_after):
-                self.out.add("BREAK", f"Aucune pause de {duration} min sans patient à bord {window}", vehicle_id=vid)
+                self.out.add("BREAK", f"Aucune pause de {duration}\u00a0min sans patient à bord {window}", vehicle_id=vid)
             return
         span = f"{hhmm(slot.start_min)}–{hhmm(slot.end_min)}"
         if slot.end_min - slot.start_min < duration - TIME_TOLERANCE_MIN:
             self.out.add(
                 "BREAK",
-                f"Pause {span} de {slot.end_min - slot.start_min} min, inférieure aux {duration} min prévues",
+                f"Pause {span} de {slot.end_min - slot.start_min}\u00a0min, inférieure aux {duration}\u00a0min prévues",
                 vehicle_id=vid,
             )
             return
@@ -565,8 +565,8 @@ class _RouteCheck:
             return
         self.out.add(
             "BREAK",
-            f"Tournée de {_duration_text(duration)} sans pause d'au moins {MIN_BREAK_FOR_WORK_MIN} min pendant le travail : "
-            "pause obligatoire dès 6 h de travail (Code du travail, art. L. 3121-16)",
+            f"Tournée de {_duration_text(duration)} sans pause d'au moins {MIN_BREAK_FOR_WORK_MIN}\u00a0min pendant le travail\u00a0: "
+            "pause obligatoire dès 6\u00a0h de travail (Code du travail, art. L. 3121-16)",
             vehicle_id=self.vehicle.id,
             key=("WORK_TIME", self.vehicle.id),
         )
@@ -603,8 +603,8 @@ class _RouteCheck:
                 self.out.add(
                     "RIDE_TIME",
                     # The trip comes with trip_id (the web shows it next to the message), not in the text.
-                    f"{on_board} min à bord pour un trajet direct de {direct} min "
-                    f"(maximum {limit} min : trajet direct + {self.settings.max_ride_extra_min} min)",
+                    f"{on_board}\u00a0min à bord pour un trajet direct de {direct}\u00a0min "
+                    f"(maximum {limit}\u00a0min\u00a0: trajet direct + {self.settings.max_ride_extra_min}\u00a0min)",
                     trip_id=trip_id,
                     vehicle_id=self.vehicle.id,
                 )
@@ -804,7 +804,7 @@ def validate_revenue(
         if abs(reported - expected) * 100 > REVENUE_TOLERANCE_CENTS:
             out.add(
                 "REVENUE",
-                f"CA de la course {result.trip_id} annoncé à {reported} €, recalculé à {expected} €",
+                f"CA de la course {result.trip_id} annoncé à {reported}\u00a0€, recalculé à {expected}\u00a0€",
                 trip_id=result.trip_id,
                 vehicle_id=item.vehicle.id if item is not None else result.vehicle_id,
             )
@@ -814,7 +814,7 @@ def validate_revenue(
         if abs(_dec(route.revenue, _CENT) - expected) * 100 > REVENUE_TOLERANCE_CENTS * max(1, trips_on_route):
             out.add(
                 "REVENUE",
-                f"CA de la tournée annoncé à {_dec(route.revenue, _CENT)} €, somme des courses recalculée à {expected} €",
+                f"CA de la tournée annoncé à {_dec(route.revenue, _CENT)}\u00a0€, somme des courses recalculée à {expected}\u00a0€",
                 vehicle_id=route.vehicle_id,
             )
     return out.items

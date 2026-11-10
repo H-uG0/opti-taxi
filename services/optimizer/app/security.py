@@ -115,7 +115,7 @@ class SolveSlots:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=(
-                    f"Service d'optimisation occupé : {self.size} calcul(s) déjà en cours. "
+                    f"Service d'optimisation occupé\u00a0: {self.size} calcul(s) déjà en cours. "
                     "Réessayez dans une minute."
                 ),
                 headers={"Retry-After": str(RETRY_AFTER_SEC)},
@@ -193,7 +193,7 @@ def log_startup_settings(slots: SolveSlots) -> None:
     if configured_token() is None:
         logger.warning(
             "OPTIMIZER_TOKEN is not set: /optimize, /evaluate and /docs accept any caller. Set the same value on the "
-            "web app and here, and keep this service on a private network (README, « Sécurité »)."
+            "web app and here, and keep this service on a private network (README, «\u202fSécurité\u202f»)."
         )
     logger.info(
         "At most %d concurrent solve(s), request bodies up to %d MB.", slots.size, max_body_bytes() // (1024 * 1024)
