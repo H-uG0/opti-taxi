@@ -17,11 +17,11 @@
  * never takes people still on another route of the date (one vehicle a day).
  */
 import "server-only";
-import type { Prisma, TripStatus } from "@prisma/client";
+import type { Prisma, RouteStatus, TripStatus } from "@prisma/client";
 import { z } from "zod";
 import { audit, type AuditActor } from "@/lib/audit";
 import { db } from "@/lib/db";
-import { buildOptimizeRequest, loadOptimizeInput, personName, type BuildResult } from "@/lib/optimizer/build-request";
+import { buildOptimizeRequest, loadOptimizeInput, personName, type BuildResult, type OptimizeInput } from "@/lib/optimizer/build-request";
 import { insert } from "@/lib/optimizer/client";
 import { violationSchema, type InsertOption } from "@/lib/optimizer/contract";
 import type { CurrentTrip, VehicleCrew } from "@/lib/optimizer/persist";
@@ -37,6 +37,7 @@ import {
   placesView,
   planPlaceWrite,
   planStopWrites,
+  type PlaceWrite,
   ROUTE_HOLD_REASONS,
   routeHold,
   violationsAfterPlace,
@@ -73,11 +74,12 @@ const storedRouteSelect = {
   stops: { select: { id: true, tripId: true, kind: true, sequence: true, completedAt: true } },
 } satisfies Prisma.RouteSelect;
 
-type Prepared = {
+/** A date's plan as « Où placer » and the draft read it: the request, the stored routes, which ones must not change. */
+export type PlaceDay = {
   isoDate: string;
   /** Version of the plan read before anything else: what the places are computed on. */
   version: string;
-  trip: { id: string; patientName: string; lockedVehicleId: string | null };
+  input: OptimizeInput;
   build: BuildResult;
   stored: StoredPlaceRoute[];
   /** Routes the assistant must not change, by vehicle. */
@@ -88,42 +90,55 @@ type Prepared = {
    * would put one person on two vehicles.
    */
   crewTaken: Map<string, string>;
-  source: StoredPlaceRoute | null;
   validated: boolean;
   started: boolean;
 };
 
-/** The day of the trip, read for the assistant, or why it cannot be placed now. */
-async function prepare(tripId: string): Promise<{ ok: true; prepared: Prepared } | { ok: false; error: string; stale?: boolean }> {
-  const trip = await db.trip.findUnique({
-    where: { id: tripId },
-    select: { id: true, serviceDate: true, status: true, lockedVehicleId: true, patient: { select: { firstName: true, lastName: true } } },
-  });
-  if (!trip) return { ok: false, error: "Course introuvable (supprimée entre-temps\u202f?).", stale: true };
-  if (trip.status === "CANCELLED" || trip.status === "NO_SHOW") {
-    return { ok: false, error: "Cette course est annulée\u00a0: elle ne se place plus dans une tournée." };
-  }
-  if (trip.status === "PICKED_UP" || trip.status === "DROPPED_OFF") return { ok: false, error: "Cette course est déjà commencée ou terminée." };
-  const isoDate = toIsoDate(trip.serviceDate);
-  if (isoDate < todayIso()) return { ok: false, error: `Le ${formatLongDate(isoDate)} est passé\u00a0: son planning n'est plus modifiable.` };
+type Prepared = PlaceDay & {
+  trip: { id: string; patientName: string; lockedVehicleId: string | null };
+  source: StoredPlaceRoute | null;
+};
 
-  // Read first: a change made after it makes « Appliquer » see another version (never the other way round).
+/**
+ * Why `tripId` cannot be placed on `day` by the assistant or the draft (null: it can): an
+ * exceptional ambulance, incomplete, no longer sent, or on a route that must not change.
+ */
+export function tripPlaceIssue(day: PlaceDay, tripId: string): { error: string; stale?: boolean } | null {
+  const { input, build } = day;
+  const raw = input.trips.find((t) => t.id === tripId);
+  if (raw && isExceptionalAmbulanceTrip(raw, (id) => input.vehicles.find((v) => v.id === id)?.type)) {
+    return { error: PLACE_EXCEPTIONAL_AMBULANCE };
+  }
+  const excluded = build.excludedTrips.find((t) => t.tripId === tripId);
+  if (excluded) return { error: `Course incomplète (${excluded.reason.replace(/[.\s]+$/, "")})\u00a0: complétez-la dans Courses avant de la placer.` };
+  if (!build.request.trips.some((t) => t.id === tripId)) return { error: "Cette course n'est plus à planifier (annulée entre-temps\u202f?).", stale: true };
+  const source = day.stored.find((route) => route.stops.some((stop) => stop.tripId === tripId)) ?? null;
+  const sourceHold = source ? day.held.get(source.vehicleId) : undefined;
+  if (source && sourceHold) {
+    const skipped = build.skippedVehicles.find((v) => v.vehicleId === source.vehicleId);
+    const label = build.request.vehicles.find((v) => v.id === source.vehicleId)?.label ?? skipped?.label ?? "Son véhicule";
+    const why =
+      sourceHold === "UNAVAILABLE"
+        ? `${unavailableReason({ unavailableReason: skipped?.reason ?? null })}. L'assistant ne refait pas la tournée d'un véhicule indisponible\u00a0: seule une réoptimisation de la journée la reprend`
+        : ROUTE_HOLD_REASONS[sourceHold];
+    return { error: `Cette course ne peut pas quitter sa tournée\u00a0: ${label} ${why}.` };
+  }
+  return null;
+}
+
+/**
+ * The plan of `isoDate` as the assistant and the draft read it (null error: a day without routes,
+ * planned by « Optimiser », never one trip at a time). The version is read first: a change made
+ * after it makes « Appliquer » see another version (never the other way round).
+ */
+export async function loadPlaceDay(isoDate: string): Promise<{ ok: true; day: PlaceDay } | { ok: false; error: string }> {
   const version = await loadPlanVersion(db, isoDate);
   const [input, stored] = await Promise.all([
     loadOptimizeInput(db, isoDate),
     db.route.findMany({ where: { serviceDate: fromIsoDate(isoDate) }, select: storedRouteSelect }),
   ]);
-  // A day without routes is planned by « Optimiser », never one locked trip at a time.
   if (stored.length === 0) return { ok: false, error: PLACE_NO_ROUTES };
-  const raw = input.trips.find((t) => t.id === trip.id);
-  if (raw && isExceptionalAmbulanceTrip(raw, (id) => input.vehicles.find((v) => v.id === id)?.type)) {
-    return { ok: false, error: PLACE_EXCEPTIONAL_AMBULANCE };
-  }
   const build = buildOptimizeRequest(input);
-  const excluded = build.excludedTrips.find((t) => t.tripId === trip.id);
-  if (excluded) return { ok: false, error: `Course incomplète (${excluded.reason.replace(/[.\s]+$/, "")})\u00a0: complétez-la dans Courses avant de la placer.` };
-  if (!build.request.trips.some((t) => t.id === trip.id)) return { ok: false, error: "Cette course n'est plus à planifier (annulée entre-temps\u202f?).", stale: true };
-
   const sent = new Set(build.request.trips.map((t) => t.id));
   const statuses = new Map<string, TripStatus>(input.trips.map((t) => [t.id, t.status]));
   const types = new Map(build.request.vehicles.map((v) => [v.id, v.type]));
@@ -137,17 +152,6 @@ async function prepare(tripId: string): Promise<{ ok: true; prepared: Prepared }
   for (const route of stored) {
     const hold = routeHold(route, sent, (id) => statuses.get(id), todayCrews);
     if (hold) held.set(route.vehicleId, hold);
-  }
-  const source = stored.find((route) => route.stops.some((stop) => stop.tripId === trip.id)) ?? null;
-  const sourceHold = source ? held.get(source.vehicleId) : undefined;
-  if (source && sourceHold) {
-    const skipped = build.skippedVehicles.find((v) => v.vehicleId === source.vehicleId);
-    const label = build.request.vehicles.find((v) => v.id === source.vehicleId)?.label ?? skipped?.label ?? "Son véhicule";
-    const why =
-      sourceHold === "UNAVAILABLE"
-        ? `${unavailableReason({ unavailableReason: skipped?.reason ?? null })}. L'assistant ne refait pas la tournée d'un véhicule indisponible\u00a0: seule une réoptimisation de la journée la reprend`
-        : ROUTE_HOLD_REASONS[sourceHold];
-    return { ok: false, error: `Cette course ne peut pas quitter sa tournée\u00a0: ${label} ${why}.` };
   }
   // One person, one vehicle a day: who is on a stored route, and the vehicles without a route whose crew of the day
   // still is (a route created for them would put that person on two vehicles).
@@ -166,23 +170,50 @@ async function prepare(tripId: string): Promise<{ ok: true; prepared: Prepared }
   }
   return {
     ok: true,
-    prepared: {
+    day: {
       isoDate,
       version,
-      trip: { id: trip.id, patientName: personName(trip.patient), lockedVehicleId: trip.lockedVehicleId },
+      input,
       build,
       stored,
       held,
       crewTaken,
-      source,
       validated: stored.some((route) => route.status === "VALIDATED"),
       started: isDayStarted(stored, input.trips.map((t) => t.status)),
     },
   };
 }
 
+/** The day of the trip, read for the assistant, or why it cannot be placed now. */
+async function prepare(tripId: string): Promise<{ ok: true; prepared: Prepared } | { ok: false; error: string; stale?: boolean }> {
+  const trip = await db.trip.findUnique({
+    where: { id: tripId },
+    select: { id: true, serviceDate: true, status: true, lockedVehicleId: true, patient: { select: { firstName: true, lastName: true } } },
+  });
+  if (!trip) return { ok: false, error: "Course introuvable (supprimée entre-temps\u202f?).", stale: true };
+  if (trip.status === "CANCELLED" || trip.status === "NO_SHOW") {
+    return { ok: false, error: "Cette course est annulée\u00a0: elle ne se place plus dans une tournée." };
+  }
+  if (trip.status === "PICKED_UP" || trip.status === "DROPPED_OFF") return { ok: false, error: "Cette course est déjà commencée ou terminée." };
+  const isoDate = toIsoDate(trip.serviceDate);
+  if (isoDate < todayIso()) return { ok: false, error: `Le ${formatLongDate(isoDate)} est passé\u00a0: son planning n'est plus modifiable.` };
+  const loaded = await loadPlaceDay(isoDate);
+  if (!loaded.ok) return loaded;
+  const { day } = loaded;
+  const issue = tripPlaceIssue(day, trip.id);
+  if (issue) return { ok: false, ...issue };
+  return {
+    ok: true,
+    prepared: {
+      ...day,
+      trip: { id: trip.id, patientName: personName(trip.patient), lockedVehicleId: trip.lockedVehicleId },
+      source: day.stored.find((route) => route.stops.some((stop) => stop.tripId === trip.id)) ?? null,
+    },
+  };
+}
+
 /** People a route of the vehicle gets (persist.ts): its driver of the day and, for an ambulance, its crew mate. */
-function crewOf(build: BuildResult, vehicleId: string): string[] {
+export function crewOf(build: BuildResult, vehicleId: string): string[] {
   const crew = build.crews.get(vehicleId);
   if (!crew) return [];
   const ambulance = build.request.vehicles.find((v) => v.id === vehicleId)?.type === "AMBULANCE";
@@ -190,7 +221,7 @@ function crewOf(build: BuildResult, vehicleId: string): string[] {
 }
 
 /** « a son équipage du jour encore sur la tournée de Taxi 5 (voir « À traiter ») ». */
-function crewTakenReason(otherLabel: string): string {
+export function crewTakenReason(otherLabel: string): string {
   return `a son équipage du jour encore sur la tournée de ${otherLabel} (voir «\u202fÀ traiter\u202f»)`;
 }
 
@@ -201,7 +232,7 @@ function triedVehicles(prepared: Prepared): string[] | null {
 }
 
 /** The minute of the day now in Europe/Paris when isoDate is today, null for a later date. */
-function nowMinuteOn(isoDate: string, now: Date = new Date()): number | null {
+export function nowMinuteOn(isoDate: string, now: Date = new Date()): number | null {
   return isoDate === todayIso(now) ? minuteOfDay(now) : null;
 }
 
@@ -269,6 +300,78 @@ async function updatePlanRun(
     },
   });
   return run.id;
+}
+
+/**
+ * Writes the routes of a placement (« Appliquer ») or of the draft: each route kept is updated in
+ * place, the stops that stay keeping their ids (planStopWrites: a driver's phone names them by id,
+ * roadmap and offline queue); a route created takes the day's status (and its validation time) and
+ * the crew of its row; the trips of these routes get their results and route; `locks` sets the lock
+ * of the trips the regulator moved (null: unlocked); the routes left without a stop are deleted.
+ * Run inside the transaction holding the planning lock and the routes' row locks.
+ */
+export async function writePlacedRoutes(
+  tx: Prisma.TransactionClient,
+  args: {
+    serviceDate: Date;
+    write: PlaceWrite;
+    storedByVehicle: ReadonlyMap<string, StoredPlaceRoute>;
+    matrixSource: string;
+    status: RouteStatus;
+    validatedAt: Date;
+    planRunId: string | null;
+    locks: ReadonlyMap<string, string | null>;
+  },
+): Promise<void> {
+  const { serviceDate, write, storedByVehicle, matrixSource, status, validatedAt, planRunId, locks } = args;
+  const routeIdByVehicle = new Map<string, string>();
+  for (const { routeId, row } of write.routes) {
+    const { stops, vehicleId: rowVehicle, driverId, crewMateId, ...totals } = row;
+    if (routeId) {
+      // The stops that stay are updated in place: a driver's phone names them by id (roadmap, offline queue).
+      const stopWrites = planStopWrites(storedByVehicle.get(rowVehicle)?.stops ?? [], stops);
+      if (stopWrites.deleteIds.length > 0) await tx.routeStop.deleteMany({ where: { id: { in: stopWrites.deleteIds } } });
+      if (stopWrites.updates.length > 0) {
+        // Out of the way first (-1, -2…): each stop then takes its new position, never one another still holds
+        // (@@unique([routeId, sequence]) is checked row by row).
+        await tx.$executeRaw`UPDATE "RouteStop" SET "sequence" = -"sequence" - 1 WHERE "routeId" = ${routeId}`;
+        for (const { id, data } of stopWrites.updates) await tx.routeStop.update({ where: { id }, data });
+      }
+      await tx.route.update({ where: { id: routeId }, data: { ...totals, matrixSource } });
+      if (stopWrites.creates.length > 0) {
+        await tx.routeStop.createMany({ data: stopWrites.creates.map((stop) => ({ ...stop, routeId })) });
+      }
+      routeIdByVehicle.set(rowVehicle, routeId);
+    } else {
+      const created = await tx.route.create({
+        data: {
+          ...totals,
+          vehicleId: rowVehicle,
+          driverId,
+          crewMateId,
+          serviceDate,
+          status,
+          ...(status === "VALIDATED" ? { validatedAt } : {}),
+          optimizationRunId: planRunId,
+          matrixSource,
+          stops: { createMany: { data: stops } },
+        },
+        select: { id: true },
+      });
+      routeIdByVehicle.set(rowVehicle, created.id);
+    }
+  }
+  for (const update of write.trips) {
+    await tx.trip.update({
+      where: { id: update.tripId },
+      data: {
+        ...update.data,
+        routeId: update.vehicleId ? (routeIdByVehicle.get(update.vehicleId) ?? null) : null,
+        ...(locks.has(update.tripId) ? { lockedVehicleId: locks.get(update.tripId) ?? null } : {}),
+      },
+    });
+  }
+  if (write.deletedRouteIds.length > 0) await tx.route.deleteMany({ where: { id: { in: write.deletedRouteIds } } });
 }
 
 /**
@@ -384,55 +487,17 @@ export async function applyTripPlace(
         .filter((route) => route.status === "VALIDATED")
         .map((route) => route.validatedAt)
         .reduce<Date | null>((latest, at) => (at && (!latest || at > latest) ? at : latest), null) ?? new Date();
-    const routeIdByVehicle = new Map<string, string>();
-    for (const { routeId, row } of write.routes) {
-      const { stops, vehicleId: rowVehicle, driverId, crewMateId, ...totals } = row;
-      if (routeId) {
-        // The stops that stay are updated in place: a driver's phone names them by id (roadmap, offline queue).
-        const stopWrites = planStopWrites(storedByVehicle.get(rowVehicle)?.stops ?? [], stops);
-        if (stopWrites.deleteIds.length > 0) await tx.routeStop.deleteMany({ where: { id: { in: stopWrites.deleteIds } } });
-        if (stopWrites.updates.length > 0) {
-          // Out of the way first (-1, -2…): each stop then takes its new position, never one another still holds
-          // (@@unique([routeId, sequence]) is checked row by row).
-          await tx.$executeRaw`UPDATE "RouteStop" SET "sequence" = -"sequence" - 1 WHERE "routeId" = ${routeId}`;
-          for (const { id, data } of stopWrites.updates) await tx.routeStop.update({ where: { id }, data });
-        }
-        await tx.route.update({ where: { id: routeId }, data: { ...totals, matrixSource: result.data.meta.matrixSource } });
-        if (stopWrites.creates.length > 0) {
-          await tx.routeStop.createMany({ data: stopWrites.creates.map((stop) => ({ ...stop, routeId })) });
-        }
-        routeIdByVehicle.set(rowVehicle, routeId);
-      } else {
-        const created = await tx.route.create({
-          data: {
-            ...totals,
-            vehicleId: rowVehicle,
-            driverId,
-            crewMateId,
-            serviceDate,
-            status,
-            ...(status === "VALIDATED" ? { validatedAt } : {}),
-            optimizationRunId: planRunId,
-            matrixSource: result.data.meta.matrixSource,
-            stops: { createMany: { data: stops } },
-          },
-          select: { id: true },
-        });
-        routeIdByVehicle.set(rowVehicle, created.id);
-      }
-    }
-    for (const update of write.trips) {
-      await tx.trip.update({
-        where: { id: update.tripId },
-        data: {
-          ...update.data,
-          routeId: update.vehicleId ? (routeIdByVehicle.get(update.vehicleId) ?? null) : null,
-          // Placed by the regulator: a later optimization keeps it there (as « Déplacer vers… »).
-          ...(update.tripId === tripId ? { lockedVehicleId: vehicleId } : {}),
-        },
-      });
-    }
-    if (write.deletedRouteIds.length > 0) await tx.route.deleteMany({ where: { id: { in: write.deletedRouteIds } } });
+    await writePlacedRoutes(tx, {
+      serviceDate,
+      write,
+      storedByVehicle,
+      matrixSource: result.data.meta.matrixSource,
+      status,
+      validatedAt,
+      planRunId,
+      // Placed by the regulator: a later optimization keeps it there (as « Déplacer vers… »).
+      locks: new Map([[tripId, vehicleId]]),
+    });
     await audit(tx, user, {
       action: "trip.move",
       entity: "Trip",
