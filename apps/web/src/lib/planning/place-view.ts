@@ -28,8 +28,18 @@ export type PlaceOptionView = {
   remainingViolations: number;
 };
 
-/** The optimizer's kinds, and the web's own: a route under way, a vehicle off the road. */
-export type PlaceRejectionKind = RejectionKind | "STARTED" | "UNAVAILABLE";
+/** The optimizer's kinds, and the web's own: a route under way, a vehicle off the road, a time already past. */
+export type PlaceRejectionKind = RejectionKind | "STARTED" | "UNAVAILABLE" | "PAST";
+
+/** Why the assistant has nothing to place a trip in: the day has no route yet (mirrored on the server). */
+export const PLACE_NO_ROUTES = "Optimisez d'abord la journée\u00a0: l'assistant place une course dans les tournées en place.";
+
+/**
+ * Why the assistant does not move a trip in an exceptional ambulance (TAR-03): the measure holds while it is
+ * locked there, and taken off it the trip would be priced and checked as a seated one (mirrored on the server).
+ */
+export const PLACE_EXCEPTIONAL_AMBULANCE =
+  "Recours exceptionnel à une ambulance\u00a0: «\u202fDéfiger\u202f» la course (la mesure tombe) pour lui chercher une place en taxi ou en VSL.";
 
 export type PlaceRejectionView = {
   vehicleId: string;
@@ -125,23 +135,31 @@ export function groupPlaces(
   );
 }
 
-const signedEuros = new Intl.NumberFormat("fr-FR", {
+const eurosFormat = new Intl.NumberFormat("fr-FR", {
   style: "currency",
   currency: "EUR",
   maximumFractionDigits: 0,
   signDisplay: "exceptZero",
 });
-const signedDecimal = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1, minimumFractionDigits: 1, signDisplay: "exceptZero" });
-const signedInteger = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0, signDisplay: "exceptZero" });
+const decimalFormat = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1, minimumFractionDigits: 1, signDisplay: "exceptZero" });
+const integerFormat = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0, signDisplay: "exceptZero" });
+
+/** The typographic minus (U+2212) instead of Intl's hyphen-minus, as signedDurationText and the driver app write it. */
+function withMinus(format: Intl.NumberFormat): (value: number) => string {
+  return (value) => format.format(value).replace(/^-/, "\u2212");
+}
+const signedEuros = withMinus(eurosFormat);
+const signedDecimal = withMinus(decimalFormat);
+const signedInteger = withMinus(integerFormat);
 
 /** « marge +18 € », « marge −12 € », « marge inchangée ». */
 export function marginText(deltaMargin: number): string {
-  return Math.round(deltaMargin) === 0 ? "marge inchangée" : `marge\u00a0${signedEuros.format(deltaMargin)}`;
+  return Math.round(deltaMargin) === 0 ? "marge inchangée" : `marge\u00a0${signedEuros(deltaMargin)}`;
 }
 
 /** « +6,2 km », « −3,0 km », « 0 km ». */
 export function signedKmText(deltaKm: number): string {
-  return Math.abs(deltaKm) < 0.05 ? "0\u00a0km" : `${signedDecimal.format(deltaKm)}\u00a0km`;
+  return Math.abs(deltaKm) < 0.05 ? "0\u00a0km" : `${signedDecimal(deltaKm)}\u00a0km`;
 }
 
 /** « +25 min », « −1 h 05 », « 0 min ». */
@@ -161,7 +179,7 @@ export function placeTimesText(option: Pick<PlaceOptionView, "pickupMinute" | "d
  */
 export function placeFiguresText(option: Pick<PlaceOptionView, "deltaKm" | "deltaEmptyKm" | "deltaDurationMin" | "deltaRevenue">): string {
   const empty = Math.abs(option.deltaEmptyKm) >= 0.05 ? ` dont ${signedKmText(option.deltaEmptyKm)} à vide` : "";
-  const revenue = Math.round(option.deltaRevenue) === 0 ? "CA inchangé" : `CA\u00a0${signedEuros.format(option.deltaRevenue)}`;
+  const revenue = Math.round(option.deltaRevenue) === 0 ? "CA inchangé" : `CA\u00a0${signedEuros(option.deltaRevenue)}`;
   return `${signedKmText(option.deltaKm)}${empty} · ${signedDurationText(option.deltaDurationMin)} de service · ${revenue}`;
 }
 
@@ -172,7 +190,7 @@ export function placeFiguresText(option: Pick<PlaceOptionView, "deltaKm" | "delt
 export function shiftsText(shifts: readonly { tripId: string; minutes: number }[], nameOf: (tripId: string) => string | null): string | null {
   if (shifts.length === 0) return null;
   const largest = shifts.reduce((a, b) => (Math.abs(b.minutes) > Math.abs(a.minutes) ? b : a));
-  const amount = `${signedInteger.format(largest.minutes)}\u00a0min`;
+  const amount = `${signedInteger(largest.minutes)}\u00a0min`;
   if (shifts.length === 1) return `Décale ${nameOf(largest.tripId) ?? "un patient"} de ${amount}`;
   return `Décale ${shifts.length} patients (jusqu'à ${amount})`;
 }
@@ -185,11 +203,29 @@ export function sharedText(coPassengerTripIds: readonly string[], nameOf: (tripI
   return `Partagée avec ${listed}`;
 }
 
-/** The headline of the answer: « 12 places possibles sur 40 véhicules compatibles ». */
-export function placesSummary(view: Pick<PlacesView, "options" | "rejected">): string {
-  const total = view.options.length + view.rejected.length;
+/**
+ * The headline of the answer: « 12 places possibles sur 40 véhicules compatibles », counted on the
+ * groups shown (the vehicles off the road greyed in their depot included).
+ */
+export function placesSummary(groups: readonly Pick<PlaceGroup, "options" | "rejected">[]): string {
+  const options = groups.reduce((sum, group) => sum + group.options.length, 0);
+  const total = options + groups.reduce((sum, group) => sum + group.rejected.length, 0);
   const vehicles = `${total} véhicule${total > 1 ? "s" : ""} compatible${total > 1 ? "s" : ""}`;
-  if (view.options.length === 0) return total === 0 ? "Aucun autre véhicule compatible ce jour" : `Aucune place sur ${vehicles}`;
-  const places = view.options.length > 1 ? `${view.options.length} places possibles` : "1 place possible";
+  if (options === 0) return total === 0 ? "Aucun autre véhicule compatible ce jour" : `Aucune place sur ${vehicles}`;
+  const places = options > 1 ? `${options} places possibles` : "1 place possible";
   return `${places} sur ${vehicles}`;
+}
+
+/**
+ * For a trip already on a vehicle whose best move does not earn more (margin rounded to 0 € or
+ * less): « Sa place actuelle reste la plus rentable : chaque déplacement coûte au moins 13 € ».
+ * Null otherwise (a gain, or a trip without a vehicle: placing it is the gain). The panel then
+ * marks no place as the best one.
+ */
+export function currentPlaceNote(view: Pick<PlacesView, "fromVehicleId">, best: Pick<PlaceOptionView, "deltaMargin"> | null): string | null {
+  if (!view.fromVehicleId || !best || Math.round(best.deltaMargin) > 0) return null;
+  const loss = Math.round(-best.deltaMargin);
+  return loss === 0
+    ? "Sa place actuelle reste la plus rentable\u00a0: aucun déplacement ne rapporte plus."
+    : `Sa place actuelle reste la plus rentable\u00a0: chaque déplacement coûte au moins ${loss}\u00a0€.`;
 }

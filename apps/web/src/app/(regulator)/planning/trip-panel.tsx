@@ -11,6 +11,7 @@ import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_LABEL } from "@/lib/domain/no
 import { exceptionalAmbulanceIssue, OPTIMIZE_FIRST_ISSUE } from "@/lib/planning/exceptional-ambulance";
 import { fieldRecordLabel, fieldRecordText, sharingAnswerText } from "@/lib/planning/format";
 import { coursesTripHref, patientHref, telHref } from "@/lib/planning/links";
+import { PLACE_EXCEPTIONAL_AMBULANCE } from "@/lib/planning/place-view";
 import { isShortcutKey } from "@/lib/planning/shortcuts";
 import { appointmentMark, TIGHT_MARGIN_MIN } from "@/lib/planning/timeline-layout";
 import type { TripView, VehicleRowView, ViolationView } from "@/lib/planning/types";
@@ -45,6 +46,8 @@ export type TripPanelProps = {
   placeBlocked: string | null;
   /** Search the places at once (the panel opened with ?placer=1). */
   autoPlace?: boolean;
+  /** The automatic search started: it is not asked again (a remount after « Appliquer », a reload). */
+  onAutoPlaceStarted?: () => void;
   onSelectTrip: (tripId: string) => void;
   onClose: () => void;
 };
@@ -95,6 +98,7 @@ export function TripPanel({
   lockBlocked,
   placeBlocked,
   autoPlace = false,
+  onAutoPlaceStarted,
   onSelectTrip,
   onClose,
 }: TripPanelProps) {
@@ -105,6 +109,16 @@ export function TripPanel({
   const [ambulance, setAmbulance] = useState("");
   const lockButton = useRef<HTMLButtonElement>(null);
   const placeButton = useRef<HTMLButtonElement>(null);
+  // « Appliquer » disables its button, then the places are drawn again for the trip's new vehicle: once the
+  // panel shows the trip there and nothing runs, the focus (lost to the page meanwhile) goes back to « Chercher ».
+  const placedFrom = useRef<{ vehicleId: string | null } | null>(null);
+  useEffect(() => {
+    if (busy || placedFrom.current === null || placedFrom.current.vehicleId === trip.vehicleId) return;
+    placedFrom.current = null;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    placeButton.current?.focus();
+  }, [busy, trip.vehicleId]);
 
   // « F »: Figer / Défiger, « D »: « Où placer cette course ? » (the same controls, so the same rules and confirmations).
   const exceptional = trip.exceptionalAmbulance === true;
@@ -145,7 +159,13 @@ export function TripPanel({
     : inField
       ? "Course déjà commencée."
       : (replanBlocked ?? optimizerOffline);
-  const placeOff = cancelled ? "Course annulée." : inField ? "Course déjà commencée." : (placeBlocked ?? optimizerOffline);
+  const placeOff = cancelled
+    ? "Course annulée."
+    : inField
+      ? "Course déjà commencée."
+      : exceptional
+        ? PLACE_EXCEPTIONAL_AMBULANCE
+        : (placeBlocked ?? optimizerOffline);
   const outbound = trip.direction === "OUTBOUND";
   const mark = trip.vehicleId ? appointmentMark(trip) : null;
   // « Recours exceptionnel » (TAR-03): only for a seated trip the last optimization left without a vehicle, never
@@ -279,6 +299,10 @@ export function TripPanel({
           vehicles={vehicles}
           blocked={placeOff}
           autoStart={autoPlace}
+          onAutoStarted={onAutoPlaceStarted}
+          onPlaced={() => {
+            placedFrom.current = { vehicleId: trip.vehicleId };
+          }}
           searchRef={placeButton}
         />
 

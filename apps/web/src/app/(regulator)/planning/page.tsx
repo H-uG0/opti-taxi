@@ -15,6 +15,7 @@ import { TariffGapBanner } from "@/components/planning/tariff-gap-banner";
 import { FILTER_PARAMS } from "@/lib/planning/filter";
 import { formatDayMonth, pluralize } from "@/lib/planning/format";
 import { loadPlanningDay } from "@/lib/planning/load";
+import { PLACE_NO_ROUTES } from "@/lib/planning/place-view";
 import type { PlanningDayView } from "@/lib/planning/types";
 import { loadDayVersion } from "@/lib/planning/version";
 import { formatDateTime, formatDayDate, formatLongDate, isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
@@ -127,8 +128,9 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   const optimizeLabel = hasRoutes ? "Réoptimiser" : date === tomorrow ? "Optimiser demain" : `Optimiser le ${formatDayMonth(date)}`;
   const relativeDay = date === today ? "Aujourd'hui" : date === tomorrow ? "J+1" : null;
   const initialTripId = requestedTrip && view.trips.some((t) => t.id === requestedTrip) ? requestedTrip : null;
-  // « Où placer cette course ? » works on a validated or started day too (it asks first, and leaves the routes under way).
-  const placeBlocked = past ? "Date passée\u00a0: le planning n'est plus modifiable." : runningReason;
+  // « Où placer cette course ? » works on a validated or started day too (it asks first, and leaves the routes under way),
+  // never on a day without routes: one trip placed there would make a half-planned day, locked on its vehicle.
+  const placeBlocked = past ? "Date passée\u00a0: le planning n'est plus modifiable." : (runningReason ?? (hasRoutes ? null : PLACE_NO_ROUTES));
   // « Placer les non affectées » places only the trips the optimizer is sent (incomplete ones never are).
   const incomplete = new Set(view.excludedTrips.map((t) => t.tripId));
   const placeable = view.unassigned.filter((u) => !incomplete.has(u.tripId)).length;

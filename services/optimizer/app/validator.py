@@ -24,6 +24,11 @@ produced routes with this module's own code (decimal arithmetic, not pricing.py'
 billed distance, short-trip band, night and weekend surcharges at the planned times, empty leg,
 sharing discount, supplements, rounded half up to the cent. A trip result off by more than one cent,
 or a route whose revenue is not the sum of its trips', is reported.
+
+Size of a breach (validate_measured, for /insert): how far a measured rule is exceeded, in its own
+unit: minutes beyond the window, the total wait, the time on board or the shift, km beyond the
+detour allowance, patients beyond the seats; None for a breach without a size (pairing, type, lock,
+break placement, revenue). Kept beside the violations, never in the contract.
 """
 
 from __future__ import annotations
@@ -65,10 +70,11 @@ KIND_LABELS: dict[StopKind, str] = {"PICKUP": "prise en charge", "DROPOFF": "dé
 
 
 class _Collector:
-    """Ordered violations without duplicates."""
+    """Ordered violations without duplicates, each with its size (`excess`, None when unmeasured)."""
 
     def __init__(self) -> None:
         self.items: list[Violation] = []
+        self.excess: list[float | None] = []
         self._keys: set[tuple[str, ...]] = set()
 
     def add(
@@ -79,12 +85,14 @@ class _Collector:
         trip_id: str | None = None,
         vehicle_id: str | None = None,
         key: tuple[str, ...] | None = None,
+        excess: float | None = None,
     ) -> None:
         dedup = key or (code, trip_id or "", vehicle_id or "", message)
         if dedup in self._keys:
             return
         self._keys.add(dedup)
         self.items.append(Violation(code=code, message=message, trip_id=trip_id, vehicle_id=vehicle_id))
+        self.excess.append(excess)
 
 
 @dataclass(frozen=True)
@@ -166,6 +174,16 @@ def check_plan_references(
 
 def validate(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix) -> list[Violation]:
     """Every hard-rule violation of the produced routes (empty list = valid plan)."""
+    return _validate(request, routes, matrix).items
+
+
+def validate_measured(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix) -> list[tuple[Violation, float | None]]:
+    """The violations of validate(), each with the size of the breach (module docstring)."""
+    out = _validate(request, routes, matrix)
+    return list(zip(out.items, out.excess, strict=True))
+
+
+def _validate(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix) -> _Collector:
     trips = {trip.id: trip for trip in request.trips}
     vehicles = {vehicle.id: vehicle for vehicle in request.vehicles}
     out = _Collector()
@@ -205,7 +223,7 @@ def validate(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix)
 
     _check_pairing(out, occurrences)
     _check_total_wait(out, request.settings, request.trips, occurrences, standing)
-    return out.items
+    return out
 
 
 def _check_pairing(out: _Collector, occurrences: Mapping[str, list[_Occurrence]]) -> None:
@@ -298,6 +316,7 @@ def _check_total_wait(
                 f"+ retour {after[0]}\u00a0min{_on_board_text(after[1])}, maximum {settings.max_total_wait_min}\u00a0min)",
                 trip_id=ret.id,
                 vehicle_id=after[2],
+                excess=total - settings.max_total_wait_min,
             )
     for trip in trips:
         if trip.id in paired:
@@ -311,6 +330,7 @@ def _check_total_wait(
                 f"(maximum {settings.max_total_wait_min}\u00a0min)",
                 trip_id=trip.id,
                 vehicle_id=wait[2],
+                excess=wait[0] - settings.max_total_wait_min,
             )
 
 
@@ -401,6 +421,7 @@ class _RouteCheck:
                     trip_id=trip.id,
                     vehicle_id=vid,
                     key=("CAPACITY", vid),
+                    excess=len(on_board) - self.vehicle.capacity,
                 )
             if len(on_board) >= 2:
                 for other_id in on_board:
@@ -435,6 +456,7 @@ class _RouteCheck:
                     f"impossible avant {hhmm(departure + needed)}",
                     trip_id=trip.id,
                     vehicle_id=vid,
+                    excess=departure + needed - next_start,
                 )
             else:
                 self.out.add(
@@ -442,6 +464,7 @@ class _RouteCheck:
                     f"Retour au dépôt de {vehicle_name(self.vehicle)} annoncé à {hhmm(next_start)}, "
                     f"impossible avant {hhmm(departure + needed)}",
                     vehicle_id=vid,
+                    excess=departure + needed - next_start,
                 )
 
         for stop, trip in self.stops:
@@ -469,6 +492,7 @@ class _RouteCheck:
                     f"(retard de {start - appointment}\u00a0min)",
                     trip_id=trip.id,
                     vehicle_id=vid,
+                    excess=start - appointment,
                 )
             elif start < appointment - margin - TIME_TOLERANCE_MIN:
                 self.out.add(
@@ -476,6 +500,7 @@ class _RouteCheck:
                     f"Arrivée au lieu de soins à {hhmm(start)}, plus de {margin}\u00a0min avant le rendez-vous de {hhmm(appointment)}",
                     trip_id=trip.id,
                     vehicle_id=vid,
+                    excess=appointment - margin - start,
                 )
         if trip.direction == "RETURN" and stop.kind == "PICKUP" and trip.ready_min is not None:
             ready = trip.ready_min
@@ -486,6 +511,7 @@ class _RouteCheck:
                     f"Prise en charge à {hhmm(start)}, avant la fin de séance ({hhmm(ready)})",
                     trip_id=trip.id,
                     vehicle_id=vid,
+                    excess=ready - start,
                 )
             elif start > ready + margin + TIME_TOLERANCE_MIN:
                 self.out.add(
@@ -493,6 +519,7 @@ class _RouteCheck:
                     f"Prise en charge à {hhmm(start)}, plus de {margin}\u00a0min après la fin de séance ({hhmm(ready)})",
                     trip_id=trip.id,
                     vehicle_id=vid,
+                    excess=start - ready - margin,
                 )
 
     # -- shift
@@ -504,6 +531,7 @@ class _RouteCheck:
                 f"Départ du dépôt de {vehicle_name(vehicle)} à {hhmm(route.start_min)}, avant le début de service "
                 f"({hhmm(vehicle.shift_start_min)})",
                 vehicle_id=vehicle.id,
+                excess=vehicle.shift_start_min - route.start_min,
             )
         if route.end_min > vehicle.shift_end_min + TIME_TOLERANCE_MIN:
             self.out.add(
@@ -511,6 +539,7 @@ class _RouteCheck:
                 f"Retour au dépôt de {vehicle_name(vehicle)} à {hhmm(route.end_min)}, après la fin de service "
                 f"({hhmm(vehicle.shift_end_min)})",
                 vehicle_id=vehicle.id,
+                excess=route.end_min - vehicle.shift_end_min,
             )
 
     # -- driver break
@@ -607,6 +636,7 @@ class _RouteCheck:
                     f"(maximum {limit}\u00a0min\u00a0: trajet direct + {self.settings.max_ride_extra_min}\u00a0min)",
                     trip_id=trip_id,
                     vehicle_id=self.vehicle.id,
+                    excess=on_board - limit,
                 )
 
     # -- detour of shared rides
@@ -636,6 +666,7 @@ class _RouteCheck:
                     f"avec {len(co_passengers)} co-passager(s))",
                     trip_id=trip_id,
                     vehicle_id=self.vehicle.id,
+                    excess=detour - allowance,
                 )
 
 

@@ -192,7 +192,7 @@ export const INSERT_TIMEOUT_MS = 15_000;
 /** Said when the optimizer predates /insert (404: web deployed first). */
 export const INSERT_UNKNOWN_ERROR =
   "Le service d'optimisation ne sait pas encore chercher la place d'une course (version plus ancienne que l'application)\u00a0: " +
-  "utilisez «\u202fFiger et réoptimiser\u202f» en attendant sa mise à jour.";
+  "utilisez «\u202fDéplacer vers…\u202f» («\u202fOu figer sur un véhicule et réoptimiser la journée\u202f») en attendant sa mise à jour.";
 
 /**
  * POST /insert: the best place of one trip in each vehicle's route in place, the other routes kept.

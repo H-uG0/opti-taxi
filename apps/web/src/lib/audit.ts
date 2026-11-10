@@ -30,7 +30,12 @@
  *   trip.generate_week (before the rolling horizon), trip.create,
  *   trip.cancel (the reason stays on the trip), trip.detach (taken off its
  *   route by a referential change, not cancelled), trip.restore,
- *   trip.reschedule, trip.sharing_accept, trip.sharing_refuse, trip.move,
+ *   trip.reschedule, trip.sharing_accept, trip.sharing_refuse, trip.move
+ *   (« Déplacer vers… »: no details, the day is then re-optimized; « Où placer
+ *   cette course ? »: details.mode "insert", details.vehicleId and
+ *   details.lockedVehicleId as { from, to }, and on a validated or started day
+ *   details.confirmed with details.validated and details.started: the
+ *   drivers' roadmaps rewritten after the question was answered),
  *   trip.lock, trip.unlock, trip.toll (details: old and new toll),
  *   trip.exceptional_ambulance (a seated trip proposed in an ambulance,
  *   details.vehicleId and details.reason, a fixed text) and

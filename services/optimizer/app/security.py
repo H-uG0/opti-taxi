@@ -5,7 +5,7 @@ The requests carry patients' home coordinates and appointment times, and one /op
 
 - OPTIMIZER_TOKEN: when set, every path but /health (container health checks) answers 401 to a
   request without ``Authorization: Bearer <the same token>`` (compared in constant time), before
-  its body is read or parsed: /optimize, /evaluate, and the /docs and /openapi.json pages too.
+  its body is read or parsed: /optimize, /evaluate, /insert, and the /docs and /openapi.json pages too.
   Unset: open, as in development, with a warning at startup.
 - OPTIMIZER_MAX_CONCURRENT_SOLVES (default 2, 1 to 8): solves running at once. Beyond, /optimize
   answers 429 at once rather than queueing (the web shows « réessayez dans une minute »).
@@ -192,7 +192,7 @@ def log_startup_settings(slots: SolveSlots) -> None:
     """One line on the protections in force; a warning when the API is open."""
     if configured_token() is None:
         logger.warning(
-            "OPTIMIZER_TOKEN is not set: /optimize, /evaluate and /docs accept any caller. Set the same value on the "
+            "OPTIMIZER_TOKEN is not set: /optimize, /evaluate, /insert and /docs accept any caller. Set the same value on the "
             "web app and here, and keep this service on a private network (README, «\u202fSécurité\u202f»)."
         )
     logger.info(

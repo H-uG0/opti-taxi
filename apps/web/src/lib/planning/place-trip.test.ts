@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { insertResponseSchema, type InsertResponse } from "@/lib/optimizer/contract";
 
 // « Où placer cette course ? » end to end against fakes: what goes to /insert, what « Appliquer »
 // writes (the two routes only, the trip locked on its vehicle, one audit event), and when it refuses.
 const fake = vi.hoisted(() => {
   const tx = {
-    route: { findMany: vi.fn(), update: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
-    routeStop: { deleteMany: vi.fn(), createMany: vi.fn() },
+    route: { findMany: vi.fn(), findFirst: vi.fn(), update: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
+    routeStop: { deleteMany: vi.fn(), createMany: vi.fn(), update: vi.fn() },
     trip: { findMany: vi.fn(), update: vi.fn() },
     vehicle: { findMany: vi.fn() },
     optimizationRun: { findFirst: vi.fn(), update: vi.fn() },
@@ -101,6 +101,7 @@ function setUp(routes: unknown[] = [taxiRoute(), ambulanceRoute()]) {
   fake.db.route.findMany.mockResolvedValue(routes);
   fake.loadInput.mockResolvedValue({
     trips: ["trip_1", "trip_2", "trip_3", "trip_4", "trip_5", "trip_6", "trip_7"].map((id) => ({ id, status: id === "trip_1" ? "PLANNED" : "ASSIGNED" })),
+    vehicles: [],
   });
   fake.build.mockReturnValue({
     request: { date: DATE, settings: request.settings, vehicles: request.vehicles, trips: request.trips, tariffs: request.tariffs },
@@ -130,6 +131,7 @@ function setUp(routes: unknown[] = [taxiRoute(), ambulanceRoute()]) {
   );
   fake.tx.vehicle.findMany.mockResolvedValue([{ id: "veh_taxi_1", type: "TAXI" }]);
   fake.tx.route.create.mockResolvedValue({ id: "route-new" });
+  fake.tx.route.findFirst.mockResolvedValue(null);
   fake.tx.optimizationRun.findFirst.mockResolvedValue({
     id: "run-1",
     details: { solverStatus: "OK", violations: [], warnings: [], unassigned: [{ tripId: "trip_1", reason: "Non affectée" }] },
@@ -140,6 +142,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   setUp();
 });
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+/** The SQL text of a tagged $executeRaw call. */
+const sqlOf = (call: unknown[]) => (call[0] as TemplateStringsArray).join("?");
 
 describe("findTripPlaces", () => {
   it("asks /insert with the routes in place, and greys the vehicles whose route is under way", async () => {
@@ -175,6 +183,67 @@ describe("findTripPlaces", () => {
     expect(await findTripPlaces("trip_1")).toMatchObject({ ok: false, error: expect.stringMatching(/est passé/) });
     expect(fake.insert).not.toHaveBeenCalled();
   });
+
+  it("never places a trip on a day without routes: the day is planned by « Optimiser »", async () => {
+    fake.db.route.findMany.mockResolvedValue([]);
+    expect(await findTripPlaces("trip_1")).toEqual({
+      ok: false,
+      error: "Optimisez d'abord la journée\u00a0: l'assistant place une course dans les tournées en place.",
+    });
+    expect(await applyTripPlace("trip_1", "veh_taxi_1", "v-1", null, REGULATOR)).toMatchObject({ ok: false });
+    expect(fake.insert).not.toHaveBeenCalled();
+  });
+
+  it("leaves a trip in an exceptional ambulance to « Défiger »", async () => {
+    fake.loadInput.mockResolvedValue({
+      trips: [{ id: "trip_1", status: "ASSIGNED", exceptionalAmbulanceAt: new Date(), lockedVehicleId: "veh_amb_1", allowedVehicleTypes: ["TAXI", "VSL"] }],
+      vehicles: [{ id: "veh_amb_1", type: "AMBULANCE" }],
+    });
+    expect(await findTripPlaces("trip_1")).toMatchObject({ ok: false, error: expect.stringMatching(/^Recours exceptionnel à une ambulance\u00a0: «\u202fDéfiger\u202f»/) });
+    expect(fake.insert).not.toHaveBeenCalled();
+  });
+
+  it("says that the trip's vehicle is off the road, not that its crew changed", async () => {
+    const downRoute = { ...taxiRoute(), id: "route-down", vehicleId: "veh_down", stops: [stop("trip_1", "PICKUP", 0), stop("trip_1", "DROPOFF", 1)] };
+    fake.db.route.findMany.mockResolvedValue([taxiRoute(), downRoute]);
+    // Made unavailable that day (VehicleUnavailability): not sent, reported as skipped.
+    const built = fake.build() as object;
+    fake.build.mockReturnValue({ ...built, skippedVehicles: [{ vehicleId: "veh_down", label: "Taxi 9 (Gap)", type: "TAXI", reason: "Panne moteur" }] });
+    expect(await findTripPlaces("trip_1")).toEqual({
+      ok: false,
+      error:
+        "Cette course ne peut pas quitter sa tournée\u00a0: Taxi 9 (Gap) est indisponible ce jour\u00a0: panne moteur. " +
+        "L'assistant ne refait pas la tournée d'un véhicule indisponible\u00a0: seule une réoptimisation de la journée la reprend.",
+    });
+    expect(fake.insert).not.toHaveBeenCalled();
+  });
+
+  it("never offers a free vehicle whose crew of the day is still on another route of the date", async () => {
+    // Crews saved after the plan: the VSL's driver of the day still drives the ambulance's stored route.
+    fake.db.route.findMany.mockResolvedValue([taxiRoute(), { ...ambulanceRoute(), driverId: "drv-vsl" }]);
+    const outcome = await findTripPlaces("trip_1");
+    expect((fake.insert.mock.calls[0]![0] as { vehicleIds: string[] | null }).vehicleIds).toEqual(["veh_taxi_1"]);
+    expect(outcome.ok && outcome.view.rejected).toEqual([
+      { vehicleId: "veh_vsl_1", kind: "RULES", reason: "a son équipage du jour encore sur la tournée de Ambulance 1 (Gap) (voir «\u202fÀ traiter\u202f»)" },
+    ]);
+    expect(await applyTripPlace("trip_1", "veh_vsl_1", "v-1", null, REGULATOR)).toEqual({
+      ok: false,
+      error: "Place refusée\u00a0: VSL 1 (Sisteron) a son équipage du jour encore sur la tournée de Ambulance 1 (Gap) (voir «\u202fÀ traiter\u202f»).",
+    });
+  });
+
+  it("on today's date, greys a place whose pickup is already past", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(`${DATE}T13:00:00Z`)); // 14:00 in Paris
+    const outcome = await findTripPlaces("trip_1");
+    expect(outcome.ok && outcome.view.options).toEqual([]);
+    expect(outcome.ok && outcome.view.rejected).toContainEqual({ vehicleId: "veh_taxi_1", kind: "PAST", reason: "la prendrait en charge à 06:08, heure déjà passée" });
+    expect(await applyTripPlace("trip_1", "veh_taxi_1", "v-1", null, REGULATOR)).toEqual({
+      ok: false,
+      error: "Place refusée\u00a0: Taxi 1 (Marseille) la prendrait en charge à 06:08, heure déjà passée. Le planning n'a pas changé.",
+    });
+    expect(fake.tx.route.update).not.toHaveBeenCalled();
+  });
 });
 
 describe("applyTripPlace", () => {
@@ -188,13 +257,26 @@ describe("applyTripPlace", () => {
     // Computed again for that vehicle only, on the data of the moment.
     expect((fake.insert.mock.calls[0]![0] as { vehicleIds: string[] }).vehicleIds).toEqual(["veh_taxi_1"]);
     expect(fake.tx.$executeRaw).toHaveBeenCalled(); // planning lock of the date
-    expect(fake.tx.routeStop.deleteMany).toHaveBeenCalledWith({ where: { routeId: "route-taxi" } });
     expect(fake.tx.route.update).toHaveBeenCalledWith({
       where: { id: "route-taxi" },
       data: expect.objectContaining({ startMinute: 362, endMinute: 803, revenue: 160.4, margin: -38.36, breakStartMinute: 758, matrixSource: "haversine" }),
     });
+    // The stops that stay keep their ids (a driver's phone sends statuses by stop id), moved out of the way first.
+    expect(fake.tx.routeStop.deleteMany).not.toHaveBeenCalled();
+    expect(fake.tx.$executeRaw.mock.calls.map(sqlOf)).toContain('UPDATE "RouteStop" SET "sequence" = -"sequence" - 1 WHERE "routeId" = ?');
+    const updated = fake.tx.routeStop.update.mock.calls.map((c) => c[0] as { where: { id: string }; data: { sequence: number; startMinute: number } });
+    expect(updated.map((u) => `${u.data.sequence}:${u.where.id}`)).toEqual([
+      "1:trip_3-PICKUP",
+      "3:trip_3-DROPOFF",
+      "4:trip_2-PICKUP",
+      "5:trip_4-PICKUP",
+      "6:trip_4-DROPOFF",
+      "7:trip_2-DROPOFF",
+    ]);
+    expect(updated[0]!.data.startMinute).toBe(381);
+    // Only the placed trip's two stops are new.
     const created = fake.tx.routeStop.createMany.mock.calls[0]![0] as { data: { routeId: string; tripId: string; sequence: number }[] };
-    expect(created.data.map((s) => `${s.sequence}:${s.tripId}`)).toEqual(["0:trip_1", "1:trip_3", "2:trip_1", "3:trip_3", "4:trip_2", "5:trip_4", "6:trip_4", "7:trip_2"]);
+    expect(created.data.map((s) => `${s.sequence}:${s.tripId}`)).toEqual(["0:trip_1", "2:trip_1"]);
     expect(created.data.every((s) => s.routeId === "route-taxi")).toBe(true);
     expect(fake.tx.route.create).not.toHaveBeenCalled();
     expect(fake.tx.route.deleteMany).not.toHaveBeenCalled();
@@ -299,18 +381,99 @@ describe("applyTripPlace", () => {
     );
   });
 
-  it("creates a validated route on a validated day, and refuses the trip's own vehicle", async () => {
+  it("moves a trip off a route that keeps other trips: only its two stops leave, the others keep their ids", async () => {
+    const vslRoute = {
+      id: "route-vsl",
+      vehicleId: "veh_vsl_1",
+      status: "PROPOSED",
+      driverId: "drv-vsl",
+      crewMateId: null,
+      stops: [stop("trip_1", "PICKUP", 0), stop("trip_7", "PICKUP", 1), stop("trip_1", "DROPOFF", 2), stop("trip_7", "DROPOFF", 3)],
+    };
+    fake.db.route.findMany.mockResolvedValue([taxiRoute(), vslRoute]);
+    fake.tx.route.findMany.mockImplementation(async (args: { where: { serviceDate?: unknown } }) =>
+      args.where.serviceDate ? [{ status: "PROPOSED" }, { status: "PROPOSED" }] : [taxiRoute(), vslRoute],
+    );
+    fake.tx.vehicle.findMany.mockResolvedValue([{ id: "veh_taxi_1", type: "TAXI" }, { id: "veh_vsl_1", type: "VSL" }]);
+    fake.tx.trip.findMany.mockResolvedValue(
+      ["trip_1", "trip_2", "trip_3", "trip_4", "trip_7"].map((id) => ({
+        id,
+        status: id === "trip_1" ? "PLANNED" : "ASSIGNED",
+        sharingStatus: "NOT_PROPOSED",
+        pickupAddress: `départ ${id}`,
+        dropoffAddress: `arrivée ${id}`,
+      })),
+    );
+    const data = answer();
+    const [option] = data.options;
+    const taxi = option!.routes[0]!;
+    const vsl = {
+      ...taxi,
+      vehicleId: "veh_vsl_1",
+      break: null,
+      stops: [
+        { ...taxi.stops[0]!, tripId: "trip_7", kind: "PICKUP" as const, arrivalMin: 500, startMin: 500, departureMin: 505, loadAfter: 1 },
+        { ...taxi.stops[2]!, tripId: "trip_7", kind: "DROPOFF" as const, arrivalMin: 540, startMin: 540, departureMin: 545, loadAfter: 0 },
+      ],
+    };
+    const trip7 = { ...option!.trips[0]!, tripId: "trip_7", vehicleId: "veh_vsl_1", pickupMin: 500, dropoffMin: 540, shared: false, coPassengerTripIds: [] };
+    fake.insert.mockResolvedValue({
+      ok: true,
+      data: { ...data, fromVehicleId: "veh_vsl_1", options: [{ ...option!, routes: [taxi, vsl], trips: [...option!.trips, trip7] }] },
+    });
+    expect((await applyTripPlace("trip_1", "veh_taxi_1", "v-1", null, REGULATOR)).ok).toBe(true);
+    expect(fake.tx.routeStop.deleteMany).toHaveBeenCalledTimes(1);
+    expect(fake.tx.routeStop.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["trip_1-PICKUP", "trip_1-DROPOFF"] } } });
+    const updated = fake.tx.routeStop.update.mock.calls.map((c) => c[0] as { where: { id: string }; data: { sequence: number } });
+    expect(updated.filter((u) => u.where.id.startsWith("trip_7")).map((u) => `${u.data.sequence}:${u.where.id}`)).toEqual([
+      "0:trip_7-PICKUP",
+      "1:trip_7-DROPOFF",
+    ]);
+    // New stops on the target only, nothing created on the source.
+    const created = fake.tx.routeStop.createMany.mock.calls.map((c) => c[0] as { data: { routeId: string }[] });
+    expect(created.flatMap((c) => c.data.map((s) => s.routeId))).toEqual(["route-taxi", "route-taxi"]);
+    expect(fake.tx.route.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses a new route whose crew got onto another route meanwhile, and writes nothing", async () => {
+    fake.db.route.findMany.mockResolvedValue([ambulanceRoute()]);
+    fake.tx.route.findMany.mockImplementation(async (args: { where: { serviceDate?: unknown } }) =>
+      args.where.serviceDate ? [{ status: "PROPOSED" }] : [],
+    );
+    fake.tx.route.findFirst.mockResolvedValue({ vehicleId: "veh_amb_1" });
+    expect(await applyTripPlace("trip_1", "veh_taxi_1", "v-1", null, REGULATOR)).toEqual({
+      ok: false,
+      error: "Place refusée\u00a0: Taxi 1 (Marseille) a son équipage du jour encore sur la tournée de Ambulance 1 (Gap) (voir «\u202fÀ traiter\u202f»).",
+      stale: true,
+    });
+    expect(fake.tx.route.findFirst).toHaveBeenCalledWith({
+      where: { serviceDate: new Date(`${DATE}T00:00:00Z`), vehicleId: { not: "veh_taxi_1" }, OR: [{ driverId: { in: ["drv-taxi"] } }, { crewMateId: { in: ["drv-taxi"] } }] },
+      select: { vehicleId: true },
+    });
+    expect(fake.tx.route.create).not.toHaveBeenCalled();
+    expect(fake.audit).not.toHaveBeenCalled();
+  });
+
+  it("creates a validated route on a validated day, at the day's validation time, and refuses the trip's own vehicle", async () => {
+    const validatedAt = new Date("2099-03-01T17:40:00Z");
     fake.db.route.findMany.mockResolvedValue([{ ...ambulanceRoute(), status: "VALIDATED" }]);
     fake.tx.route.findMany.mockImplementation(async (args: { where: { serviceDate?: unknown } }) =>
-      args.where.serviceDate ? [{ status: "VALIDATED" }] : [],
+      args.where.serviceDate ? [{ status: "VALIDATED", validatedAt }] : [],
     );
     const asked = await applyTripPlace("trip_1", "veh_taxi_1", "v-1", null, REGULATOR);
     expect(asked.ok).toBe(false);
     await applyTripPlace("trip_1", "veh_taxi_1", "v-1", asked.ok ? null : asked.error, REGULATOR);
+    // Not now: the dashboard reads the latest validation time as the end of planning.
     expect(fake.tx.route.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ status: "VALIDATED", validatedAt: expect.any(Date) }),
+      data: expect.objectContaining({ status: "VALIDATED", validatedAt }),
       select: { id: true },
     });
+    // The question answered is traced with the state of the day.
+    expect(fake.audit).toHaveBeenCalledWith(
+      fake.tx,
+      REGULATOR,
+      expect.objectContaining({ details: expect.objectContaining({ mode: "insert", confirmed: true, validated: true, started: false }) }),
+    );
     setUp([{ ...taxiRoute(), stops: [...taxiRoute().stops, stop("trip_1", "PICKUP", 6), stop("trip_1", "DROPOFF", 7)] }]);
     expect(await applyTripPlace("trip_1", "veh_taxi_1", "v-1", null, REGULATOR)).toEqual({
       ok: false,

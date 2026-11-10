@@ -12,8 +12,9 @@ its own (the other stops keep their order, their times follow). For each vehicle
    when the trip only fits without it there) gives its cheapest feasible positions;
 4. the OPTION_POSITIONS cheapest are timed and priced exactly (plan.route_results, as /evaluate
    reports them: sharing discount, empty leg, planned times): the best margin is kept, provided the
-   independent validator finds no violation on the changed routes that they did not have before
-   (the routes of the other leg of their patients are checked with them, for the total wait);
+   independent validator finds no violation on the changed routes that they did not have before,
+   nor one they had grown larger (a longer wait, a later arrival: validator.validate_measured; the
+   routes of the other leg of their patients are checked with them, for the total wait);
 5. a vehicle without any place gets the reason the solver gives the trips it leaves out
    (_DayModel._obstacle: busy, break, no room between two stops…), within REASON_SEC.
 
@@ -62,7 +63,7 @@ from app.solver import (
     usable_fleet,
 )
 from app.traffic import with_traffic
-from app.validator import check_plan_references, validate, validate_revenue
+from app.validator import DISTANCE_TOLERANCE_KM, check_plan_references, validate_measured, validate_revenue
 
 STATUS_INSERT = "INSERT"
 """meta.solverStatus of an /insert answer."""
@@ -75,6 +76,8 @@ MONEY_DIGITS = 2
 KM_DIGITS = 2
 PATIENT_WIDE_CODES = frozenset({"TOTAL_WAIT"})
 """Violations of a patient across their outbound and return, possibly on two vehicles."""
+KM_CODES = frozenset({"DETOUR"})
+"""Violations measured in km (the others in minutes, or patients for CAPACITY: whole numbers)."""
 
 REASON_OFF_FLEET = "ne roule pas ce jour, la pause de son chauffeur ne tenant pas dans son horaire"
 REASON_ROUTE_BROKEN = "a une tournée enregistrée incohérente, un arrêt sans sa prise en charge ou sa dépose (réoptimisez d'abord)"
@@ -235,13 +238,32 @@ def _complete_trips(refs: Sequence[StopRef]) -> list[str] | None:
     return None if picked else list(done)
 
 
-def _key(violation: Violation) -> tuple[str, str | None, str | None]:
+Key = tuple[str, str | None, str | None]
+Measured = tuple[Violation, float | None]
+
+
+def _key(violation: Violation) -> Key:
     return (violation.code, violation.trip_id, violation.vehicle_id)
+
+
+def _sizes(found: Sequence[Measured]) -> dict[Key, float]:
+    """Size of the breaches of each key, summed (None: an unmeasured breach, 0)."""
+    sizes: dict[Key, float] = {}
+    for violation, excess in found:
+        key = _key(violation)
+        sizes[key] = sizes.get(key, 0.0) + (excess or 0.0)
+    return sizes
+
+
+def _grown(code: str, before: float, after: float) -> bool:
+    """A breach larger than it was, beyond the validator's rounding (whole minutes, 0.05 km)."""
+    return after > before + (DISTANCE_TOLERANCE_KM if code in KM_CODES else 0)
 
 
 class _Checker:
     """The independent validator on the routes an insertion changes, against the same routes in
-    place: an option may keep what they already broke, never break something new."""
+    place: an option may keep what they already broke, never break something new nor make a
+    breach they had larger (a patient's total wait, a lateness, a time on board, a detour…)."""
 
     def __init__(self, ctx: PlanContext, in_place: Mapping[str, Sequence[StopRef]]) -> None:
         self.ctx = ctx
@@ -258,15 +280,16 @@ class _Checker:
             self._figures[vehicle_id] = _figures(self.ctx, vehicle_id, self.in_place.get(vehicle_id, ()))
         return self._figures[vehicle_id]
 
-    def _relevant(self, found: Sequence[Violation], vehicles: set[str], trip_ids: set[str]) -> list[Violation]:
+    def _relevant(self, found: Sequence[Measured], vehicles: set[str], trip_ids: set[str]) -> list[Measured]:
         patients = {self.ctx.trips[t].patient_id for t in trip_ids if t in self.ctx.trips}
-        kept: list[Violation] = []
-        for violation in found:
+        kept: list[Measured] = []
+        for item in found:
+            violation = item[0]
             if violation.vehicle_id in vehicles or violation.trip_id in trip_ids:
-                kept.append(violation)
+                kept.append(item)
             elif violation.code in PATIENT_WIDE_CODES and violation.trip_id in self.ctx.trips:
                 if self.ctx.trips[violation.trip_id].patient_id in patients:
-                    kept.append(violation)
+                    kept.append(item)
         return kept
 
     def _partners(self, vehicles: set[str], trip_ids: set[str]) -> list[Route]:
@@ -279,22 +302,29 @@ class _Checker:
                     others[vehicle_id] = None
         return [route for vehicle_id in others for route in self.figures(vehicle_id).routes]
 
-    def check(self, before: _Figures, after: _Figures, vehicles: set[str]) -> tuple[list[Violation], list[Violation]]:
-        """(violations of the changed routes after the insertion, those of them that are new)."""
+    def _found(self, figures: _Figures, partners: list[Route]) -> list[Measured]:
+        request, matrix = self.ctx.request, self.ctx.matrix
+        return [
+            *validate_measured(request, [*figures.routes, *partners], matrix),
+            *((violation, None) for violation in validate_revenue(request, figures.routes, figures.trips, matrix)),
+        ]
+
+    def check(self, before: _Figures, after: _Figures, vehicles: set[str]) -> tuple[list[Violation], list[Violation], list[Violation]]:
+        """(violations of the changed routes after the insertion, those of them that are new, those
+        that were there but have grown larger)."""
         trip_ids = {result.trip_id for result in (*before.trips, *after.trips)}
         partners = self._partners(vehicles, trip_ids)
-        request, matrix = self.ctx.request, self.ctx.matrix
-        found_before = [
-            *validate(request, [*before.routes, *partners], matrix),
-            *validate_revenue(request, before.routes, before.trips, matrix),
+        after_relevant = self._relevant(self._found(after, partners), vehicles, trip_ids)
+        known = _sizes(self._relevant(self._found(before, partners), vehicles, trip_ids))
+        sizes = _sizes(after_relevant)
+        violations = [violation for violation, _ in after_relevant]
+        new = [violation for violation in violations if _key(violation) not in known]
+        grown = [
+            violation
+            for violation in violations
+            if _key(violation) in known and _grown(violation.code, known[_key(violation)], sizes[_key(violation)])
         ]
-        found_after = [
-            *validate(request, [*after.routes, *partners], matrix),
-            *validate_revenue(request, after.routes, after.trips, matrix),
-        ]
-        after_relevant = self._relevant(found_after, vehicles, trip_ids)
-        known = {_key(violation) for violation in self._relevant(found_before, vehicles, trip_ids)}
-        return after_relevant, [violation for violation in after_relevant if _key(violation) not in known]
+        return violations, new, grown
 
 
 def _shifts(before: _Figures, after: _Figures, placed: str) -> list[TimeShift]:
@@ -482,9 +512,12 @@ def _best_option(
     refused: str | None = None
     vehicles = {vehicle_id} | ({source} if source is not None else set())
     for *_, after in priced:
-        violations, new = checker.check(before, after, vehicles)
+        violations, new, grown = checker.check(before, after, vehicles)
         if new:
             refused = f"ne peut pas la prendre sans enfreindre une règle ({new[0].message})"
+            continue
+        if grown:
+            refused = f"ne peut pas la prendre sans aggraver une règle déjà enfreinte ({grown[0].message})"
             continue
         return _option(vehicle_id, trip.id, before, after, violations), None
     return None, refused

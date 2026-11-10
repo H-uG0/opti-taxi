@@ -269,11 +269,12 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
 
       {params.notice === "created" ? (
         <div className="mb-4 space-y-2">
-          {createdId && date >= today ? (
-            // The same assistant as on the planning: placed now in a route in place, the others untouched.
+          {createdId && date >= today && summary.assigned > 0 ? (
+            // The same assistant as on the planning: placed now in a route in place, the others untouched. Only once
+            // the day has routes (J+1 before « Optimiser demain », J+2…: the coming optimization places it).
             <div className="flex flex-wrap items-center gap-3">
               <FormMessage tone="success">
-                Course créée. Placez-la tout de suite dans une tournée en place, ou à la prochaine optimisation du planning.
+                Course créée. Elle peut entrer dès maintenant dans une tournée en place, sans réoptimiser la journée.
               </FormMessage>
               <LinkButton href={placeTripHref(date, createdId)} size="sm" variant="primary">
                 <Search aria-hidden className="size-4" />

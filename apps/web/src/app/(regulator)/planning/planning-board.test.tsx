@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanningMapProps } from "@/components/map/planning-map";
 import { DISPLAY_PALETTE } from "@/lib/planning/colors";
@@ -9,6 +9,7 @@ import { PlanningActivityProvider } from "./planning-activity";
 import { PlanningBoard } from "./planning-board";
 
 // The server actions are not loaded, and the map (WebGL) is replaced by what the board gives it.
+const actions = vi.hoisted(() => ({ findPlaces: vi.fn(async () => ({ ok: false, error: "Service indisponible." })) }));
 vi.mock("./actions", () => ({
   lockTrip: vi.fn(),
   unlockTrip: vi.fn(),
@@ -17,6 +18,8 @@ vi.mock("./actions", () => ({
   lockRoutes: vi.fn(),
   unlockRoutes: vi.fn(),
   changeRouteCrew: vi.fn(),
+  findPlaces: actions.findPlaces,
+  placeTrip: vi.fn(),
 }));
 // The filter is read from the address (Next.js keeps useSearchParams in step with it in the app).
 vi.mock("next/navigation", async (importOriginal) => ({
@@ -34,6 +37,7 @@ vi.mock("@/components/map/planning-map-lazy", () => ({
 afterEach(cleanup);
 beforeEach(() => {
   map.props = null;
+  actions.findPlaces.mockClear();
   window.history.replaceState(null, "", "/planning");
 });
 
@@ -52,10 +56,10 @@ const KPIS: DayKpis = {
   violations: 0,
 };
 
-function renderBoard(props: { planned?: boolean } = {}) {
+function board(props: { planned?: boolean; trips?: TripView[]; initialTripId?: string | null; initialPlace?: boolean } = {}) {
   const { trips, vehicles } = planningFixture();
-  const list: TripView[] = Object.values(trips);
-  render(
+  const list: TripView[] = props.trips ?? Object.values(trips);
+  return (
     <PlanningActivityProvider timeLimitSec={10}>
       <PlanningBoard
         date="2026-11-10"
@@ -74,21 +78,39 @@ function renderBoard(props: { planned?: boolean } = {}) {
         replanBlocked={null}
         lockBlocked={null}
         placeBlocked={null}
-        initialTripId={null}
+        initialTripId={props.initialTripId ?? null}
+        initialPlace={props.initialPlace}
         crewChoices={[]}
         crewRules={{ minPairOverlapMin: 60 }}
         crewChangeMode="route"
         crewChangeBlocked={null}
         version="v1"
       />
-    </PlanningActivityProvider>,
+    </PlanningActivityProvider>
   );
+}
+
+function renderBoard(props: { planned?: boolean } = {}) {
+  return render(board(props));
 }
 
 const announcement = () => document.querySelector("[aria-live='polite'].sr-only")?.textContent;
 const mapVehicleIds = () => map.props?.vehicles.map((v) => v.id);
 
 describe("PlanningBoard", () => {
+  it("searches the places of a trip opened with ?placer=1 once: not again once it moved, nor on a reload", async () => {
+    window.history.replaceState(null, "", "/planning?date=2026-11-10&trip=trip-c&placer=1");
+    const { rerender } = render(board({ initialTripId: "trip-c", initialPlace: true }));
+    await waitFor(() => expect(actions.findPlaces).toHaveBeenCalledTimes(1));
+    expect(window.location.search).toBe("?date=2026-11-10&trip=trip-c");
+    // « Appliquer » placed it on the VSL: the panel draws its places again, without searching.
+    const moved = Object.values(planningFixture().trips).map((t) => (t.id === "trip-c" ? { ...t, vehicleId: "vsl-1", lockedVehicleId: "vsl-1" } : t));
+    rerender(board({ trips: moved, initialTripId: "trip-c", initialPlace: true }));
+    await act(async () => {});
+    expect(screen.getByRole("button", { name: "Chercher" })).toBeTruthy();
+    expect(actions.findPlaces).toHaveBeenCalledTimes(1);
+  });
+
   it("goes to the next entry of «\u202fÀ traiter\u202f» with «\u202fN\u202f», selects it and says it", () => {
     renderBoard();
     act(() => {

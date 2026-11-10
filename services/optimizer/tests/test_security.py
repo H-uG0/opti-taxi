@@ -34,9 +34,13 @@ def test_without_a_configured_token_the_api_stays_open(monkeypatch: pytest.Monke
     assert client.post("/evaluate", json=load_fixture("evaluate-request.json")).status_code == 200
 
 
-def test_a_configured_token_is_required_on_optimize_and_evaluate(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_configured_token_is_required_on_optimize_evaluate_and_insert(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPTIMIZER_TOKEN", "jeton-de-test")
-    for path, body in (("/optimize", _fast_body()), ("/evaluate", load_fixture("evaluate-request.json"))):
+    for path, body in (
+        ("/optimize", _fast_body()),
+        ("/evaluate", load_fixture("evaluate-request.json")),
+        ("/insert", load_fixture("insert-request.json")),
+    ):
         missing = client.post(path, json=body)
         assert missing.status_code == 401
         assert missing.headers["www-authenticate"] == "Bearer"
@@ -47,13 +51,16 @@ def test_a_configured_token_is_required_on_optimize_and_evaluate(monkeypatch: py
         assert not_bearer.status_code == 401
     good = client.post("/evaluate", json=load_fixture("evaluate-request.json"), headers={"Authorization": "Bearer jeton-de-test"})
     assert good.status_code == 200
+    # /insert carries every patient's home and appointment of the day too.
+    good = client.post("/insert", json=load_fixture("insert-request.json"), headers={"Authorization": "Bearer jeton-de-test"})
+    assert good.status_code == 200
 
 
 def test_the_token_is_checked_before_the_body(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPTIMIZER_TOKEN", "jeton-de-test")
     assert client.post("/optimize", json={"not": "a request"}).status_code == 401
     # Not even parsed: a body that is no JSON at all gets 401, not 422.
-    for path in ("/optimize", "/evaluate"):
+    for path in ("/optimize", "/evaluate", "/insert"):
         malformed = client.post(path, content=b"{not json", headers={"content-type": "application/json"})
         assert malformed.status_code == 401
         assert malformed.headers["www-authenticate"] == "Bearer"

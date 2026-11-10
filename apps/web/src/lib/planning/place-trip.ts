@@ -3,14 +3,18 @@
  * computed by the optimizer's POST /insert, and « Appliquer », which saves one of them. Shared by
  * the planning server actions (callers check auth).
  *
- * Unlike « Figer et réoptimiser » (« Déplacer vers… », run-optimization.ts), nothing else of the day
+ * Unlike « Déplacer vers… » (lock, then re-optimize the day: run-optimization.ts), nothing else of the day
  * moves: only the target route and, for a move, the source route are rewritten, with the times,
  * totals and trip results the optimizer computed for them; the trip is locked on its new vehicle
  * (a later optimization keeps it there). The places are computed on the plan of a version
  * (version.ts); « Appliquer » computes the chosen one again on the data of the moment and writes it
  * under the planning lock of the date, only if that version is still the one shown, no computation
  * of the date runs, and the two routes are as read. On a validated or started day it asks first
- * (the drivers' roadmaps change at once); a route under way is never changed.
+ * (the drivers' roadmaps change at once; the stops that stay keep their ids, so a status sent from a
+ * phone still finds its stop); a route under way is never changed, and on today's date a place
+ * whose times are already past is refused. Never on a day without routes (one trip placed there
+ * would make a half-planned day), nor for a trip in an exceptional ambulance; a route created
+ * never takes people still on another route of the date (one vehicle a day).
  */
 import "server-only";
 import type { Prisma, TripStatus } from "@prisma/client";
@@ -21,15 +25,18 @@ import { buildOptimizeRequest, loadOptimizeInput, personName, type BuildResult }
 import { insert } from "@/lib/optimizer/client";
 import { violationSchema, type InsertOption } from "@/lib/optimizer/contract";
 import type { CurrentTrip, VehicleCrew } from "@/lib/optimizer/persist";
-import { formatLongDate, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
+import { formatLongDate, fromIsoDate, minuteOfDay, todayIso, toIsoDate } from "@/lib/time";
 import { lockPlanningDay } from "./day-lock";
+import { isExceptionalAmbulanceTrip } from "./exceptional-ambulance";
 import {
   buildInsertRequest,
   newRouteStatus,
+  pastPlaceReason,
   placedMessage,
   placeQuestion,
   placesView,
   planPlaceWrite,
+  planStopWrites,
   ROUTE_HOLD_REASONS,
   routeHold,
   violationsAfterPlace,
@@ -37,7 +44,13 @@ import {
   type StoredPlaceRoute,
 } from "./insertion";
 import type { TodayCrew } from "./plan-compare";
-import type { PlaceRejectionView, PlacesView } from "./place-view";
+import {
+  PLACE_EXCEPTIONAL_AMBULANCE,
+  PLACE_NO_ROUTES,
+  unavailableReason,
+  type PlaceRejectionView,
+  type PlacesView,
+} from "./place-view";
 import { isDayStarted } from "./refresh-routes";
 import { optimizationInProgress, OPTIMIZATION_IN_PROGRESS_ERROR, PLANNING_TX_OPTIONS, withdrawLapsedProposals } from "./run-optimization";
 import { loadPlanVersion } from "./version";
@@ -69,6 +82,12 @@ type Prepared = {
   stored: StoredPlaceRoute[];
   /** Routes the assistant must not change, by vehicle. */
   held: Map<string, RouteHold>;
+  /**
+   * Vehicles without a route whose crew of the day is still on another vehicle's stored route (crews
+   * saved after the plan: « Véhicules à revoir »), with that vehicle's label: a route created for them
+   * would put one person on two vehicles.
+   */
+  crewTaken: Map<string, string>;
   source: StoredPlaceRoute | null;
   validated: boolean;
   started: boolean;
@@ -94,6 +113,12 @@ async function prepare(tripId: string): Promise<{ ok: true; prepared: Prepared }
     loadOptimizeInput(db, isoDate),
     db.route.findMany({ where: { serviceDate: fromIsoDate(isoDate) }, select: storedRouteSelect }),
   ]);
+  // A day without routes is planned by « Optimiser », never one locked trip at a time.
+  if (stored.length === 0) return { ok: false, error: PLACE_NO_ROUTES };
+  const raw = input.trips.find((t) => t.id === trip.id);
+  if (raw && isExceptionalAmbulanceTrip(raw, (id) => input.vehicles.find((v) => v.id === id)?.type)) {
+    return { ok: false, error: PLACE_EXCEPTIONAL_AMBULANCE };
+  }
   const build = buildOptimizeRequest(input);
   const excluded = build.excludedTrips.find((t) => t.tripId === trip.id);
   if (excluded) return { ok: false, error: `Course incomplète (${excluded.reason.replace(/[.\s]+$/, "")})\u00a0: complétez-la dans Courses avant de la placer.` };
@@ -116,8 +141,28 @@ async function prepare(tripId: string): Promise<{ ok: true; prepared: Prepared }
   const source = stored.find((route) => route.stops.some((stop) => stop.tripId === trip.id)) ?? null;
   const sourceHold = source ? held.get(source.vehicleId) : undefined;
   if (source && sourceHold) {
-    const label = build.request.vehicles.find((v) => v.id === source.vehicleId)?.label ?? "Son véhicule";
-    return { ok: false, error: `Cette course ne peut pas quitter sa tournée\u00a0: ${label} ${ROUTE_HOLD_REASONS[sourceHold]}.` };
+    const skipped = build.skippedVehicles.find((v) => v.vehicleId === source.vehicleId);
+    const label = build.request.vehicles.find((v) => v.id === source.vehicleId)?.label ?? skipped?.label ?? "Son véhicule";
+    const why =
+      sourceHold === "UNAVAILABLE"
+        ? `${unavailableReason({ unavailableReason: skipped?.reason ?? null })}. L'assistant ne refait pas la tournée d'un véhicule indisponible\u00a0: seule une réoptimisation de la journée la reprend`
+        : ROUTE_HOLD_REASONS[sourceHold];
+    return { ok: false, error: `Cette course ne peut pas quitter sa tournée\u00a0: ${label} ${why}.` };
+  }
+  // One person, one vehicle a day: who is on a stored route, and the vehicles without a route whose crew of the day
+  // still is (a route created for them would put that person on two vehicles).
+  const onRoute = new Map<string, string>();
+  for (const route of stored) {
+    for (const person of [route.driverId, route.crewMateId]) if (person) onRoute.set(person, route.vehicleId);
+  }
+  const vehicleLabel = (id: string) =>
+    build.request.vehicles.find((v) => v.id === id)?.label ?? build.skippedVehicles.find((v) => v.vehicleId === id)?.label ?? "un autre véhicule";
+  const routed = new Set(stored.map((route) => route.vehicleId));
+  const crewTaken = new Map<string, string>();
+  for (const vehicle of build.request.vehicles) {
+    if (routed.has(vehicle.id)) continue;
+    const elsewhere = crewOf(build, vehicle.id).map((person) => onRoute.get(person)).find((id) => id !== undefined);
+    if (elsewhere !== undefined) crewTaken.set(vehicle.id, vehicleLabel(elsewhere));
   }
   return {
     ok: true,
@@ -128,6 +173,7 @@ async function prepare(tripId: string): Promise<{ ok: true; prepared: Prepared }
       build,
       stored,
       held,
+      crewTaken,
       source,
       validated: stored.some((route) => route.status === "VALIDATED"),
       started: isDayStarted(stored, input.trips.map((t) => t.status)),
@@ -135,10 +181,28 @@ async function prepare(tripId: string): Promise<{ ok: true; prepared: Prepared }
   };
 }
 
-/** The vehicles to send to /insert: every one but those whose route is held (null: every one). */
+/** People a route of the vehicle gets (persist.ts): its driver of the day and, for an ambulance, its crew mate. */
+function crewOf(build: BuildResult, vehicleId: string): string[] {
+  const crew = build.crews.get(vehicleId);
+  if (!crew) return [];
+  const ambulance = build.request.vehicles.find((v) => v.id === vehicleId)?.type === "AMBULANCE";
+  return [crew.driverId, ...(ambulance && crew.crewMateId ? [crew.crewMateId] : [])].filter((id) => id !== "");
+}
+
+/** « a son équipage du jour encore sur la tournée de Taxi 5 (voir « À traiter ») ». */
+function crewTakenReason(otherLabel: string): string {
+  return `a son équipage du jour encore sur la tournée de ${otherLabel} (voir «\u202fÀ traiter\u202f»)`;
+}
+
+/** The vehicles to send to /insert: every one but those whose route is held or whose crew is taken (null: every one). */
 function triedVehicles(prepared: Prepared): string[] | null {
-  if (prepared.held.size === 0) return null;
-  return prepared.build.request.vehicles.map((v) => v.id).filter((id) => !prepared.held.has(id));
+  if (prepared.held.size === 0 && prepared.crewTaken.size === 0) return null;
+  return prepared.build.request.vehicles.map((v) => v.id).filter((id) => !prepared.held.has(id) && !prepared.crewTaken.has(id));
+}
+
+/** The minute of the day now in Europe/Paris when isoDate is today, null for a later date. */
+function nowMinuteOn(isoDate: string, now: Date = new Date()): number | null {
+  return isoDate === todayIso(now) ? minuteOfDay(now) : null;
 }
 
 /** « Où placer cette course ? »: the places of the trip in the routes in place, nothing written. */
@@ -152,12 +216,22 @@ export async function findTripPlaces(tripId: string): Promise<FindPlacesOutcome>
   if (!result.ok) return { ok: false, error: result.error };
   const allowed = request.trips.find((t) => t.id === tripId)?.allowedVehicleTypes ?? [];
   const held: PlaceRejectionView[] = request.vehicles
-    .filter((v) => prepared.held.has(v.id) && allowed.includes(v.type) && v.id !== prepared.source?.vehicleId)
+    .filter((v) => (prepared.held.has(v.id) || prepared.crewTaken.has(v.id)) && allowed.includes(v.type) && v.id !== prepared.source?.vehicleId)
     .map((v) => {
-      const hold = prepared.held.get(v.id) as RouteHold;
+      const hold = prepared.held.get(v.id);
+      if (!hold) return { vehicleId: v.id, kind: "RULES", reason: crewTakenReason(prepared.crewTaken.get(v.id) ?? "un autre véhicule") };
       return { vehicleId: v.id, kind: hold === "STARTED" ? "STARTED" : "RULES", reason: ROUTE_HOLD_REASONS[hold] };
     });
-  const view = placesView(result.data, held, prepared.version, Date.now() - began);
+  // Today: the optimizer times the routes from the start of the shift, unaware of the hour.
+  const nowMinute = nowMinuteOn(prepared.isoDate);
+  const past: PlaceRejectionView[] =
+    nowMinute === null
+      ? []
+      : result.data.options.flatMap((option) => {
+          const reason = pastPlaceReason(option, nowMinute);
+          return reason ? [{ vehicleId: option.vehicleId, kind: "PAST" as const, reason }] : [];
+        });
+  const view = placesView(result.data, [...held, ...past], prepared.version, Date.now() - began);
   console.info(
     `[planning] places of a trip on ${prepared.isoDate}: ${view.options.length} option(s), ${view.rejected.length} without, ` +
       `${view.elapsedMs} ms (optimizer ${result.data.meta.wallTimeMs} ms)`,
@@ -219,6 +293,8 @@ export async function applyTripPlace(
   if (!targetLabel) return { ok: false, error: "Ce véhicule n'est plus disponible ce jour\u00a0: relancez «\u202fOù placer cette course\u202f?\u202f».", stale: true };
   const hold = prepared.held.get(vehicleId);
   if (hold) return { ok: false, error: `Place refusée\u00a0: ${targetLabel} ${ROUTE_HOLD_REASONS[hold]}.` };
+  const taken = prepared.crewTaken.get(vehicleId);
+  if (taken !== undefined) return { ok: false, error: `Place refusée\u00a0: ${targetLabel} ${crewTakenReason(taken)}.` };
   if (await optimizationInProgress(isoDate)) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
 
   const fromVehicleId = source?.vehicleId ?? null;
@@ -237,6 +313,9 @@ export async function applyTripPlace(
     const why = result.data.rejected.find((r) => r.vehicleId === vehicleId)?.reason ?? "n'a plus de place pour elle";
     return { ok: false, error: `Place refusée\u00a0: ${targetLabel} ${why}. Le planning n'a pas changé.` };
   }
+  const nowMinute = nowMinuteOn(isoDate);
+  const late = nowMinute === null ? null : pastPlaceReason(option, nowMinute);
+  if (late) return { ok: false, error: `Place refusée\u00a0: ${targetLabel} ${late}. Le planning n'a pas changé.` };
 
   const serviceDate = fromIsoDate(isoDate);
   const changed = [vehicleId, ...(fromVehicleId ? [fromVehicleId] : [])];
@@ -259,6 +338,18 @@ export async function applyTripPlace(
       });
       if (!same) return "stale" as const;
     }
+    if (!storedByVehicle.has(vehicleId)) {
+      // The route created takes the crew of the day: never someone still on another route of the date.
+      const people = crewOf(build, vehicleId);
+      const elsewhere =
+        people.length === 0
+          ? null
+          : await tx.route.findFirst({
+              where: { serviceDate, vehicleId: { not: vehicleId }, OR: [{ driverId: { in: people } }, { crewMateId: { in: people } }] },
+              select: { vehicleId: true },
+            });
+      if (elsewhere) return { crewOn: labelOf(elsewhere.vehicleId) ?? "un autre véhicule" };
+    }
     const tripIds = option.trips.map((t) => t.tripId);
     const [currentTrips, vehicles, dayRoutes] = await Promise.all([
       tx.trip.findMany({
@@ -266,7 +357,7 @@ export async function applyTripPlace(
         select: { id: true, status: true, sharingStatus: true, pickupAddress: true, dropoffAddress: true },
       }),
       tx.vehicle.findMany({ where: { id: { in: changed } }, select: { id: true, type: true } }),
-      tx.route.findMany({ where: { serviceDate }, select: { status: true } }),
+      tx.route.findMany({ where: { serviceDate }, select: { status: true, validatedAt: true } }),
     ]);
     // A new route gets the crew the optimizer planned with: the crew of the day (as savePlan).
     const crewed = new Map<string, VehicleCrew>(
@@ -287,13 +378,29 @@ export async function applyTripPlace(
 
     const planRunId = await updatePlanRun(tx, isoDate, option, fromVehicleId, prepared);
     const status = newRouteStatus(dayRoutes);
+    // A route created on a validated day takes the day's validation time: the dashboard reads it as the end of planning.
+    const validatedAt =
+      dayRoutes
+        .filter((route) => route.status === "VALIDATED")
+        .map((route) => route.validatedAt)
+        .reduce<Date | null>((latest, at) => (at && (!latest || at > latest) ? at : latest), null) ?? new Date();
     const routeIdByVehicle = new Map<string, string>();
     for (const { routeId, row } of write.routes) {
       const { stops, vehicleId: rowVehicle, driverId, crewMateId, ...totals } = row;
       if (routeId) {
-        await tx.routeStop.deleteMany({ where: { routeId } });
+        // The stops that stay are updated in place: a driver's phone names them by id (roadmap, offline queue).
+        const stopWrites = planStopWrites(storedByVehicle.get(rowVehicle)?.stops ?? [], stops);
+        if (stopWrites.deleteIds.length > 0) await tx.routeStop.deleteMany({ where: { id: { in: stopWrites.deleteIds } } });
+        if (stopWrites.updates.length > 0) {
+          // Out of the way first (-1, -2…): each stop then takes its new position, never one another still holds
+          // (@@unique([routeId, sequence]) is checked row by row).
+          await tx.$executeRaw`UPDATE "RouteStop" SET "sequence" = -"sequence" - 1 WHERE "routeId" = ${routeId}`;
+          for (const { id, data } of stopWrites.updates) await tx.routeStop.update({ where: { id }, data });
+        }
         await tx.route.update({ where: { id: routeId }, data: { ...totals, matrixSource: result.data.meta.matrixSource } });
-        await tx.routeStop.createMany({ data: stops.map((stop) => ({ ...stop, routeId })) });
+        if (stopWrites.creates.length > 0) {
+          await tx.routeStop.createMany({ data: stopWrites.creates.map((stop) => ({ ...stop, routeId })) });
+        }
         routeIdByVehicle.set(rowVehicle, routeId);
       } else {
         const created = await tx.route.create({
@@ -304,7 +411,7 @@ export async function applyTripPlace(
             crewMateId,
             serviceDate,
             status,
-            ...(status === "VALIDATED" ? { validatedAt: new Date() } : {}),
+            ...(status === "VALIDATED" ? { validatedAt } : {}),
             optimizationRunId: planRunId,
             matrixSource: result.data.meta.matrixSource,
             stops: { createMany: { data: stops } },
@@ -335,6 +442,8 @@ export async function applyTripPlace(
         mode: "insert",
         vehicleId: { from: fromVehicleId, to: vehicleId },
         lockedVehicleId: { from: prepared.trip.lockedVehicleId, to: vehicleId },
+        // Drivers' roadmaps rewritten on a validated or started day, after the question was answered.
+        ...(question !== null ? { confirmed: true, validated: prepared.validated, started: prepared.started } : {}),
       },
     });
     // An exceptional ambulance holds while the trip is locked on it: moved off it, the measure lapses.
@@ -344,6 +453,7 @@ export async function applyTripPlace(
 
   if (outcome === "running") return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
   if (outcome === "stale") return { ok: false, error: PLACES_STALE_ERROR, stale: true };
+  if (typeof outcome === "object") return { ok: false, error: `Place refusée\u00a0: ${targetLabel} ${crewTakenReason(outcome.crewOn)}.`, stale: true };
   const message = placedMessage({ patient: prepared.trip.patientName, vehicleLabel: targetLabel, fromLabel, option });
   const kept = option.violations.length;
   if (kept === 0) return { ok: true, message };

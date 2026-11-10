@@ -322,7 +322,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
 
       <Fieldset legend="Remplacement du planning en place">
         <Explanation>
-          Un nouveau calcul («&#x202F;Réoptimiser&#x202F;», «&#x202F;Figer et réoptimiser&#x202F;» d&apos;une course) remplace toutes les tournées du jour
+          Un nouveau calcul («&#x202F;Réoptimiser&#x202F;», «&#x202F;Déplacer vers…&#x202F;» d&apos;une course) remplace toutes les tournées du jour
           («&#x202F;Où placer cette course&#x202F;?&#x202F;» ne change que deux tournées et n&apos;en fait pas partie). Il n&apos;est
           enregistré d&apos;office que s&apos;il ne comporte pas plus de violations de contraintes que le planning en
           place, et dans les limites ci-dessous&#x202F;; sinon le planning affiche le comparatif et vous choisissez de remplacer

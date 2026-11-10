@@ -54,12 +54,19 @@ beforeEach(() => {
   actions.placeTrip.mockResolvedValue({ ok: true, message: "Course placée." });
 });
 
-function renderFinder(props: { blocked?: string | null; autoStart?: boolean; vehicleId?: string | null } = {}) {
+function renderFinder(props: { blocked?: string | null; autoStart?: boolean; vehicleId?: string | null; onAutoStarted?: () => void } = {}) {
   const { trips, vehicles } = planningFixture();
   const trip = { ...trips["trip-c"]!, vehicleId: props.vehicleId ?? null };
   render(
     <PlanningActivityProvider timeLimitSec={10}>
-      <PlaceFinder trip={trip} trips={trips} vehicles={vehicles} blocked={props.blocked ?? null} autoStart={props.autoStart} />
+      <PlaceFinder
+        trip={trip}
+        trips={trips}
+        vehicles={vehicles}
+        blocked={props.blocked ?? null}
+        autoStart={props.autoStart}
+        onAutoStarted={props.onAutoStarted}
+      />
     </PlanningActivityProvider>,
   );
 }
@@ -71,7 +78,8 @@ describe("PlaceFinder (« Où placer cette course ? »)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Chercher" }));
     await waitFor(() => expect(actions.findPlaces).toHaveBeenCalledWith("trip-c"));
     const list = await screen.findByRole("list", { name: "Places par dépôt" });
-    expect(screen.getByText(plain("2 places possibles sur 2 véhicules compatibles · calcul 0,7\u00a0s · distances à vol d'oiseau"))).toBeTruthy();
+    // Counted as listed: the VSL off the road that day, greyed below, is one of the compatible vehicles.
+    expect(screen.getByText(plain("2 places possibles sur 3 véhicules compatibles · calcul 0,7\u00a0s · distances à vol d'oiseau"))).toBeTruthy();
     const depots = within(list).getAllByRole("listitem").filter((li) => li.parentElement === list);
     expect(depots.map((d) => d.querySelector("p span")?.textContent)).toEqual(["Marseille", "Manosque"]);
     const best = within(depots[0]!).getAllByRole("listitem")[0]!;
@@ -97,7 +105,8 @@ describe("PlaceFinder (« Où placer cette course ? »)", () => {
     fireEvent.click(apply);
     await waitFor(() => expect(actions.placeTrip).toHaveBeenCalledWith("trip-c", "vsl-1", "v-42", null));
     expect(await screen.findByText(plain(QUESTION))).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Oui, appliquer" }));
+    // Labelled « En cours… » until the action's transition ends (the question is set inside it).
+    fireEvent.click(await screen.findByRole("button", { name: "Oui, appliquer" }));
     await waitFor(() => expect(actions.placeTrip).toHaveBeenLastCalledWith("trip-c", "vsl-1", "v-42", QUESTION));
   });
 
@@ -114,14 +123,53 @@ describe("PlaceFinder (« Où placer cette course ? »)", () => {
   });
 
   it("says why it cannot search, and searches at once when asked to", async () => {
-    renderFinder({ blocked: "Course annulée.", autoStart: true });
+    const onAutoStarted = vi.fn();
+    renderFinder({ blocked: "Course annulée.", autoStart: true, onAutoStarted });
     expect((screen.getByRole("button", { name: "Chercher" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("Course annulée.")).toBeTruthy();
     expect(actions.findPlaces).not.toHaveBeenCalled();
+    expect(onAutoStarted).not.toHaveBeenCalled();
     cleanup();
-    renderFinder({ autoStart: true });
+    renderFinder({ autoStart: true, onAutoStarted });
     await waitFor(() => expect(actions.findPlaces).toHaveBeenCalledTimes(1));
+    // The request is spent: the board stops asking (a remount after « Appliquer » does not search again).
+    expect(onAutoStarted).toHaveBeenCalledTimes(1);
     expect(await screen.findByRole("list", { name: "Places par dépôt" })).toBeTruthy();
+  });
+
+  it("never marks a move that loses money as the best place: the trip's own place stays better", async () => {
+    const losing = places({
+      fromVehicleId: "taxi-1",
+      options: places().options.map((o, i) => ({ ...o, deltaMargin: -13.4 - i * 10 })),
+    });
+    actions.findPlaces.mockResolvedValueOnce({ ok: true, view: losing });
+    renderFinder({ vehicleId: "taxi-1" });
+    fireEvent.click(screen.getByRole("button", { name: "Chercher" }));
+    expect(await screen.findByText(plain("Sa place actuelle reste la plus rentable\u00a0: chaque déplacement coûte au moins 13\u00a0€."))).toBeTruthy();
+    expect(screen.queryByText("Meilleure place")).toBeNull();
+    // No primary « Appliquer » either: each is a plain choice.
+    for (const button of screen.getAllByRole("button", { name: /^Appliquer/ })) expect(button.className).not.toContain("bg-brand-700");
+  });
+
+  it("keeps the focus on « Chercher » while it searches, and announces only the headline", async () => {
+    let answer: (value: unknown) => void = () => {};
+    actions.findPlaces.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    renderFinder();
+    const button = screen.getByRole("button", { name: "Chercher" }) as HTMLButtonElement;
+    button.focus();
+    fireEvent.click(button);
+    await waitFor(() => expect(button.getAttribute("aria-disabled")).toBe("true"));
+    expect(button.disabled).toBe(false);
+    expect(document.activeElement).toBe(button);
+    // A second click while it searches is ignored.
+    fireEvent.click(button);
+    expect(actions.findPlaces).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status").textContent).toBe("Recherche des places…");
+    answer({ ok: true, view: places() });
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("2 places possibles sur 3 véhicules compatibles"));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Recalculer" }));
+    // The list itself is not a live region (a screen reader would read all of it at each search).
+    expect(screen.getByRole("list", { name: "Places par dépôt" }).closest("[aria-live]")).toBeNull();
   });
 
   it("shows the depots' other places and vehicles without a place behind a disclosure", async () => {

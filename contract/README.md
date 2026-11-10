@@ -271,8 +271,10 @@ véhicule d'un type autorisé (sauf le sien), l'optimizer :
    `/evaluate`) ; la pause se déplace si la course ne tient qu'à sa place ;
 4. calcule exactement (comme `/evaluate` : abattement de partage, retour à vide, horaires prévus) les trois
    places les moins coûteuses et garde celle de meilleure marge que le validateur indépendant accepte : aucune
-   violation sur les tournées changées qu'elles n'avaient pas déjà (les tournées de l'autre trajet de leurs
-   patients sont validées avec elles, pour l'attente cumulée) ;
+   violation sur les tournées changées qu'elles n'avaient pas déjà, et aucune de celles qu'elles avaient qui
+   grandisse (une attente cumulée plus longue, un retard plus grand, plus de temps à bord, plus de détour : à la
+   minute près, à 0,05 km près ; « ne peut pas la prendre sans aggraver une règle déjà enfreinte (…) ») ; les
+   tournées de l'autre trajet de leurs patients sont validées avec elles, pour l'attente cumulée ;
 5. sinon, dit pourquoi, avec les mots des motifs de non-affectation de `/optimize` (`OCCUPIED`, `BREAK`,
    `NO_ROOM`) : la phrase suit le nom du véhicule (« Taxi 4 est en pause de 12:00 à 12:45 »).
 
@@ -293,7 +295,8 @@ véhicule d'un type autorisé (sauf le sien), l'optimizer :
     "routes": [ /* Route */ ],          // la tournée cible avec la course et, pour un déplacement, la source sans elle
                                         //   (absente si elle n'a plus d'arrêt), comme les donne /evaluate
     "trips": [ /* TripResult */ ],      // résultats de chaque course de ces tournées, la course placée comprise
-    "violations": []                    // ce que ces tournées enfreignaient déjà et enfreignent encore (jamais une nouvelle)
+    "violations": []                    // ce que ces tournées enfreignaient déjà et enfreignent encore, sans pire
+                                        //   (jamais une nouvelle)
   }],
   "rejected": [{ "vehicleId": "veh_vsl_1", "kind": "SHIFT", "reason": "ne peut pas l'assurer dans ses heures de service (06:30–18:30)" }],
                                         // SHIFT | BREAK | OCCUPIED | NO_ROOM | RULES, dans l'ordre des véhicules

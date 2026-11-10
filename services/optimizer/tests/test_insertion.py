@@ -14,7 +14,10 @@ from typing import Any
 import pytest
 
 from app import service
-from app.schemas import EvaluateRequest, InsertOption, InsertRequest, InsertResponse, PlanResponse
+from app.context import request_points
+from app.matrix import build_matrix
+from app.schemas import DayRequest, EvaluateRequest, InsertOption, InsertRequest, InsertResponse, PlanResponse
+from app.validator import validate_measured
 from tests.builders import MARSEILLE, load_fixture, offset, request, trip, vehicle
 
 SEED_FLEET_DAY = Path(__file__).resolve().parent / "data" / "seed-fleet-2026-11-11.json.gz"
@@ -152,6 +155,42 @@ def test_a_route_already_breaking_a_rule_gets_nothing() -> None:
     assert answer.options == []
     taxi = next(r for r in answer.rejected if r.vehicle_id == "veh_taxi_1")
     assert taxi.kind == "RULES" and "réoptimisez" in taxi.reason
+
+
+def test_a_breach_already_there_may_stay_but_never_grow() -> None:
+    """The patient's return already waits 66 min alone (its taxi starts at 11:00): placing their
+    outbound, which waits 30 min before the appointment, would make it 96 min. Same violation key
+    (TOTAL_WAIT on the return), but larger: refused, with the reason."""
+    home, facility = offset(MARSEILLE, 3, 2), offset(MARSEILLE, -2, 1)
+    raw = request(
+        [vehicle("taxi_free", MARSEILLE), vehicle("taxi_late", MARSEILLE, shift=(660, 1140))],
+        [
+            trip("t_out", "p1", "OUTBOUND", home, facility, appointment=570),
+            trip("t_ret", "p1", "RETURN", facility, home, ready=600),
+        ],
+    )
+    raw["routes"] = [{"vehicleId": "taxi_late", "stops": [{"tripId": "t_ret", "kind": "PICKUP"}, {"tripId": "t_ret", "kind": "DROPOFF"}]}]
+    before = evaluated(raw, raw["routes"])
+    assert {v.code for v in before.validation.violations} == {"TOTAL_WAIT", "TIME_WINDOW"}
+    answer = insert(raw, "t_out", vehicleIds=["taxi_free"])
+    assert answer.options == []
+    [refused] = answer.rejected
+    assert refused.kind == "RULES"
+    assert refused.reason.startswith("ne peut pas la prendre sans aggraver une règle déjà enfreinte (Attente cumulée de 96")
+
+
+def test_the_validator_measures_the_breaches() -> None:
+    home, facility = offset(MARSEILLE, 3, 2), offset(MARSEILLE, -2, 1)
+    raw = request(
+        [vehicle("taxi_late", MARSEILLE, shift=(660, 1140))],
+        [trip("t_ret", "p1", "RETURN", facility, home, ready=600)],
+    )
+    plan = evaluated(raw, [{"vehicleId": "taxi_late", "stops": [{"tripId": "t_ret", "kind": "PICKUP"}, {"tripId": "t_ret", "kind": "DROPOFF"}]}])
+    day = DayRequest.model_validate({key: value for key, value in raw.items() if key != "routes"})
+    matrix, _ = build_matrix(request_points(day), None)
+    sizes = {violation.code: excess for violation, excess in validate_measured(day, plan.routes, matrix)}
+    # Picked up at 11:06 for a session ending at 10:00: 51 min after the 15 min allowed, 21 min over the 45 min wait.
+    assert sizes == {"TIME_WINDOW": 51, "TOTAL_WAIT": 21}
 
 
 def test_an_unknown_trip_is_refused() -> None:

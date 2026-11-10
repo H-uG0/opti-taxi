@@ -6,20 +6,31 @@
  * the source of a move) as /evaluate times and prices them, their figures against the plan in
  * place, the patients it delays, or why a vehicle cannot take the trip. This module:
  * - builds the request from the stored routes (routesInPlace: the stops of the trips and vehicles
- *   sent), and says which routes the web must not hand over: one under way (a stop done), one
- *   holding a trip no longer sent (cancelled or incomplete: rewriting it would drop that trip), one
- *   saved with another crew than today's (« Véhicules à revoir »);
+ *   sent), and says which routes the web must not hand over: one under way (a stop done), one of a
+ *   vehicle off the road that day (not sent), one holding a trip no longer sent (cancelled or
+ *   incomplete: rewriting it would drop that trip), one saved with another crew than today's
+ *   (« Véhicules à revoir »);
  * - shapes the answer for the trip panel (lib/planning/place-view.ts);
  * - plans the writes of « Appliquer »: the target and source routes only, through the pure mapping
- *   of persist.ts (stops, totals, trip results, sharing traceability), the trip locked on its new
- *   vehicle as « Déplacer vers… » does, and the day's stored violations updated for these routes.
+ *   of persist.ts (stops, totals, trip results, sharing traceability), the stops that stay updated
+ *   in place (their ids kept: the drivers' phones send statuses by stop id), the trip locked on its
+ *   new vehicle as « Déplacer vers… » does, and the day's stored violations updated for these routes;
+ * - on today's date, refuses a place whose pickup, or another patient's moved stop, is already past.
  *
  * The answer for one vehicle (`vehicleIds`) is the check of a manual move onto it: the base of the
  * drag-and-drop draft (INS-03).
  */
 import type { RouteStatus, StopKind, TripStatus } from "@prisma/client";
 import type { DayRequest, InsertOption, InsertRequest, InsertResponse, Violation } from "@/lib/optimizer/contract";
-import { planRoutes, planTripUpdates, type CurrentTrip, type RouteRow, type TripUpdate, type VehicleCrew } from "@/lib/optimizer/persist";
+import {
+  planRoutes,
+  planTripUpdates,
+  type CurrentTrip,
+  type RouteRow,
+  type StopRow,
+  type TripUpdate,
+  type VehicleCrew,
+} from "@/lib/optimizer/persist";
 import { formatMinute } from "@/lib/time";
 import { isDrivable, routesInPlace, type TodayCrew } from "./plan-compare";
 import { marginText, signedKmText, type PlaceRejectionView, type PlacesView } from "./place-view";
@@ -36,17 +47,19 @@ export type StoredPlaceRoute = {
 };
 
 /** Why a stored route cannot be handed to the assistant (neither as source nor as target). */
-export type RouteHold = "STARTED" | "OFF_REQUEST" | "CREW";
+export type RouteHold = "STARTED" | "UNAVAILABLE" | "OFF_REQUEST" | "CREW";
 
 export const ROUTE_HOLD_REASONS: Record<RouteHold, string> = {
   STARTED: "a une tournée commencée, qui ne change plus en cours de journée",
+  UNAVAILABLE: "est indisponible ce jour\u00a0: seule une réoptimisation de la journée refait sa tournée",
   OFF_REQUEST: "a dans sa tournée une course annulée ou incomplète (réoptimisez la journée d'abord)",
   CREW: "a une tournée prévue avec un autre équipage que celui du jour (voir «\u202fÀ traiter\u202f»)",
 };
 
 /**
- * Why the route cannot change now, or null: a stop done by the crew (or its trip picked up), a stop
- * of a trip the request does not carry, or a crew that is no longer the vehicle's of the day.
+ * Why the route cannot change now, or null: a stop done by the crew (or its trip picked up), a
+ * vehicle off the road that day (no crew of the day: not sent), a stop of a trip the request does
+ * not carry, or a crew that is no longer the vehicle's of the day.
  */
 export function routeHold(
   route: Pick<StoredPlaceRoute, "vehicleId" | "driverId" | "crewMateId" | "stops">,
@@ -55,6 +68,7 @@ export function routeHold(
   todayCrews: ReadonlyMap<string, TodayCrew>,
 ): RouteHold | null {
   if (route.stops.some((stop) => isStopDone(stop, statusOf(stop.tripId)))) return "STARTED";
+  if (!todayCrews.has(route.vehicleId)) return "UNAVAILABLE";
   if (route.stops.some((stop) => !sentTripIds.has(stop.tripId))) return "OFF_REQUEST";
   if (!isDrivable(route, todayCrews)) return "CREW";
   return null;
@@ -81,6 +95,30 @@ export function buildInsertRequest(
     tripId,
     vehicleIds: vehicleIds ? [...vehicleIds] : null,
   };
+}
+
+/** A pickup placed on today's date leaves the crew at least this long (to be told, and to get there). */
+export const PLACE_NOW_MARGIN_MIN = 10;
+
+/**
+ * Why a place cannot be taken at `nowMinute` (minutes since midnight in Europe/Paris, today's date
+ * only): the trip picked up before now plus PLACE_NOW_MARGIN_MIN, or another patient's stop moved
+ * to a time already past (the optimizer times the routes from the start of the shift, unaware of
+ * the hour). Null when it can; to follow the vehicle's name.
+ */
+export function pastPlaceReason(option: Pick<InsertOption, "pickupMin" | "shifts">, nowMinute: number): string | null {
+  if (option.pickupMin < nowMinute) return `la prendrait en charge à ${formatMinute(option.pickupMin)}, heure déjà passée`;
+  if (option.pickupMin < nowMinute + PLACE_NOW_MARGIN_MIN) {
+    return `la prendrait en charge à ${formatMinute(option.pickupMin)}, dans moins de ${PLACE_NOW_MARGIN_MIN}\u00a0min`;
+  }
+  for (const shift of option.shifts) {
+    const moved = [
+      ...(shift.pickupShiftMin !== 0 ? [shift.pickupMin] : []),
+      ...(shift.dropoffShiftMin !== 0 ? [shift.dropoffMin] : []),
+    ].find((minute) => minute < nowMinute);
+    if (moved !== undefined) return `décalerait un autre patient de sa tournée à une heure déjà passée (${formatMinute(moved)})`;
+  }
+  return null;
 }
 
 /** The largest of the two shifts of a trip (pickup, dropoff), sign kept. */
@@ -120,6 +158,35 @@ export function placesView(
     elapsedMs,
     straightLine: response.meta.matrixSource === "haversine",
   };
+}
+
+/**
+ * How the stops of a route in place are rewritten: the stops that stay (same trip and kind) are
+ * updated in place, so their ids hold (a driver's roadmap on the phone, and the statuses waiting in
+ * its offline queue, name stops by id: refresh-routes.ts and detach.ts keep them too); the stops
+ * that leave are deleted, those that come are created.
+ */
+export type StopWrites = {
+  deleteIds: string[];
+  updates: { id: string; data: StopRow }[];
+  creates: StopRow[];
+};
+
+export function planStopWrites(stored: readonly Pick<StoredPlaceRoute["stops"][number], "id" | "tripId" | "kind">[], rows: readonly StopRow[]): StopWrites {
+  const byKey = new Map(stored.map((stop) => [`${stop.tripId}:${stop.kind}`, stop.id]));
+  const kept = new Set<string>();
+  const updates: StopWrites["updates"] = [];
+  const creates: StopRow[] = [];
+  for (const row of rows) {
+    const id = byKey.get(`${row.tripId}:${row.kind}`);
+    if (id !== undefined && !kept.has(id)) {
+      kept.add(id);
+      updates.push({ id, data: row });
+    } else {
+      creates.push(row);
+    }
+  }
+  return { deleteIds: stored.filter((stop) => !kept.has(stop.id)).map((stop) => stop.id), updates, creates };
 }
 
 /** What « Appliquer » writes: the routes it changes, and the results of their trips. */

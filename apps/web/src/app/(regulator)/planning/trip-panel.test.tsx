@@ -134,6 +134,72 @@ describe("TripPanel (panneau course)", () => {
     expect(screen.getByRole("button", { name: /Défiger/ }).getAttribute("title")).toMatch(/^Retire le recours exceptionnel/);
   });
 
+  it("leaves a trip in an exceptional ambulance to « Défiger » rather than searching places for it", () => {
+    renderPanel({ ...planningFixture().trips["trip-a"]!, vehicleId: "amb-1", lockedVehicleId: "amb-1", exceptionalAmbulance: true });
+    expect((screen.getByRole("button", { name: "Chercher" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      screen.getByText("Recours exceptionnel à une ambulance : « Défiger » la course (la mesure tombe) pour lui chercher une place en taxi ou en VSL."),
+    ).toBeTruthy();
+  });
+
+  it("gives the focus back to « Chercher » once a place is applied and the trip shows on its new vehicle", async () => {
+    const { trips, vehicles } = planningFixture();
+    const trip = trips["trip-a"]!;
+    actions.findPlaces.mockResolvedValueOnce({
+      ok: true,
+      view: {
+        tripId: trip.id,
+        fromVehicleId: trip.vehicleId,
+        version: "v-1",
+        options: [
+          {
+            vehicleId: "vsl-1",
+            pickupMinute: 420,
+            dropoffMinute: 445,
+            shared: false,
+            coPassengerTripIds: [],
+            deltaKm: 1,
+            deltaEmptyKm: 0,
+            deltaDurationMin: 5,
+            deltaRevenue: 20,
+            deltaMargin: 12,
+            shifts: [],
+            remainingViolations: 0,
+          },
+        ],
+        rejected: [],
+        elapsedMs: 300,
+        straightLine: false,
+      },
+    } as never);
+    const panel = (shown: TripView) => (
+      <PlanningActivityProvider timeLimitSec={10}>
+        <TripPanel
+          trip={shown}
+          trips={trips}
+          vehicles={vehicles}
+          violations={[]}
+          date="2026-11-10"
+          replanBlocked={null}
+          lockBlocked={null}
+          placeBlocked={null}
+          onSelectTrip={() => {}}
+          onClose={() => {}}
+        />
+      </PlanningActivityProvider>
+    );
+    const { rerender } = render(panel(trip));
+    fireEvent.click(screen.getByRole("button", { name: "Chercher" }));
+    const apply = await screen.findByRole("button", { name: "Appliquer\u00a0: placer la course sur VSL 1 (Marseille)" });
+    apply.focus();
+    fireEvent.click(apply);
+    await waitFor(() => expect(actions.placeTrip).toHaveBeenCalledWith(trip.id, "vsl-1", "v-1", null));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Recalculer" }) as HTMLButtonElement).disabled).toBe(false));
+    // The page refreshed: the trip is on the VSL, its places are drawn again (and « Appliquer » is gone).
+    rerender(panel({ ...trip, vehicleId: "vsl-1", lockedVehicleId: "vsl-1" }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Chercher" })));
+  });
+
   it("shows a trip carried by an ambulance as an exceptional measure, at the VSL tariff", () => {
     renderPanel({ ...planningFixture().trips["trip-a"]!, vehicleId: "amb-1", lockedVehicleId: "amb-1", exceptionalAmbulance: true });
     expect(screen.getByText("Recours exceptionnel")).toBeTruthy();

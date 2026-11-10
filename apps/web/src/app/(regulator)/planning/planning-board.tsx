@@ -127,6 +127,17 @@ export function PlanningBoard({
   }));
   // ?placer=1 searches the places of the trip of the address once, while it stays selected.
   const [autoPlaceTripId, setAutoPlaceTripId] = useState<string | null>(initialPlace ? initialTripId : null);
+  // Once started, the request is spent: neither the panel drawn again after « Appliquer » nor a reload
+  // (« Recharger ») searches again, whichever trip is selected then.
+  const autoPlaceStarted = useCallback(() => {
+    setAutoPlaceTripId(null);
+    const current = new URLSearchParams(window.location.search);
+    if (!current.has("placer")) return;
+    current.delete("placer");
+    const query = current.toString();
+    // State null: Next.js keeps its own history state and useSearchParams in step (use-planning-filter.ts).
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  }, []);
   // After a refresh the selected trip / vehicle may be gone: treat it as unselected.
   const selectedTrip = selection.tripId ? (tripsById[selection.tripId] ?? null) : null;
   const selectedVehicle = selection.vehicleId ? (vehicles.find((v) => v.id === selection.vehicleId) ?? null) : null;
@@ -457,6 +468,7 @@ export function PlanningBoard({
                 lockBlocked={lockBlocked}
                 placeBlocked={placeBlocked}
                 autoPlace={selectedTrip.id === autoPlaceTripId}
+                onAutoPlaceStarted={autoPlaceStarted}
                 onSelectTrip={selectTrip}
                 onClose={clear}
               />

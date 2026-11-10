@@ -8,6 +8,7 @@ import { cn } from "@/components/ui/cn";
 import { ConfirmPanel } from "@/components/ui/confirm-action";
 import { formatSeconds } from "@/lib/planning/format";
 import {
+  currentPlaceNote,
   groupPlaces,
   marginText,
   placeFiguresText,
@@ -35,6 +36,10 @@ export type PlaceFinderProps = {
   blocked: string | null;
   /** Search at once (« Où la placer ? » from a new trip or a link). */
   autoStart?: boolean;
+  /** Called once the automatic search has started: the request is spent (a remount does not search again). */
+  onAutoStarted?: () => void;
+  /** Called when « Appliquer » saved a place (the panel gives the focus back once it shows the trip moved). */
+  onPlaced?: () => void;
   /** The « Chercher » button (shortcut « D » of the trip panel). */
   searchRef?: Ref<HTMLButtonElement>;
 };
@@ -45,7 +50,7 @@ export type PlaceFinderProps = {
  * first, the vehicles without a place greyed with their reason. « Appliquer » saves that place
  * only: the vehicle's route and the one the trip leaves, nothing else of the day.
  */
-export function PlaceFinder({ trip, trips, vehicles, blocked, autoStart = false, searchRef }: PlaceFinderProps) {
+export function PlaceFinder({ trip, trips, vehicles, blocked, autoStart = false, onAutoStarted, onPlaced, searchRef }: PlaceFinderProps) {
   const { busy, run } = usePlanningActivity();
   const titleId = useId();
   const [view, setView] = useState<PlacesView | null>(null);
@@ -55,6 +60,8 @@ export function PlaceFinder({ trip, trips, vehicles, blocked, autoStart = false,
   const nameOf = (id: string) => trips[id]?.patientName ?? null;
 
   const search = () => {
+    // Not disabled while it searches (the focus would fall to the page): a second click is ignored.
+    if (searching) return;
     setError(null);
     setConfirm(null);
     startSearch(async () => {
@@ -79,6 +86,7 @@ export function PlaceFinder({ trip, trips, vehicles, blocked, autoStart = false,
     if (!autoStart || started.current || blocked !== null) return;
     started.current = true;
     search();
+    onAutoStarted?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per panel
   }, [autoStart, blocked]);
 
@@ -87,14 +95,16 @@ export function PlaceFinder({ trip, trips, vehicles, blocked, autoStart = false,
     setConfirm(null);
     run(`Placement sur ${option.label}…`, () => placeTrip(trip.id, option.vehicleId, view.version, confirmed), {
       onResult: (result) => {
-        if (!result.ok && result.needsConfirmation) setConfirm({ vehicleId: option.vehicleId, question: result.error });
+        if (result.ok) onPlaced?.();
+        else if (result.needsConfirmation) setConfirm({ vehicleId: option.vehicleId, question: result.error });
         // The places no longer describe the plan: computed again on demand.
-        else if (!result.ok && result.stale) setView(null);
+        else if (result.stale) setView(null);
       },
     });
   };
 
   const off = blocked !== null;
+  const groups = view && !off ? groupPlaces(view, vehicles, trip.allowedVehicleTypes) : null;
   return (
     <section aria-labelledby={titleId} className="space-y-2">
       <div className="flex items-center justify-between gap-2">
@@ -107,8 +117,10 @@ export function PlaceFinder({ trip, trips, vehicles, blocked, autoStart = false,
           variant={trip.vehicleId ? "secondary" : "primary"}
           aria-keyshortcuts="D"
           onClick={search}
-          disabled={busy || searching || off}
+          disabled={busy || off}
+          aria-disabled={searching || undefined}
           aria-busy={searching}
+          className="aria-disabled:cursor-wait aria-disabled:opacity-50"
           title={blocked ?? "Cherche la meilleure place dans chaque tournée en place, sans changer les autres"}
         >
           {searching ? <LoaderCircle aria-hidden className="size-3.5 motion-safe:animate-spin" /> : <Search aria-hidden className="size-3.5" />}
@@ -127,19 +139,13 @@ export function PlaceFinder({ trip, trips, vehicles, blocked, autoStart = false,
           {error}
         </p>
       ) : null}
-      <div aria-live="polite">
-        {view && !off ? (
-          <PlacesList
-            view={view}
-            groups={groupPlaces(view, vehicles, trip.allowedVehicleTypes)}
-            nameOf={nameOf}
-            busy={busy}
-            confirm={confirm}
-            onApply={apply}
-            onKeep={() => setConfirm(null)}
-          />
-        ) : null}
-      </div>
+      {/* Only the headline is announced, never the whole list (a screen reader goes through it at will). */}
+      <p role="status" className="sr-only">
+        {searching ? "Recherche des places…" : groups ? placesSummary(groups) : ""}
+      </p>
+      {view && groups ? (
+        <PlacesList view={view} groups={groups} nameOf={nameOf} busy={busy} confirm={confirm} onApply={apply} onKeep={() => setConfirm(null)} />
+      ) : null}
     </section>
   );
 }
@@ -161,7 +167,10 @@ function PlacesList({
   onApply: (option: PlaceOptionRow, confirmed: string | null) => void;
   onKeep: () => void;
 }) {
-  const bestId = groups[0]?.options[0]?.vehicleId ?? null;
+  const first = groups[0]?.options[0] ?? null;
+  // A move that loses money is never « Meilleure place »: the trip's own place stays better.
+  const stay = currentPlaceNote(view, first);
+  const bestId = stay === null ? (first?.vehicleId ?? null) : null;
   const item = (option: PlaceOptionRow) => (
     <PlaceItem
       key={option.vehicleId}
@@ -177,9 +186,10 @@ function PlacesList({
   return (
     <div className="space-y-2.5">
       <p className="text-xs text-slate-600">
-        {placesSummary(view)} · calcul {formatSeconds(view.elapsedMs)}
+        {placesSummary(groups)} · calcul {formatSeconds(view.elapsedMs)}
         {view.straightLine ? " · distances à vol d'oiseau" : ""}
       </p>
+      {stay ? <p className="text-xs font-medium text-slate-700">{stay}</p> : null}
       {groups.length > 0 ? (
         <ul className="space-y-2.5" aria-label="Places par dépôt">
           {groups.map((group) => (

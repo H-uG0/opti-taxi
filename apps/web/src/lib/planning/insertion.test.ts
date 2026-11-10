@@ -6,10 +6,12 @@ import type { CurrentTrip, VehicleCrew } from "@/lib/optimizer/persist";
 import {
   buildInsertRequest,
   newRouteStatus,
+  pastPlaceReason,
   placedMessage,
   placeQuestion,
   placesView,
   planPlaceWrite,
+  planStopWrites,
   ROUTE_HOLD_REASONS,
   routeHold,
   violationsAfterPlace,
@@ -52,6 +54,56 @@ describe("routeHold", () => {
     );
     expect(routeHold(storedRoute({ driverId: "drv-2" }), sent, () => "ASSIGNED", crews)).toBe("CREW");
     expect(ROUTE_HOLD_REASONS.STARTED).toBe("a une tournée commencée, qui ne change plus en cours de journée");
+  });
+
+  it("says a vehicle off the road that day as such, not as another crew", () => {
+    // Made unavailable (breakdown, maintenance…): no crew of the day, not sent to the optimizer.
+    expect(routeHold(storedRoute({ vehicleId: "veh_down" }), sent, () => "ASSIGNED", crews)).toBe("UNAVAILABLE");
+    // A stop already done still comes first: the route is under way.
+    expect(routeHold(storedRoute({ vehicleId: "veh_down" }), sent, () => "PICKED_UP", crews)).toBe("STARTED");
+  });
+});
+
+describe("planStopWrites", () => {
+  const row = (tripId: string, kind: "PICKUP" | "DROPOFF", sequence: number) => ({
+    sequence,
+    tripId,
+    kind,
+    lat: 43.3,
+    lng: 5.4,
+    address: `${kind} ${tripId}`,
+    arrivalMinute: 400 + sequence,
+    startMinute: 400 + sequence,
+    departureMinute: 405 + sequence,
+    loadAfter: kind === "PICKUP" ? 1 : 0,
+  });
+
+  it("keeps the ids of the stops that stay, creates the placed trip's and deletes the moved trip's", () => {
+    const stored = [stop("trip_3", "PICKUP", 0), stop("trip_1", "PICKUP", 1), stop("trip_1", "DROPOFF", 2), stop("trip_3", "DROPOFF", 3)];
+    const writes = planStopWrites(stored, [row("trip_9", "PICKUP", 0), row("trip_3", "PICKUP", 1), row("trip_3", "DROPOFF", 2), row("trip_9", "DROPOFF", 3)]);
+    expect(writes.deleteIds).toEqual(["trip_1-PICKUP", "trip_1-DROPOFF"]);
+    expect(writes.updates.map((u) => `${u.id}@${u.data.sequence}`)).toEqual(["trip_3-PICKUP@1", "trip_3-DROPOFF@2"]);
+    expect(writes.creates.map((c) => `${c.tripId}:${c.kind}@${c.sequence}`)).toEqual(["trip_9:PICKUP@0", "trip_9:DROPOFF@3"]);
+  });
+});
+
+describe("pastPlaceReason", () => {
+  const option = (pickupMin: number, shifts: { tripId: string; pickupMin: number; dropoffMin: number; pickupShiftMin: number; dropoffShiftMin: number }[] = []) => ({
+    pickupMin,
+    shifts,
+  });
+
+  it("refuses, today, a pickup already past or too close, and another patient moved to a past time", () => {
+    // 14:00: a 10:00 appointment whose window has passed.
+    expect(pastPlaceReason(option(560), 840)).toBe("la prendrait en charge à 09:20, heure déjà passée");
+    expect(pastPlaceReason(option(845), 840)).toBe("la prendrait en charge à 14:05, dans moins de 10\u00a0min");
+    expect(pastPlaceReason(option(900), 840)).toBeNull();
+    // A stop of the route re-timed earlier than now (its patient not marked picked up).
+    expect(pastPlaceReason(option(900, [{ tripId: "trip_3", pickupMin: 830, dropoffMin: 870, pickupShiftMin: -5, dropoffShiftMin: 0 }]), 840)).toBe(
+      "décalerait un autre patient de sa tournée à une heure déjà passée (13:50)",
+    );
+    // Its past pickup unchanged, only its later dropoff moves: nothing in the past is re-timed.
+    expect(pastPlaceReason(option(900, [{ tripId: "trip_3", pickupMin: 830, dropoffMin: 875, pickupShiftMin: 0, dropoffShiftMin: 5 }]), 840)).toBeNull();
   });
 });
 
