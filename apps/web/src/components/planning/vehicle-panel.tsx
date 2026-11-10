@@ -115,7 +115,7 @@ export function VehiclePanel({
                     <span className="block truncate">
                       <span className="sr-only">{STOP_KIND_LABELS[stop.kind]} : </span>
                       {trip?.patientName ?? "Course"}
-                      {stop.loadAfter > 1 ? <span className="ml-1 text-xs text-amber-700">(partagé)</span> : null}
+                      {stop.loadAfter > 1 ? <span className="ml-1 text-xs font-medium text-shared-strong">(partagé)</span> : null}
                       {trip?.lockedVehicleId === vehicle.id && stop.kind === "PICKUP" ? (
                         <Lock role="img" aria-label="figée" className="ml-1 inline size-3 align-[-1px] text-slate-500" />
                       ) : null}

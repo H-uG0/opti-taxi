@@ -366,9 +366,11 @@ const TimelineRow = memo(function TimelineRow({
           />
         ) : null}
         {route ? (
+          // Under the trips: what shows between them is driven or waited without a patient (« à vide »),
+          // dashed and dark enough to read against the row (3:1 or more, WCAG 1.4.11).
           <div
             aria-hidden
-            className="absolute top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-slate-300"
+            className="absolute top-1/2 h-0 -translate-y-1/2 border-t-2 border-dashed border-slate-500"
             style={span(route.startMinute, route.endMinute, range)}
           />
         ) : null}
@@ -406,7 +408,7 @@ const TimelineRow = memo(function TimelineRow({
 
         {!route && row.available && !compact ? (
           <span className="absolute inset-0 flex items-center justify-center">
-            <span className="rounded bg-white/90 px-1.5 text-xs text-slate-400">Disponible — aucune course</span>
+            <span className="rounded bg-white/90 px-1.5 text-xs text-slate-500">Disponible — aucune course</span>
           </span>
         ) : null}
       </div>
@@ -996,6 +998,10 @@ export function TimelineLegend({ showReturnToCheck = false }: { showReturnToChec
         Course partagée (deux patients à bord)
       </li>
       <li className={item}>
+        <span aria-hidden className={cn(block, "bg-blue-600 ring-2 ring-shared ring-offset-1")} />
+        Co-passager de la course sélectionnée (contour violet, la couleur du partage)
+      </li>
+      <li className={item}>
         <span aria-hidden className={cn(block, "border-l-[3px] border-slate-900 bg-blue-600")} />
         Course figée sur son véhicule
       </li>
@@ -1037,9 +1043,9 @@ export function TimelineLegend({ showReturnToCheck = false }: { showReturnToChec
       </li>
       <li className={item}>
         <span aria-hidden className="inline-flex h-4 w-8 shrink-0 items-center">
-          <span className="h-0.5 w-8 rounded-full bg-slate-300" />
+          <span className="h-0 w-8 border-t-2 border-dashed border-slate-500" />
         </span>
-        Tournée : départ et retour au dépôt
+        Tournée : départ et retour au dépôt ; en pointillé, sans patient à bord (à vide)
       </li>
       <li className={item}>
         <span aria-hidden className="h-3.5 w-8 shrink-0 rounded bg-amber-100 ring-1 ring-inset ring-amber-300" /> Pause

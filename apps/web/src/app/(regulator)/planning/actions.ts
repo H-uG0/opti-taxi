@@ -183,7 +183,7 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
       const skip = skipped.find((s) => s.vehicleId === ids.data.vehicleId);
       return {
         ok: false,
-        error: skip ? `${skip.label} est indisponible ce jour : ${skip.reason}.` : "Véhicule introuvable ou inactif.",
+        error: skip ? `${skip.label} est indisponible ce jour : ${skip.reason}.` : "Véhicule introuvable ou désactivé.",
       };
     }
     if (!trip.allowedVehicleTypes.includes(target.type)) {

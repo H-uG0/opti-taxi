@@ -185,7 +185,7 @@ export default async function VehiclesPage({
           title="Aucun véhicule"
           action={
             <LinkButton href="/vehicules/nouveau" variant="primary">
-              Ajouter un véhicule
+              Nouveau véhicule
             </LinkButton>
           }
         >
@@ -324,7 +324,7 @@ export default async function VehiclesPage({
                             ) : vehicle.active ? (
                               <Badge tone="warning">À affecter</Badge>
                             ) : (
-                              <span className="text-slate-400">—</span>
+                              <span className="text-slate-500">—</span>
                             )}
                             {isAmbulance ? (
                               vehicle.defaultCrewMate ? (
@@ -365,7 +365,7 @@ export default async function VehiclesPage({
                             ) : null}
                           </div>
                         </Td>
-                        <Td className="min-w-40">{vehicle.active ? <TomorrowCell day={day} /> : <span className="text-slate-400">—</span>}</Td>
+                        <Td className="min-w-40">{vehicle.active ? <TomorrowCell day={day} /> : <span className="text-slate-500">—</span>}</Td>
                         <Td className="tabular text-right whitespace-nowrap">{formatEuros(vehicle.costPerKm)}</Td>
                         <Td>
                           <FleetNotesCell outToday={outToday} alerts={alerts} />
@@ -401,7 +401,7 @@ function groupByDepot<T extends Row>(rows: readonly T[]): { id: string; name: st
 
 /** Tomorrow's situation of a vehicle (crews of the day, Équipages). */
 function TomorrowCell({ day }: { day: VehicleDay | null }) {
-  if (!day) return <span className="text-slate-400">—</span>;
+  if (!day) return <span className="text-slate-500">—</span>;
   switch (day.kind) {
     case "off":
       return (
@@ -435,7 +435,7 @@ type OutageNote = ReturnType<typeof unavailabilityOn>;
 type AlertNote = ReturnType<typeof deadlineAlerts>[number];
 
 function FleetNotesCell({ outToday, alerts }: { outToday: OutageNote; alerts: AlertNote[] }) {
-  if (!outToday && alerts.length === 0) return <span className="text-slate-400">—</span>;
+  if (!outToday && alerts.length === 0) return <span className="text-slate-500">—</span>;
   const more = alerts.length - 2;
   return (
     <div className="space-y-0.5">

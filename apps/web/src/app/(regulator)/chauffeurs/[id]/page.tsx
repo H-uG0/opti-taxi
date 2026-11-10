@@ -99,7 +99,7 @@ export default async function EditDriverPage({
 
   return (
     <div className="max-w-7xl">
-      <BackLink href="/chauffeurs">Chauffeurs</BackLink>
+      <BackLink href="/chauffeurs">Personnel</BackLink>
       <PageHeader
         title={fullName}
         description={
@@ -119,7 +119,7 @@ export default async function EditDriverPage({
       {cree === "1" && !account ? (
         <div className="mb-6">
           <FormMessage tone="success">
-            Chauffeur créé. Créez-lui maintenant un compte d&apos;accès pour qu&apos;il consulte sa feuille de route sur son
+            Fiche créée. Créez-lui maintenant un compte d&apos;accès pour qu&apos;il consulte sa feuille de route sur son
             téléphone.
           </FormMessage>
         </div>
@@ -299,7 +299,10 @@ export default async function EditDriverPage({
               {assignments.length === 0 ? (
                 <p className="text-slate-500">
                   Affecté à aucun véhicule. L&apos;équipage par défaut se choisit sur la{" "}
-                  <Link href="/vehicules" className="font-medium text-brand-700 underline-offset-2 hover:underline">
+                  <Link
+                    href={driver.depotId ? `/vehicules?depot=${driver.depotId}` : "/vehicules"}
+                    className="font-medium text-brand-700 underline-offset-2 hover:underline"
+                  >
                     fiche du véhicule
                   </Link>
                   .

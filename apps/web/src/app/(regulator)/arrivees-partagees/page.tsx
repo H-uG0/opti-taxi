@@ -306,7 +306,7 @@ export default async function SharedArrivalsPage({
                       <p className="inline-flex items-center gap-1.5 text-sm text-amber-800">
                         <TriangleAlert aria-hidden className="size-4" />
                         Téléphone de l&apos;accueil non renseigné
-                        <Link href="/etablissements" className="font-medium underline underline-offset-2 print:hidden">
+                        <Link href={`/etablissements/${facility.id}/modifier`} className="font-medium underline underline-offset-2 print:hidden">
                           Compléter
                         </Link>
                       </p>

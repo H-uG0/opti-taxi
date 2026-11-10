@@ -126,7 +126,7 @@ describe("which vehicles a filter keeps", () => {
       vehicleIssues: [{ vehicleId: "x-1" }],
       staleTrips: [{ tripId: "trip-v" }],
       returnsToCheck: ["trip-r", "trip-c"],
-      // « Verrous ignorés » of « À traiter »: the vehicle the lock pointed at.
+      // « Courses figées ignorées » of « À traiter »: the vehicle the lock pointed at.
       droppedLocks: [{ vehicleId: "off-1" }],
     });
     expect([...ids].sort()).toEqual(["amb-1", "off-1", "taxi-1", "vsl-1", "vsl-2", "x-1"]);

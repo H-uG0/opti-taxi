@@ -218,7 +218,7 @@ export default async function TariffsPage({
               title="Aucune grille tarifaire"
               action={
                 <LinkButton href="/tarifs/nouveau" variant="primary">
-                  Créer une grille
+                  Nouvelle grille
                 </LinkButton>
               }
             >

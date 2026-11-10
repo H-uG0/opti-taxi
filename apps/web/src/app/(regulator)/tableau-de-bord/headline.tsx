@@ -104,7 +104,7 @@ export function Headline({
         </p>
         {previous && mixedDistanceSources(focus, previous) ? (
           <p role="note" className="text-sm text-amber-800">
-            Distances calculées différemment ces deux jours (OSRM ou estimation à vol d&apos;oiseau) : comparaison des
+            Distances calculées différemment ces deux jours (routières ou estimées à vol d&apos;oiseau) : comparaison des
             km et des durées indicative.
           </p>
         ) : null}

@@ -374,11 +374,11 @@ function CrewFormBody({
                                 ) : null}
                               </>
                             ) : (
-                              <span className="text-xs text-slate-400">—</span>
+                              <span className="text-xs text-slate-500">—</span>
                             )}
                           </Td>
                           <Td className={cn(WIDE_ONLY, "tabular text-sm whitespace-nowrap text-slate-700")}>
-                            {row.shift ? shiftText(row.shift) : <span className="text-slate-400">—</span>}
+                            {row.shift ? shiftText(row.shift) : <span className="text-slate-500">—</span>}
                           </Td>
                         </>
                       )}
@@ -436,7 +436,7 @@ function CrewFormBody({
                       </Td>
                       <Td className="min-w-40 text-xs">
                         {row.issues.length === 0 ? (
-                          <span className="text-slate-400">—</span>
+                          <span className="text-slate-500">—</span>
                         ) : (
                           <ul className="space-y-0.5">
                             {row.issues.map((issue, i) => (

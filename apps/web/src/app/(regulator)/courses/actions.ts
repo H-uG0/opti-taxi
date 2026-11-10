@@ -7,7 +7,7 @@ import { LOW_GEOCODE_SCORE } from "@/components/address/address-utils";
 import { audit, auditRead, type AuditEntry } from "@/lib/audit";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import type { ActionResult } from "@/lib/forms";
+import { errorState, type ActionResult, type FormState } from "@/lib/forms";
 import { CANCELLATION_REASON_LABELS, isLateCancellation, NO_CANCELLATION, userCancellation } from "@/lib/domain/cancellation";
 import { conflictLabel, restoreBlocker, tripConflicts } from "@/lib/domain/duplicates";
 import { isSameEpisode } from "@/lib/domain/no-show";
@@ -44,7 +44,6 @@ import {
   sharingDecisionSchema,
   tripIdSchema,
   type FieldErrors,
-  type NewTripValues,
   type TripDestination,
   type TripPrescription,
 } from "./trip-form";
@@ -135,13 +134,8 @@ export async function completeDayTrips(date: string): Promise<{ changed: boolean
 // ---------------------------------------------------------------------------
 // One-off trip
 
-export type NewTripState = {
-  errors: FieldErrors;
-  message: string | null;
-  values: NewTripValues;
-  /** Incremented on every answer so the form remounts with the submitted values. */
-  attempt: number;
-};
+/** The app's form state (lib/forms): one message per field, the typed values echoed, a new submissionId each answer. */
+export type NewTripState = FormState;
 
 const OUTSIDE_FRANCE_MESSAGE = "Adresse localisée hors de France métropolitaine : précisez-la ou saisissez les coordonnées.";
 
@@ -183,15 +177,16 @@ async function freeDestination(
   }
 }
 
-export async function createTrip(prev: NewTripState, formData: FormData): Promise<NewTripState> {
+export async function createTrip(_prev: NewTripState, formData: FormData): Promise<NewTripState> {
   const user = await requireUser("REGULATOR");
   const values = formValues(formData, NEW_TRIP_FIELDS);
-  const answer = (errors: FieldErrors, message: string | null = null): NewTripState => ({
-    errors,
-    message: message ?? "Vérifiez les champs signalés.",
-    values,
-    attempt: prev.attempt + 1,
-  });
+  const echoedValues = Object.fromEntries(Object.entries(values).filter((entry): entry is [string, string] => entry[1] !== undefined));
+  const answer = (errors: FieldErrors, message: string | null = null): NewTripState =>
+    errorState(
+      Object.fromEntries(Object.entries(errors).flatMap(([field, messages]) => (messages?.[0] ? [[field, messages[0]]] : []))),
+      echoedValues,
+      message ?? "Vérifiez les champs signalés.",
+    );
 
   const parsed = parseNewTrip(values, todayIso());
   if (!parsed.ok) return answer(parsed.errors);

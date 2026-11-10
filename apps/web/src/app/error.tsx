@@ -35,7 +35,7 @@ export default function RootError({ error, retry }: { error: unknown; retry: () 
             En développement : vérifiez que la base de données est démarrée (port 5433).
           </span>
         ) : null}
-        {digest ? <span className="mt-1 block text-xs text-slate-400">Référence : {digest}</span> : null}
+        {digest ? <span className="mt-1 block text-xs text-slate-500">Référence : {digest}</span> : null}
       </EmptyState>
     </main>
   );

@@ -177,8 +177,8 @@ export function IssuesPanel({
         <div className="divide-y divide-slate-100">
           {!violationsKnown ? (
             <p className="px-4 py-3 text-sm text-amber-800">
-              Le dernier calcul signalait des violations, mais leur détail n&apos;a pas été enregistré (calcul antérieur à
-              cette version) : relancez l&apos;optimisation pour les revoir.
+              Le dernier calcul signalait des violations, mais leur détail n&apos;a pas été enregistré (calcul plus
+              ancien) : relancez l&apos;optimisation pour les revoir.
             </p>
           ) : null}
 
@@ -264,7 +264,7 @@ export function IssuesPanel({
                       <button
                         type="button"
                         onClick={() => onSelectTrip(v.tripId ?? "")}
-                        className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-brand-600"
+                        className="inline-flex min-h-6 items-center rounded border border-slate-300 bg-white px-2 text-xs text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-brand-600"
                       >
                         {trips[v.tripId]?.patientName ?? "Course"}
                       </button>
@@ -273,7 +273,7 @@ export function IssuesPanel({
                       <button
                         type="button"
                         onClick={() => onSelectVehicle(v.vehicleId ?? "")}
-                        className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-brand-600"
+                        className="inline-flex min-h-6 items-center rounded border border-slate-300 bg-white px-2 text-xs text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-brand-600"
                       >
                         {vehicleLabels[v.vehicleId] ?? "Véhicule"}
                       </button>
@@ -313,7 +313,7 @@ export function IssuesPanel({
           ) : null}
 
           {droppedLocks.length > 0 ? (
-            <Section icon={<LockKeyholeOpen aria-hidden className="size-3.5" />} title={`Verrous ignorés (${droppedLocks.length})`} tone="amber">
+            <Section icon={<LockKeyholeOpen aria-hidden className="size-3.5" />} title={`Courses figées ignorées (${droppedLocks.length})`} tone="amber">
               {droppedLocks.map((d) => (
                 <li key={d.tripId}>
                   <TripButton tripId={d.tripId} trips={trips} selected={d.tripId === selectedTripId} onSelect={onSelectTrip}>

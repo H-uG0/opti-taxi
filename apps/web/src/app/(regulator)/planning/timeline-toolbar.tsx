@@ -324,7 +324,7 @@ export function TimelineToolbar({
             Compacte
           </button>
           <HelpDialog showReturnToCheck={showReturnToCheck} />
-          <Popover label="Verrous" icon={<Lock aria-hidden className="size-3.5" />}>
+          <Popover label="Figer" icon={<Lock aria-hidden className="size-3.5" />}>
             <div className="w-72 space-y-2 text-sm text-slate-700">
               <p>
                 Une course figée reste sur son véhicule aux prochaines optimisations. Figez une tournée depuis son véhicule,

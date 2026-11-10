@@ -123,7 +123,7 @@ export function PlanningSearch({
             else input.current?.blur();
           }
         }}
-        className="block h-8 w-full rounded-md border border-slate-300 bg-white pl-8 pr-8 text-sm text-slate-900 shadow-xs placeholder:text-slate-400 focus:border-brand-500 focus:outline-2 focus:outline-brand-200"
+        className="block h-8 w-full rounded-md border border-field bg-white pl-8 pr-8 text-sm text-slate-900 shadow-xs placeholder:text-slate-500 focus:border-brand-600 focus:outline-2 focus:outline-brand-600"
       />
       {query === "" ? (
         <kbd

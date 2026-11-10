@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { health, optimize } from "./client";
+import { health, optimize, unreachableMessage } from "./client";
 import { MAX_TRIPS, MAX_VEHICLES, type OptimizeRequest } from "./contract";
 import { optimizerHttpErrorMessage } from "./http-errors";
 import { optimizerAuthHeaders, optimizerToken, optimizerTokenWarning } from "./token";
@@ -133,5 +133,16 @@ describe("token helpers", () => {
     expect(optimizerTokenWarning({ NODE_ENV: "production" })).toMatch(/OPTIMIZER_TOKEN is not set/);
     expect(optimizerTokenWarning({ NODE_ENV: "production", OPTIMIZER_TOKEN: "abc" })).toBeNull();
     expect(optimizerTokenWarning({ NODE_ENV: "development" })).toBeNull();
+  });
+});
+
+describe("unreachableMessage", () => {
+  it("tells a developer how to start the service, never a dispatcher", () => {
+    expect(unreachableMessage("http://127.0.0.1:8100", "development")).toContain("Lancez-le avec : cd services/optimizer");
+    const production = unreachableMessage("http://optimizer:8100", "production");
+    expect(production).toBe(
+      "Le service d'optimisation ne répond pas. Réessayez dans quelques minutes ; si cela dure, prévenez la personne qui gère l'application.",
+    );
+    expect(production).not.toContain("optimizer:8100");
   });
 });

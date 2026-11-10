@@ -43,7 +43,7 @@ export function BarChart({
       {hasSecondary ? (
         <figcaption className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
           <span className="inline-flex items-center gap-1.5">
-            <span aria-hidden className="h-2.5 w-2 rounded-t-[2px] bg-brand-300" />
+            <span aria-hidden className="h-2.5 w-2 rounded-t-[2px] bg-brand-500" />
             {primaryLabel}
           </span>
           <span className="inline-flex items-center gap-1.5">
@@ -60,7 +60,7 @@ export function BarChart({
           // A rounded data end and a square end on the baseline: the square patch covers the baseline corners.
           const patch = bar ? Math.min(radius, bar.height) : 0;
           return (
-            <g key={shape.date} className={isFocus ? "fill-brand-700" : "fill-brand-300"}>
+            <g key={shape.date} className={isFocus ? "fill-brand-800" : "fill-brand-500"}>
               {bar ? (
                 <>
                   <rect

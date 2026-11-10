@@ -144,7 +144,7 @@ export function PrescriptionForm({
       </Fieldset>
 
       <Fieldset legend="Compléments">
-        <Field label="Prescripteur" htmlFor="prescriber" error={errors.prescriber} hint="Facultatif — ex. Dr Martin, néphrologue">
+        <Field label="Prescripteur (facultatif)" htmlFor="prescriber" error={errors.prescriber} hint="Ex. Dr Martin, néphrologue">
           <Input
             id="prescriber"
             name="prescriber"
@@ -154,7 +154,7 @@ export function PrescriptionForm({
             aria-invalid={errors.prescriber ? true : undefined}
           />
         </Field>
-        <Field label="Notes" htmlFor="notes" error={errors.notes}>
+        <Field label="Notes (facultatif)" htmlFor="notes" error={errors.notes}>
           <Textarea
             id="notes"
             name="notes"

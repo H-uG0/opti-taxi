@@ -171,7 +171,7 @@ export function SearchSelect({
           }
         }}
         className={cn(
-          "flex h-10 w-full items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-left text-sm text-slate-900 shadow-xs focus-visible:border-brand-500 focus-visible:outline-2 focus-visible:outline-brand-200 disabled:bg-slate-100 disabled:text-slate-500",
+          "flex h-10 w-full items-center gap-2 rounded-md border border-field bg-white px-3 text-left text-sm text-slate-900 shadow-xs focus-visible:border-brand-600 focus-visible:outline-2 focus-visible:outline-brand-600 disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-500",
           invalid && "border-red-500",
         )}
       >
@@ -208,7 +208,7 @@ export function SearchSelect({
               onKeyDown={onInputKey}
               placeholder={placeholder}
               autoComplete="off"
-              className="h-9 w-full rounded border border-slate-300 pr-2 pl-8 text-sm focus:border-brand-500 focus:outline-2 focus:outline-brand-200"
+              className="h-9 w-full rounded border border-field pr-2 pl-8 text-sm focus:border-brand-600 focus:outline-2 focus:outline-brand-600"
             />
           </div>
           <div id={listId} role="listbox" aria-label={label} className="min-h-0 flex-1 overflow-y-auto py-1">

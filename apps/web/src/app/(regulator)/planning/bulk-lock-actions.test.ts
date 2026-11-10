@@ -80,7 +80,7 @@ describe("lockRoutes", () => {
     expect(result).toEqual({
       ok: true,
       message:
-        "La tournée de Taxi 1 : 2 courses figées, elles resteront sur leur véhicule à la prochaine optimisation. 1 course figée sur un autre véhicule garde ce verrou.",
+        "La tournée de Taxi 1 : 2 courses figées, elles resteront sur leur véhicule à la prochaine optimisation. 1 course figée sur un autre véhicule y reste.",
     });
     // Conditional: still unlocked and still on that vehicle's route when written.
     expect(fake.trip.updateManyAndReturn).toHaveBeenCalledWith({

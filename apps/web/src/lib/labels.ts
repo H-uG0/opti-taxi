@@ -50,13 +50,14 @@ export const DIRECTION_LABELS = {
   RETURN: "Retour",
 } as const;
 
+/** Agreed with « course » (« Course prise en charge »); the driver app's buttons speak of the patient (« Pris en charge »). */
 export const TRIP_STATUS_LABELS = {
   PLANNED: "À planifier",
   ASSIGNED: "Planifiée",
-  PICKED_UP: "Pris en charge",
-  DROPPED_OFF: "Déposé",
+  PICKED_UP: "Prise en charge",
+  DROPPED_OFF: "Déposée",
   CANCELLED: "Annulée",
-  NO_SHOW: "Absent",
+  NO_SHOW: "Patient absent",
 } as const;
 
 export const SHARING_STATUS_LABELS = {
@@ -137,9 +138,9 @@ export const USER_ROLE_LABELS = {
 
 /** Source of the travel times and distances (optimizer matrixSource; "mixed": a route recomputed with another one). */
 export const MATRIX_SOURCE_LABELS: Record<string, string> = {
-  osrm: "OSRM (réseau routier)",
-  haversine: "estimation à vol d'oiseau",
-  mixed: "mixte (recalculée avec une autre source)",
+  osrm: "distances routières",
+  haversine: "distances estimées à vol d'oiseau",
+  mixed: "mixte (recalculée avec une autre source de distances)",
 };
 
 export const VIOLATION_LABELS: Record<string, string> = {

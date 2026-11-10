@@ -70,7 +70,7 @@ export default async function FacilityPage({
           title={
             <span className="flex flex-wrap items-center gap-3">
               {facility.name}
-              <Badge tone={facility.active ? "success" : "neutral"}>{facility.active ? "Actif" : "Inactif"}</Badge>
+              <Badge tone={facility.active ? "success" : "neutral"}>{facility.active ? "Actif" : "Désactivé"}</Badge>
             </span>
           }
           description={`${FACILITY_TYPE_LABELS[facility.type]} · ${facility.city}`}
@@ -127,7 +127,7 @@ export default async function FacilityPage({
               {facility.extraServiceMin > 0 ? (
                 <span className="tabular">{facility.extraServiceMin} min à chaque dépose et prise en charge ici</span>
               ) : (
-                <span className="text-slate-400">Aucun</span>
+                <span className="text-slate-500">Aucun</span>
               )}
             </Item>
             <Item label="Adresse" className="sm:col-span-2">
@@ -142,7 +142,7 @@ export default async function FacilityPage({
               {facility.notes ? (
                 <span className="whitespace-pre-line">{facility.notes}</span>
               ) : (
-                <span className="text-slate-400">Aucune</span>
+                <span className="text-slate-500">Aucune</span>
               )}
             </Item>
           </dl>
@@ -184,7 +184,7 @@ export default async function FacilityPage({
                       <span className="ml-1.5 text-xs text-slate-500">{r.patient.city}</span>
                       {!r.patient.active ? (
                         <Badge tone="neutral" className="ml-2">
-                          Patient inactif
+                          Patient désactivé
                         </Badge>
                       ) : null}
                     </Td>

@@ -1,13 +1,11 @@
 import Link from "next/link";
 import { buttonClasses } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
+import { Input } from "@/components/ui/form";
 import { addDays } from "@/lib/time";
 
 const PRESETS = [7, 14, 30, 90] as const;
 
-/** Same look as the UI kit's Input, sized to its content. */
-const DATE_INPUT =
-  "tabular block h-10 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-xs focus:border-brand-500 focus:outline-2 focus:outline-brand-200";
 
 export function dashboardHref(params: { from: string; to: string; day?: string | null }): string {
   const query = new URLSearchParams({ from: params.from, to: params.to });
@@ -27,13 +25,13 @@ export function RangeForm({ from, to, tomorrow }: { from: string; to: string; to
           <label htmlFor="kpi-from" className="block text-sm font-medium text-slate-700">
             Du
           </label>
-          <input id="kpi-from" type="date" name="from" defaultValue={from} required className={DATE_INPUT} />
+          <Input id="kpi-from" type="date" name="from" defaultValue={from} required className="tabular w-auto" />
         </div>
         <div className="space-y-1">
           <label htmlFor="kpi-to" className="block text-sm font-medium text-slate-700">
             Au
           </label>
-          <input id="kpi-to" type="date" name="to" defaultValue={to} required className={DATE_INPUT} />
+          <Input id="kpi-to" type="date" name="to" defaultValue={to} required className="tabular w-auto" />
         </div>
         <button type="submit" className={buttonClasses("secondary")}>
           Afficher

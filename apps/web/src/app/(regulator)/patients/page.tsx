@@ -61,7 +61,7 @@ const SORT_PHRASES: Record<keyof typeof SORTS, string> = {
 function describeResults(total: number, status: StatusFilter, q: string): string {
   if (total === 0) return "Aucun patient pour ces critères.";
   const plural = total > 1 ? "s" : "";
-  const adjective = status === "actifs" ? ` actif${plural}` : status === "inactifs" ? ` inactif${plural}` : "";
+  const adjective = status === "actifs" ? ` actif${plural}` : status === "inactifs" ? ` désactivé${plural}` : "";
   return `${new Intl.NumberFormat("fr-FR").format(total)} patient${plural}${adjective}${q ? ` correspondant à « ${q} »` : ""}`;
 }
 
@@ -193,7 +193,7 @@ export default async function PatientsPage({
               <LinkButton href="/patients">Voir les patients actifs</LinkButton>
             ) : (
               <LinkButton href="/patients/nouveau" variant="primary">
-                Créer le premier patient
+                Nouveau patient
               </LinkButton>
             )
           }
@@ -278,7 +278,7 @@ export default async function PatientsPage({
                     </Td>
                     <Td>
                       {patient.recurrences.length === 0 ? (
-                        <span className="text-slate-400">—</span>
+                        <span className="text-slate-500">—</span>
                       ) : (
                         <ul className="tabular space-y-0.5">
                           {patient.recurrences.map((r) => (
@@ -295,7 +295,7 @@ export default async function PatientsPage({
                       )}
                     </Td>
                     <Td>
-                      <Badge tone={patient.active ? "success" : "neutral"}>{patient.active ? "Actif" : "Inactif"}</Badge>
+                      <Badge tone={patient.active ? "success" : "neutral"}>{patient.active ? "Actif" : "Désactivé"}</Badge>
                     </Td>
                   </tr>
                 );

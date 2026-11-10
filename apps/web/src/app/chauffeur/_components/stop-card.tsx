@@ -122,9 +122,9 @@ function StopDetails({ stop }: { stop: StopView }) {
       ) : null}
 
       {stop.sharedWith.length > 0 ? (
-        <Line icon={<Users className="size-5 text-violet-700" />}>
+        <Line icon={<Users className="size-5 text-shared" />}>
           <p className="text-base text-slate-900">
-            <span className="font-semibold text-violet-900">Transport partagé</span> avec {stop.sharedWith.join(", ")}
+            <span className="font-semibold text-shared-strong">Transport partagé</span> avec {stop.sharedWith.join(", ")}
           </p>
           <p className="tabular text-sm text-slate-600">
             {stop.onBoardAfter} patient{stop.onBoardAfter > 1 ? "s" : ""} à bord après l&apos;arrêt
@@ -198,7 +198,7 @@ function OpenStopCard({ stop, total, regulator }: { stop: StopView; total: numbe
           <h3 className="text-xl font-semibold text-slate-950">{stop.patient}</h3>
           <MobilityBadge mobility={stop.mobility} />
           {stop.sharedWith.length > 0 ? (
-            <Pill className="bg-violet-50 text-violet-900 ring-violet-200">
+            <Pill className="bg-shared-soft text-shared-strong ring-shared-ring">
               <Users aria-hidden className="size-4" />
               Partagé
             </Pill>

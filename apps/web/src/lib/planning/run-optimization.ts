@@ -318,7 +318,7 @@ class ReplaceRefused extends Error {
 }
 
 export const NOT_PENDING_ERROR = "Ce calcul n'attend plus de confirmation (déjà traité ou remplacé par un autre) : rechargez la page.";
-const INPUT_CHANGED_ERROR = `${NOT_KEPT_PREFIX} : les données du jour ont changé depuis (course, verrou, équipage, véhicule ou paramètre). Relancez l'optimisation.`;
+const INPUT_CHANGED_ERROR = `${NOT_KEPT_PREFIX} : les données du jour ont changé depuis (courses, courses figées, équipages, véhicules ou paramètres). Relancez l'optimisation.`;
 const PLAN_CHANGED_SINCE_ERROR = `${NOT_KEPT_PREFIX} : le planning en place a changé depuis. Relancez l'optimisation.`;
 
 type Actor = Pick<SessionUser, "id" | "role">;

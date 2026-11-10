@@ -111,7 +111,7 @@ export function FacilityForm({
 
       <Fieldset legend="Notes">
         <Field
-          label="Notes"
+          label="Notes (facultatif)"
           htmlFor="notes"
           error={errors.notes}
           hint="Entrée à utiliser, stationnement, service à l'étage… visibles par le chauffeur à la dépose et à la prise en charge"

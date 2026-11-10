@@ -87,7 +87,7 @@ export function PatientForm({
               aria-invalid={errors.firstName ? true : undefined}
             />
           </Field>
-          <Field label="Téléphone" htmlFor="phone" error={errors.phone} hint="Facultatif — pour prévenir le patient">
+          <Field label="Téléphone (facultatif)" htmlFor="phone" error={errors.phone} hint="Pour prévenir le patient">
             <Input
               id="phone"
               name="phone"

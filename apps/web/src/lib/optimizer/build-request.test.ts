@@ -253,7 +253,7 @@ describe("vehicle availability", () => {
     expect(available).toEqual([]);
     expect(skipped.map((s) => [s.vehicleId, s.reason])).toEqual([
       ["a", "Aucun chauffeur attitré"],
-      ["b", expect.stringMatching(/^Chauffeur inactif/)],
+      ["b", expect.stringMatching(/^Chauffeur désactivé/)],
     ]);
   });
 

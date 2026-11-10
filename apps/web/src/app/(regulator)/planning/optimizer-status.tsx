@@ -10,7 +10,7 @@ export async function OptimizerStatus() {
       <p role="status" className="flex items-center gap-2 text-xs text-slate-500">
         <span aria-hidden className="size-2 rounded-full bg-emerald-500" />
         Service d&apos;optimisation en ligne · distances{" "}
-        {result.data.matrixSource === "osrm" ? "routières (OSRM)" : "estimées à vol d'oiseau (OSRM non configuré)"}
+        {result.data.matrixSource === "osrm" ? "routières" : "estimées à vol d'oiseau (km et horaires approximatifs)"}
       </p>
     );
   }
@@ -20,7 +20,7 @@ export async function OptimizerStatus() {
       <WifiOff aria-hidden className="mt-0.5 size-4 shrink-0" />
       <p className="min-w-0 break-words">
         <span className="font-semibold">Optimiseur hors ligne.</span> {result.error} Le planning enregistré reste consultable
-        et modifiable (verrous, validation) ; « Optimiser », « Déplacer » et « Revenir au planning précédent » attendent son
+        et modifiable (courses figées, validation) ; « Optimiser », « Déplacer » et « Revenir au planning précédent » attendent son
         retour.
       </p>
     </div>
@@ -29,7 +29,7 @@ export async function OptimizerStatus() {
 
 export function OptimizerStatusPending() {
   return (
-    <p className="flex items-center gap-2 text-xs text-slate-400">
+    <p className="flex items-center gap-2 text-xs text-slate-500">
       <span aria-hidden className="size-2 rounded-full bg-slate-300" />
       Vérification du service d&apos;optimisation…
     </p>

@@ -46,12 +46,19 @@ export function optimizerUrl(): string {
   return (process.env.OPTIMIZER_URL?.trim() || DEFAULT_OPTIMIZER_URL).replace(/\/+$/, "");
 }
 
-function unreachableMessage(url: string): string {
-  return (
-    `Le service d'optimisation ne répond pas (${url}). Lancez-le avec : ` +
-    "cd services/optimizer && .venv/Scripts/python.exe -m uvicorn app.main:app --port 8100 " +
-    "(ou : docker compose up -d optimizer)."
-  );
+/**
+ * Said when the service does not answer. How to start it is a developer's concern: shown in
+ * development only; a dispatcher reads what to do (wait, then tell whoever runs the application).
+ */
+export function unreachableMessage(url: string, environment: string | undefined = process.env.NODE_ENV): string {
+  if (environment === "development") {
+    return (
+      `Le service d'optimisation ne répond pas (${url}). Lancez-le avec : ` +
+      "cd services/optimizer && .venv/Scripts/python.exe -m uvicorn app.main:app --port 8100 " +
+      "(ou : docker compose up -d optimizer)."
+    );
+  }
+  return "Le service d'optimisation ne répond pas. Réessayez dans quelques minutes ; si cela dure, prévenez la personne qui gère l'application.";
 }
 
 function formatIssues(error: z.ZodError): string {

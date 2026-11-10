@@ -257,7 +257,7 @@ export function TripRow({
             </span>
           ) : null}
           {trip.shared ? (
-            <span className="mt-1 flex items-center gap-1 text-xs text-brand-800">
+            <span className="mt-1 flex items-center gap-1 text-xs text-shared-strong">
               <Users aria-hidden className="size-3.5 shrink-0" />
               <span className="truncate">
                 {trip.coPassengers.length > 0 ? `avec ${trip.coPassengers.join(", ")}` : "Partagée"}

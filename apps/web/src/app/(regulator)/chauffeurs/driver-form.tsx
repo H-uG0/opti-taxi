@@ -108,10 +108,10 @@ export function DriverForm({
 
       <Fieldset legend="Rattachement">
         <Field
-          label="Dépôt de rattachement"
+          label="Dépôt de rattachement (facultatif)"
           htmlFor="depotId"
           error={errors.depotId}
-          hint="Facultatif : le dépôt où la personne prend son service. Il servira à composer les équipages du jour."
+          hint="Le dépôt où la personne prend son service. Il servira à composer les équipages du jour."
         >
           <Select
             id="depotId"

@@ -51,7 +51,7 @@ export default async function NewRecurrencePage({ params }: { params: Promise<{ 
           action={
             prescriptions.length === 0 ? (
               <LinkButton href={`/patients/${patient.id}/prescriptions/nouvelle`} variant="primary">
-                Ajouter une prescription
+                Nouvelle prescription
               </LinkButton>
             ) : (
               <LinkButton href="/etablissements/nouveau" variant="primary">

@@ -16,7 +16,7 @@ export const metadata: Metadata = { title: "Établissements" };
 
 const STATUS_FILTERS = {
   actifs: "Actifs",
-  inactifs: "Inactifs",
+  inactifs: "Désactivés",
   tous: "Tous",
 } as const;
 type StatusFilter = keyof typeof STATUS_FILTERS;
@@ -77,7 +77,7 @@ export default async function FacilitiesPage({
         description={
           facilities.length === 0
             ? "Aucun établissement pour ces critères."
-            : `${facilities.length} établissement${plural} de soins${status === "inactifs" ? ` inactif${plural}` : ""}`
+            : `${facilities.length} établissement${plural} de soins${status === "inactifs" ? ` désactivé${plural}` : ""}`
         }
         actions={
           <LinkButton href="/etablissements/nouveau" variant="primary">
@@ -115,7 +115,7 @@ export default async function FacilitiesPage({
               <LinkButton href="/etablissements">Voir les établissements actifs</LinkButton>
             ) : (
               <LinkButton href="/etablissements/nouveau" variant="primary">
-                Créer le premier établissement
+                Nouvel établissement
               </LinkButton>
             )
           }
@@ -157,9 +157,9 @@ export default async function FacilitiesPage({
                   <Td className="tabular whitespace-nowrap">
                     {f.phone ?? <span className="text-amber-700">Non renseigné</span>}
                   </Td>
-                  <Td className="tabular text-right">{count === 0 ? <span className="text-slate-400">0</span> : count}</Td>
+                  <Td className="tabular text-right">{count === 0 ? <span className="text-slate-500">0</span> : count}</Td>
                   <Td>
-                    <Badge tone={f.active ? "success" : "neutral"}>{f.active ? "Actif" : "Inactif"}</Badge>
+                    <Badge tone={f.active ? "success" : "neutral"}>{f.active ? "Actif" : "Désactivé"}</Badge>
                   </Td>
                 </tr>
               );

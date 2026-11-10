@@ -64,7 +64,7 @@ export default async function DepotsPage({
           title="Aucun dépôt"
           action={
             <LinkButton href="/depots/nouveau" variant="primary">
-              Ajouter un dépôt
+              Nouveau dépôt
             </LinkButton>
           }
         >

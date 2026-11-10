@@ -119,7 +119,7 @@ export async function updateDriver(driverId: string, _state: FormState, formData
     await audit(tx, user, { action: "driver.update", entity: "Driver", entityId: current.id });
   });
   revalidateDriver(current.id);
-  return successState("Fiche chauffeur enregistrée.");
+  return successState("Fiche enregistrée.");
 }
 
 const activeArgs = z.object({ id: idSchema, active: z.boolean() });

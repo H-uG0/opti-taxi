@@ -371,7 +371,7 @@ export function decideVehicle(vehicle: VehicleInput, weekday: number): VehicleDe
   const ofTheDay = vehicle.dayCrew !== undefined;
   const driver = vehicle.defaultDriver;
   if (!driver) return { ok: false, reason: "Aucun chauffeur attitré" };
-  if (!driver.active) return { ok: false, reason: `Chauffeur inactif (${personName(driver)})` };
+  if (!driver.active) return { ok: false, reason: `Chauffeur désactivé (${personName(driver)})` };
   if (!ofTheDay && !worksOn(driver, weekday)) {
     return { ok: false, reason: `Chauffeur absent le ${dayLabel} (${personName(driver)})` };
   }
@@ -385,7 +385,7 @@ export function decideVehicle(vehicle: VehicleInput, weekday: number): VehicleDe
     const mate = vehicle.defaultCrewMate;
     if (!mate) return { ok: false, reason: "Ambulance sans équipier attitré (équipage de 2 requis)" };
     if (mate.id === driver.id) return { ok: false, reason: "Le chauffeur et l'équipier sont la même personne" };
-    if (!mate.active) return { ok: false, reason: `Équipier inactif (${personName(mate)})` };
+    if (!mate.active) return { ok: false, reason: `Équipier désactivé (${personName(mate)})` };
     if (!ofTheDay && !worksOn(mate, weekday)) {
       return { ok: false, reason: `Équipier absent le ${dayLabel} (${personName(mate)})` };
     }
@@ -494,7 +494,7 @@ function lockDropReason(
   }
   const skip = skipped.get(lockedVehicleId);
   if (skip) return `Véhicule indisponible ce jour : ${skip.reason}`;
-  if (allVehicles.get(lockedVehicleId)?.active === false) return "Véhicule inactif";
+  if (allVehicles.get(lockedVehicleId)?.active === false) return "Véhicule désactivé";
   return "Véhicule introuvable";
 }
 

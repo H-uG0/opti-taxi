@@ -131,7 +131,7 @@ export function lockMessage(scope: LockScope, name: string | null, locked: numbe
   ];
   if (plan.lockedElsewhere > 0) {
     parts.push(
-      `${plural(plan.lockedElsewhere, "course figée", "courses figées")} sur un autre véhicule ${plan.lockedElsewhere > 1 ? "gardent" : "garde"} ce verrou.`,
+      `${plural(plan.lockedElsewhere, "course figée", "courses figées")} sur un autre véhicule y ${plan.lockedElsewhere > 1 ? "restent" : "reste"}.`,
     );
   }
   return parts.join(" ");

@@ -14,7 +14,7 @@ import { EXPIRY_WARNING_DAYS, findRenewal, needsRenewal, pickCurrentPrescription
 
 export const PATIENT_PAGE_SIZE = 100;
 
-export const STATUS_FILTERS = { actifs: "Actifs", inactifs: "Inactifs", tous: "Tous" } as const;
+export const STATUS_FILTERS = { actifs: "Actifs", inactifs: "Désactivés", tous: "Tous" } as const;
 export type StatusFilter = keyof typeof STATUS_FILTERS;
 
 export const PRESCRIPTION_FILTERS = {

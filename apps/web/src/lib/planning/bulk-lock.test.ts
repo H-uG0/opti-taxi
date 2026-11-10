@@ -100,7 +100,7 @@ describe("messages", () => {
       "La tournée de Taxi 1 : 1 course figée, elle restera sur son véhicule à la prochaine optimisation.",
     );
     expect(lockMessage({ kind: "day" }, null, 0, { lockedElsewhere: 2 })).toBe(
-      "Toutes les courses du jour sont déjà figées. 2 courses figées sur un autre véhicule gardent ce verrou.",
+      "Toutes les courses du jour sont déjà figées. 2 courses figées sur un autre véhicule y restent.",
     );
     expect(lockMessage({ kind: "depot", depotId: "d" }, "Gap", 0, { lockedElsewhere: 0 })).toBe(
       "Rien à figer dans les tournées du dépôt Gap : leurs courses sont déjà figées.",

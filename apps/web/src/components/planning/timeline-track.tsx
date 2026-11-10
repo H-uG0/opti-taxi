@@ -196,7 +196,7 @@ export function TrackTrips({
               done && "opacity-60",
               violating.has(block.tripId) && "outline-2 outline-offset-1 outline-slate-900 outline-dashed",
               isSelected && "z-[15] ring-2 ring-slate-900 ring-offset-1",
-              !isSelected && isCompanion && "z-[15] ring-2 ring-amber-400 ring-offset-1",
+              !isSelected && isCompanion && "z-[15] ring-2 ring-shared ring-offset-1",
             )}
             style={style}
           >

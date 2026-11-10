@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Info } from "lucide-react";
 import { LinkButton } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, EmptyState, PageHeader } from "@/components/ui/layout";
 import { FormMessage } from "@/components/ui/form";
@@ -45,22 +44,13 @@ export default async function DashboardPage({
     <div>
       <PageHeader
         title="Tableau de bord"
-        description={`Les cinq indicateurs du besoin, jour par jour, du ${formatShortDate(range.from)} au ${formatShortDate(range.to)} (${plural(period.days, "jour")}).`}
+        description={`Les indicateurs de la régulation, jour par jour, du ${formatShortDate(range.from)} au ${formatShortDate(range.to)} (${plural(period.days, "jour")}).`}
       />
 
       <div className="mb-6 space-y-3">
         <RangeForm from={range.from} to={range.to} tomorrow={tomorrow} />
         {range.error ? <FormMessage tone="info">{range.error}</FormMessage> : null}
       </div>
-
-      <p className="mb-6 flex items-start gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
-        <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
-        <span>
-          Valeurs de référence : les valeurs de départ de ces indicateurs sont à mesurer sur l&apos;historique de V
-          (2 à 4 semaines de courses du planning manuel) avant tout développement ; c&apos;est la comparaison avec
-          elles qui dira si l&apos;optimiseur fait mieux.
-        </span>
-      </p>
 
       {period.simulatedDays > 0 ? (
         <div role="note" className="mb-6 rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
@@ -119,7 +109,7 @@ export default async function DashboardPage({
             {/* Above the charts: they mix the same days as the table. */}
             {mixedDistanceSources(period) ? (
               <p role="note" className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                Cette période mélange des tournées calculées avec les distances routières (OSRM) et avec l&apos;estimation à
+                Cette période mélange des tournées calculées avec les distances routières et avec l&apos;estimation à
                 vol d&apos;oiseau (indiqué sous chaque jour du détail) : leurs kilomètres, durées et retards prévus ne se
                 comparent pas d&apos;un jour à l&apos;autre.
               </p>
@@ -152,7 +142,7 @@ export default async function DashboardPage({
           </p>
           <p>
             Km, CA estimé, coût et marge sont ceux calculés par l&apos;optimiseur pour chaque tournée : les distances
-            sont celles d&apos;OSRM, ou une estimation à vol d&apos;oiseau quand OSRM n&apos;est pas configuré. Les
+            sont les distances routières, ou une estimation à vol d&apos;oiseau quand le calcul routier n&apos;est pas disponible. Les
             heures réelles (dépose, validation) sont converties à l&apos;heure de Paris.
           </p>
           <p>

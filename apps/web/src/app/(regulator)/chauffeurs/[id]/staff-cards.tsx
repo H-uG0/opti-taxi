@@ -56,9 +56,9 @@ export function AbsenceForm({ action, defaultDate }: { action: Action; defaultDa
         </Field>
       </div>
       <Field
-        label="Note"
+        label="Note (facultatif)"
         htmlFor="absence-note"
-        hint="Facultatif. Aucune information médicale (ni diagnostic ni détail de l'arrêt)."
+        hint="Aucune information médicale (ni diagnostic ni détail de l'arrêt)."
         error={errors.note}
       >
         <Input id="absence-note" name="note" maxLength={200} defaultValue={valueOf(values, "note")} />
@@ -90,9 +90,9 @@ export function IncompatibilityForm({ action, people }: { action: Action; people
         </Select>
       </Field>
       <Field
-        label="Note"
+        label="Note (facultatif)"
         htmlFor="pair-note"
-        hint="Facultatif, visible des régulateurs seulement. Aucune information médicale ni jugement sur la personne."
+        hint="Visible des régulateurs seulement. Aucune information médicale ni jugement sur la personne."
         error={errors.note}
       >
         <Input id="pair-note" name="note" maxLength={200} defaultValue={valueOf(values, "note")} />

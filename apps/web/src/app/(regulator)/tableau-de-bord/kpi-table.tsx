@@ -19,7 +19,7 @@ import { dashboardHref } from "./range-form";
 /** Columns after the day column (colSpan of days without planning). */
 const DATA_COLUMNS = 14;
 
-const SOURCE_SHORT: Record<string, string> = { osrm: "OSRM", haversine: "vol d'oiseau", mixed: "mixte" };
+const SOURCE_SHORT: Record<string, string> = { osrm: "routières", haversine: "vol d'oiseau", mixed: "mixte" };
 
 /** Distance source(s) of a day or a period, under its date: one is the normal case, several do not compare. */
 function sourcesCell(sources: readonly string[]): { tone: Tone; text: string; title: string | undefined } {
@@ -40,7 +40,7 @@ const TONES = {
   strong: "font-medium text-slate-900",
   bad: "font-semibold text-red-700",
   warn: "text-amber-700",
-  muted: "text-slate-400",
+  muted: "text-slate-500",
 } as const;
 type Tone = keyof typeof TONES;
 
@@ -224,7 +224,7 @@ export function KpiTable({
             return (
               <tr key={day.date} className={background}>
                 {dayCell}
-                <td colSpan={DATA_COLUMNS} className="px-3 py-2 text-slate-400">
+                <td colSpan={DATA_COLUMNS} className="px-3 py-2 text-slate-500">
                   Aucune tournée
                 </td>
               </tr>

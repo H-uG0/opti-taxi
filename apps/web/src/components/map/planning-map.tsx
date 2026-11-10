@@ -409,7 +409,7 @@ export function PlanningMap({
           </button>
         </div>
         {usingFallback ? (
-          <p className="rounded bg-white/90 px-1.5 py-0.5 text-[11px] text-slate-500">Fond de carte OpenStreetMap (raster)</p>
+          <p className="rounded bg-white/90 px-1.5 py-0.5 text-[11px] text-slate-600">Fond de carte OpenStreetMap</p>
         ) : null}
       </div>
       <MapLegend planned={planned} />
@@ -417,7 +417,7 @@ export function PlanningMap({
         <div className="absolute inset-0 grid place-items-center rounded-lg bg-slate-50 px-6 text-center text-sm text-slate-500">
           {webglAvailable
             ? "Chargement de la carte…"
-            : "Carte indisponible : WebGL est désactivé dans ce navigateur. La frise et les listes restent utilisables."}
+            : "Carte indisponible : ce navigateur n'affiche pas les cartes (accélération graphique désactivée). La frise et les listes restent utilisables."}
         </div>
       ) : null}
     </div>

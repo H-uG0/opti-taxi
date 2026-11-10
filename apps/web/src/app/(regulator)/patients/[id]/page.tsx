@@ -203,7 +203,7 @@ export default async function PatientPage({
           title={
             <span className="flex flex-wrap items-center gap-3">
               {fullName}
-              <Badge tone={patient.active ? "success" : "neutral"}>{patient.active ? "Actif" : "Inactif"}</Badge>
+              <Badge tone={patient.active ? "success" : "neutral"}>{patient.active ? "Actif" : "Désactivé"}</Badge>
             </span>
           }
           description={`${patient.city} · ${MOBILITY_LABELS[patient.mobility]}`}
@@ -262,7 +262,7 @@ export default async function PatientPage({
                   {patient.phone}
                 </a>
               ) : (
-                <span className="text-slate-400">Non renseigné</span>
+                <span className="text-slate-500">Non renseigné</span>
               )}
             </Item>
             <Item label="Mobilité">{MOBILITY_LABELS[patient.mobility]}</Item>
@@ -307,7 +307,7 @@ export default async function PatientPage({
               {patient.accessNotes ? (
                 <span className="whitespace-pre-line">{patient.accessNotes}</span>
               ) : (
-                <span className="text-slate-400">Aucune</span>
+                <span className="text-slate-500">Aucune</span>
               )}
             </Item>
           </dl>
@@ -321,7 +321,7 @@ export default async function PatientPage({
           actions={
             <LinkButton href={`/patients/${patient.id}/prescriptions/nouvelle`} size="sm" variant="primary">
               <Plus aria-hidden className="size-4" />
-              Ajouter une prescription
+              Nouvelle prescription
             </LinkButton>
           }
         />
@@ -443,7 +443,7 @@ export default async function PatientPage({
                         )}
                       </Td>
                       <Td>
-                        {p.prescriber ?? <span className="text-slate-400">—</span>}
+                        {p.prescriber ?? <span className="text-slate-500">—</span>}
                         {p.notes ? <p className="mt-0.5 max-w-xs text-xs whitespace-pre-line text-slate-500">{p.notes}</p> : null}
                       </Td>
                       <Td className="tabular text-xs whitespace-nowrap text-slate-600">
@@ -493,7 +493,7 @@ export default async function PatientPage({
             prescriptions.length > 0 ? (
               <LinkButton href={`/patients/${patient.id}/recurrences/nouvelle`} size="sm" variant="primary">
                 <Plus aria-hidden className="size-4" />
-                Ajouter une récurrence
+                Nouvelle récurrence
               </LinkButton>
             ) : null
           }
@@ -598,7 +598,7 @@ export default async function PatientPage({
                         </span>
                       </Td>
                       <Td>
-                        <Badge tone={r.active ? "success" : "neutral"}>{r.active ? "Active" : "Inactive"}</Badge>
+                        <Badge tone={r.active ? "success" : "neutral"}>{r.active ? "Active" : "Désactivée"}</Badge>
                       </Td>
                       <Td>
                         <div className="flex items-start justify-end gap-1">
@@ -673,7 +673,14 @@ export default async function PatientPage({
                 return (
                   <tr key={t.id}>
                     <Td className="tabular whitespace-nowrap">
-                      {formatShortDate(date)}
+                      {/* The trip in Courses (its day, this patient only): a link to the record, not to a list. */}
+                      <Link
+                        href={`/courses?date=${date}&patient=${patient.id}`}
+                        className="font-medium text-brand-700 underline-offset-2 hover:underline"
+                        title="Voir cette course dans Courses"
+                      >
+                        {formatShortDate(date)}
+                      </Link>
                       {date === today ? <span className="ml-1.5 text-xs text-slate-500">aujourd&apos;hui</span> : null}
                     </Td>
                     <Td>{DIRECTION_LABELS[t.direction]}</Td>
@@ -687,7 +694,7 @@ export default async function PatientPage({
                         </span>
                       ) : null}
                     </Td>
-                    <Td>{t.facility?.name ?? <span className="text-slate-400">—</span>}</Td>
+                    <Td>{t.facility?.name ?? <span className="text-slate-500">—</span>}</Td>
                     <Td>
                       <Badge tone={TRIP_STATUS_TONES[t.status]}>{TRIP_STATUS_LABELS[t.status]}</Badge>
                       {t.status === "CANCELLED" ? (
@@ -696,7 +703,7 @@ export default async function PatientPage({
                     </Td>
                     <Td className="whitespace-nowrap">
                       {t.shared ? (
-                        <Badge tone="brand" className="mr-1.5">
+                        <Badge tone="shared" className="mr-1.5">
                           Partagée
                         </Badge>
                       ) : null}

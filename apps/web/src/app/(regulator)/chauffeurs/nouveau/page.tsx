@@ -7,7 +7,7 @@ import { DriverForm } from "../driver-form";
 import { driverFormValues } from "../schema";
 import { BackLink } from "@/components/ui/back-link";
 
-export const metadata: Metadata = { title: "Nouveau chauffeur" };
+export const metadata: Metadata = { title: "Nouvelle personne" };
 
 export default async function NewDriverPage() {
   await requireUser("REGULATOR");
@@ -15,9 +15,9 @@ export default async function NewDriverPage() {
 
   return (
     <div className="max-w-5xl">
-      <BackLink href="/chauffeurs">Chauffeurs</BackLink>
+      <BackLink href="/chauffeurs">Personnel</BackLink>
       <PageHeader
-        title="Nouveau chauffeur"
+        title="Nouvelle personne"
         description="Après l'enregistrement, vous pourrez lui créer un accès à sa feuille de route."
       />
       <DriverForm

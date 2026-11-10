@@ -233,7 +233,7 @@ export function TripPanel({
               variant="secondary"
               aria-keyshortcuts="F"
               disabled={busy || lockBlocked !== null}
-              onClick={() => run("Défigeage de la course…", () => unlockTrip(trip.id))}
+              onClick={() => run("Défiger la course…", () => unlockTrip(trip.id))}
               title={
                 lockBlocked ??
                 (trip.exceptionalAmbulance
@@ -251,7 +251,7 @@ export function TripPanel({
               variant="secondary"
               aria-keyshortcuts="F"
               disabled={busy || lockBlocked !== null}
-              onClick={() => run("Verrouillage de la course…", () => lockTrip(trip.id, trip.vehicleId ?? ""))}
+              onClick={() => run("Figer la course…", () => lockTrip(trip.id, trip.vehicleId ?? ""))}
               title={lockBlocked ?? "La course restera sur ce véhicule à la prochaine optimisation"}
             >
               <Lock aria-hidden className="size-3.5" />
@@ -428,7 +428,7 @@ export function TripPanel({
                     key={id}
                     type="button"
                     onClick={() => onSelectTrip(id)}
-                    className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-900 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-brand-600"
+                    className="inline-flex min-h-6 items-center rounded border border-shared-ring bg-shared-soft px-2 text-xs text-shared-strong hover:bg-violet-100 focus-visible:outline-2 focus-visible:outline-brand-600"
                   >
                     {trips[id]?.patientName ?? "Course"}
                   </button>

@@ -119,7 +119,7 @@ export function RecurrenceForm({
             </Select>
           </Field>
         </div>
-        <Field label="Libellé" htmlFor="label" error={errors.label} hint="Facultatif — ex. Dialyse, Radiothérapie">
+        <Field label="Libellé (facultatif)" htmlFor="label" error={errors.label} hint="Ex. Dialyse, Radiothérapie">
           <Input
             id="label"
             name="label"

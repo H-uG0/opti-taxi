@@ -29,7 +29,7 @@ import {
 import { describeBreak, ISO_WEEKDAYS, QUALIFICATION_SHORT, QUALIFICATIONS } from "./schema";
 import { formatPersonName } from "@/lib/names";
 
-export const metadata: Metadata = { title: "Chauffeurs" };
+export const metadata: Metadata = { title: "Personnel" };
 
 const DAY_LETTERS: Record<number, string> = { 1: "L", 2: "M", 3: "M", 4: "J", 5: "V", 6: "S", 7: "D" };
 
@@ -135,16 +135,16 @@ export default async function DriversPage({
   return (
     <>
       <PageHeader
-        title="Chauffeurs"
+        title="Personnel"
         description={
           activeCount > 0
             ? `${activeCount} personne${activeCount > 1 ? "s" : ""} active${activeCount > 1 ? "s" : ""}${absentTomorrow > 0 ? ` · ${absentTomorrow} absente${absentTomorrow > 1 ? "s" : ""} demain` : ""} — qualifications, jours, horaires et pauses utilisés par l'optimiseur.`
-            : "Qualifications, jours, horaires et pauses utilisés par l'optimiseur."
+            : "Chauffeurs, auxiliaires et ambulanciers DE : qualifications, jours, horaires et pauses utilisés par l'optimiseur."
         }
         actions={
           <LinkButton href="/chauffeurs/nouveau" variant="primary">
             <Plus aria-hidden className="size-4" />
-            Nouveau chauffeur
+            Nouvelle personne
           </LinkButton>
         }
       />
@@ -154,7 +154,7 @@ export default async function DriversPage({
           title="Aucun chauffeur"
           action={
             <LinkButton href="/chauffeurs/nouveau" variant="primary">
-              Ajouter un chauffeur
+              Nouvelle personne
             </LinkButton>
           }
         >
@@ -326,7 +326,7 @@ export default async function DriversPage({
                               tomorrow={tomorrow}
                             />
                           ) : (
-                            <span className="text-slate-400">—</span>
+                            <span className="text-slate-500">—</span>
                           )}
                         </Td>
                         <Td>
@@ -337,7 +337,7 @@ export default async function DriversPage({
                             </p>
                           ) : null}
                           {driver.defaultForVehicles.length === 0 && driver.crewMateForVehicles.length === 0 ? (
-                            <span className="text-slate-400">—</span>
+                            <span className="text-slate-500">—</span>
                           ) : null}
                           {multiSeatText ? (
                             <span className="block" title={multiSeatText}>
@@ -354,7 +354,7 @@ export default async function DriversPage({
                               <span className="sr-only"> : {driver.user.email}</span>
                             </span>
                           ) : (
-                            <span className="text-xs text-slate-400">Aucun</span>
+                            <span className="text-xs text-slate-500">Aucun</span>
                           )}
                         </Td>
                         {/* From 1 536 px; it is on the person's sheet. */}
@@ -386,7 +386,7 @@ function WorkDays({ days, className }: { days: readonly number[]; className?: st
               title={WEEKDAY_LABELS[weekday]}
               className={cn(
                 "inline-flex size-4.5 items-center justify-center rounded-sm text-[11px]",
-                works ? "bg-brand-100 font-semibold text-brand-800" : "text-slate-300",
+                works ? "bg-brand-100 font-semibold text-brand-800" : "text-slate-500",
               )}
             >
               {DAY_LETTERS[weekday]}
@@ -414,10 +414,10 @@ function TomorrowCell({
   usual: readonly string[];
   tomorrow: string;
 }) {
-  if (!day) return <span className="text-slate-400">—</span>;
+  if (!day) return <span className="text-slate-500">—</span>;
   switch (day.kind) {
     case "inactive":
-      return <span className="text-slate-400">—</span>;
+      return <span className="text-slate-500">—</span>;
     case "absent":
       // The column is tomorrow: only the word, and the last day when it goes on after.
       return (
@@ -464,7 +464,7 @@ function VehicleLinks({
       {index > 0 ? ", " : null}
       <Link
         href={`/vehicules/${vehicle.id}`}
-        className={cn("whitespace-nowrap underline-offset-2 hover:text-brand-700 hover:underline", !vehicle.active && "text-slate-400 line-through")}
+        className={cn("whitespace-nowrap underline-offset-2 hover:text-brand-700 hover:underline", !vehicle.active && "text-slate-500 line-through")}
         title={vehicle.active ? undefined : "Véhicule désactivé"}
       >
         {vehicle.label}

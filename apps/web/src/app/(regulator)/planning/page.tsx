@@ -263,7 +263,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
                 </div>
               }
               replanBlocked={replanBlocked ?? runningReason}
-              lockBlocked={past ? "Date passée : les verrous ne servent plus." : null}
+              lockBlocked={past ? "Date passée : figer une course ne sert plus." : null}
               initialTripId={initialTripId}
               crewChoices={view.crewChoices}
               crewRules={view.crewRules}

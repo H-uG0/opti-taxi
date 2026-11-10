@@ -121,7 +121,7 @@ export function PlanRunLine({ planRun, restore }: { planRun: RunView | null; res
       </span>
       {dot}
       {planRun.matrixSource === "haversine" ? (
-        <span className="inline-flex items-center gap-1 text-amber-800" title="OSRM non configuré : distances et temps estimés à vol d'oiseau">
+        <span className="inline-flex items-center gap-1 text-amber-800" title="Distances et temps estimés à vol d'oiseau, faute de calcul routier : prévenez la personne qui gère l'application si cela dure">
           <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
           distances à vol d&apos;oiseau : km, horaires et CA approximatifs
         </span>
