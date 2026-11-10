@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { requireUser } from "@/lib/auth";
 import { geocoderEnabled } from "@/lib/geocode";
 import { EMPTY_ADDRESS } from "@/components/address/address-utils";
+import { BackLink } from "@/components/ui/back-link";
 import { PageHeader } from "@/components/ui/layout";
 import { createPatient } from "../actions";
 import { PatientForm } from "../_components/patient-form";
@@ -13,6 +14,7 @@ export default async function NewPatientPage() {
 
   return (
     <div>
+      <BackLink href="/patients">Patients</BackLink>
       <PageHeader
         title="Nouveau patient"
         description="Ajoutez ensuite sa prescription puis ses récurrences depuis la fiche patient."

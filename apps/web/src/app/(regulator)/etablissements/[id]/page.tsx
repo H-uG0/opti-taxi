@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { FormMessage } from "@/components/ui/form";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { Pencil } from "lucide-react";
@@ -100,6 +101,8 @@ export default async function FacilityPage({
           }
         />
         <div className="space-y-2">
+          {query.cree === "1" ? <FormMessage tone="success">Établissement créé.</FormMessage> : null}
+          {query.enregistre === "1" ? <FormMessage tone="success">Modifications enregistrées.</FormMessage> : null}
           <SyncNotice query={query} />
           {!facility.active ? (
             <Notice size="sm" tone="info">

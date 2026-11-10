@@ -202,7 +202,8 @@ export async function createPatient(_prev: PatientFormState, formData: FormData)
     return created;
   });
   revalidatePatients();
-  redirect(`/patients/${patient.id}`);
+  // A creation opens the record with a banner; a change comes back to it with a banner (the app's rule).
+  redirect(`/patients/${patient.id}?cree=1`);
 }
 
 /**
@@ -240,7 +241,7 @@ export async function updatePatient(patientId: string, _prev: FormState, formDat
 
   revalidatePatients();
   revalidateTrips(summary);
-  redirect(afterSave(`/patients/${existing.id}`, summary, refresh));
+  redirect(afterSave(`/patients/${existing.id}?enregistre=1`, summary, refresh));
 }
 
 /** Deactivation keeps the history (no hard delete) and cancels the patient's open trips to come. */

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { FormMessage } from "@/components/ui/form";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import type { TripStatus } from "@prisma/client";
@@ -233,6 +234,8 @@ export default async function PatientPage({
           }
         />
         <div className="space-y-2">
+          {query.cree === "1" ? <FormMessage tone="success">Patient créé. Saisissez maintenant sa prescription, puis ses récurrences.</FormMessage> : null}
+          {query.enregistre === "1" ? <FormMessage tone="success">Modifications enregistrées.</FormMessage> : null}
           <SyncNotice query={query} />
           {todayCancelledBySync > 0 ? (
             <Notice size="sm">

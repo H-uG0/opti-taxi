@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { ArrowLeft } from "lucide-react";
 import { LinkButton } from "@/components/ui/button";
+import { BackLink } from "@/components/ui/back-link";
 import { Card, CardBody, EmptyState, PageHeader } from "@/components/ui/layout";
 import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
@@ -82,15 +82,10 @@ export default async function NewTripPage({
 
   return (
     <div className="max-w-3xl">
+      <BackLink href={`/courses?date=${initialDate}`}>Courses</BackLink>
       <PageHeader
         title="Nouvelle course"
         description="Course ponctuelle, hors récurrence&nbsp;: elle sera placée dans une tournée à la prochaine optimisation."
-        actions={
-          <LinkButton href={`/courses?date=${initialDate}`} variant="ghost">
-            <ArrowLeft aria-hidden className="size-4" />
-            Retour aux courses
-          </LinkButton>
-        }
       />
       {patientOptions.length === 0 ? (
         <EmptyState

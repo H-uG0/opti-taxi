@@ -39,7 +39,8 @@ export async function createFacility(_prev: FormState, formData: FormData): Prom
     return created;
   });
   revalidateReferential();
-  redirect(`/etablissements/${facility.id}`);
+  // A creation opens the record with a banner; a change comes back to it with a banner (the app's rule).
+  redirect(`/etablissements/${facility.id}?cree=1`);
 }
 
 /**
@@ -84,7 +85,7 @@ export async function updateFacility(facilityId: string, _prev: FormState, formD
 
   revalidateReferential();
   if (!isEmptySync(summary)) revalidatePath("/", "layout");
-  redirect(withRefreshNotice(withSyncNotice(`/etablissements/${existing.id}`, summary), refresh));
+  redirect(withRefreshNotice(withSyncNotice(`/etablissements/${existing.id}?enregistre=1`, summary), refresh));
 }
 
 /**

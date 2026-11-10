@@ -257,14 +257,14 @@ describe("updatePatient", () => {
     expect("active" in data).toBe(false);
     expect(recorded()).toEqual([{ action: "patient.update", entityId: "p1" }]);
     expect(fake.trip.findMany).not.toHaveBeenCalled();
-    expect(redirect).toHaveBeenCalledWith("/patients/p1");
+    expect(redirect).toHaveBeenCalledWith("/patients/p1?enregistre=1");
   });
 
   it("copies a new home to the open trips", async () => {
     await updatePatient("p1", INITIAL_FORM_STATE, form({ ...fields, address: "12 rue des Lilas" }));
 
     expect(fake.trip.findMany).toHaveBeenCalledTimes(1);
-    expect(redirect).toHaveBeenCalledWith("/patients/p1");
+    expect(redirect).toHaveBeenCalledWith("/patients/p1?enregistre=1");
   });
 });
 
@@ -303,7 +303,7 @@ describe("createPatient", () => {
     await createPatient(INITIAL_FORM_STATE, form({ ...fields, confirmSimilar: "1" }));
     expect(fake.patient.findMany).not.toHaveBeenCalled();
     expect(fake.patient.create).toHaveBeenCalledTimes(1);
-    expect(redirect).toHaveBeenCalledWith("/patients/new");
+    expect(redirect).toHaveBeenCalledWith("/patients/new?cree=1");
 
     fake.patient.findMany.mockResolvedValue([{ ...existing, firstName: "Paul" }]);
     await createPatient(INITIAL_FORM_STATE, form(fields));
