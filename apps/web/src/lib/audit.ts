@@ -19,7 +19,8 @@
  *   access notes and trip notes), roadmap.view (driver, today or
  *   tomorrow), shared_arrivals.view (Facility when a facility's sheet is
  *   opened), driver.view (/chauffeurs/[id]: absences), day_crew.view
- *   (/equipages: everyone's absences of the day);
+ *   (/equipages: everyone's absences of the day), staff_list.view
+ *   (/chauffeurs: everyone's situation tomorrow, absences included);
  * - referentials: patient.*, prescription.*, recurrence.* (create, update,
  *   delete, deactivate, reactivate, attach_renewal), facility.*;
  * - trips: trip.generate (a trip created from a recurrence, one event per

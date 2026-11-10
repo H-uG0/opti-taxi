@@ -51,6 +51,8 @@
 import type { AbsenceKind, Qualification, VehicleType } from "@prisma/client";
 import { CREW_REQUIRED_ONE_OF, crewHoldsRequired, REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
 import { unavailabilityOn, unavailabilityText, type DatedVehicleUnavailability } from "@/lib/fleet/availability";
+// Same display order as the optimizer request and every list: type, then label in numeric order.
+import { compareVehicles, VEHICLE_TYPE_ORDER } from "@/lib/fleet/order";
 import { ABSENCE_KIND_LABELS, QUALIFICATION_NOUNS } from "@/lib/labels";
 import { formatDuration, formatMinute, formatShortDate, isoWeekday, WEEKDAY_LABELS } from "@/lib/time";
 import { workTimeIssue, workTimeSummary, type BreakSettings } from "./work-time";
@@ -157,15 +159,9 @@ export type DayCrewInput = {
   rules?: CrewRules;
 };
 
-const TYPE_ORDER: Record<VehicleType, number> = { TAXI: 0, VSL: 1, AMBULANCE: 2 };
-const TYPES = Object.keys(TYPE_ORDER) as VehicleType[];
+const TYPES = Object.keys(VEHICLE_TYPE_ORDER) as VehicleType[];
 /** Replacements are served from the scarcest people to the most common: ambulance, VSL, taxi. */
 const SCARCITY_ORDER: Record<VehicleType, number> = { AMBULANCE: 0, VSL: 1, TAXI: 2 };
-
-/** Same display order as the optimizer request: type, then label. */
-function compareVehicles(a: CrewVehicle, b: CrewVehicle): number {
-  return TYPE_ORDER[a.type] - TYPE_ORDER[b.type] || a.label.localeCompare(b.label, "fr", { numeric: true });
-}
 
 function comparePeople(a: StaffPerson, b: StaffPerson): number {
   return a.lastName.localeCompare(b.lastName, "fr") || a.firstName.localeCompare(b.firstName, "fr") || a.id.localeCompare(b.id);
@@ -319,7 +315,12 @@ const DUTY_KINDS: Partial<Record<AbsenceKind, string>> = { ON_CALL: "Garde", TRA
  * leave cannot be told from a holiday there. A noun, so it reads right for anyone.
  */
 export function planningAbsenceText(absence: Pick<DatedAbsence, "kind" | "startDate" | "endDate">): string {
-  return datedText(DUTY_KINDS[absence.kind] ?? "Absence", absence);
+  return datedText(planningAbsenceLabel(absence.kind), absence);
+}
+
+/** « Garde », « Formation », else « Absence »: the word of planningAbsenceText, without the dates. */
+export function planningAbsenceLabel(kind: AbsenceKind): string {
+  return DUTY_KINDS[kind] ?? "Absence";
 }
 
 /** "07:00 – 15:00". */
