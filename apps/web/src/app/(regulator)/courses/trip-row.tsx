@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useId, useState, type FormEvent } from "react";
 import { useFormStatus } from "react-dom";
 import type { Payer, SharingStatus, TripDirection, TripStatus, VehicleType } from "@prisma/client";
-import { Check, ChevronDown, Lock, TriangleAlert, Undo2, UserX, Users, X } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, Lock, TriangleAlert, Undo2, UserX, Users, X } from "lucide-react";
 import { Badge, VEHICLE_TYPE_COLORS, VehicleTypeBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
@@ -100,6 +101,8 @@ export type TripRowData = {
   pairedReturn: { id: string; keyMinute: number | null } | null;
   /** Another trip of the patient that day on the same leg, or during another session (possible duplicate). */
   conflicts: string[];
+  /** The trip opened on the planning of its date (/planning?date=…&trip=…); null when the planning does not show it. */
+  planningHref?: string | null;
 };
 
 export const TRIP_TABLE_COLUMNS = 8;
@@ -124,6 +127,16 @@ export function TripRow({ trip }: { trip: TripRowData }) {
           <span className={cn("block font-medium text-slate-900", cancelled && "line-through")}>{trip.patientName}</span>
           <span className="mt-0.5 flex flex-wrap items-center gap-1">
             <Badge tone={trip.direction === "OUTBOUND" ? "brand" : "neutral"}>{DIRECTION_LABELS[trip.direction]}</Badge>
+            {trip.planningHref ? (
+              <Link
+                href={trip.planningHref}
+                aria-label={`Voir la course de ${trip.patientName} sur le planning`}
+                title="Voir sur le planning"
+                className="inline-grid size-6 place-items-center rounded text-brand-700 hover:bg-brand-50 focus-visible:outline-2 focus-visible:outline-brand-600"
+              >
+                <CalendarClock aria-hidden className="size-4" />
+              </Link>
+            ) : null}
             {trip.origin ? null : <span className="text-xs text-slate-500">Ponctuelle</span>}
             {trip.conflicts.length > 0 ? (
               <span title={trip.conflicts.join(" ; ")}>

@@ -133,6 +133,32 @@ describe("TripPanel (panneau course)", () => {
     expect(screen.getByText("Ambulance pour un transport assis : tarif VSL.")).toBeTruthy();
   });
 
+  it("gives what is needed to call the patient or brief the crew, and the links to the record and to Courses", () => {
+    renderPanel({
+      ...planningFixture().trips["trip-a"]!,
+      mobility: "WHEELCHAIR",
+      accessNotes: "3e étage sans ascenseur, digicode 4512",
+      notes: "Prévoir la rampe",
+      facilityPhone: "04 91 22 33 44",
+    });
+    const call = screen.getByRole("link", { name: "Appeler Monique Aubert : 04 91 00 00 01" });
+    expect(call.getAttribute("href")).toBe("tel:0491000001");
+    expect(screen.getByRole("link", { name: /^Appeler Centre de dialyse des Oliviers/ }).getAttribute("href")).toBe("tel:0491223344");
+    expect(screen.getByText("Fauteuil roulant")).toBeTruthy();
+    expect(screen.getByText("3e étage sans ascenseur, digicode 4512")).toBeTruthy();
+    expect(screen.getByText("Prévoir la rampe")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Fiche patient" }).getAttribute("href")).toBe("/patients/patient-a");
+    const courses = "/courses?date=2026-11-10&sens=OUTBOUND&q=Monique+Aubert";
+    expect(screen.getByRole("link", { name: "Voir dans Courses" }).getAttribute("href")).toBe(courses);
+    // « Accord du patient » opens the same line, not the whole day.
+    expect(screen.getByRole("link", { name: "Accord du patient" }).getAttribute("href")).toBe(courses);
+    cleanup();
+
+    renderPanel({ ...planningFixture().trips["trip-a"]!, patientPhone: null, mobility: null });
+    expect(screen.getByText("Non renseigné")).toBeTruthy();
+    expect(screen.queryByText("Mobilité")).toBeNull();
+  });
+
   it("closes from its button", () => {
     const { onClose } = renderPanel(planningFixture().trips["trip-a"]!);
     fireEvent.click(screen.getByRole("button", { name: "Fermer le détail de la course" }));

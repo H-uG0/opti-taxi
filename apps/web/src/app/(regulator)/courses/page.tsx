@@ -39,6 +39,7 @@ import {
   sortTrips,
   summarizeTrips,
 } from "./trip-list";
+import { planningTripHref } from "@/lib/planning/links";
 import { TripRow, type TripRowData } from "./trip-row";
 import { keyMinute } from "./trip-rules";
 
@@ -198,6 +199,9 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       cancellationTrace: cancellationTrace(trip),
       pairedReturn: returns.get(trip.id) ?? null,
       conflicts: conflicts.get(trip.id) ?? [],
+      // The planning shows the trips still to plan and those still in a route (a cancelled one there included).
+      planningHref:
+        (trip.status !== "CANCELLED" && trip.status !== "NO_SHOW") || trip.routeId !== null ? planningTripHref(date, trip.id) : null,
     };
   });
 

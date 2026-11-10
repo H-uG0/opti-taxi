@@ -3,6 +3,7 @@
  * No database access here: see ./load.ts for the queries.
  */
 import type {
+  Mobility,
   OptimizationRunStatus,
   Payer,
   RouteStatus,
@@ -74,8 +75,10 @@ export type RawTrip = TripInput & {
   createdAt: Date;
   sharingRespondedAt: Date | null;
   sharingRespondedBy: Recorder;
-  patient: Person;
-  facility: { name: string } | null;
+  /** Contact and access details shown in the trip panel; absent in older tests: unknown. */
+  patient: Person & { phone?: string | null; mobility?: Mobility; accessNotes?: string | null };
+  facility: { name: string; phone?: string | null } | null;
+  notes?: string | null;
 };
 
 export type RawStop = {
@@ -504,8 +507,14 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
         direction: t.direction,
         status: t.status,
         payer: t.payer,
+        patientId: t.patientId,
         patientName: personName(t.patient),
+        patientPhone: t.patient.phone?.trim() || null,
+        mobility: t.patient.mobility ?? null,
+        accessNotes: t.patient.accessNotes?.trim() || null,
+        notes: t.notes?.trim() || null,
         facilityName: t.facility?.name ?? null,
+        facilityPhone: t.facility?.phone?.trim() || null,
         pickupAddress: t.pickupAddress,
         dropoffAddress: t.dropoffAddress,
         pickup: { lat: t.pickupLat, lng: t.pickupLng },

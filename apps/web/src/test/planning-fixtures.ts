@@ -11,8 +11,14 @@ export function tripView(overrides: Partial<TripView> = {}): TripView {
     direction: "OUTBOUND",
     status: "ASSIGNED",
     payer: "CPAM",
+    patientId: "patient-a",
     patientName: "Monique Aubert",
+    patientPhone: "04 91 00 00 01",
+    mobility: "SEATED",
+    accessNotes: null,
+    notes: null,
     facilityName: "Centre de dialyse des Oliviers (fictif)",
+    facilityPhone: null,
     pickupAddress: "12 rue des Lilas, 13012 Marseille",
     dropoffAddress: "112 boulevard des Oliviers, 13012 Marseille",
     pickup: { lat: 43.31, lng: 5.41 },
@@ -102,9 +108,10 @@ export function vehicleRow(overrides: Partial<VehicleRowView> = {}): VehicleRowV
 /** The taxi with its shared pair, a free VSL, an ambulance, and a VSL off the road. */
 export function planningFixture() {
   const tripA = tripView();
-  const tripB = tripView({ id: "trip-b", patientName: "Gérard Blanc", coPassengerTripIds: ["trip-a"] });
+  const tripB = tripView({ id: "trip-b", patientId: "patient-b", patientName: "Gérard Blanc", coPassengerTripIds: ["trip-a"] });
   const unassigned = tripView({
     id: "trip-c",
+    patientId: "patient-c",
     patientName: "Colette Imbert",
     vehicleId: null,
     status: "PLANNED",

@@ -3,6 +3,7 @@
  * Minutes are planned times since local midnight; instants are ISO strings.
  */
 import type {
+  Mobility,
   OptimizationRunStatus,
   Payer,
   RouteStatus,
@@ -96,8 +97,20 @@ export type TripView = {
   direction: TripDirection;
   status: TripStatus;
   payer: Payer;
+  patientId: string;
   patientName: string;
+  /**
+   * What the regulator needs to call or brief the crew without leaving the
+   * planning (trip panel): the patient's phone, mobility and access notes,
+   * the trip's notes, the facility's phone. Health data: the page's read is
+   * traced (plan.view).
+   */
+  patientPhone: string | null;
+  mobility: Mobility | null;
+  accessNotes: string | null;
+  notes: string | null;
   facilityName: string | null;
+  facilityPhone: string | null;
   pickupAddress: string;
   dropoffAddress: string;
   pickup: LatLngView;

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useId, useState, type ReactNode } from "react";
-import { Ambulance, ExternalLink, Lock, LockOpen, MoveRight, UserX, X } from "lucide-react";
+import { Ambulance, ExternalLink, ListChecks, Lock, LockOpen, MoveRight, Phone, UserRound, UserX, X } from "lucide-react";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
@@ -10,11 +10,13 @@ import { Card } from "@/components/ui/layout";
 import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_LABEL } from "@/lib/domain/no-show";
 import { exceptionalAmbulanceIssue, OPTIMIZE_FIRST_ISSUE } from "@/lib/planning/exceptional-ambulance";
 import { fieldRecordLabel, fieldRecordText, sharingAnswerText } from "@/lib/planning/format";
+import { coursesTripHref, patientHref, telHref } from "@/lib/planning/links";
 import type { TripView, VehicleRowView, ViolationView } from "@/lib/planning/types";
 import {
   DIRECTION_LABELS,
   formatEuros,
   formatKm,
+  MOBILITY_LABELS,
   PAYER_LABELS,
   SHARING_STATUS_LABELS,
   TRIP_STATUS_LABELS,
@@ -47,12 +49,28 @@ const SHARING_TONES = {
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid grid-cols-[8.5rem_minmax(0,1fr)] gap-2 py-1">
+    <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-2 py-1">
       <dt className="text-slate-500">{label}</dt>
-      <dd className="min-w-0 text-slate-900">{children}</dd>
+      <dd className="min-w-0 wrap-break-word text-slate-900">{children}</dd>
     </div>
   );
 }
+
+function PhoneLink({ phone, label }: { phone: string; label: string }) {
+  return (
+    <a
+      href={telHref(phone)}
+      aria-label={`${label} : ${phone}`}
+      className="tabular inline-flex items-center gap-1 font-medium text-brand-700 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-brand-600"
+    >
+      <Phone aria-hidden className="size-3.5" />
+      {phone}
+    </a>
+  );
+}
+
+const PANEL_LINK =
+  "inline-flex min-h-6 items-center gap-1 rounded text-xs font-medium text-brand-700 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-brand-600";
 
 export function TripPanel({
   trip,
@@ -95,6 +113,8 @@ export function TripPanel({
   const ambulances = vehicles.filter((v) => v.available && v.type === "AMBULANCE");
   const ambulanceValid = ambulances.some((v) => v.id === ambulance);
   const sharingAnswerLine = trip.sharingAnswer ? sharingAnswerText(trip.sharingAnswer, trip.sharingStatus) : null;
+  // The trip's line in Courses (patient and leg): phone, sharing answer, cancellation, toll.
+  const coursesHref = coursesTripHref(date, trip.patientName, trip.direction);
 
   return (
     <Card aria-labelledby="trip-panel-title">
@@ -103,6 +123,16 @@ export function TripPanel({
           <h2 id="trip-panel-title" className="truncate text-base font-semibold text-slate-900">
             {trip.patientName}
           </h2>
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-3">
+            <Link href={patientHref(trip.patientId)} className={PANEL_LINK}>
+              <UserRound aria-hidden className="size-3.5" />
+              Fiche patient
+            </Link>
+            <Link href={coursesHref} className={PANEL_LINK}>
+              <ListChecks aria-hidden className="size-3.5" />
+              Voir dans Courses
+            </Link>
+          </p>
           <p className="mt-1 flex flex-wrap items-center gap-1.5">
             <Badge tone="brand">{DIRECTION_LABELS[trip.direction]}</Badge>
             <Badge tone={cancelled ? "danger" : trip.vehicleId ? "success" : "warning"}>{TRIP_STATUS_LABELS[trip.status]}</Badge>
@@ -130,7 +160,7 @@ export function TripPanel({
             <p className="text-sm font-semibold">{OUTBOUND_NO_SHOW_LABEL}</p>
             <p className="text-xs text-red-800">{OUTBOUND_NO_SHOW_ADVICE}</p>
             <Link
-              href={`/courses?${new URLSearchParams({ date, sens: "RETURN", q: trip.patientName }).toString()}`}
+              href={coursesTripHref(date, trip.patientName, "RETURN")}
               className="inline-flex items-center gap-1 text-xs font-medium underline underline-offset-2"
             >
               Téléphone du patient et annulation dans Courses
@@ -142,9 +172,38 @@ export function TripPanel({
 
       <dl className="divide-y divide-slate-100 px-4 py-2 text-sm">
         <div className="pb-1">
+          <Row label="Téléphone">
+            {trip.patientPhone ? (
+              <PhoneLink phone={trip.patientPhone} label={`Appeler ${trip.patientName}`} />
+            ) : (
+              <span className="text-slate-500">Non renseigné</span>
+            )}
+          </Row>
+          {trip.mobility ? <Row label="Mobilité">{MOBILITY_LABELS[trip.mobility]}</Row> : null}
+          {trip.accessNotes ? (
+            <Row label="Accès">
+              <span className="whitespace-pre-line">{trip.accessNotes}</span>
+            </Row>
+          ) : null}
+          {trip.notes ? (
+            <Row label="Notes de la course">
+              <span className="whitespace-pre-line">{trip.notes}</span>
+            </Row>
+          ) : null}
+        </div>
+        <div className="py-1">
           <Row label="Prise en charge">{trip.pickupAddress}</Row>
           <Row label="Dépose">{trip.dropoffAddress}</Row>
-          {trip.facilityName ? <Row label="Établissement">{trip.facilityName}</Row> : null}
+          {trip.facilityName ? (
+            <Row label="Établissement">
+              {trip.facilityName}
+              {trip.facilityPhone ? (
+                <span className="mt-0.5 block">
+                  <PhoneLink phone={trip.facilityPhone} label={`Appeler ${trip.facilityName}`} />
+                </span>
+              ) : null}
+            </Row>
+          ) : null}
         </div>
         <div className="py-1">
           <Row label={outbound ? "Rendez-vous" : "Fin de séance"}>
@@ -192,10 +251,7 @@ export function TripPanel({
           <Row label="Statut du partage">
             <span className="flex flex-wrap items-center gap-2">
               <Badge tone={SHARING_TONES[trip.sharingStatus]}>{SHARING_STATUS_LABELS[trip.sharingStatus]}</Badge>
-              <Link
-                href={`/courses?date=${date}`}
-                className="inline-flex items-center gap-1 text-xs text-brand-700 underline-offset-2 hover:underline"
-              >
+              <Link href={coursesHref} className="inline-flex items-center gap-1 text-xs text-brand-700 underline-offset-2 hover:underline">
                 Accord du patient
                 <ExternalLink aria-hidden className="size-3" />
               </Link>

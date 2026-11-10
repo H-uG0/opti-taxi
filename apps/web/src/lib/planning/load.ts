@@ -71,8 +71,10 @@ export async function loadPlanningDay(
         createdAt: true,
         sharingRespondedAt: true,
         sharingRespondedBy: recorderSelect,
-        patient: personSelect,
-        facility: { select: { name: true } },
+        notes: true,
+        // Shown in the trip panel to call the patient or brief the crew (the page traces plan.view).
+        patient: { select: { firstName: true, lastName: true, phone: true, mobility: true, accessNotes: true } },
+        facility: { select: { name: true, phone: true } },
       },
     }),
     db.route.findMany({

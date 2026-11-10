@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { planningTripHref } from "@/lib/planning/links";
 import { ArrowLeft, Building2, Info, Phone, Printer, TriangleAlert } from "lucide-react";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
@@ -316,6 +317,7 @@ export default async function SharedArrivalsPage({
                 <div className="space-y-4 p-4">
                   {arrivals.length > 0 ? (
                     <GroupTable
+                      date={date}
                       title="Arrivées (aller)"
                       timeHeader="Arrivée prévue"
                       referenceLabel="RDV"
@@ -325,6 +327,7 @@ export default async function SharedArrivalsPage({
                   ) : null}
                   {departures.length > 0 ? (
                     <GroupTable
+                      date={date}
                       title="Départs (retour)"
                       timeHeader="Prise en charge prévue"
                       referenceLabel="fin de séance"
@@ -346,12 +349,15 @@ export default async function SharedArrivalsPage({
 }
 
 function GroupTable({
+  date,
   title,
   timeHeader,
   referenceLabel,
   plannedLabel,
   groups,
 }: {
+  /** Each patient's name opens the trip on the planning of this date. */
+  date: string;
   title: string;
   timeHeader: string;
   referenceLabel: string;
@@ -393,7 +399,13 @@ function GroupTable({
                 <ul className="space-y-1">
                   {group.patients.map((patient) => (
                     <li key={patient.tripId}>
-                      <span className="font-medium text-slate-900">{patient.patientName}</span>{" "}
+                      <Link
+                        href={planningTripHref(date, patient.tripId)}
+                        className="font-medium text-slate-900 underline-offset-2 hover:text-brand-800 hover:underline focus-visible:outline-2 focus-visible:outline-brand-600 print:no-underline"
+                        title="Voir la course sur le planning"
+                      >
+                        {patient.patientName}
+                      </Link>{" "}
                       <span className="tabular text-xs text-slate-600">
                         {plannedLabel} {formatMinute(patient.plannedMinute)} · {referenceLabel}{" "}
                         {formatMinute(patient.referenceMinute)}
