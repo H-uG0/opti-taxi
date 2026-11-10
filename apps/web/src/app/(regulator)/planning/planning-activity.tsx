@@ -56,7 +56,9 @@ const FeedbackContext = createContext<{
 /**
  * Runs the planning server actions one at a time and shares their progress:
  * every button is disabled while an action runs, and <PlanningActivityBanner>
- * shows "Optimisation en cours…" then the result.
+ * shows "Optimisation en cours…" then the result, in a toast fixed at the
+ * bottom of the screen (an action started from the panel or a depot header
+ * is answered where the regulator looks, whatever the timeline's scroll).
  */
 export function PlanningActivityProvider({ timeLimitSec, children }: { timeLimitSec: number; children: ReactNode }) {
   const [isPending, startTransition] = useTransition();
@@ -99,7 +101,8 @@ export function PlanningActivityProvider({ timeLimitSec, children }: { timeLimit
     () => ({ busy, run, remoteRunning, setRemoteRunning, optimizerOffline, setOptimizerOffline }),
     [busy, run, remoteRunning, optimizerOffline],
   );
-  const status = useMemo(() => ({ activity, feedback, dismiss: () => setFeedback(null) }), [activity, feedback]);
+  const dismiss = useCallback(() => setFeedback(null), []);
+  const status = useMemo(() => ({ activity, feedback, dismiss }), [activity, feedback, dismiss]);
 
   return (
     <Context.Provider value={actions}>
@@ -132,10 +135,28 @@ function Elapsed({ startedAt, expectedSec }: { startedAt: number; expectedSec: n
   );
 }
 
-/** Progress of the running action, then its result. */
+/** A success stays this long on screen, unless the pointer or the focus is on it; an error stays until closed. */
+const SUCCESS_TOAST_MS = 12_000;
+
+/**
+ * Fixed at the bottom of the main area (beside the navigation from lg), over
+ * the timeline: never pushes the board, never scrolled out of sight.
+ */
+const TOAST =
+  "fixed bottom-4 left-1/2 z-50 w-[min(44rem,calc(100vw-2rem))] -translate-x-1/2 shadow-lg lg:left-[calc(50%+7.5rem)] lg:w-[min(44rem,calc(100vw-17rem))] print:hidden";
+
+/** Progress of the running action, then its result (a toast). */
 export function PlanningActivityBanner({ className }: { className?: string }) {
   const { activity, feedback, dismiss } = useContext(FeedbackContext);
   const router = useRouter();
+  const [held, setHeld] = useState(false);
+
+  // A success goes away by itself (an error waits to be read and closed).
+  useEffect(() => {
+    if (!feedback || feedback.tone !== "success" || held) return;
+    const id = window.setTimeout(dismiss, SUCCESS_TOAST_MS);
+    return () => window.clearTimeout(id);
+  }, [feedback, held, dismiss]);
 
   if (activity) {
     return (
@@ -143,7 +164,8 @@ export function PlanningActivityBanner({ className }: { className?: string }) {
         role="status"
         aria-live="polite"
         className={cn(
-          "relative flex items-center gap-3 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-900",
+          TOAST,
+          "flex items-center gap-3 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-900",
           className,
         )}
       >
@@ -165,7 +187,12 @@ export function PlanningActivityBanner({ className }: { className?: string }) {
   return (
     <div
       role={success ? "status" : "alert"}
+      onPointerEnter={() => setHeld(true)}
+      onPointerLeave={() => setHeld(false)}
+      onFocus={() => setHeld(true)}
+      onBlur={() => setHeld(false)}
       className={cn(
+        TOAST,
         "flex items-start gap-3 rounded-lg border px-4 py-3 text-sm",
         success ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900",
         className,

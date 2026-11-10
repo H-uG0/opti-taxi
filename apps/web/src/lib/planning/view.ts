@@ -58,7 +58,7 @@ type Recorder = { name: string } | null;
 
 export type RawVehicle = Omit<VehicleInput, "depot"> & {
   registration: string;
-  depot: VehicleInput["depot"] & { name: string };
+  depot: VehicleInput["depot"] & { id: string; name: string };
 };
 
 export type RawTrip = TripInput & {
@@ -456,10 +456,13 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
 
   const withRoute: VehicleRowView[] = [];
   const idle: VehicleRowView[] = [];
+  // Active vehicles off the road that day (unavailability, no crew): shown last, with why, so that a
+  // depot's rows are its whole fleet (the « Indisponible » filter of the timeline).
+  const off: VehicleRowView[] = [];
   for (const vehicle of [...input.vehicles].sort(compareVehicles)) {
     const route = routeByVehicle.get(vehicle.id) ?? null;
     const available = availableById.get(vehicle.id);
-    if (!route && !available) continue;
+    if (!route && !available && !vehicle.active) continue;
     const isAmbulance = vehicle.type === "AMBULANCE";
     const driver = route ? route.driver : vehicle.defaultDriver;
     const mate = route ? route.crewMate : isAmbulance ? vehicle.defaultCrewMate : null;
@@ -470,7 +473,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
       type: vehicle.type,
       capacity: available?.capacity ?? vehicle.capacity,
       color: colorById.get(vehicle.id) ?? input.baseColors[vehicle.type],
-      depot: { lat: vehicle.depot.lat, lng: vehicle.depot.lng, label: vehicle.depot.name },
+      depot: { id: vehicle.depot.id, lat: vehicle.depot.lat, lng: vehicle.depot.lng, label: vehicle.depot.name },
       driverName: driver ? personName(driver) : null,
       crewMateName: mate ? personName(mate) : null,
       available: available !== undefined,
@@ -481,9 +484,9 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
         : null,
       route: route ? toRouteView(route) : null,
     };
-    (route ? withRoute : idle).push(row);
+    (route ? withRoute : available ? idle : off).push(row);
   }
-  const rows = [...withRoute, ...idle];
+  const rows = [...withRoute, ...idle, ...off];
 
   // Co-passengers from the stop sequences.
   const companions = new Map<string, Set<string>>();

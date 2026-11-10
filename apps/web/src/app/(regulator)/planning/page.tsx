@@ -9,10 +9,10 @@ import { isSimulatedId } from "@/lib/simulated";
 import { LinkButton } from "@/components/ui/button";
 import { EmptyState, PageHeader } from "@/components/ui/layout";
 import { AvailabilityNotes } from "@/components/planning/availability-notes";
-import { KpiStrip } from "@/components/planning/kpi-strip";
-import { RunBanner } from "@/components/planning/run-banner";
+import { PlanRunLine, RunBanner } from "@/components/planning/run-banner";
 import { SimulatedDayBadge } from "@/components/planning/simulated-day-badge";
 import { TariffGapBanner } from "@/components/planning/tariff-gap-banner";
+import { FILTER_PARAMS } from "@/lib/planning/filter";
 import { formatDayMonth, formatInstant, pluralize } from "@/lib/planning/format";
 import { loadPlanningDay } from "@/lib/planning/load";
 import type { PlanningDayView } from "@/lib/planning/types";
@@ -55,7 +55,7 @@ function replanBlockedReason(view: PlanningDayView, past: boolean): string | nul
   return null;
 }
 
-function headerDescription(view: PlanningDayView, availableVehicles: number): string {
+function headerDescription(view: PlanningDayView, availableVehicles: number): string | null {
   const vehicles = pluralize(availableVehicles, "véhicule disponible", "véhicules disponibles");
   switch (view.dayStatus) {
     case "EMPTY":
@@ -69,7 +69,8 @@ function headerDescription(view: PlanningDayView, availableVehicles: number): st
         : "Planning validé. Rouvrez-le pour l'ajuster.";
     }
     default:
-      return "Tournées proposées par l'optimiseur : ajustez, figez, réoptimisez puis validez.";
+      // Proposed: the board and its hint say what to do; the height goes to the timeline.
+      return null;
   }
 }
 
@@ -104,7 +105,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
     // Read only: the trips of a date of the horizon are completed by <TripCompletion> once the page is shown.
     currentHorizon(db, today),
     date >= today ? loadRecurrencesWithoutTrip(date) : Promise.resolve([]),
-    // The day's patients and stop addresses are on screen (timeline, map, trip panel).
+    // The day's patients, stop addresses, phones, access and trip notes are on screen (timeline, map, trip panel).
     auditRead(user, { action: "plan.view", entity: "Route", entityId: null, serviceDate: date }),
   ]);
   const completing = inHorizon(date, horizon);
@@ -125,61 +126,70 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   return (
     // Keyed by date: an action's progress or result never shows on another date.
     <PlanningActivityProvider key={date} timeLimitSec={view.timeLimitSec}>
-      <PageHeader
-        title={
-          <span className="flex flex-wrap items-center gap-2">
-            <span>Planning du {formatLongDate(date)}</span>
-            {relativeDay ? <Badge tone="brand">{relativeDay}</Badge> : null}
-            {view.dayStatus === "VALIDATED" ? <Badge tone="success">Validé</Badge> : null}
-            {view.dayStatus === "PROPOSED" ? <Badge tone="info">Proposé</Badge> : null}
-            {view.dayStatus === "MIXED" ? <Badge tone="warning">Partiellement validé</Badge> : null}
-            {isSimulatedId(view.planRun?.id ?? view.lastRun?.id) ? <SimulatedDayBadge /> : null}
-          </span>
-        }
-        description={headerDescription(view, availableVehicles)}
-        actions={
-          <>
-            <DateNav date={date} tomorrow={tomorrow} />
-            <LinkButton href={`/equipages?date=${date}`} variant="ghost" title="Équipages de ce jour : absences, remplaçants, équipages fixés">
-              Équipages
-            </LinkButton>
-            <PlanningToolbar
-              date={date}
-              version={shownVersion.version}
-              optimizeLabel={optimizeLabel}
-              optimizeBlocked={optimizeBlocked}
-              runningReason={runningReason}
-              canValidate={!past && (view.dayStatus === "PROPOSED" || view.dayStatus === "MIXED")}
-              canReopen={!past && (view.dayStatus === "VALIDATED" || view.dayStatus === "MIXED")}
-            />
-          </>
-        }
-      />
+      {/* From xl (1 280 px) the page is as tall as the screen: the board below takes what the header and banners
+          leave, and scrolls inside (timeline, panel), never the page (3rem: the main area's vertical padding).
+          Narrower, the board's parts stack and the page scrolls. */}
+      <div className="flex flex-col gap-2 xl:h-[calc(100dvh-var(--demo-banner-h)-3rem)]">
+        <PageHeader
+          className="mb-0"
+          title={
+            <span className="flex flex-wrap items-center gap-2">
+              <span>Planning du {formatLongDate(date)}</span>
+              {relativeDay ? <Badge tone="brand">{relativeDay}</Badge> : null}
+              {view.dayStatus === "VALIDATED" ? <Badge tone="success">Validé</Badge> : null}
+              {view.dayStatus === "PROPOSED" ? <Badge tone="info">Proposé</Badge> : null}
+              {view.dayStatus === "MIXED" ? <Badge tone="warning">Partiellement validé</Badge> : null}
+              {isSimulatedId(view.planRun?.id ?? view.lastRun?.id) ? <SimulatedDayBadge /> : null}
+            </span>
+          }
+          description={headerDescription(view, availableVehicles)}
+          actions={
+            <>
+              <DateNav date={date} tomorrow={tomorrow} keepParams={FILTER_PARAMS} />
+              <LinkButton href={`/equipages?date=${date}`} variant="ghost" title="Équipages de ce jour : absences, remplaçants, équipages fixés">
+                Équipages
+              </LinkButton>
+              <PlanningToolbar
+                date={date}
+                version={shownVersion.version}
+                optimizeLabel={optimizeLabel}
+                optimizeBlocked={optimizeBlocked}
+                runningReason={runningReason}
+                canValidate={!past && (view.dayStatus === "PROPOSED" || view.dayStatus === "MIXED")}
+                canReopen={!past && (view.dayStatus === "VALIDATED" || view.dayStatus === "MIXED")}
+                unassignedCount={hasRoutes && !past ? view.unassigned.length : 0}
+              />
+            </>
+          }
+        />
 
-      <div className="space-y-4">
         <PlanningActivityBanner />
         <PlanningVersionWatcher key={`${shownVersion.version}/${shownVersion.run ?? ""}`} date={date} shown={shownVersion} />
-        <Suspense fallback={<OptimizerStatusPending />}>
-          <OptimizerStatus />
-        </Suspense>
+        {/* One line of context: the optimizer service, then the plan in place (when, how, what to keep in mind). */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <Suspense fallback={<OptimizerStatusPending />}>
+            <OptimizerStatus />
+          </Suspense>
+          {view.dayStatus !== "EMPTY" ? <AvailabilityNotes skipped={view.skippedVehicles} notes={view.notes} inline /> : null}
+          <PlanRunLine
+            planRun={view.planRun}
+            restore={
+              view.planRun?.previous && hasRoutes && !past && view.dayStatus === "PROPOSED" && !view.dayStarted ? (
+                <RestorePlanButton
+                  date={date}
+                  version={shownVersion.version}
+                  previous={view.planRun.previous}
+                  blocked={runningReason}
+                />
+              ) : null
+            }
+          />
+        </div>
         {view.lastRun?.pending && !past ? (
           // Keyed by run: a new plan waiting for confirmation takes the focus again.
           <PendingPlanBanner key={view.lastRun.id} run={{ ...view.lastRun, pending: view.lastRun.pending }} />
         ) : null}
-        <RunBanner
-          lastRun={view.lastRun}
-          planRun={view.planRun}
-          restore={
-            view.planRun?.previous && hasRoutes && !past && view.dayStatus === "PROPOSED" && !view.dayStarted ? (
-              <RestorePlanButton
-                date={date}
-                version={shownVersion.version}
-                previous={view.planRun.previous}
-                blocked={runningReason}
-              />
-            ) : null
-          }
-        />
+        <RunBanner lastRun={view.lastRun} planRun={view.planRun} />
         {view.dayStatus !== "EMPTY" && !past ? <TariffGapBanner gaps={view.tariffGaps} date={date} /> : null}
         {completing ? (
           <TripCompletion key={date} date={date} missing={showMissing ? missing : []} />
@@ -210,24 +220,9 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
           </>
         ) : (
           <>
-            {hasRoutes ? (
-              <KpiStrip kpis={view.kpis} availableVehicles={availableVehicles} />
-            ) : (
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                <p>
-                  <span className="font-semibold">{pluralize(view.kpis.tripsTotal, "course")} à planifier</span> avec{" "}
-                  {pluralize(availableVehicles, "véhicule disponible", "véhicules disponibles")}.{" "}
-                  {optimizeBlocked ?? runningReason ?? <OptimizeHint label={optimizeLabel} />}
-                </p>
-                <LinkButton href={`/courses?date=${date}`} size="sm">
-                  <ListChecks aria-hidden className="size-4" />
-                  Voir les courses
-                </LinkButton>
-              </div>
-            )}
-            <AvailabilityNotes skipped={view.skippedVehicles} notes={view.notes} />
             <PlanningBoard
               key={date}
+              className="xl:min-h-[26rem] xl:flex-1"
               date={date}
               vehicles={view.vehicles}
               trips={view.trips}
@@ -239,6 +234,20 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
               droppedLocks={view.droppedLocks}
               timeRange={view.timeRange}
               planned={hasRoutes}
+              kpis={view.kpis}
+              unplannedNote={
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                  <p>
+                    <span className="font-semibold">{pluralize(view.kpis.tripsTotal, "course")} à planifier</span> avec{" "}
+                    {pluralize(availableVehicles, "véhicule disponible", "véhicules disponibles")}.{" "}
+                    {optimizeBlocked ?? runningReason ?? <OptimizeHint label={optimizeLabel} />}
+                  </p>
+                  <LinkButton href={`/courses?date=${date}`} size="sm">
+                    <ListChecks aria-hidden className="size-4" />
+                    Voir les courses
+                  </LinkButton>
+                </div>
+              }
               replanBlocked={replanBlocked ?? runningReason}
               lockBlocked={past ? "Date passée : les verrous ne servent plus." : null}
               initialTripId={initialTripId}

@@ -23,22 +23,14 @@ const NOT_KEPT_LABEL: Record<NonNullable<RunView["kind"]>, string> = {
 };
 
 /**
- * Last optimization: when, how long, distance source, warnings, and the error
- * of a failed attempt. `restore` (« Revenir au planning précédent ») shows in
- * the card of the plan in place. A run waiting for confirmation is shown by
- * PendingPlanBanner. A move refused (planning unchanged) is not repeated
- * here: the action's own answer said it, with the patients' names.
+ * What happened to the last optimization when it did not give the plan in
+ * place: interrupted, running, failed or not kept. The plan in place is
+ * summed up on one line by PlanRunLine. A run waiting for confirmation is
+ * shown by PendingPlanBanner. A move refused (planning unchanged) is not
+ * repeated here: the action's own answer said it, with the patients' names.
  */
-export function RunBanner({
-  lastRun,
-  planRun,
-  restore,
-}: {
-  lastRun: RunView | null;
-  planRun: RunView | null;
-  restore?: ReactNode;
-}) {
-  if (!lastRun && !planRun) return null;
+export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planRun: RunView | null }) {
+  if (!lastRun) return null;
   const refusedMove = lastRun?.status === "FAILED" && lastRun.error?.startsWith(MOVE_REFUSED_PREFIX);
   const failedRun = lastRun && lastRun.status === "FAILED" && !refusedMove ? lastRun : null;
   // A plan the regulator chose not to keep (or that could no longer be saved) is not a failure.
@@ -47,6 +39,7 @@ export function RunBanner({
   // A RUNNING run past its budget was interrupted (server restart): do not promise a result.
   const running = lastRun && lastRun.status === "RUNNING" && !lastRun.interrupted ? lastRun : null;
   const interrupted = lastRun && lastRun.status === "RUNNING" && lastRun.interrupted ? lastRun : null;
+  if (!interrupted && !running && !failed && !notKept) return null;
 
   return (
     <div className="space-y-2">
@@ -91,69 +84,79 @@ export function RunBanner({
         </p>
       ) : null}
 
-      {planRun ? (
-        <div className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 shadow-xs">
-          <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <Clock aria-hidden className="size-4 shrink-0 text-slate-400" />
-            <span>
-              {PLAN_RUN_LABEL[planRun.kind ?? "optimize"]} le <span className="tabular">{formatInstant(planRun.startedAt)}</span>
-              {planRun.requestedBy ? ` par ${planRun.requestedBy}` : ""}
-            </span>
-            <span aria-hidden className="text-slate-300">
-              ·
-            </span>
-            <span className="tabular">
-              durée {formatSeconds(planRun.durationMs)}
-              {planRun.wallTimeMs !== null ? ` (solveur ${formatSeconds(planRun.wallTimeMs)})` : ""}
-            </span>
-            <span aria-hidden className="text-slate-300">
-              ·
-            </span>
-            <span>
-              {pluralize(planRun.tripsCount, "course")}
-              {planRun.lockedCount > 0 ? ` dont ${pluralize(planRun.lockedCount, "figée", "figées")}` : ""}
-            </span>
-            <span aria-hidden className="text-slate-300">
-              ·
-            </span>
-            <span>distances : {MATRIX_SOURCE_LABELS[planRun.matrixSource ?? ""] ?? planRun.matrixSource ?? "—"}</span>
-            {planRun.trafficSource ? (
-              <>
-                <span aria-hidden className="text-slate-300">
-                  ·
-                </span>
-                <span>{planRun.trafficSource === "none" ? "trafic non pris en compte" : "trafic pris en compte"}</span>
-              </>
-            ) : null}
-          </p>
-          {restore && planRun.previous ? (
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 pl-6 text-slate-600">
-              <span>
-                Planning remplacé par ce calcul : {pluralize(planRun.previous.served, "course servie", "courses servies")},
-                marge {formatEurosRounded(planRun.previous.margin)}.
-              </span>
-              {restore}
-            </div>
-          ) : null}
-          {planRun.matrixSource === "haversine" ? (
-            <p className="mt-1.5 flex items-start gap-2 text-amber-800">
-              <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
-              Distances et temps estimés à vol d&apos;oiseau (OSRM non configuré) : km, horaires et CA sont approximatifs.
-            </p>
-          ) : null}
-          {planRun.warnings && planRun.warnings.length > 0 ? (
-            <details className="mt-1.5">
-              <summary className="cursor-pointer text-amber-800 hover:underline">
-                {pluralize(planRun.warnings.length, "avertissement", "avertissements")} de l&apos;optimiseur
-              </summary>
-              <ul className="mt-1 list-disc space-y-0.5 pl-6 text-slate-700">
-                {planRun.warnings.map((w, i) => (
-                  <li key={i}>{w}</li>
-                ))}
-              </ul>
-            </details>
-          ) : null}
-        </div>
+    </div>
+  );
+}
+
+/**
+ * The plan in place on one line (the planning's board needs the height): when
+ * and by whom it was computed, how long, how many trips and locks, the
+ * distance source (approximate without OSRM), traffic, the optimizer's
+ * warnings, and « Revenir au planning précédent » when offered (`restore`).
+ */
+export function PlanRunLine({ planRun, restore }: { planRun: RunView | null; restore?: ReactNode }) {
+  if (!planRun) return null;
+  const dot = (
+    <span aria-hidden className="text-slate-300">
+      ·
+    </span>
+  );
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
+      <Clock aria-hidden className="size-3.5 shrink-0 text-slate-400" />
+      <span>
+        {PLAN_RUN_LABEL[planRun.kind ?? "optimize"]} le <span className="tabular">{formatInstant(planRun.startedAt)}</span>
+        {planRun.requestedBy ? ` par ${planRun.requestedBy}` : ""}
+      </span>
+      {dot}
+      <span className="tabular">
+        {formatSeconds(planRun.durationMs)}
+        {planRun.wallTimeMs !== null ? ` (solveur ${formatSeconds(planRun.wallTimeMs)})` : ""}
+      </span>
+      {dot}
+      <span>
+        {pluralize(planRun.tripsCount, "course")}
+        {planRun.lockedCount > 0 ? ` dont ${pluralize(planRun.lockedCount, "figée", "figées")}` : ""}
+      </span>
+      {dot}
+      {planRun.matrixSource === "haversine" ? (
+        <span className="inline-flex items-center gap-1 text-amber-800" title="OSRM non configuré : distances et temps estimés à vol d'oiseau">
+          <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
+          distances à vol d&apos;oiseau : km, horaires et CA approximatifs
+        </span>
+      ) : (
+        <span>distances : {MATRIX_SOURCE_LABELS[planRun.matrixSource ?? ""] ?? planRun.matrixSource ?? "—"}</span>
+      )}
+      {planRun.trafficSource ? (
+        <>
+          {dot}
+          <span>{planRun.trafficSource === "none" ? "trafic non pris en compte" : "trafic pris en compte"}</span>
+        </>
+      ) : null}
+      {planRun.warnings && planRun.warnings.length > 0 ? (
+        <>
+          {dot}
+          <details className="relative">
+            <summary className="cursor-pointer text-amber-800 hover:underline">
+              {pluralize(planRun.warnings.length, "avertissement", "avertissements")} de l&apos;optimiseur
+            </summary>
+            <ul className="absolute left-0 top-full z-40 mt-1 w-max max-w-[min(36rem,80vw)] list-disc space-y-0.5 rounded-md border border-slate-200 bg-white py-2 pl-6 pr-3 text-slate-700 shadow-lg">
+              {planRun.warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          </details>
+        </>
+      ) : null}
+      {restore && planRun.previous ? (
+        <span className="inline-flex flex-wrap items-center gap-x-2">
+          {dot}
+          <span>
+            Planning remplacé : {pluralize(planRun.previous.served, "course servie", "courses servies")}, marge{" "}
+            {formatEurosRounded(planRun.previous.margin)}
+          </span>
+          {restore}
+        </span>
       ) : null}
     </div>
   );

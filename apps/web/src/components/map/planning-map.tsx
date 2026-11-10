@@ -303,7 +303,7 @@ export function PlanningMap({
   }, [ready, selectedTripId, selectedVehicleId, trips, vehicles]);
 
   return (
-    <div className="relative h-full min-h-80">
+    <div className="relative h-full min-h-40">
       {/* maplibre-gl.css sets `.maplibregl-map { position: relative }` outside any cascade layer, which
           beats Tailwind's layered `absolute` on the same element: the map gets its own child, sized by
           an absolutely positioned wrapper. */}

@@ -2,7 +2,7 @@
 
 import { useTransition, type ReactNode } from "react";
 import { useLinkStatus } from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react";
 import { LinkButton } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
@@ -20,9 +20,28 @@ function LinkLabel({ children }: { children: ReactNode }) {
   return <span className={cn("transition-opacity", pending && "opacity-50")}>{children}</span>;
 }
 
-export function DateNav({ date, tomorrow, basePath = "/planning" }: { date: string; tomorrow: string; basePath?: string }) {
+export function DateNav({
+  date,
+  tomorrow,
+  basePath = "/planning",
+  keepParams = [],
+}: {
+  date: string;
+  tomorrow: string;
+  basePath?: string;
+  /** Query parameters kept from one date to the next (the planning's filters). */
+  keepParams?: readonly string[];
+}) {
   const router = useRouter();
-  const href = (day: string) => `${basePath}?date=${day}`;
+  const search = useSearchParams();
+  const href = (day: string) => {
+    const params = new URLSearchParams({ date: day });
+    for (const key of keepParams) {
+      const value = search.get(key);
+      if (value) params.set(key, value);
+    }
+    return `${basePath}?${params.toString()}`;
+  };
   const [navigating, startTransition] = useTransition();
 
   return (

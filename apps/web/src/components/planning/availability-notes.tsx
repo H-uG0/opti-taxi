@@ -3,27 +3,55 @@ import { VehicleTypeBadge } from "@/components/ui/badge";
 import type { SkippedVehicle } from "@/lib/optimizer/build-request";
 import { pluralize } from "@/lib/planning/format";
 
-/** Vehicles left out of the day and non-blocking remarks of the request builder. */
-export function AvailabilityNotes({ skipped, notes }: { skipped: SkippedVehicle[]; notes: string[] }) {
+/**
+ * Vehicles left out of the day and non-blocking remarks of the request
+ * builder. Open by default when short. `inline`: one line of small text,
+ * closed, opening as a panel over the page (the planning's board, whose
+ * timeline already shows each vehicle off the road with why, needs the height).
+ */
+export function AvailabilityNotes({ skipped, notes, inline = false }: { skipped: SkippedVehicle[]; notes: string[]; inline?: boolean }) {
   if (skipped.length === 0 && notes.length === 0) return null;
   return (
-    <details className="group rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm shadow-xs" open={skipped.length <= 3}>
-      <summary className="flex cursor-pointer list-none items-center gap-2 text-slate-700 [&::-webkit-details-marker]:hidden">
-        <CarFront aria-hidden className="size-4 shrink-0 text-slate-400" />
-        <span className="font-medium">
+    <details
+      className={
+        inline
+          ? "group relative text-xs"
+          : "group rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm shadow-xs"
+      }
+      open={!inline && skipped.length <= 3}
+    >
+      <summary
+        className={
+          inline
+            ? "flex cursor-pointer list-none items-center gap-1.5 text-slate-600 hover:text-slate-900 [&::-webkit-details-marker]:hidden"
+            : "flex cursor-pointer list-none items-center gap-2 text-slate-700 [&::-webkit-details-marker]:hidden"
+        }
+      >
+        <CarFront aria-hidden className={inline ? "size-3.5 shrink-0 text-slate-400" : "size-4 shrink-0 text-slate-400"} />
+        <span className={inline ? "underline decoration-dotted underline-offset-2" : "font-medium"}>
           {skipped.length > 0
             ? `${pluralize(skipped.length, "véhicule indisponible", "véhicules indisponibles")} ce jour`
             : "Remarques sur les véhicules"}
         </span>
         {notes.length > 0 && skipped.length > 0 ? <span className="text-slate-500">· {pluralize(notes.length, "remarque")}</span> : null}
-        <span aria-hidden className="ml-auto text-xs text-slate-400 group-open:hidden">
-          Afficher
-        </span>
-        <span aria-hidden className="ml-auto hidden text-xs text-slate-400 group-open:inline">
-          Masquer
-        </span>
+        {inline ? null : (
+          <>
+            <span aria-hidden className="ml-auto text-xs text-slate-400 group-open:hidden">
+              Afficher
+            </span>
+            <span aria-hidden className="ml-auto hidden text-xs text-slate-400 group-open:inline">
+              Masquer
+            </span>
+          </>
+        )}
       </summary>
-      <ul className="mt-2 grid gap-x-6 gap-y-1.5 md:grid-cols-2">
+      <ul
+        className={
+          inline
+            ? "absolute left-0 top-full z-40 mt-1 grid w-max max-w-[min(48rem,calc(100vw-2rem))] gap-x-6 gap-y-1.5 rounded-md border border-slate-200 bg-white p-3 text-sm shadow-lg md:grid-cols-2"
+            : "mt-2 grid gap-x-6 gap-y-1.5 md:grid-cols-2"
+        }
+      >
         {skipped.map((s) => (
           <li key={s.vehicleId} className="flex min-w-0 items-baseline gap-2">
             <span className="shrink-0 self-center">

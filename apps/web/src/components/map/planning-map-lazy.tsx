@@ -7,7 +7,7 @@ import type { PlanningMapProps } from "./planning-map";
 const PlanningMapClient = dynamic(() => import("./planning-map").then((m) => m.PlanningMap), {
   ssr: false,
   loading: () => (
-    <div className="grid h-full min-h-80 place-items-center bg-slate-50 text-sm text-slate-500">Chargement de la carte…</div>
+    <div className="grid h-full min-h-40 place-items-center bg-slate-50 text-sm text-slate-500">Chargement de la carte…</div>
   ),
 });
 

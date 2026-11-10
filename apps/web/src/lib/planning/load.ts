@@ -49,7 +49,7 @@ export async function loadPlanningDay(
   const [settings, defaultVehicles, crewContext, trips, routes, lastRun, planRun, tariffs, billing] = await Promise.all([
     getSettings(db),
     db.vehicle.findMany({
-      select: { ...vehicleInputSelect, registration: true, depot: { select: { lat: true, lng: true, name: true } } },
+      select: { ...vehicleInputSelect, registration: true, depot: { select: { id: true, lat: true, lng: true, name: true } } },
       orderBy: { label: "asc" },
     }),
     // Crews of the day (absences, replacements, crews fixed on the Équipages page).

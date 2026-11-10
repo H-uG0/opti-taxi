@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { TriangleAlert, X } from "lucide-react";
+import { Lock, TriangleAlert, X } from "lucide-react";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
@@ -16,6 +16,7 @@ export function VehiclePanel({
   trips,
   issues = [],
   crewAction,
+  lockAction,
   onSelectTrip,
   onClose,
 }: {
@@ -25,6 +26,8 @@ export function VehiclePanel({
   issues?: string[];
   /** « Changer l'équipage » (planning page). */
   crewAction?: ReactNode;
+  /** « Figer la tournée » / « Défiger la tournée » (planning page). */
+  lockAction?: ReactNode;
   onSelectTrip: (tripId: string) => void;
   onClose: () => void;
 }) {
@@ -77,6 +80,7 @@ export function VehiclePanel({
         ) : (
           <p className="text-slate-500">Aucune course ce jour.</p>
         )}
+        {route && lockAction ? <div className="pt-1.5">{lockAction}</div> : null}
         {issues.length > 0 ? (
           <ul className="space-y-0.5 pt-1 text-xs text-amber-900">
             {issues.map((issue) => (
@@ -91,7 +95,7 @@ export function VehiclePanel({
       {crewAction}
 
       {route ? (
-        <ol className="max-h-96 overflow-y-auto border-t border-slate-100 px-2 py-2">
+        <ol className="border-t border-slate-100 px-2 py-2">
           {route.stops.map((stop) => {
             const trip = trips[stop.tripId];
             return (
@@ -112,6 +116,9 @@ export function VehiclePanel({
                       <span className="sr-only">{STOP_KIND_LABELS[stop.kind]} : </span>
                       {trip?.patientName ?? "Course"}
                       {stop.loadAfter > 1 ? <span className="ml-1 text-xs text-amber-700">(partagé)</span> : null}
+                      {trip?.lockedVehicleId === vehicle.id && stop.kind === "PICKUP" ? (
+                        <Lock role="img" aria-label="figée" className="ml-1 inline size-3 align-[-1px] text-slate-500" />
+                      ) : null}
                     </span>
                     <span className="block truncate text-xs text-slate-500">{stop.address}</span>
                   </span>

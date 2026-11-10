@@ -54,7 +54,7 @@ const vehicle = (id: string, label: string, workDays?: number[]): RawVehicle => 
   registration: `AA-${id}`,
   type: "TAXI",
   capacity: 2,
-  depot: { lat: 43.3, lng: 5.37, name: "Marseille" },
+  depot: { id: "depot-marseille", lat: 43.3, lng: 5.37, name: "Marseille" },
   department: "13",
   costPerKm: 0.3,
   active: true,
@@ -188,12 +188,15 @@ function input(overrides: Partial<PlanningRawInput> = {}): PlanningRawInput {
 const taxiGrid = tariffRow({ id: "g1", validFrom: new Date("2026-01-01T00:00:00Z"), createdAt: new Date("2026-01-01T00:00:00Z") });
 
 describe("buildPlanningView", () => {
-  it("lists vehicles with a route first, then available ones; unavailable ones only as skipped", () => {
+  it("lists vehicles with a route first, then available ones, then the active ones off the road with why", () => {
     const view = buildPlanningView(input());
-    expect(view.vehicles.map((v) => [v.id, v.route?.id ?? null])).toEqual([
-      ["v1", "r1"],
-      ["v2", null],
+    expect(view.vehicles.map((v) => [v.id, v.route?.id ?? null, v.available])).toEqual([
+      ["v1", "r1", true],
+      ["v2", null, true],
+      ["v3", null, false],
     ]);
+    expect(view.vehicles[2]?.unavailableReason).toBe(view.skippedVehicles[0]?.reason);
+    expect(view.vehicles[2]).toMatchObject({ shift: null, depot: { id: "depot-marseille", label: "Marseille" } });
     expect(view.skippedVehicles.map((s) => s.vehicleId)).toEqual(["v3"]);
     expect(view.vehicles[0]).toMatchObject({ driverName: "Jean Route", shift: { start: 360, end: 1140 }, available: true });
     expect(view.vehicles[0]?.color).not.toBe(view.vehicles[1]?.color);

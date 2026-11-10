@@ -65,7 +65,8 @@ export type VehicleRowView = {
   capacity: number;
   /** Hex color of this vehicle (shade of its type color). */
   color: string;
-  depot: LatLngView & { label: string };
+  /** Depot the vehicle starts from and returns to: the timeline groups and filters by it. */
+  depot: LatLngView & { id: string; label: string };
   driverName: string | null;
   crewMateName: string | null;
   available: boolean;
@@ -242,7 +243,10 @@ export type DayStatus = "EMPTY" | "UNPLANNED" | "PROPOSED" | "VALIDATED" | "MIXE
 export type PlanningDayView = {
   date: string;
   dayStatus: DayStatus;
-  /** Timeline rows: vehicles with a route, then available vehicles without one. */
+  /**
+   * Timeline rows: vehicles with a route, then available vehicles without one,
+   * then active vehicles off the road that day (their reason in unavailableReason).
+   */
   vehicles: VehicleRowView[];
   /** Every trip of the day that is not cancelled, plus cancelled ones still in a route. */
   trips: TripView[];

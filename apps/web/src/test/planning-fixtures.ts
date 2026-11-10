@@ -70,7 +70,7 @@ export function vehicleRow(overrides: Partial<VehicleRowView> = {}): VehicleRowV
     type: "TAXI",
     capacity: 2,
     color: "#c27c0e",
-    depot: { lat: 43.3, lng: 5.4, label: "Marseille" },
+    depot: { id: "depot-marseille", lat: 43.3, lng: 5.4, label: "Marseille" },
     driverName: "Julien Marchetti",
     crewMateName: null,
     available: true,
@@ -124,7 +124,15 @@ export function planningFixture() {
     vehicleRow(),
     vehicleRow({ id: "vsl-1", label: "VSL 1 (Marseille)", type: "VSL", driverName: "Élodie Fabre", route: null }),
     vehicleRow({ id: "amb-1", label: "Ambulance 1 (Marseille)", type: "AMBULANCE", capacity: 1, crewMateName: "Laurent Giraud", route: null }),
-    vehicleRow({ id: "vsl-2", label: "VSL 2 (Manosque)", type: "VSL", route: null, available: false, unavailableReason: "révision au garage" }),
+    vehicleRow({
+      id: "vsl-2",
+      label: "VSL 2 (Manosque)",
+      type: "VSL",
+      depot: { id: "depot-manosque", lat: 43.83, lng: 5.79, label: "Manosque" },
+      route: null,
+      available: false,
+      unavailableReason: "révision au garage",
+    }),
   ];
   return { trips: { [tripA.id]: tripA, [tripB.id]: tripB, [unassigned.id]: unassigned }, vehicles };
 }
