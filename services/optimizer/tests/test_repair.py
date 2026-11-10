@@ -37,9 +37,16 @@ from tests.builders import (
 SEED_FLEET_DAY = Path(__file__).resolve().parent / "data" / "seed-fleet-2026-11-11.json.gz"
 """11/11 of the large seed (pnpm db:seed --fleet: fictitious, 290 trips, 118 vehicles) as the web
 sends it, with its plan in place (288 trips, made by the optimizer of November 9)."""
+SEED_SMALL_PLACE_DAY = Path(__file__).resolve().parent / "data" / "seed-small-2026-11-12-place.json.gz"
+"""12/11 of the small seed (pnpm db:seed: fictitious, 64 trips, 10 vehicles) as « Placer les non
+affectées » sends it: the 62 trips of the plan in place locked on their vehicle, two returns left."""
+AMBULANCE_RETURN = "cmw9rmlke00eskw8me549vovl"
+"""The return of SEED_SMALL_PLACE_DAY no ambulance can take: Marseille, ready at 11:30."""
+AMBULANCE_GAP = "cmw9rmkjb002pkw8m2gw5ag7y"
 NO_DEADLINE_SEC = 300.0
 MARSEILLE_FAC = FACILITIES["fac_marseille_timone"][1]
 LUNCH_BREAK = {"windowStartMin": 690, "windowEndMin": 840, "durationMin": 30}
+NBSP = solver.NBSP
 
 
 def day_model(raw: dict[str, Any]) -> solver._DayModel:
@@ -134,7 +141,10 @@ def test_placing_the_unassigned_trips_of_the_large_seed_keeps_the_288_and_places
         assert all(served.get(trip_id) == vehicle_id for trip_id in trip_ids)
     assert plan.kpis.trips_served == 289
     [left] = plan.unassigned
-    assert left.reason.startswith(f"{solver.REASON_DROPPED_PREFIX} 06:43 à 09:00 : « Ambulance 13 (Sisteron) » transporte")
+    assert left.reason == (
+        f"{solver.REASON_DROPPED_PREFIX} 06:43 à 09:00{NBSP}: "
+        "Ambulance 13 (Sisteron) transporte un autre patient de 06:31 à 07:30"
+    )
 
 
 def test_a_lock_does_not_take_break_sites_away() -> None:
@@ -295,6 +305,30 @@ def test_a_trip_left_out_takes_the_place_of_a_trip_that_moves_elsewhere() -> Non
     model._exact_checks = True
     assert all(model._fits(v, route) for v, route in enumerate(routes))
 
+def test_the_final_check_puts_back_the_trips_it_took_out_before_the_others(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A locked trip the final check takes out goes back before a cheaper trip the search left out
+    can take its slot (the regret insertion ranks by partner, regret and cost, not by lock): a
+    one-seat taxi, two trips due at Aix at 10:00 that cannot be chained. Before the fix, "free" took
+    the slot and "bound", locked, was left out: « Placer les non affectées » then lost a trip."""
+    facility = FACILITIES["fac_aix_ch"][1]
+    trips = [
+        trip("bound", "p2", "OUTBOUND", offset(facility, 25, 0), facility, appointment=600, locked="taxi_a"),
+        trip("free", "p1", "OUTBOUND", offset(facility, -25, 0), facility, appointment=600),
+    ]
+    model = day_model(request([vehicle("taxi_a", MARSEILLE, capacity=1)], trips))
+    bound, free = model.ctx.trips["bound"], model.ctx.trips["free"]
+    on_a = model._cheapest_insertion([], 0, bound)
+    alone = model._cheapest_insertion([], 0, free)
+    assert on_a is not None and alone is not None and alone[0] < on_a[0]
+    assert model._cheapest_insertion(on_a[1], 0, free) is None
+    routes = [on_a[1]]
+    # The final check finds "bound" breaking a rule once, as a timing only schedule.py sees would.
+    breach = iter([{"bound": solver.REASON_DROPPED_ON_BOARD}])
+    exact = solver._DayModel._scheduled_reasons
+    monkeypatch.setattr(solver._DayModel, "_scheduled_reasons", lambda self, v, seq: next(breach, None) or exact(self, v, seq))
+    assert model.guarded(routes, NO_DEADLINE_SEC) == {}
+    assert model._trip_ids(routes[0]) == ["bound"]
+
 
 def two_ambulances_busy() -> dict[str, Any]:
     """Two ambulances, each with a patient at 11:00; a third patient ready at 11:00 has no room."""
@@ -307,13 +341,13 @@ def two_ambulances_busy() -> dict[str, Any]:
     return request(fleet, trips, timeLimitSec=2)
 
 
-def test_a_trip_left_out_says_what_each_compatible_vehicle_does_meanwhile() -> None:
+def test_a_trip_left_out_says_what_keeps_each_compatible_vehicle_from_taking_it() -> None:
     plan = service.optimize(OptimizeRequest.model_validate(two_ambulances_busy()))
     assert plan.kpis.trips_served == 2
     [left] = plan.unassigned
     assert left.reason.startswith(f"{solver.REASON_DROPPED_PREFIX} 11:00 à ")
-    assert "« Amb 1 » transporte un autre patient de 11:" in left.reason
-    assert "« Amb 2 » transporte un autre patient de 11:" in left.reason
+    assert f"{NBSP}: Amb 1 transporte un autre patient de 11:" in left.reason
+    assert f"{NBSP}; Amb 2 transporte un autre patient de 11:" in left.reason
 
 
 def test_a_trip_left_out_counts_the_vehicles_when_there_are_many() -> None:
@@ -327,29 +361,110 @@ def test_a_trip_left_out_counts_the_vehicles_when_there_are_many() -> None:
     plan = service.optimize(OptimizeRequest.model_validate(raw))
     assert plan.kpis.trips_served == 4
     [left] = plan.unassigned
-    assert left.reason.endswith(": sur 4 véhicules compatibles, 4 transportent d'autres patients")
+    assert left.reason.endswith(f"{NBSP}: les 4 véhicules compatibles transportent d'autres patients")
 
 
-def test_activity_of_a_vehicle_during_a_trip() -> None:
-    """The kinds of activity the reason names: patients on board, break, neither."""
-    raw = two_ambulances_busy()
-    raw["vehicles"][0]["break"] = {"windowStartMin": 690, "windowEndMin": 840, "durationMin": 45}
+def seed_small_place_day() -> dict[str, Any]:
+    with gzip.open(SEED_SMALL_PLACE_DAY, "rt", encoding="utf-8") as file:
+        raw: dict[str, Any] = json.load(file)
+    raw["settings"]["timeLimitSec"] = 2
+    return raw
+
+
+def left_out_reason_of(raw: dict[str, Any], trip_id: str) -> str:
+    plan = service.optimize(OptimizeRequest.model_validate(raw))
+    assert plan.validation.valid, plan.validation.violations[:5]
+    return next(u.reason for u in plan.unassigned if u.trip_id == trip_id)
+
+
+def test_the_reason_names_what_keeps_each_ambulance_away_not_what_it_does_meanwhile() -> None:
+    """12/11 of the small seed, « Placer les non affectées »: no ambulance can take the 11:30
+    return. Ambulance 2 is in Gap, 180 km away, with a locked trip at 13:16 there: it was said to
+    be « en pause de 11:30 à 12:15 », although it cannot take the trip without its break either.
+    Ambulance 1 needs both its 13:00 and 13:30 trips in Aix out of the way: neither alone, nor its
+    break, is the cause."""
+    reason = left_out_reason_of(seed_small_place_day(), AMBULANCE_RETURN)
+    assert reason == (
+        f"{solver.REASON_DROPPED_PREFIX} 11:30 à 11:54{NBSP}: "
+        f"Ambulance 1 (Marseille) ne peut pas l'intercaler entre ses arrêts de 10:55 et 12:31{NBSP}; "
+        "Ambulance 2 (Gap) ne peut pas rejoindre ensuite son arrêt de 13:16"
+    )
+
+
+def test_the_reason_of_a_locked_trip_does_not_name_its_vehicle_again() -> None:
+    """The web says which vehicle refused the move around the reason (move.ts)."""
+    raw = seed_small_place_day()
+    next(t for t in raw["trips"] if t["id"] == AMBULANCE_RETURN)["lockedVehicleId"] = AMBULANCE_GAP
+    reason = left_out_reason_of(raw, AMBULANCE_RETURN)
+    assert reason == (
+        f"{solver.REASON_DROPPED_PREFIX} 11:30 à 11:54{NBSP}: le véhicule figé ne peut pas rejoindre ensuite son arrêt de 13:16"
+    )
+
+
+def break_in_the_way() -> dict[str, Any]:
+    """A one-seat taxi drops a patient at the Timone at 12:15, when another one is ready to go home
+    from there, and takes a third there for 13:45: its driver's 45 min break, due to start between
+    11:30 and 13:15, fits between the first two trips only."""
+    rule = {"windowStartMin": 690, "windowEndMin": 840, "durationMin": 45}
+    return request(
+        [vehicle("taxi_a", MARSEILLE, capacity=1, break_=rule)],
+        [
+            trip("a", "p1", "OUTBOUND", offset(MARSEILLE_FAC, 4, 2), MARSEILLE_FAC, appointment=735),
+            trip("t", "p2", "RETURN", MARSEILLE_FAC, offset(MARSEILLE_FAC, -4, 2), ready=735),
+            trip("b", "p3", "OUTBOUND", offset(MARSEILLE_FAC, 4, -2), MARSEILLE_FAC, appointment=825),
+        ],
+    )
+
+
+def test_a_break_is_named_when_the_trip_fits_without_it() -> None:
+    model = day_model(break_in_the_way())
+    model._exact_checks = True
+    route = model._breaks_only_routes()[0]
+    for trip_id in ("a", "b"):
+        fit = model._cheapest_insertion(route, 0, model.ctx.trips[trip_id])
+        assert fit is not None
+        route = fit[1]
+    t = model.ctx.trips["t"]
+    assert model._cheapest_insertion(route, 0, t) is None
+    assert model._fits_without_break(0, route, t)
+    reason = model.left_out_reason(t, [route], {}, time.monotonic() + NO_DEADLINE_SEC)
+    assert reason.endswith(f"{NBSP}: Taxi A est en pause de 12:02 à 12:47"), reason
+
+
+def test_a_shared_ride_that_does_not_fit_is_not_called_a_full_vehicle() -> None:
+    """Two patients ready at 11:00, going home 12 km apart on either side: the taxi has a free seat,
+    the detour is what keeps it from taking the second one."""
+    raw = request(
+        [vehicle("taxi_a", MARSEILLE)],
+        [
+            trip("east", "p1", "RETURN", MARSEILLE_FAC, offset(MARSEILLE_FAC, 0, 6), ready=660),
+            trip("west", "p2", "RETURN", MARSEILLE_FAC, offset(MARSEILLE_FAC, 0, -6), ready=660),
+        ],
+        timeLimitSec=2,
+    )
+    plan = service.optimize(OptimizeRequest.model_validate(raw))
+    assert plan.kpis.trips_served == 1
+    [left] = plan.unassigned
+    assert f"{NBSP}: Taxi A ne peut pas la partager avec son patient de 11:00 à 11:" in left.reason, left.reason
+    assert left.reason.endswith(" (détour ou horaires)")
+
+
+def test_no_driver_can_take_the_trip_with_their_break() -> None:
+    """A long outbound whose ride covers the break window: no driver can rest before nor after it,
+    whatever the plan; the reason says what the regulator can do."""
+    raw = far_outbound()
+    raw["vehicles"].append(vehicle("taxi_gap", GAP, department="05", break_=LUNCH_BREAK))
     model = day_model(raw)
-    route = model._with_break([], 0) or []
-    fit = model._cheapest_insertion(route, 0, model.ctx.trips["t0"])
-    assert fit is not None
-    scheduled = model._scheduled(0, fit[1])
-    assert scheduled is not None
-    schedule = scheduled[1]
-    pickup = schedule.stops[0].start_min
-    kind, text = solver._activity(schedule, pickup + 1, pickup + 2)
-    assert kind == "busy" and text.startswith("transporte un autre patient de 11:")
-    slot = schedule.break_slot
-    assert slot is not None
-    kind, text = solver._activity(schedule, slot[0] + 1, slot[0] + 2)
-    assert kind == "break" and text.startswith("est en pause de ")
-    assert solver._activity(schedule, pickup - 30, pickup - 20)[0] == "tight"
-    assert solver._activity(None, 600, 610) == ("tight", "n'a pas le temps de l'assurer")
+    pickup, delivery = (model.nodes[n] for n in model.trip_nodes["far"])
+    # The latest pickup comes 5 min before the earliest end of a break.
+    ride = pickup.service_min + model._leg(pickup, delivery)
+    raw["trips"][0]["appointmentMin"] = LUNCH_BREAK["windowStartMin"] + LUNCH_BREAK["durationMin"] - 5 + ride
+    plan = service.optimize(OptimizeRequest.model_validate(raw))
+    [left] = plan.unassigned
+    assert left.reason.endswith(
+        f"{NBSP}: aucun des 2 véhicules compatibles ne peut l'assurer avec la pause de son chauffeur, "
+        f"même sans autre course{NBSP}: {solver.ALONE_ADVICE}"
+    ), left.reason
 
 
 def test_the_reason_only_gives_the_times_when_time_runs_out() -> None:
@@ -358,4 +473,4 @@ def test_the_reason_only_gives_the_times_when_time_runs_out() -> None:
     routes = model._breaks_only_routes()
     reason = model.left_out_reason(model.ctx.trips["t0"], routes, {}, time.monotonic() - 1)
     assert reason.startswith(f"{solver.REASON_DROPPED_PREFIX} 11:00 à 11:")
-    assert reason.endswith(f" : {solver.REASON_DROPPED_DETAIL}")
+    assert reason.endswith(f"{NBSP}: {solver.REASON_DROPPED_DETAIL}")

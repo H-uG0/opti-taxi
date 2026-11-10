@@ -228,7 +228,11 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   choix ne dépend pas de `PYTHONHASHSEED`). Les courses que la recherche a laissées de côté ont le
   même essai (depuis OPT-09) : ses mouvements ne placent pas une course qui ne tient qu'en déplaçant
   la pause du véhicule, l'insertion Python si (avec la passe suivante, 2 à 7 courses de plus sur
-  les journées chargées). Une course qui ne trouve pas de place reçoit le motif
+  les journées chargées). Les courses sorties sont réinsérées d'abord, seules : l'insertion par
+  regret ne regarde pas les verrous, et une course laissée de côté moins coûteuse prenait la place
+  qu'une course figée venait de quitter (« Placer les non affectées » perdait alors une course
+  placée). La réparation du planning en place fait de même avec les courses qu'elle sort. Une
+  course qui ne trouve pas de place reçoit le motif
   « Pas de place dans les tournées sans dépasser le temps à bord ou l'attente au lieu de soins… »,
   ou, sortie pour la durée de tournée, « Pas de place dans les tournées sans dépasser 6 h de
   travail sans pause de 20 min… ».
@@ -282,13 +286,28 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   des tournées interrompue… planning construit par une méthode de secours… ») le signale dans
   `meta.warnings`.
 - Motif des courses non placées par le solveur : si la recherche locale a atteint un optimum
-  local, « Pas de place dans les tournées pour le trajet de 11:30 à 11:54 : « Ambulance 1 »
-  transporte un autre patient de 11:05 à 11:40 ; « Ambulance 2 » est en pause de 11:30 à 12:15 »
-  (ce que fait chaque véhicule compatible pendant que le patient serait à bord, aux horaires de la
-  course ; au-delà de 3 véhicules, leur décompte : « sur 26 véhicules compatibles, 19 transportent
-  d'autres patients, 4 sont en pause et 3 ne peuvent pas l'intercaler entre leurs courses » ; « ne
-  peut pas l'assurer avec la pause de son chauffeur » quand même seul il ne le peut pas ; au plus
-  1 s pour toutes, ensuite les seuls horaires) ; si elle a été interrompue par la limite de temps
+  local, « Pas de place dans les tournées pour le trajet de 11:30 à 11:54 : Ambulance 1 (Marseille)
+  ne peut pas l'intercaler entre ses arrêts de 10:55 et 12:31 ; Ambulance 2 (Gap) ne peut pas
+  rejoindre ensuite son arrêt de 13:16 » (12/11 du petit seed). Pour chaque véhicule compatible,
+  ce qui l'empêche de la prendre (`_DayModel._obstacle`) : chaque cause possible est retirée à son
+  tour, et la première dont l'absence fait entrer la course (insertion exacte, pause libre de
+  bouger) est nommée, jamais ce que le véhicule fait seulement pendant ce temps. Dans l'ordre :
+  la pause du chauffeur même sans autre course ; les patients à bord pendant que la course peut
+  rouler (toute sa fenêtre de prise en charge ou d'arrivée), « transporte un autre patient de … à … »
+  si aucune place ne peut la prendre (transport exclusif, véhicule plein), sinon « ne peut pas la
+  partager avec son patient de … à … (détour ou horaires) » ; la pause si elle tombe dans cette
+  fenêtre (« est en pause de … à … ») ; la course juste après (« ne peut pas rejoindre ensuite son
+  arrêt de … »), puis juste avant (« ne peut pas arriver à temps après son arrêt de … ») ; la pause
+  hors de la fenêtre (« ne peut pas décaler sa pause de … à … pour la prendre ») ; sinon « ne peut
+  pas l'intercaler entre ses arrêts de … et … ». Au-delà de 3 véhicules, un décompte (« sur 8
+  véhicules compatibles, 1 transporte d'autres patients, 4 ne peuvent pas la partager avec leurs
+  patients (détour ou horaires) et 3 ne peuvent pas l'intercaler entre leurs courses », « les 4
+  véhicules compatibles transportent d'autres patients ») ; quand aucun ne peut l'assurer avec la
+  pause de son chauffeur, même sans autre course, le motif ajoute « à confier à un confrère ou
+  décaler la pause ». Une course figée dit « le véhicule figé … » (le web nomme le véhicule autour
+  du motif). Libellés sans « », comme les écrans du planning, et espace insécable avant « : » et
+  « ; ». Au plus 1 s pour toutes (0,13 s pour une course à 96 véhicules compatibles), ensuite les
+  seuls horaires ; si la recherche a été interrompue par la limite de temps
   (statut `ROUTING_PARTIAL_SUCCESS_LOCAL_OPTIMUM_NOT_REACHED`) ou si le planning vient de la
   méthode de secours ci-dessus, « Non placée dans le temps de calcul imparti… » et un
   avertissement dans `meta.warnings` donne le nombre de courses concernées et le temps conseillé.

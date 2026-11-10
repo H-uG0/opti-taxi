@@ -102,8 +102,8 @@ under the same rules and the same objective. plan_score weighs like the objectiv
 trip left out and per patient not served both ways, minus the margin as the response reports it):
 one more trip served can be traded for one fewer half-served patient, the margin deciding. Last, a
 trip still left out may take the place of a trip in its way that fits elsewhere (make_room, the time
-the search left or MAKE_ROOM_SEC), and each trip left out gets a reason naming what its compatible
-vehicles do meanwhile (left_out_reason, REASON_SEC).
+the search left or MAKE_ROOM_SEC), and each trip left out gets a reason naming what keeps each
+compatible vehicle from taking it (left_out_reason, REASON_SEC).
 
 The plan in place is repaired at break sites that do not depend on the locks (_break_site_vehicles)
 and include the places where its routes rest (_plan_break_sites): repairing a plan the optimizer
@@ -210,25 +210,39 @@ the rest goes on from the best plan they found."""
 MIN_PROBE_SEC = 0.5
 """Shortest search from one start worth running: below it, only the cheapest start is searched."""
 
+NBSP = "\u00a0"
+"""Non-breaking space, before « : » and « ; » in the reasons of the trips left out (French
+typography: a narrow panel never starts a line with the punctuation)."""
 REASON_DROPPED_PREFIX = "Pas de place dans les tournées pour le trajet de"
-"""Start of the reason of a trip the search left out with no more time to help: what each compatible
-vehicle does while it would ride follows (_DayModel.left_out_reason)."""
+"""Start of the reason of a trip the search left out with no more time to help: what keeps each
+compatible vehicle from taking it follows (_DayModel.left_out_reason)."""
 REASON_DROPPED_DETAIL = "conflit d'horaires, de capacité ou de pause avec les autres courses"
 """What the reason of a trip left out says when there was no time left to tell what each vehicle does."""
 REASON_SEC = 1.0
-"""Most time spent telling, for the trips left out, what each compatible vehicle does meanwhile."""
+"""Most time spent telling, for the trips left out, what keeps each compatible vehicle from taking them."""
 MAX_NAMED_VEHICLES = 3
 """Up to this many compatible vehicles, the reason of a trip left out names each one; above, it counts them."""
+ALONE_TEXT = "ne peut pas l'assurer avec la pause de son chauffeur, même sans autre course"
+"""What the reason says of a vehicle whose driver cannot take the trip and the break even in an
+otherwise empty day."""
+ALONE_ADVICE = "à confier à un confrère ou décaler la pause"
+"""What the regulator can do when no compatible vehicle can take the trip with its driver's break."""
 LEFT_OUT_KINDS: dict[str, tuple[str, str]] = {
+    "free": ("{} a la place de la prendre (à placer à la main)", "{} ont la place de la prendre (à placer à la main)"),
     "busy": ("{} transporte d'autres patients", "{} transportent d'autres patients"),
-    "break": ("{} est en pause", "{} sont en pause"),
+    "share": (
+        "{} ne peut pas la partager avec ses patients (détour ou horaires)",
+        "{} ne peuvent pas la partager avec leurs patients (détour ou horaires)",
+    ),
+    "break": ("{} est bloqué par la pause de son chauffeur", "{} sont bloqués par la pause de leur chauffeur"),
     "tight": ("{} ne peut pas l'intercaler entre ses courses", "{} ne peuvent pas l'intercaler entre leurs courses"),
     "alone": (
-        "{} ne peut pas l'assurer avec la pause de son chauffeur",
-        "{} ne peuvent pas l'assurer avec la pause de leur chauffeur",
+        "{} ne peut pas l'assurer avec la pause de son chauffeur, même sans autre course",
+        "{} ne peuvent pas l'assurer avec la pause de leur chauffeur, même sans autre course",
     ),
 }
-"""Singular and plural of each kind of vehicle activity counted in the reason of a trip left out (left_out_reason)."""
+"""Singular and plural of each kind of obstacle counted in the reason of a trip left out
+(_DayModel.left_out_reason, _DayModel._obstacle)."""
 REASON_DROPPED_TIME_LIMIT = (
     "Non placée dans le temps de calcul imparti : augmenter le temps de calcul (Paramètres) ou placer la course à la main"
 )
@@ -1080,8 +1094,9 @@ class _DayModel:
         allow, completed: per route of a usable vehicle, the trips it may serve (vehicle type, lock)
         picked up then dropped off on it, once in the day, in the order given; then each route
         without the trips that break a rule (seats, exclusive ride, times, shift, work time, detour,
-        time on board, wait at the facility; _kept_in_place), with its break; then every trip left
-        out back where it fits (_insert_left_out), until `deadline`."""
+        time on board, wait at the facility; _kept_in_place), with its break; then the trips taken
+        out, and after them every other trip left out, back where they fit (_insert_left_out),
+        until `deadline`."""
         position = {member.vehicle.id: v for v, member in enumerate(self.fleet)}
         routes = self._breaks_only_routes()
         given: set[int] = set()
@@ -1117,6 +1132,11 @@ class _DayModel:
                     taken.add(trip_id)
                     sequence.append(self.manager.NodeToIndex(d_node))
             routes[v] = self._kept_in_place(v, sequence)
+        # The trips the repair took out go back first, as in guarded: a cheaper trip left out of
+        # the plan in place must not take the slot of one of its trips (locked or not).
+        kept = {trip_id for route in routes for trip_id in self._trip_ids(route)}
+        if taken - kept:
+            self._insert_left_out(routes, deadline, only=taken - kept)
         self._insert_left_out(routes, deadline)
         return routes
 
@@ -1340,7 +1360,10 @@ class _DayModel:
         The trips the search left out get one more try because its moves cannot place a trip that
         only fits once the vehicle's break moves, which the Python insertion does
         (_cheapest_insertion). With make_room, 2 to 7 more trips served on the busy days (journal,
-        OPT-09)."""
+        OPT-09). The trips taken out go back first, on their own: the regret insertion ranks by
+        partner, regret and cost, never by lock, so a cheaper trip the search left out could take
+        the slot a locked trip had just held (« Placer les non affectées » locks every trip in
+        place: such a plan is discarded by the web)."""
         removed: dict[str, str] = {}
         for v in range(len(self.fleet)):
             while breaches := self._scheduled_reasons(v, routes[v]):
@@ -1355,9 +1378,11 @@ class _DayModel:
                     for trip_id in before
                     if trip_id not in after
                 )
+        deadline = time.monotonic() + seconds
         self._exact_checks = True
         try:
-            placed = self._insert_left_out(routes, time.monotonic() + seconds)
+            placed = self._insert_left_out(routes, deadline, only=set(removed)) if removed else 0
+            placed += self._insert_left_out(routes, deadline)
         finally:
             self._exact_checks = False
         served = {trip_id for route in routes for trip_id in self._trip_ids(route)}
@@ -1523,39 +1548,154 @@ class _DayModel:
     def left_out_reason(
         self, trip: Trip, routes: Sequence[Sequence[int]], schedules: dict[int, RouteSchedule | None], deadline: float
     ) -> str:
-        """Why the final routes have no place for `trip`, in French for the regulator: what each
-        compatible vehicle does while the patient would be on board (from the pickup to the dropoff
-        at the trip's own times: the appointment of an outbound, the end of session of a return),
-        or that it cannot take the trip and its driver's break even alone. `schedules` caches the
-        timing of each route (schedule.py, as the response reports it) across the trips left out;
-        past `deadline`, the reason only gives the trip's times."""
+        """Why the final routes have no place for `trip`, in French for the regulator: the trip's
+        own times (the appointment of an outbound, the end of session of a return), then what keeps
+        each compatible vehicle from taking it (_obstacle), named up to MAX_NAMED_VEHICLES and
+        counted above; « le véhicule figé » for a trip locked on its vehicle, which the web names
+        around the reason. `schedules` caches the timing of each route (schedule.py, as the response
+        reports it) across the trips left out; past `deadline`, the reason only gives the trip's
+        times. Checked like the final passes, on the times schedule.py reports."""
         p_node, d_node = self.trip_nodes[trip.id]
         pickup, delivery = self.nodes[p_node], self.nodes[d_node]
         ride = pickup.service_min + self._leg(pickup, delivery)
-        begin = delivery.window.close - ride if trip.direction == "OUTBOUND" else pickup.window.open
-        end = begin + ride
-        head = f"{REASON_DROPPED_PREFIX} {hhmm(begin)} à {hhmm(end)}"
+        if trip.direction == "OUTBOUND":
+            begin, span = delivery.window.close - ride, (delivery.window.open - ride, delivery.window.close)
+        else:
+            begin, span = pickup.window.open, (pickup.window.open, pickup.window.close + ride)
+        head = f"{REASON_DROPPED_PREFIX} {hhmm(begin)} à {hhmm(begin + ride)}{NBSP}: "
+        candidates = self._candidates[trip.id]
         found: list[tuple[str, str]] = []
-        """(kind, what the vehicle does) per compatible vehicle."""
-        for v in self._candidates[trip.id]:
-            if time.monotonic() >= deadline:
-                return f"{head} : {REASON_DROPPED_DETAIL}"
-            if v not in self._alone_routes:
-                self._alone_routes[v] = (self._with_break([], v) or []) if v in self.break_nodes else []
-            if self._cheapest_insertion(self._alone_routes[v], v, trip) is None:
-                found.append(("alone", "ne peut pas l'assurer avec la pause de son chauffeur"))
-                continue
-            if v not in schedules:
-                scheduled = self._scheduled(v, routes[v])
-                schedules[v] = None if scheduled is None else scheduled[1]
-            found.append(_activity(schedules[v], begin, end))
+        """(kind, what keeps the vehicle from taking the trip) per compatible vehicle."""
+        self._exact_checks = True
+        try:
+            for v in candidates:
+                if time.monotonic() >= deadline:
+                    return head + REASON_DROPPED_DETAIL
+                found.append(self._obstacle(v, routes[v], trip, span, schedules))
+        finally:
+            self._exact_checks = False
+        return head + self._obstacles_text(trip, candidates, found)
+
+    def _obstacles_text(self, trip: Trip, candidates: Sequence[int], found: Sequence[tuple[str, str]]) -> str:
+        """The obstacles of every compatible vehicle (_obstacle), worded for left_out_reason."""
+        if trip.locked_vehicle_id is not None:
+            return f"le véhicule figé {found[0][1]}"
+        if all(kind == "alone" for kind, _ in found):
+            # Whatever the plan, no driver can take it: say what the regulator can do.
+            if len(found) == 1:
+                return f"{_label(self.fleet[candidates[0]].vehicle)} {ALONE_TEXT}{NBSP}: {ALONE_ADVICE}"
+            return (
+                f"aucun des {len(found)} véhicules compatibles ne peut l'assurer avec la pause de son chauffeur, "
+                f"même sans autre course{NBSP}: {ALONE_ADVICE}"
+            )
         if len(found) <= MAX_NAMED_VEHICLES:
-            names = [vehicle_name(self.fleet[v].vehicle) for v in self._candidates[trip.id]]
-            return f"{head} : " + " ; ".join(f"{name} {what}" for name, (_, what) in zip(names, found, strict=True))
+            names = [_label(self.fleet[v].vehicle) for v in candidates]
+            return f"{NBSP}; ".join(f"{name} {what}" for name, (_, what) in zip(names, found, strict=True))
         counts = {kind: sum(1 for k, _ in found if k == kind) for kind in LEFT_OUT_KINDS}
+        if len([count for count in counts.values() if count]) == 1:
+            kind = next(kind for kind, count in counts.items() if count)
+            return LEFT_OUT_KINDS[kind][1].format(f"les {len(found)} véhicules compatibles")
         parts = [LEFT_OUT_KINDS[kind][0 if count == 1 else 1].format(count) for kind, count in counts.items() if count]
-        listed = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " et " + parts[-1]
-        return f"{head} : sur {len(found)} véhicules compatibles, {listed}"
+        return f"sur {len(found)} véhicules compatibles, " + ", ".join(parts[:-1]) + " et " + parts[-1]
+
+    def _obstacle(
+        self, v: int, route: Sequence[int], trip: Trip, span: tuple[int, int], schedules: dict[int, RouteSchedule | None]
+    ) -> tuple[str, str]:
+        """(kind of LEFT_OUT_KINDS, French text) of what keeps vehicle v from taking `trip` into
+        `route`. Each possible cause is taken away in turn, and the first whose absence lets the
+        trip in (the exact insertion, the break free to move, _cheapest_insertion) is named, so
+        that the reason never blames what the vehicle merely does meanwhile (12/11 of the small
+        seed: an ambulance « en pause » that could not take the trip without its break either):
+        - "alone": the trip and the driver's break do not fit even in an otherwise empty day;
+        - "free": nothing, the trip fits the route as it is (a final pass changed it after the
+          last try; never seen on the seeds and the demo);
+        - the patients on board during `span`, every minute the trip may ride (its whole pickup
+          window for a return, arrival window for an outbound): "busy" when no seat can take it
+          (an exclusive ride, a full vehicle), "share" otherwise (the shared ride breaks the
+          detour, the time on board or the windows);
+        - "break": the break of the route, when it falls in `span`;
+        - "tight": the trip right after `span`, then the one right before, named by its stop;
+        - "break": the break of the route outside `span` (it cannot move for the trip);
+        - "tight" otherwise, with the stops around `span` (several trips in the way)."""
+        if v not in self._alone_routes:
+            self._alone_routes[v] = (self._with_break([], v) or []) if v in self.break_nodes else []
+        if self._cheapest_insertion(self._alone_routes[v], v, trip) is None:
+            if v in self.break_nodes:
+                return "alone", ALONE_TEXT
+            return "tight", "n'a pas le temps de l'assurer dans ses heures de service"
+        if self._cheapest_insertion(route, v, trip) is not None:
+            # A final pass changed the route after the last try (make_room): never blame a cause.
+            return "free", "a la place de la prendre (à placer à la main)"
+        if v not in schedules:
+            scheduled = self._scheduled(v, route)
+            schedules[v] = None if scheduled is None else scheduled[1]
+        schedule = schedules[v]
+        if schedule is None:
+            return "tight", "n'a pas le temps de l'assurer"
+        first, last = span
+        periods: dict[str, tuple[int, int]] = {}
+        """Pickup and dropoff service starts of each trip of the route, in route order."""
+        for timed in schedule.stops:
+            trip_id = timed.stop.trip.id
+            start = periods.get(trip_id, (timed.start_min, timed.start_min))[0]
+            periods[trip_id] = (start, timed.start_min)
+        aboard = [trip_id for trip_id, (a, b) in periods.items() if a < last and b > first]
+        if aboard and self._fits_without(v, route, trip, set(aboard)):
+            a, b = hhmm(min(periods[t][0] for t in aboard)), hhmm(max(periods[t][1] for t in aboard))
+            if self._no_seat(v, trip, aboard, schedule, span):
+                who = "un autre patient" if len(aboard) == 1 else "d'autres patients"
+                return "busy", f"transporte {who} de {a} à {b}"
+            whose = "son patient" if len(aboard) == 1 else "ses patients"
+            return "share", f"ne peut pas la partager avec {whose} de {a} à {b} (détour ou horaires)"
+        slot = schedule.break_slot
+        has_break = any(self.node_at(index).role is Role.BREAK for index in route)
+        during = slot is not None and slot[0] < last and slot[1] > first
+        if slot is not None and has_break and during and self._fits_without_break(v, route, trip):
+            return "break", f"est en pause de {hhmm(slot[0])} à {hhmm(slot[1])}"
+        after = [trip_id for trip_id in periods if trip_id not in aboard and periods[trip_id][0] >= last]
+        if after and self._fits_without(v, route, trip, {(following := min(after, key=lambda t: periods[t][0]))}):
+            return "tight", f"ne peut pas rejoindre ensuite son arrêt de {hhmm(periods[following][0])}"
+        before = [trip_id for trip_id in periods if trip_id not in aboard and periods[trip_id][1] <= first]
+        if before and self._fits_without(v, route, trip, {(preceding := max(before, key=lambda t: periods[t][1]))}):
+            return "tight", f"ne peut pas arriver à temps après son arrêt de {hhmm(periods[preceding][1])}"
+        if slot is not None and has_break and not during and self._fits_without_break(v, route, trip):
+            return "break", f"ne peut pas décaler sa pause de {hhmm(slot[0])} à {hhmm(slot[1])} pour la prendre"
+        starts = [timed.start_min for timed in schedule.stops]
+        earlier, later = [m for m in starts if m <= first], [m for m in starts if m >= last]
+        if earlier and later:
+            return "tight", f"ne peut pas l'intercaler entre ses arrêts de {hhmm(earlier[-1])} et {hhmm(later[0])}"
+        return "tight", "ne peut pas l'enchaîner avec ses autres courses"
+
+    def _fits_without(self, v: int, route: Sequence[int], trip: Trip, trip_ids: set[str]) -> bool:
+        """Whether `trip` fits the route of vehicle v once these trips are out of it."""
+        return self._cheapest_insertion(self._without_trips(route, trip_ids, v), v, trip) is not None
+
+    def _fits_without_break(self, v: int, route: Sequence[int], trip: Trip) -> bool:
+        """Whether `trip` fits the route of vehicle v if its driver took no break. Without the
+        exact checks: schedule.py would place a break anyway, the 6 h rule (_scheduled_reasons)
+        would ask for one, and the break would seem not to be in the way."""
+        bare = [index for index in route if self.node_at(index).role is not Role.BREAK]
+        exact, self._exact_checks = self._exact_checks, False
+        try:
+            return self._first_feasible(v, bare, self._insertion_positions(bare, v, trip), trip) is not None
+        finally:
+            self._exact_checks = exact
+
+    def _no_seat(self, v: int, trip: Trip, aboard: Sequence[str], schedule: RouteSchedule, span: tuple[int, int]) -> bool:
+        """Whether vehicle v has no seat for `trip` beside the patients `aboard` during `span`: an
+        exclusive ride (theirs or the trip's, an ambulance), or every seat taken whenever someone
+        is on board."""
+        capacity = self.fleet[v].vehicle.capacity
+        if not trip.shareable or capacity < 2 or any(not self.ctx.trips[t].shareable for t in aboard):
+            return True
+        first, last = span
+        stops = schedule.stops
+        loads = [
+            timed.load_after
+            for timed, following in zip(stops, stops[1:], strict=False)
+            if timed.load_after and timed.start_min < last and following.start_min > first
+        ]
+        return bool(loads) and min(loads) >= capacity
 
     def _trip_ids(self, sequence: Sequence[int]) -> list[str]:
         return [node.trip.id for node in (self.node_at(index) for index in sequence) if node.trip is not None and node.role is Role.PICKUP]
@@ -1981,37 +2121,10 @@ def _lawful_work_time(schedule: RouteSchedule) -> bool:
     )
 
 
-def _activity(schedule: RouteSchedule | None, begin: int, end: int) -> tuple[str, str]:
-    """(kind, French text) of what a vehicle does during [begin, end]: patients on board, its
-    break, or neither (its other trips leave no room for the drives to and from this one)."""
-    if schedule is None:
-        return "tight", "n'a pas le temps de l'assurer"
-    stops = schedule.stops
-    loaded: list[tuple[int, int, set[str]]] = []
-    """Periods with patients on board: from a stop's service start to the next stop's, merged."""
-    for k, timed in enumerate(stops[:-1]):
-        if timed.load_after == 0:
-            continue
-        aboard = set(schedule.legs[k + 1].on_board)
-        start, stop = timed.start_min, stops[k + 1].start_min
-        if loaded and loaded[-1][1] == start:
-            loaded[-1] = (loaded[-1][0], stop, loaded[-1][2] | aboard)
-        else:
-            loaded.append((start, stop, aboard))
-    overlapping = [(a, b, aboard) for a, b, aboard in loaded if a < end and b > begin]
-    if overlapping:
-        first, last = overlapping[0][0], overlapping[-1][1]
-        patients = set().union(*(aboard for _, _, aboard in overlapping))
-        who = "un autre patient" if len(patients) == 1 else "d'autres patients"
-        return "busy", f"transporte {who} de {hhmm(first)} à {hhmm(last)}"
-    slot = schedule.break_slot
-    if slot is not None and slot[0] < end and slot[1] > begin:
-        return "break", f"est en pause de {hhmm(slot[0])} à {hhmm(slot[1])}"
-    before = [timed.start_min for timed in stops if timed.start_min <= begin]
-    after = [timed.start_min for timed in stops if timed.start_min >= end]
-    if before and after:
-        return "tight", f"ne peut pas l'intercaler entre ses arrêts de {hhmm(before[-1])} et {hhmm(after[0])}"
-    return "tight", "ne peut pas l'enchaîner avec ses autres courses"
+def _label(vehicle: Vehicle) -> str:
+    """A vehicle in the reason of a trip left out: its label as the planning screens write it,
+    without the « » of vehicle_name (the web shows these reasons among its own lines)."""
+    return vehicle.label or vehicle.id
 
 
 def solve(ctx: PlanContext, initial_routes: Sequence[RoutePlan] = ()) -> SolveOutcome:

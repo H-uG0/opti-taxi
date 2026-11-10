@@ -45,6 +45,25 @@ describe("emptyPlanIssue", () => {
     );
   });
 
+  it("counts together the reasons that only differ by their trip's times and vehicles", () => {
+    const noRoom = (times: string, what: string) => `Pas de place dans les tournées pour le trajet de ${times} : ${what}`;
+    const reasons = [
+      noRoom("11:30 à 11:54", "Ambulance 1 (Marseille) est en pause de 11:46 à 12:31"),
+      noRoom("07:53 à 09:00", "Ambulance 2 (Gap) ne peut pas arriver à temps après son arrêt de 07:00"),
+      noRoom("13:10 à 14:00", "les 8 véhicules compatibles transportent d'autres patients"),
+      "Aucun véhicule de type autorisé (Ambulance) disponible ce jour",
+      "Aucun véhicule de type autorisé (Ambulance) disponible ce jour",
+    ];
+    expect(emptyPlanIssue(plan(0, 5, reasons))).toBe(
+      "L'optimisation n'a placé aucune des 5 courses : le planning actuel est conservé. " +
+        "Motif le plus fréquent (3 sur 5) : Pas de place dans les tournées.",
+    );
+    expect(emptyPlanIssue(plan(0, 3, [UNREACHABLE, UNREACHABLE.replace("09:00", "10:30"), TIME_LIMIT]))).toBe(
+      "L'optimisation n'a placé aucune des 3 courses : le planning actuel est conservé. " +
+        "Motif le plus fréquent (2 sur 3) : Horaires inatteignables : aucun véhicule compatible ne peut assurer la course.",
+    );
+  });
+
   it("still refuses an empty plan that gives no reason", () => {
     expect(emptyPlanIssue(plan(0, 2, []))).toBe("L'optimisation n'a placé aucune des 2 courses : le planning actuel est conservé.");
   });
