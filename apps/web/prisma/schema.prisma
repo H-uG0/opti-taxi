@@ -233,6 +233,11 @@ model Patient {
   mobility    Mobility @default(SEATED)
   accessNotes String?
   active      Boolean  @default(true)
+  /// Search key of the Patients list: last name, first name, city and postal code in lowercase without
+  /// accents (extension unaccent), then the phone's digits in national form (« 0612345678 »). Written by
+  /// the trigger patient_search_text (migration patient_search) on every insert or update, whatever
+  /// writes the row: never set by the application.
+  searchText  String   @default("")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

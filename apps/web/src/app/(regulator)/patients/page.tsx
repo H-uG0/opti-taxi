@@ -1,18 +1,32 @@
 import type { Metadata } from "next";
-import Form from "next/form";
 import Link from "next/link";
-import type { Prisma } from "@prisma/client";
-import { Plus, Search } from "lucide-react";
+import { Plus } from "lucide-react";
 import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { compareLabels } from "@/lib/fleet/order";
 import { MOBILITY_LABELS, PRESCRIBED_MODE_LABELS } from "@/lib/labels";
+import { filterHref, pageOf } from "@/lib/list-filters";
 import { formatShortDate, todayIso, toIsoDate } from "@/lib/time";
 import { Badge } from "@/components/ui/badge";
-import { Button, LinkButton } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/form";
+import { LinkButton } from "@/components/ui/button";
+import { FilterBar, FilterSearch, FilterSelect } from "@/components/ui/filter-bar";
 import { EmptyState, PageHeader } from "@/components/ui/layout";
+import { Pagination } from "@/components/ui/pagination";
 import { Table, TBody, Td, Th, THead } from "@/components/ui/table";
+import {
+  isFiltered,
+  MOBILITIES,
+  parsePatientFilter,
+  PATIENT_PAGE_SIZE,
+  patientOrderBy,
+  patientParams,
+  patientWhere,
+  PRESCRIPTION_FILTERS,
+  SORTS,
+  STATUS_FILTERS,
+  type StatusFilter,
+} from "./_lib/list-filter";
 import {
   findRenewal,
   formatRecurrenceSummary,
@@ -25,24 +39,18 @@ import {
 
 export const metadata: Metadata = { title: "Patients" };
 
-const STATUS_FILTERS = {
-  actifs: "Actifs",
-  inactifs: "Inactifs",
-  tous: "Tous",
-} as const;
-type StatusFilter = keyof typeof STATUS_FILTERS;
-
-const MAX_ROWS = 300;
-
-function first(value: string | string[] | undefined): string {
-  return (Array.isArray(value) ? value[0] : value) ?? "";
-}
+const SORT_PHRASES: Record<keyof typeof SORTS, string> = {
+  nom: "par nom",
+  "nom-desc": "par nom, de Z à A",
+  ville: "par ville",
+  recent: "du plus récent au plus ancien",
+};
 
 function describeResults(total: number, status: StatusFilter, q: string): string {
   if (total === 0) return "Aucun patient pour ces critères.";
   const plural = total > 1 ? "s" : "";
   const adjective = status === "actifs" ? ` actif${plural}` : status === "inactifs" ? ` inactif${plural}` : "";
-  return `${total} patient${plural}${adjective}${q ? ` correspondant à « ${q} »` : ""}`;
+  return `${new Intl.NumberFormat("fr-FR").format(total)} patient${plural}${adjective}${q ? ` correspondant à « ${q} »` : ""}`;
 }
 
 export default async function PatientsPage({
@@ -52,74 +60,67 @@ export default async function PatientsPage({
 }) {
   const user = await requireUser("REGULATOR");
   const params = await searchParams;
-  const q = first(params.q).trim().slice(0, 100);
-  const statusParam = first(params.statut);
-  const status: StatusFilter = Object.hasOwn(STATUS_FILTERS, statusParam) ? (statusParam as StatusFilter) : "actifs";
+  const filter = parsePatientFilter(params);
   const today = todayIso();
+  const where = patientWhere(filter, today);
 
-  // Every word must match the last name, first name or city.
-  const terms = q.split(/\s+/).filter(Boolean).slice(0, 5);
-  const where: Prisma.PatientWhereInput = {
-    ...(status === "tous" ? {} : { active: status === "actifs" }),
-    AND: terms.map((term) => ({
-      OR: [
-        { lastName: { contains: term, mode: "insensitive" as const } },
-        { firstName: { contains: term, mode: "insensitive" as const } },
-        { city: { contains: term, mode: "insensitive" as const } },
-      ],
-    })),
-  };
-
+  const [total, facilities] = await Promise.all([
+    db.patient.count({ where }),
+    db.facility.findMany({ where: { active: true }, select: { id: true, name: true } }),
+  ]);
+  const { page, pageCount, skip } = pageOf(params, total, PATIENT_PAGE_SIZE);
   // Mobility, prescriptions and care schedules of many patients are on screen (auditRead never throws).
   const traced = auditRead(user, { action: "patient_list.view", entity: "Patient", entityId: null });
-  const [patients, total] = await Promise.all([
-    db.patient.findMany({
-      where,
-      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
-      take: MAX_ROWS,
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        city: true,
-        postalCode: true,
-        mobility: true,
-        active: true,
-        prescriptions: {
-          select: {
-            id: true,
-            mode: true,
-            validFrom: true,
-            validTo: true,
-            // Facilities of the active recurrences: another series' PMT is never taken for a renewal.
-            recurrences: { where: { active: true }, select: { facilityId: true } },
-          },
-        },
-        recurrences: {
-          where: { active: true },
-          orderBy: { appointmentMinute: "asc" },
-          select: {
-            id: true,
-            weekdays: true,
-            appointmentMinute: true,
-            label: true,
-            prescriptionId: true,
-            facility: { select: { name: true } },
-          },
+  const patients = await db.patient.findMany({
+    where,
+    orderBy: patientOrderBy(filter.sort),
+    skip,
+    take: PATIENT_PAGE_SIZE,
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      phone: true,
+      city: true,
+      postalCode: true,
+      mobility: true,
+      active: true,
+      prescriptions: {
+        select: {
+          id: true,
+          mode: true,
+          validFrom: true,
+          validTo: true,
+          // Facilities of the active recurrences: another series' PMT is never taken for a renewal.
+          recurrences: { where: { active: true }, select: { facilityId: true } },
         },
       },
-    }),
-    db.patient.count({ where }),
-  ]);
+      recurrences: {
+        where: { active: true },
+        orderBy: { appointmentMinute: "asc" },
+        select: {
+          id: true,
+          weekdays: true,
+          appointmentMinute: true,
+          label: true,
+          prescriptionId: true,
+          facility: { select: { name: true } },
+        },
+      },
+    },
+  });
   await traced;
 
-  const filtered = q !== "" || status !== "actifs";
+  const filtered = isFiltered(filter);
+  const hrefOf = (target: number) => filterHref("/patients", { ...patientParams(filter), page: target > 1 ? target : null });
+  const first = skip + 1;
+  const last = skip + patients.length;
 
   return (
     <div>
       <PageHeader
         title="Patients"
-        description={describeResults(total, status, q)}
+        description={describeResults(total, filter.status, filter.q)}
         actions={
           <LinkButton href="/patients/nouveau" variant="primary">
             <Plus aria-hidden className="size-4" />
@@ -128,29 +129,49 @@ export default async function PatientsPage({
         }
       />
 
-      <Form key={`${q}|${status}`} action="/patients" role="search" className="mb-4 flex flex-wrap items-end gap-3">
-        <Field label="Rechercher" htmlFor="q" className="w-full sm:w-80">
-          <Input id="q" name="q" type="search" defaultValue={q} placeholder="Nom, prénom ou ville" maxLength={100} />
-        </Field>
-        <Field label="Statut" htmlFor="statut" className="w-40">
-          <Select id="statut" name="statut" defaultValue={status}>
-            {Object.entries(STATUS_FILTERS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Button type="submit" variant="secondary">
-          <Search aria-hidden className="size-4" />
-          Rechercher
-        </Button>
-        {filtered ? (
-          <Link href="/patients" className="pb-2.5 text-sm text-slate-600 underline-offset-2 hover:text-slate-900 hover:underline">
-            Réinitialiser
-          </Link>
-        ) : null}
-      </Form>
+      <FilterBar action="/patients" label="Rechercher un patient" resetHref="/patients" filtered={filtered} submitLabel="Rechercher" className="mb-4">
+        <FilterSearch defaultValue={filter.q} placeholder="Nom, prénom, ville, CP ou téléphone" className="sm:w-80" />
+        <FilterSelect
+          name="statut"
+          label="Statut"
+          value={filter.status}
+          defaultChoice="actifs"
+          options={Object.entries(STATUS_FILTERS).map(([value, label]) => ({ value, label }))}
+          className="w-32"
+        />
+        <FilterSelect
+          name="pmt"
+          label="Prescription"
+          value={filter.prescription ?? ""}
+          allLabel="Toutes"
+          options={Object.entries(PRESCRIPTION_FILTERS).map(([value, label]) => ({ value, label }))}
+          className="w-64"
+        />
+        <FilterSelect
+          name="etablissement"
+          label="Établissement (série en cours)"
+          value={filter.facility ?? ""}
+          allLabel="Tous"
+          options={[...facilities].sort((a, b) => compareLabels(a.name, b.name)).map((f) => ({ value: f.id, label: f.name }))}
+          className="w-64"
+        />
+        <FilterSelect
+          name="mobilite"
+          label="Mobilité"
+          value={filter.mobility ?? ""}
+          allLabel="Toutes"
+          options={MOBILITIES.map((m) => ({ value: m, label: MOBILITY_LABELS[m] }))}
+          className="w-40"
+        />
+        <FilterSelect
+          name="tri"
+          label="Trier par"
+          value={filter.sort}
+          defaultChoice="nom"
+          options={Object.entries(SORTS).map(([value, label]) => ({ value, label }))}
+          className="w-48"
+        />
+      </FilterBar>
 
       {patients.length === 0 ? (
         <EmptyState
@@ -165,11 +186,14 @@ export default async function PatientsPage({
             )
           }
         >
-          {filtered ? "Modifiez la recherche ou le filtre de statut." : "Commencez par créer une fiche patient."}
+          {filtered ? "Modifiez la recherche ou les filtres." : "Commencez par créer une fiche patient."}
         </EmptyState>
       ) : (
         <>
-          <Table>
+          <p className="mb-2 text-sm text-slate-600" aria-live="polite">
+            {pageCount > 1 ? `Patients ${first} à ${last} sur ${total}` : `${total} patient${total > 1 ? "s" : ""}`}, {SORT_PHRASES[filter.sort]}.
+          </p>
+          <Table stickyHeader>
             <THead>
               <tr>
                 <Th>Nom</Th>
@@ -201,6 +225,7 @@ export default async function PatientsPage({
                       >
                         <span className="uppercase">{patient.lastName}</span> {patient.firstName}
                       </Link>
+                      {patient.phone ? <span className="tabular block text-xs text-slate-500">{patient.phone}</span> : null}
                     </Td>
                     <Td className="whitespace-nowrap">
                       {patient.city}
@@ -265,11 +290,7 @@ export default async function PatientsPage({
               })}
             </TBody>
           </Table>
-          {total > patients.length ? (
-            <p className="mt-3 text-sm text-slate-600">
-              {patients.length} premiers patients affichés sur {total} : affinez la recherche pour voir les autres.
-            </p>
-          ) : null}
+          <Pagination page={page} pageCount={pageCount} hrefOf={hrefOf} label="Pages de la liste des patients" className="mt-3" />
         </>
       )}
     </div>

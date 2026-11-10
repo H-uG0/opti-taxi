@@ -19,7 +19,7 @@ import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_LABEL } from "@/lib/domain/no
 import { EXCEPTIONAL_AMBULANCE_REASON } from "@/lib/planning/exceptional-ambulance";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Td } from "@/components/ui/table";
-import { DIRECTION_LABELS, PAYER_LABELS, SHARING_STATUS_LABELS, TRIP_STATUS_LABELS, formatEuros, formatKm } from "@/lib/labels";
+import { DIRECTION_LABELS, PAYER_LABELS, SHARING_STATUS_LABELS, TRIP_STATUS_LABELS, VEHICLE_TYPE_SHORT, formatEuros, formatKm } from "@/lib/labels";
 import { formatMinute } from "@/lib/time";
 import { cancelTrip, recordSharingDecision, rescheduleTrip, restoreTrip, setTripToll } from "./actions";
 import { UnitInput } from "../vehicules/_lib/ui";
@@ -105,20 +105,41 @@ export type TripRowData = {
   planningHref?: string | null;
 };
 
-export const TRIP_TABLE_COLUMNS = 8;
+export const TRIP_TABLE_COLUMNS = 9;
 
 const PAYER_SHORT: Record<Payer, string> = { CPAM: "CPAM", PRIVATE: "Privé" };
 
-export function TripRow({ trip }: { trip: TripRowData }) {
+export function TripRow({
+  trip,
+  selection = null,
+}: {
+  trip: TripRowData;
+  /** The box of « Annuler la sélection », for a trip that can still be cancelled. */
+  selection?: { checked: boolean; onChange: (checked: boolean) => void } | null;
+}) {
   const [open, setOpen] = useState(false);
   const detailsId = useId();
   const cancelled = trip.status === "CANCELLED";
   const muted = cancelled ? "opacity-55" : undefined;
   const conflict = sharingConflict(trip);
+  const background = open ? "bg-brand-50/40" : selection?.checked ? "bg-amber-50/60" : undefined;
+  // The pinned « Détails » cell hides what scrolls under it: an opaque background of the same tint.
+  const pinnedBackground = open ? "bg-brand-50" : selection?.checked ? "bg-amber-50" : "bg-white group-hover:bg-slate-50";
 
   return (
     <>
-      <tr className={cn("align-top", open ? "bg-brand-50/40" : "hover:bg-slate-50")}>
+      <tr className={cn("group align-top", background ?? "hover:bg-slate-50")}>
+        <Td className="w-10 pr-0">
+          {selection ? (
+            <input
+              type="checkbox"
+              checked={selection.checked}
+              onChange={(event) => selection.onChange(event.target.checked)}
+              aria-label={`Sélectionner la course de ${trip.patientName} (${DIRECTION_LABELS[trip.direction].toLowerCase()}, ${formatMinute(trip.keyMinute)})`}
+              className="mt-1 size-4 rounded border-slate-300 accent-brand-700"
+            />
+          ) : null}
+        </Td>
         <Td className={cn("whitespace-nowrap", muted)}>
           <span className="tabular block text-base font-semibold text-slate-900">{formatMinute(trip.keyMinute)}</span>
           <span className="block text-xs text-slate-500">{keyMinuteLabel(trip.direction)}</span>
@@ -138,6 +159,12 @@ export function TripRow({ trip }: { trip: TripRowData }) {
               </Link>
             ) : null}
             {trip.origin ? null : <span className="text-xs text-slate-500">Ponctuelle</span>}
+            {/* The payer only when it is not the usual one; the full « Types · payeur » column from 1 536 px. */}
+            {trip.payer === "PRIVATE" ? (
+              <span className="2xl:hidden">
+                <Badge tone="info">Privé</Badge>
+              </span>
+            ) : null}
             {trip.conflicts.length > 0 ? (
               <span title={trip.conflicts.join(" ; ")}>
                 <Badge tone="warning" className="whitespace-nowrap">
@@ -161,7 +188,7 @@ export function TripRow({ trip }: { trip: TripRowData }) {
             </>
           ) : null}
         </Td>
-        <Td className={cn("max-w-72", muted)}>
+        <Td className={cn("max-w-60", muted)}>
           <span className="block truncate font-medium text-slate-800" title={trip.facilityName ?? undefined}>
             {trip.facilityName ?? "Adresse libre"}
           </span>
@@ -169,7 +196,7 @@ export function TripRow({ trip }: { trip: TripRowData }) {
             {trip.pickupAddress} → {trip.dropoffAddress}
           </span>
         </Td>
-        <Td className={cn("hidden lg:table-cell", muted)}>
+        <Td className={cn("hidden 2xl:table-cell", muted)}>
           <span className="flex flex-wrap gap-1">
             {trip.allowedVehicleTypes.map((type) => (
               <VehicleTypeBadge key={type} type={type} />
@@ -212,7 +239,7 @@ export function TripRow({ trip }: { trip: TripRowData }) {
             </span>
           ) : null}
         </Td>
-        <Td className={muted}>
+        <Td className={cn("max-w-44", muted)}>
           <Badge tone={SHARING_STATUS_TONES[trip.sharingStatus]}>{SHARING_STATUS_LABELS[trip.sharingStatus]}</Badge>
           {trip.sharingAnswerShort ? <TraceHint full={trip.sharingAnswer ?? undefined} short={trip.sharingAnswerShort} /> : null}
           {conflict ? (
@@ -230,7 +257,8 @@ export function TripRow({ trip }: { trip: TripRowData }) {
             </span>
           ) : null}
         </Td>
-        <Td className="text-right">
+        {/* Pinned to the right edge of the frame: « Détails » stays in reach when the table scrolls sideways. */}
+        <Td className={cn("sticky right-0 text-right", pinnedBackground)}>
           <Button
             variant="ghost"
             size="sm"
@@ -294,6 +322,7 @@ function TripDetails({ trip }: { trip: TripRowData }) {
           <Detail label="Prise en charge">{trip.pickupAddress}</Detail>
           <Detail label="Dépose">{trip.dropoffAddress}</Detail>
           <Detail label="Payeur">{PAYER_LABELS[trip.payer]}</Detail>
+          <Detail label="Véhicules possibles">{trip.allowedVehicleTypes.map((type) => VEHICLE_TYPE_SHORT[type]).join(", ")}</Detail>
           <Detail label="Prescription">{trip.prescriptionLabel}</Detail>
           <Detail label="Origine">{trip.origin ? `Récurrence « ${trip.origin} »` : "Course ponctuelle"}</Detail>
           {trip.statusTraces.length > 0 ? (

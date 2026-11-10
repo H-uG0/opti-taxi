@@ -3,14 +3,24 @@
  * day summary, co-passengers from route stops and French messages.
  * No server-only import so vitest can cover them.
  */
-import type { SharingStatus, TripDirection, TripStatus } from "@prisma/client";
+import type { Payer, SharingStatus, TripDirection, TripStatus } from "@prisma/client";
 import { isSameEpisode, type LegKey } from "@/lib/domain/no-show";
+import { normalizeSearch } from "@/lib/list-filters";
 import { formatShortDate, TIME_ZONE } from "@/lib/time";
 import { keyMinute, sharingConflict } from "./trip-rules";
 
 const TRIP_STATUSES = ["PLANNED", "ASSIGNED", "PICKED_UP", "DROPPED_OFF", "CANCELLED", "NO_SHOW"] as const satisfies readonly TripStatus[];
 const SHARING_STATUSES = ["NOT_ELIGIBLE", "NOT_PROPOSED", "PROPOSED", "ACCEPTED", "REFUSED"] as const satisfies readonly SharingStatus[];
 const DIRECTIONS = ["OUTBOUND", "RETURN"] as const satisfies readonly TripDirection[];
+const PAYERS = ["CPAM", "PRIVATE"] as const satisfies readonly Payer[];
+
+/** « Véhicule » filter: the trips still without a route (not cancelled, patient not absent). */
+export const UNASSIGNED = "aucun";
+/** « Établissement » filter: the trips to a free address (no facility). */
+export const NO_FACILITY = "libre";
+/** « Origine » filter: from a recurrence (regular) or created one by one. */
+export const ORIGINS = ["reguliere", "ponctuelle"] as const;
+export type OriginFilter = (typeof ORIGINS)[number];
 
 /**
  * "ACTIVE" = every status but CANCELLED; "RETURN_TO_CHECK" = return trips
@@ -30,9 +40,28 @@ export type TripFilters = {
    * patient's name never travels in a URL (access logs, history, Referer).
    */
   patient: string | null;
+  /** A facility id, or NO_FACILITY. */
+  facility: string | null;
+  /** A vehicle id (the trip's route), or UNASSIGNED. */
+  vehicle: string | null;
+  /** The depot of the trip's vehicle. */
+  depot: string | null;
+  payer: Payer | null;
+  origin: OriginFilter | null;
 };
 
-export const EMPTY_FILTERS: TripFilters = { status: null, direction: null, sharing: null, q: "", patient: null };
+export const EMPTY_FILTERS: TripFilters = {
+  status: null,
+  direction: null,
+  sharing: null,
+  q: "",
+  patient: null,
+  facility: null,
+  vehicle: null,
+  depot: null,
+  payer: null,
+  origin: null,
+};
 
 type SearchParamValue = string | string[] | undefined;
 
@@ -45,31 +74,44 @@ function pick<T extends string>(value: SearchParamValue, allowed: readonly T[]):
   return v !== undefined && (allowed as readonly string[]).includes(v) ? (v as T) : null;
 }
 
-/** Reads ?statut=&sens=&partage=&q=&patient= ; unknown values are ignored. */
+function id(value: SearchParamValue): string | null {
+  const v = (firstValue(value) ?? "").trim();
+  return /^[\w-]{1,64}$/.test(v) ? v : null;
+}
+
+/** Reads ?statut=&sens=&partage=&q=&patient=&etablissement=&vehicule=&depot=&payeur=&origine= ; unknown values are ignored. */
 export function parseTripFilters(params: Record<string, SearchParamValue>): TripFilters {
-  const patient = (firstValue(params.patient) ?? "").trim();
   return {
     status: pick<StatusFilter>(params.statut, [...TRIP_STATUSES, "ACTIVE", "RETURN_TO_CHECK"]),
     direction: pick<TripDirection>(params.sens, DIRECTIONS),
     sharing: pick<SharingFilter>(params.partage, [...SHARING_STATUSES, "SHARED"]),
     q: (firstValue(params.q) ?? "").trim().slice(0, 80),
-    patient: /^[\w-]{1,64}$/.test(patient) ? patient : null,
+    patient: id(params.patient),
+    facility: id(params.etablissement),
+    vehicle: id(params.vehicule),
+    depot: id(params.depot),
+    payer: pick<Payer>(params.payeur, PAYERS),
+    origin: pick<OriginFilter>(params.origine, ORIGINS),
   };
 }
 
 export function hasActiveFilters(filters: TripFilters): boolean {
-  return filters.status !== null || filters.direction !== null || filters.sharing !== null || filters.q !== "" || filters.patient !== null;
+  return (
+    filters.status !== null ||
+    filters.direction !== null ||
+    filters.sharing !== null ||
+    filters.q !== "" ||
+    filters.patient !== null ||
+    filters.facility !== null ||
+    filters.vehicle !== null ||
+    filters.depot !== null ||
+    filters.payer !== null ||
+    filters.origin !== null
+  );
 }
 
-/** Lowercase, accents removed: "Hélène" and "helene" match. */
-export function normalizeSearch(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
+/** Lowercase, accents removed: "Hélène" and "helene" match (lib/list-filters.ts). */
+export { normalizeSearch };
 
 export type FilterableTrip = {
   patientId?: string;
@@ -80,6 +122,15 @@ export type FilterableTrip = {
   patient: { firstName: string; lastName: string };
   /** Return trip to check: its outbound leg was closed as patient absent (returnsToCheckAfterNoShow). */
   outboundNoShow?: boolean;
+  routeId?: string | null;
+  facilityId?: string | null;
+  facility?: { name: string } | null;
+  pickupAddress?: string;
+  dropoffAddress?: string;
+  payer?: Payer;
+  recurrenceId?: string | null;
+  /** The vehicle of the trip's route and its depot. */
+  route?: { vehicle: { id: string; depotId: string } } | null;
 };
 
 export function matchesFilters(trip: FilterableTrip, filters: TripFilters): boolean {
@@ -97,11 +148,27 @@ export function matchesFilters(trip: FilterableTrip, filters: TripFilters): bool
   } else if (filters.sharing !== null && trip.sharingStatus !== filters.sharing) {
     return false;
   }
+  if (filters.facility === NO_FACILITY ? (trip.facilityId ?? null) !== null : filters.facility !== null && trip.facilityId !== filters.facility) {
+    return false;
+  }
+  if (filters.vehicle === UNASSIGNED) {
+    if ((trip.routeId ?? null) !== null || trip.status === "CANCELLED" || trip.status === "NO_SHOW") return false;
+  } else if (filters.vehicle !== null && trip.route?.vehicle.id !== filters.vehicle) {
+    return false;
+  }
+  if (filters.depot !== null && trip.route?.vehicle.depotId !== filters.depot) return false;
+  if (filters.payer !== null && trip.payer !== filters.payer) return false;
+  if (filters.origin !== null && ((trip.recurrenceId ?? null) !== null) !== (filters.origin === "reguliere")) return false;
   if (filters.q) {
+    // The patient's name in both orders, the facility and the addresses (a city): « clinique gap », « dupont marie ».
     const needle = normalizeSearch(filters.q);
     const { firstName, lastName } = trip.patient;
     const haystacks = [`${firstName} ${lastName}`, `${lastName} ${firstName}`].map(normalizeSearch);
-    if (!haystacks.some((h) => h.includes(needle))) return false;
+    if (!haystacks.some((h) => h.includes(needle))) {
+      const place = normalizeSearch([trip.facility?.name, trip.pickupAddress, trip.dropoffAddress].filter(Boolean).join(" "));
+      const words = needle.split(" ");
+      if (!words.every((word) => place.includes(word) || haystacks[0]!.includes(word))) return false;
+    }
   }
   return true;
 }
@@ -206,13 +273,18 @@ export function summarizeTrips(
   return summary;
 }
 
-/** Filters in use as URL parameters (statut, sens, partage, q). */
+/** Filters in use as URL parameters. */
 export function filtersToParams(filters: TripFilters): Record<string, string> {
   const params: Record<string, string> = {};
   if (filters.status) params.statut = filters.status;
   if (filters.direction) params.sens = filters.direction;
   if (filters.sharing) params.partage = filters.sharing;
   if (filters.q) params.q = filters.q;
+  if (filters.facility) params.etablissement = filters.facility;
+  if (filters.vehicle) params.vehicule = filters.vehicle;
+  if (filters.depot) params.depot = filters.depot;
+  if (filters.payer) params.payeur = filters.payer;
+  if (filters.origin) params.origine = filters.origin;
   if (filters.patient) params.patient = filters.patient;
   return params;
 }
@@ -274,6 +346,35 @@ export function pairedReturns(
     if (back) pairs.set(outbound.id, { id: back.id, keyMinute: back.readyMinute });
   }
   return pairs;
+}
+
+/**
+ * Feedback of « Annuler la sélection » : « 12 courses annulées (hospitalisation),
+ * dont 4 retirées de leur tournée. 3 annulations tardives. 2 courses non
+ * annulées : déjà commencées, terminées ou modifiées entre-temps. »
+ */
+export function bulkCancelMessage(result: { cancelled: number; fromRoutes: number; late: number; skipped: number; reason: string }): string {
+  const parts: string[] = [];
+  if (result.cancelled > 0) {
+    const routes =
+      result.fromRoutes === 0
+        ? ""
+        : result.fromRoutes === result.cancelled
+          ? result.cancelled > 1
+            ? ", toutes retirées de leur tournée"
+            : " et retirée de sa tournée"
+          : `, dont ${plural(result.fromRoutes, "retirée de sa tournée", "retirées de leur tournée")}`;
+    parts.push(`${plural(result.cancelled, "course annulée", "courses annulées")} (${result.reason})${routes}.`);
+    if (result.late > 0) parts.push(`${plural(result.late, "annulation tardive", "annulations tardives")}.`);
+  } else {
+    parts.push("Aucune course annulée.");
+  }
+  if (result.skipped > 0) {
+    parts.push(
+      `${plural(result.skipped, "course non annulée", "courses non annulées")} : déjà ${result.skipped > 1 ? "commencées, terminées ou modifiées" : "commencée, terminée ou modifiée"} entre-temps.`,
+    );
+  }
+  return parts.join(" ");
 }
 
 /** Feedback of « Générer les courses » : what was created or brought back between fromIso and toIso. */

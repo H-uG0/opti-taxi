@@ -17,7 +17,9 @@ import {
   summarizeTrips,
 } from "./trip-list";
 
-type T = Parameters<typeof summarizeTrips>[0][number] & Parameters<typeof sortTrips>[0][number] & { patientId?: string };
+type T = Parameters<typeof summarizeTrips>[0][number] &
+  Parameters<typeof sortTrips>[0][number] &
+  Omit<Parameters<typeof filterTrips>[0][number], "status" | "direction" | "sharingStatus" | "shared" | "patient">;
 
 function trip(overrides: Partial<T> & { id: string }): T {
   return {
@@ -37,20 +39,22 @@ function trip(overrides: Partial<T> & { id: string }): T {
 describe("parseTripFilters", () => {
   it("keeps known values and ignores the rest", () => {
     expect(parseTripFilters({ statut: "CANCELLED", sens: "RETURN", partage: "SHARED", q: "  dupont " })).toEqual({
+      ...EMPTY_FILTERS,
       status: "CANCELLED",
       direction: "RETURN",
       sharing: "SHARED",
       q: "dupont",
-      patient: null,
     });
     expect(parseTripFilters({ statut: "RETURN_TO_CHECK" }).status).toBe("RETURN_TO_CHECK");
     expect(parseTripFilters({ statut: "DROP TABLE", sens: ["OUTBOUND", "RETURN"], partage: "nope" })).toEqual({
-      status: null,
+      ...EMPTY_FILTERS,
       direction: "OUTBOUND",
-      sharing: null,
-      q: "",
-      patient: null,
     });
+    expect(
+      parseTripFilters({ etablissement: "fac_1", vehicule: "aucun", depot: "dep_gap", payeur: "PRIVATE", origine: "ponctuelle" }),
+    ).toEqual({ ...EMPTY_FILTERS, facility: "fac_1", vehicle: "aucun", depot: "dep_gap", payer: "PRIVATE", origin: "ponctuelle" });
+    expect(parseTripFilters({ payeur: "MUTUELLE", origine: "x", depot: "a b" })).toEqual(EMPTY_FILTERS);
+    expect(hasActiveFilters({ ...EMPTY_FILTERS, depot: "d" })).toBe(true);
     expect(hasActiveFilters(EMPTY_FILTERS)).toBe(false);
     expect(hasActiveFilters({ ...EMPTY_FILTERS, q: "x" })).toBe(true);
     // A patient by id (the planning's links), never anything else.
@@ -89,6 +93,34 @@ describe("filterTrips", () => {
     const mine = [trip({ id: "a", patientId: "p1" }), trip({ id: "b", patientId: "p2" }), trip({ id: "c", patientId: "p1", direction: "RETURN" })];
     expect(ids(filterTrips(mine, { ...EMPTY_FILTERS, patient: "p1" }))).toEqual(["a", "c"]);
     expect(ids(filterTrips(mine, { ...EMPTY_FILTERS, patient: "p1", direction: "RETURN" }))).toEqual(["c"]);
+  });
+
+  it("filters by facility (or a free address), vehicle, unassigned, depot, payer and origin", () => {
+    const day = [
+      trip({ id: "a", facilityId: "f1", routeId: "r1", route: { vehicle: { id: "v1", depotId: "gap" } }, recurrenceId: "rec", payer: "CPAM" }),
+      trip({ id: "b", facilityId: null, routeId: null, payer: "PRIVATE" }),
+      trip({ id: "c", facilityId: "f2", routeId: "r2", route: { vehicle: { id: "v2", depotId: "aix" } }, recurrenceId: "rec", payer: "CPAM" }),
+      trip({ id: "x", facilityId: "f1", routeId: null, status: "CANCELLED", payer: "CPAM" }),
+    ];
+    expect(ids(filterTrips(day, { ...EMPTY_FILTERS, facility: "f1" }))).toEqual(["a", "x"]);
+    expect(ids(filterTrips(day, { ...EMPTY_FILTERS, facility: "libre" }))).toEqual(["b"]);
+    expect(ids(filterTrips(day, { ...EMPTY_FILTERS, vehicle: "v2" }))).toEqual(["c"]);
+    // Unassigned: still to place, a cancelled trip is not.
+    expect(ids(filterTrips(day, { ...EMPTY_FILTERS, vehicle: "aucun" }))).toEqual(["b"]);
+    expect(ids(filterTrips(day, { ...EMPTY_FILTERS, depot: "gap" }))).toEqual(["a"]);
+    expect(ids(filterTrips(day, { ...EMPTY_FILTERS, payer: "PRIVATE" }))).toEqual(["b"]);
+    expect(ids(filterTrips(day, { ...EMPTY_FILTERS, origin: "reguliere" }))).toEqual(["a", "c"]);
+    expect(ids(filterTrips(day, { ...EMPTY_FILTERS, origin: "ponctuelle" }))).toEqual(["b", "x"]);
+  });
+
+  it("searches the facility and the addresses too", () => {
+    const day = [
+      trip({ id: "a", facility: { name: "Clinique du Parc" }, pickupAddress: "1 rue X, 05000 Gap", dropoffAddress: "Clinique, Gap" }),
+      trip({ id: "b", facility: { name: "Centre de dialyse" }, pickupAddress: "2 rue Y, 13006 Marseille", dropoffAddress: "Aix" }),
+    ];
+    expect(ids(filterTrips(day, { ...EMPTY_FILTERS, q: "clinique gap" }))).toEqual(["a"]);
+    expect(ids(filterTrips(day, { ...EMPTY_FILTERS, q: "marseille" }))).toEqual(["b"]);
+    expect(ids(filterTrips(day, { ...EMPTY_FILTERS, q: "martin dialyse" }))).toEqual(["b"]);
   });
 
   it("searches patient names without case or accents, in both orders", () => {
@@ -168,10 +200,11 @@ describe("summarizeTrips", () => {
 describe("coursesHref", () => {
   it("keeps only the filters in use", () => {
     expect(coursesHref("2026-11-03")).toBe("/courses?date=2026-11-03");
-    expect(coursesHref("2026-11-03", { status: "ACTIVE", direction: null, sharing: "REFUSED", q: "Le Gall", patient: null })).toBe(
+    expect(coursesHref("2026-11-03", { ...EMPTY_FILTERS, status: "ACTIVE", sharing: "REFUSED", q: "Le Gall" })).toBe(
       "/courses?date=2026-11-03&statut=ACTIVE&partage=REFUSED&q=Le+Gall",
     );
     expect(coursesHref("2026-11-03", { ...EMPTY_FILTERS, direction: "RETURN", patient: "p1" })).toBe("/courses?date=2026-11-03&sens=RETURN&patient=p1");
+    expect(coursesHref("2026-11-03", { ...EMPTY_FILTERS, vehicle: "aucun", depot: "d1" })).toBe("/courses?date=2026-11-03&vehicule=aucun&depot=d1");
   });
 });
 

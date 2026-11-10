@@ -31,6 +31,7 @@ import {
   buildNewTripData,
   CANCEL_TRIP_FIELDS,
   cancelTripSchema,
+  cancelTripsSchema,
   firstErrorMessage,
   formValues,
   generateWeekSchema,
@@ -49,7 +50,7 @@ import {
 } from "./trip-form";
 import { checkScheduleFit, type ScheduleFit } from "./schedule-fit";
 import { sharingDecisionData } from "./sharing-decision";
-import { generationMessage } from "./trip-list";
+import { bulkCancelMessage, generationMessage } from "./trip-list";
 import { canCancel, canEditTime, canRestore, keyMinuteLabel, sharingDecisionsFor, SHARING_DECISION_LABELS } from "./trip-rules";
 
 /** Pages that show trips, route stops or route totals: refreshed after every change. */
@@ -417,6 +418,77 @@ export async function cancelTrip(_prev: ActionResult, formData: FormData): Promi
   return {
     ok: true,
     message: `${left}${why}.${late}${aloneMessage(detached.nowAlone)}${noticeOf(refresh)}${adviceOf(refresh, trip.route?.status ?? back?.route?.status)}`,
+  };
+}
+
+/**
+ * « Annuler la sélection » : the trips ticked in the list, with one reason
+ * (and note) for all, each cancelled as « Annuler la course » would (who,
+ * when, late or not, out of its route) and traced on its own (trip.cancel,
+ * details.bulk). A trip already started, closed or changed meanwhile is left
+ * as it is and counted apart; the others are still cancelled.
+ */
+export async function cancelTrips(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
+  const user = await requireUser("REGULATOR");
+  const parsed = cancelTripsSchema.safeParse({
+    tripIds: formData.getAll("tripId").filter((v): v is string => typeof v === "string"),
+    reason: formData.get("reason") ?? undefined,
+    note: formData.get("note") ?? undefined,
+  });
+  if (!parsed.success) return failure(firstErrorMessage(parsed.error));
+  const { tripIds, reason, note } = parsed.data;
+
+  const [found, settings] = await Promise.all([
+    db.trip.findMany({ where: { id: { in: tripIds } }, select: CANCEL_SELECT }),
+    getSettings(db),
+  ]);
+  const open = found.filter((t) => canCancel(t.status));
+  const now = new Date();
+  const fieldsOf = (t: CancelledTrip) =>
+    userCancellation({
+      reason,
+      note: note ?? null,
+      actorId: user.id,
+      now,
+      late: isLateCancellation({ ...t, serviceDate: toIsoDate(t.serviceDate) }, now, settings.lateCancellationHours),
+    });
+
+  // One transaction: each trip guarded on the status read above, a trip changed meanwhile is skipped.
+  const cancelled: CancelledTrip[] = [];
+  const detached = await detachInTransaction(async (tx) => {
+    const result: DetachResult = { nowAlone: 0, routeIds: [] };
+    cancelled.length = 0;
+    for (const t of open) {
+      const updated = await tx.trip.updateMany({
+        where: { id: t.id, status: t.status },
+        data: { ...CLEARED_PLANNING, status: "CANCELLED", ...fieldsOf(t) },
+      });
+      if (updated.count === 0) continue;
+      cancelled.push(t);
+      // The reason stays on the trip only, as for one trip.
+      await audit(tx, user, { ...tripEvent("trip.cancel", t), details: { bulk: true } });
+      const removed = await removeTripStops(tx, t.id);
+      result.nowAlone += removed.nowAlone;
+      result.routeIds.push(...removed.routeIds.filter((id) => !result.routeIds.includes(id)));
+    }
+    return result;
+  });
+  if (!detached) return failure("Les courses ont changé entre-temps : rechargez la page, rien n'a été annulé.");
+
+  const refresh = await refreshLeftRoutes(detached.routeIds);
+  if (cancelled.length > 0) revalidateTripViews();
+  const message = bulkCancelMessage({
+    cancelled: cancelled.length,
+    fromRoutes: cancelled.filter((t) => t.routeId !== null).length,
+    late: cancelled.filter((t) => fieldsOf(t).lateCancellation).length,
+    skipped: tripIds.length - cancelled.length,
+    reason: CANCELLATION_REASON_LABELS[reason].toLowerCase(),
+  });
+  if (cancelled.length === 0) return failure(message);
+  const routed = cancelled.find((t) => t.route !== null);
+  return {
+    ok: true,
+    message: `${message}${aloneMessage(detached.nowAlone)}${noticeOf(refresh)}${adviceOf(refresh, routed?.route?.status)}`,
   };
 }
 

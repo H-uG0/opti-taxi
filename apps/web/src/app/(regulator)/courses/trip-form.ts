@@ -304,6 +304,30 @@ export const cancelTripSchema = z
     }
   });
 
+/** At most a day of trips in one « Annuler la sélection ». */
+export const BULK_CANCEL_MAX = 300;
+
+/**
+ * « Annuler la sélection » of the trips list: the trips ticked (each one is
+ * cancelled and traced on its own), one reason and an optional note for all,
+ * as « Annuler la course ».
+ */
+export const cancelTripsSchema = z
+  .object({
+    tripIds: z
+      .array(tripIdSchema)
+      .min(1, "Cochez au moins une course.")
+      .max(BULK_CANCEL_MAX, `${BULK_CANCEL_MAX} courses au plus à la fois.`)
+      .transform((ids) => [...new Set(ids)]),
+    reason: z.enum(USER_CANCELLATION_REASONS, { error: "Choisissez le motif de l'annulation." }),
+    note: optionalText(CANCELLATION_NOTE_MAX, `Précision trop longue (${CANCELLATION_NOTE_MAX} caractères au plus).`),
+  })
+  .superRefine((value, ctx) => {
+    if (value.reason === "OTHER" && !value.note) {
+      ctx.addIssue({ code: "custom", path: ["note"], message: "Précisez le motif de l'annulation." });
+    }
+  });
+
 export const sharingDecisionSchema = z.object({
   tripId: tripIdSchema,
   decision: z.enum(["ACCEPTED", "REFUSED"], { error: "Décision de partage inconnue." }),

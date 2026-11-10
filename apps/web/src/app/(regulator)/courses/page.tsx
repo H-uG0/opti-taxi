@@ -4,13 +4,13 @@ import { Info, Plus, TriangleAlert, UserX } from "lucide-react";
 import { LinkButton } from "@/components/ui/button";
 import { FormMessage } from "@/components/ui/form";
 import { Card, CardBody, EmptyState, PageHeader, Stat } from "@/components/ui/layout";
-import { Table, TBody, THead, Th } from "@/components/ui/table";
 import { auditRead } from "@/lib/audit";
 import { cancellationLabel } from "@/lib/domain/cancellation";
 import { conflictLabel, tripConflicts } from "@/lib/domain/duplicates";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { OUTBOUND_NO_SHOW_ADVICE, returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
+import { compareLabels, compareVehiclesByDepot } from "@/lib/fleet/order";
 import { formatPercent, PRESCRIBED_MODE_LABELS, SHARING_SCOPE_LABELS } from "@/lib/labels";
 import { addDays, formatLongDate, formatShortDate, fromIsoDate, isIsoDate, startOfIsoWeek, todayIso, tomorrowIso } from "@/lib/time";
 import { currentHorizon, inHorizon } from "@/lib/trips/completion";
@@ -22,7 +22,7 @@ import { isSimulatedDay } from "@/lib/simulated-day";
 import { DayNav } from "./day-nav";
 import { GenerateTripsForm } from "./generate-trips-form";
 import { cancellationTrace, exceptionalAmbulanceTrace, outboundNoShowTrace, sharingAnswerTrace, stopStatusTraces } from "./record-trace";
-import { TripFiltersForm } from "./trip-filters";
+import { TripFiltersForm, type TripFilterChoices } from "./trip-filters";
 import {
   coPassengersFromStops,
   coursesHref,
@@ -38,9 +38,11 @@ import {
   shortPatientName,
   sortTrips,
   summarizeTrips,
+  UNASSIGNED,
 } from "./trip-list";
 import { planningTripHref } from "@/lib/planning/links";
-import { TripRow, type TripRowData } from "./trip-row";
+import type { TripRowData } from "./trip-row";
+import { TripTable } from "./trip-table";
 import { keyMinute } from "./trip-rules";
 
 export const metadata: Metadata = { title: "Courses" };
@@ -62,7 +64,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
   // The day's patients, phones, addresses and notes are on screen (auditRead never throws).
   const traced = auditRead(user, { action: "trip_list.view", entity: "Trip", entityId: null, serviceDate: date });
   const today = todayIso();
-  const [trips, stops, horizon, missing, simulated] = await Promise.all([
+  const [trips, stops, horizon, missing, simulated, depots] = await Promise.all([
     db.trip.findMany({
       where: { serviceDate },
       select: {
@@ -102,7 +104,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
         facility: { select: { name: true } },
         prescription: { select: { mode: true, sharing: true } },
         recurrence: { select: { label: true } },
-        route: { select: { vehicle: { select: { label: true, type: true } } } },
+        route: { select: { vehicle: { select: { id: true, label: true, type: true, depotId: true, depot: { select: { name: true } } } } } },
         lockedVehicleId: true,
         lockedVehicle: { select: { label: true, type: true } },
         // « Recours exceptionnel à une ambulance »: who proposed it and when (account name only).
@@ -126,6 +128,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
     date >= today ? loadRecurrencesWithoutTrip(date) : Promise.resolve([]),
     // Its statuses and sharing answers are simulated: said in the header, as on the planning.
     isSimulatedDay(date),
+    db.depot.findMany({ select: { id: true, name: true } }),
   ]);
   await traced;
   const completing = inHorizon(date, horizon);
@@ -141,6 +144,19 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
   const filteredPatient = filters.patient ? trips.find((trip) => trip.patientId === filters.patient)?.patient : undefined;
   const patientLabel = filteredPatient ? patientDisplayName(filteredPatient) : null;
   const returns = pairedReturns(trips);
+  // The lists of the filter bar: the facilities and vehicles of the day (by depot, in the usual order), every depot.
+  const facilityNames = new Map<string, string>();
+  const dayVehicles = new Map<string, TripFilterChoices["vehicles"][number]>();
+  for (const trip of trips) {
+    if (trip.facilityId && trip.facility) facilityNames.set(trip.facilityId, trip.facility.name);
+    const vehicle = trip.route?.vehicle;
+    if (vehicle) dayVehicles.set(vehicle.id, { id: vehicle.id, label: vehicle.label, type: vehicle.type, depotName: vehicle.depot.name });
+  }
+  const choices: TripFilterChoices = {
+    facilities: [...facilityNames].map(([id, name]) => ({ id, name })).sort((a, b) => compareLabels(a.name, b.name)),
+    vehicles: [...dayVehicles.values()].sort(compareVehiclesByDepot),
+    depots: [...depots].sort((a, b) => compareLabels(a.name, b.name)),
+  };
   // Same patient, same day: a trip on the same leg, or during another care session (two vehicles for one patient?).
   const conflicts = new Map(
     trips.map((trip) => [trip.id, tripConflicts(trip, trips).map((c) => conflictLabel(c, trip.direction))] as const),
@@ -267,7 +283,17 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
           label="Affectées"
           value={summary.assigned}
           tone={summary.total === 0 ? "default" : summary.unassigned > 0 ? "warn" : "good"}
-          hint={summary.unassigned > 0 ? `${summary.unassigned} à placer dans une tournée` : summary.total > 0 ? "Toutes placées" : "—"}
+          hint={
+            summary.unassigned > 0 ? (
+              <Link href={coursesHref(date, { ...EMPTY_FILTERS, vehicle: UNASSIGNED })} className="underline underline-offset-2">
+                {summary.unassigned} à placer dans une tournée
+              </Link>
+            ) : summary.total > 0 ? (
+              "Toutes placées"
+            ) : (
+              "—"
+            )
+          }
         />
         <Stat
           label="Partagées"
@@ -337,8 +363,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
 
       <Card className="mb-4">
         <CardBody className="py-3">
-          {/* Keyed by the URL: uncontrolled fields must show the filters in use after a client navigation (e.g. « Réinitialiser »). */}
-          <TripFiltersForm key={coursesHref(date, filters)} date={date} filters={filters} patientLabel={patientLabel} />
+          <TripFiltersForm date={date} filters={filters} choices={choices} patientLabel={patientLabel} />
         </CardBody>
       </Card>
 
@@ -377,28 +402,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
               : plural(rows.length, "course", "courses")}
             , triées par heure de rendez-vous (aller) ou de fin de séance (retour).
           </p>
-          <Table>
-            <caption className="sr-only">Courses du {formatLongDate(date)}</caption>
-            <THead>
-              <tr>
-                <Th>Heure</Th>
-                <Th>Patient</Th>
-                <Th>Trajet</Th>
-                <Th className="hidden lg:table-cell">Types · payeur</Th>
-                <Th>Statut</Th>
-                <Th>Véhicule</Th>
-                <Th>Partage</Th>
-                <Th>
-                  <span className="sr-only">Détails</span>
-                </Th>
-              </tr>
-            </THead>
-            <TBody>
-              {rows.map((row) => (
-                <TripRow key={row.id} trip={row} />
-              ))}
-            </TBody>
-          </Table>
+          <TripTable rows={rows} caption={`Courses du ${formatLongDate(date)}`} />
         </>
       )}
     </div>

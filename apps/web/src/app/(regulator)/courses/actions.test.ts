@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addDays, startOfIsoWeek, todayIso } from "@/lib/time";
-import { cancelTrip, completeDayTrips, generateWeekTrips, restoreTrip } from "./actions";
+import { cancelTrip, cancelTrips, completeDayTrips, generateWeekTrips, restoreTrip } from "./actions";
 import { INITIAL_ACTION_RESULT } from "./trip-form";
 
 // The trips screen actions against a fake Prisma client: which writes are
@@ -163,6 +163,66 @@ describe("cancelTrip", () => {
     const result = await cancelTrip(INITIAL_ACTION_RESULT, form({ tripId: "t1", reason: "PATIENT" }));
 
     expect(result).toEqual({ ok: false, message: "La course a changé entre-temps : rechargez la page." });
+    expect(recorded()).toEqual([]);
+  });
+});
+
+describe("cancelTrips (« Annuler la sélection »)", () => {
+  function bulk(ids: string[], entries: Record<string, string>): FormData {
+    const fd = form(entries);
+    for (const id of ids) fd.append("tripId", id);
+    return fd;
+  }
+
+  it("refuses without a reason or without a trip, writing nothing", async () => {
+    expect(await cancelTrips(INITIAL_ACTION_RESULT, bulk(["t1"], {}))).toEqual({ ok: false, message: "Choisissez le motif de l'annulation." });
+    expect(await cancelTrips(INITIAL_ACTION_RESULT, bulk([], { reason: "FACILITY" }))).toEqual({ ok: false, message: "Cochez au moins une course." });
+    expect(await cancelTrips(INITIAL_ACTION_RESULT, bulk(["t1"], { reason: "OTHER" }))).toEqual({ ok: false, message: "Précisez le motif de l'annulation." });
+    expect(fake.trip.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("cancels each open trip with the reason, one trace per trip, and leaves a started or changed one", async () => {
+    fake.trip.findMany.mockResolvedValueOnce([
+      tripRow("t1", "OUTBOUND"),
+      tripRow("t2", "RETURN", { status: "ASSIGNED", routeId: "r1", route: { status: "PROPOSED" } }),
+      tripRow("t3", "OUTBOUND", { status: "PICKED_UP" }),
+      tripRow("t4", "OUTBOUND", { patientId: "p2" }),
+    ]);
+    // t4 changed between the read and the write.
+    fake.trip.updateMany.mockImplementation(async ({ where }: { where: { id: string } }) => ({ count: where.id === "t4" ? 0 : 1 }));
+
+    const result = await cancelTrips(INITIAL_ACTION_RESULT, bulk(["t1", "t2", "t3", "t4", "t1"], { reason: "FACILITY", note: "centre fermé" }));
+
+    expect(fake.trip.findMany.mock.calls[0]![0].where).toEqual({ id: { in: ["t1", "t2", "t3", "t4"] } });
+    expect(fake.trip.updateMany.mock.calls.map(([args]) => args.where)).toEqual([
+      { id: "t1", status: "PLANNED" },
+      { id: "t2", status: "ASSIGNED" },
+      { id: "t4", status: "PLANNED" },
+    ]);
+    expect(fake.trip.updateMany.mock.calls[0]![0].data).toMatchObject({
+      status: "CANCELLED",
+      routeId: null,
+      cancellationReason: "FACILITY",
+      cancellationOrigin: "USER",
+      cancellationNote: "centre fermé",
+      cancelledById: "u1",
+    });
+    expect(recorded()).toEqual([
+      { action: "trip.cancel", entityId: "t1" },
+      { action: "trip.cancel", entityId: "t2" },
+    ]);
+    const details = fake.auditEvent.createMany.mock.calls.map((call) => (call[0] as { data: { details?: unknown }[] }).data[0]?.details);
+    expect(details).toEqual([{ bulk: true }, { bulk: true }]);
+    expect(result.ok).toBe(true);
+    expect(result.message).toMatch(
+      /^2 courses annulées \(séance annulée ou déplacée par l'établissement\), dont 1 retirée de sa tournée\. 2 courses non annulées : déjà commencées, terminées ou modifiées entre-temps\./,
+    );
+  });
+
+  it("says so when nothing could be cancelled", async () => {
+    fake.trip.findMany.mockResolvedValueOnce([tripRow("t3", "OUTBOUND", { status: "DROPPED_OFF" })]);
+    const result = await cancelTrips(INITIAL_ACTION_RESULT, bulk(["t3"], { reason: "PATIENT" }));
+    expect(result).toEqual({ ok: false, message: "Aucune course annulée. 1 course non annulée : déjà commencée, terminée ou modifiée entre-temps." });
     expect(recorded()).toEqual([]);
   });
 });
