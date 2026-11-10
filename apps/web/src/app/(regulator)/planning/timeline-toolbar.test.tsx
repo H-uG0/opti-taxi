@@ -31,7 +31,7 @@ describe("TimelineToolbar", () => {
     expect(document.activeElement).toBe(help);
     expect(within(help).getByRole("list", { name: "Légende de la frise" })).toBeTruthy();
     const shortcuts = help.textContent ?? "";
-    for (const text of ["Chercher un patient", "Jour précédent", "Jour suivant", "Figer ou défiger la course sélectionnée", "Déplacer vers…", "Problème suivant"]) {
+    for (const text of ["Chercher un patient", "Jour précédent", "Jour suivant", "Figer ou défiger la course sélectionnée", "Où placer cette course", "Problème suivant"]) {
       expect(shortcuts).toContain(text);
     }
     expect(Array.from(help.querySelectorAll("kbd")).map((k) => k.textContent)).toEqual(

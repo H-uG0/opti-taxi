@@ -12,7 +12,7 @@ export const PLANNING_SHORTCUTS: readonly ShortcutHelp[] = [
   { keys: ["["], label: "Jour précédent" },
   { keys: ["]"], label: "Jour suivant" },
   { keys: ["F"], label: "Figer ou défiger la course sélectionnée (recours exceptionnel\u00a0: va au bouton «\u202fDéfiger\u202f» sans l'activer)" },
-  { keys: ["D"], label: "Aller à «\u00a0Déplacer vers…\u00a0» de la course sélectionnée" },
+  { keys: ["D"], label: "Aller à «\u00a0Où placer cette course\u00a0?\u00a0» de la course sélectionnée" },
   { keys: ["N"], label: "Problème suivant de «\u00a0À traiter\u00a0»" },
   { keys: ["Échap"], label: "Désélectionner, fermer une liste" },
   { keys: ["?"], label: "Afficher ou masquer cette aide" },

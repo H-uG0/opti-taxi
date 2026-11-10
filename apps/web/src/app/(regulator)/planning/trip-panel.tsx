@@ -25,6 +25,7 @@ import {
 } from "@/lib/labels";
 import { formatDuration, formatMinute } from "@/lib/time";
 import { lockTrip, moveTrip, proposeExceptionalAmbulance, unlockTrip } from "./actions";
+import { PlaceFinder } from "./place-finder";
 import { usePlanningActivity } from "./planning-activity";
 
 export type TripPanelProps = {
@@ -37,6 +38,13 @@ export type TripPanelProps = {
   replanBlocked: string | null;
   /** Why locks cannot change (past date), or null. */
   lockBlocked: string | null;
+  /**
+   * Why « Où placer cette course ? » cannot place a trip now (past date, computation running), or
+   * null: unlike a re-optimization, it works on a validated or started day (it asks first).
+   */
+  placeBlocked: string | null;
+  /** Search the places at once (the panel opened with ?placer=1). */
+  autoPlace?: boolean;
   onSelectTrip: (tripId: string) => void;
   onClose: () => void;
 };
@@ -72,7 +80,7 @@ function PhoneLink({ phone, label }: { phone: string; label: string }) {
 }
 
 const MOVE_HELP =
-  "La course est figée sur ce véhicule, puis le reste de la journée est réoptimisé. Si ce véhicule ne peut pas la prendre, le planning reste inchangé\u202f; si d'autres courses perdaient leur véhicule, le nouveau planning attend votre confirmation.";
+  "La course est figée sur ce véhicule, puis le reste de la journée est réoptimisé (jusqu'à une minute sur une grande journée). Si ce véhicule ne peut pas la prendre, le planning reste inchangé\u202f; si d'autres courses perdaient leur véhicule, le nouveau planning attend votre confirmation.";
 
 const PANEL_LINK =
   "inline-flex min-h-6 items-center gap-1 rounded text-xs font-medium text-brand-700 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-brand-600";
@@ -85,6 +93,8 @@ export function TripPanel({
   date,
   replanBlocked,
   lockBlocked,
+  placeBlocked,
+  autoPlace = false,
   onSelectTrip,
   onClose,
 }: TripPanelProps) {
@@ -94,9 +104,9 @@ export function TripPanel({
   const [target, setTarget] = useState("");
   const [ambulance, setAmbulance] = useState("");
   const lockButton = useRef<HTMLButtonElement>(null);
-  const moveSelect = useRef<HTMLSelectElement>(null);
+  const placeButton = useRef<HTMLButtonElement>(null);
 
-  // « F »: Figer / Défiger, « D »: « Déplacer vers… » (the same controls, so the same rules and confirmations).
+  // « F »: Figer / Défiger, « D »: « Où placer cette course ? » (the same controls, so the same rules and confirmations).
   const exceptional = trip.exceptionalAmbulance === true;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -112,9 +122,9 @@ export function TripPanel({
         // the button, next to its warning.
         if (exceptional) lockButton.current.focus();
         else lockButton.current.click();
-      } else if (key === "d" && moveSelect.current && !moveSelect.current.disabled) {
+      } else if (key === "d" && placeButton.current && !placeButton.current.disabled) {
         e.preventDefault();
-        moveSelect.current.focus();
+        placeButton.current.focus();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -135,6 +145,7 @@ export function TripPanel({
     : inField
       ? "Course déjà commencée."
       : (replanBlocked ?? optimizerOffline);
+  const placeOff = cancelled ? "Course annulée." : inField ? "Course déjà commencée." : (placeBlocked ?? optimizerOffline);
   const outbound = trip.direction === "OUTBOUND";
   const mark = trip.vehicleId ? appointmentMark(trip) : null;
   // « Recours exceptionnel » (TAR-03): only for a seated trip the last optimization left without a vehicle, never
@@ -260,44 +271,61 @@ export function TripPanel({
           ) : null}
         </div>
 
-        <form
-          className="space-y-1"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!targetValid) return;
-            const label = vehicleById.get(target)?.label ?? "";
-            run(`Déplacement vers ${label} et réoptimisation…`, () => moveTrip(trip.id, target), { long: true });
-            setTarget("");
-          }}
-        >
-          <label htmlFor={selectId} className="sr-only">
-            Déplacer vers…
-          </label>
-          <div className="flex gap-2">
-            <Select
-              ref={moveSelect}
-              id={selectId}
-              aria-keyshortcuts="D"
-              value={targetValid ? target : ""}
-              onChange={(e) => setTarget(e.currentTarget.value)}
-              disabled={busy || moveBlocked !== null || options.length === 0}
-              className="min-w-0 flex-1"
-            >
-              <option value="">{options.length === 0 ? "Aucun véhicule compatible disponible" : "Déplacer vers…"}</option>
-              {options.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.label}
-                  {v.route ? ` — ${v.route.tripCount} course${v.route.tripCount > 1 ? "s" : ""}` : " — libre"}
-                </option>
-              ))}
-            </Select>
-            <Button type="submit" disabled={busy || moveBlocked !== null || !targetValid} title={MOVE_HELP}>
-              <MoveRight aria-hidden className="size-4" />
-              Déplacer
-            </Button>
-          </div>
-          <p className="text-xs text-slate-500">{moveBlocked ?? "Fige la course sur le véhicule choisi et réoptimise le reste."}</p>
-        </form>
+        <PlaceFinder
+          // Fresh places once the trip moved (an « Appliquer », a re-optimization).
+          key={trip.vehicleId ?? ""}
+          trip={trip}
+          trips={trips}
+          vehicles={vehicles}
+          blocked={placeOff}
+          autoStart={autoPlace}
+          searchRef={placeButton}
+        />
+
+        <details className="border-t border-slate-200 pt-2.5">
+          <summary className="cursor-pointer text-xs font-medium text-slate-600 hover:text-slate-900">
+            Ou figer sur un véhicule et réoptimiser la journée
+          </summary>
+          <form
+            className="mt-2 space-y-1"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!targetValid) return;
+              const label = vehicleById.get(target)?.label ?? "";
+              run(`Déplacement vers ${label} et réoptimisation…`, () => moveTrip(trip.id, target), { long: true });
+              setTarget("");
+            }}
+          >
+            <label htmlFor={selectId} className="sr-only">
+              Déplacer vers…
+            </label>
+            <div className="flex gap-2">
+              <Select
+                id={selectId}
+                value={targetValid ? target : ""}
+                onChange={(e) => setTarget(e.currentTarget.value)}
+                disabled={busy || moveBlocked !== null || options.length === 0}
+                className="min-w-0 flex-1"
+              >
+                <option value="">{options.length === 0 ? "Aucun véhicule compatible disponible" : "Déplacer vers…"}</option>
+                {options.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                    {v.route ? ` — ${v.route.tripCount} course${v.route.tripCount > 1 ? "s" : ""}` : " — libre"}
+                  </option>
+                ))}
+              </Select>
+              <Button type="submit" disabled={busy || moveBlocked !== null || !targetValid} title={MOVE_HELP}>
+                <MoveRight aria-hidden className="size-4" />
+                Déplacer
+              </Button>
+            </div>
+            <p className="text-xs text-slate-500">
+              {moveBlocked ??
+                "Fige la course sur le véhicule choisi et réoptimise le reste de la journée\u00a0: les autres courses peuvent changer de véhicule. Utile quand aucune place ne se libère sans déplacer d'autres courses."}
+            </p>
+          </form>
+        </details>
 
         {exceptionalOffer ? (
           <form

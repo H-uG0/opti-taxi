@@ -53,7 +53,11 @@ export type PlanningBoardProps = {
   replanBlocked: string | null;
   /** Why locks cannot change (past date), or null. */
   lockBlocked: string | null;
+  /** Why « Où placer cette course ? » cannot place a trip now (past date, computation running), or null. */
+  placeBlocked: string | null;
   initialTripId: string | null;
+  /** The trip of the address (?trip=) gets its places searched at once (?placer=1: a trip just created). */
+  initialPlace?: boolean;
   /** « Changer l'équipage » of a route: people offered, where the change happens, what blocks it now. */
   crewChoices: CrewChoice[];
   /** Settings of the crews of the day (shared working time of an ambulance pair). */
@@ -95,7 +99,9 @@ export function PlanningBoard({
   unplannedNote,
   replanBlocked,
   lockBlocked,
+  placeBlocked,
   initialTripId,
+  initialPlace = false,
   crewChoices,
   crewRules,
   crewChangeMode,
@@ -119,6 +125,8 @@ export function PlanningBoard({
     tripId: initialTripId,
     vehicleId: initialTripId ? (trips.find((t) => t.id === initialTripId)?.vehicleId ?? null) : null,
   }));
+  // ?placer=1 searches the places of the trip of the address once, while it stays selected.
+  const [autoPlaceTripId, setAutoPlaceTripId] = useState<string | null>(initialPlace ? initialTripId : null);
   // After a refresh the selected trip / vehicle may be gone: treat it as unselected.
   const selectedTrip = selection.tripId ? (tripsById[selection.tripId] ?? null) : null;
   const selectedVehicle = selection.vehicleId ? (vehicles.find((v) => v.id === selection.vehicleId) ?? null) : null;
@@ -147,6 +155,7 @@ export function PlanningBoard({
     (tripId: string) => {
       const vehicleId = tripsById[tripId]?.vehicleId ?? null;
       setSelection({ tripId, vehicleId });
+      setAutoPlaceTripId(null);
       reveal(vehicleId);
     },
     [tripsById, reveal],
@@ -446,6 +455,8 @@ export function PlanningBoard({
                 date={date}
                 replanBlocked={replanBlocked}
                 lockBlocked={lockBlocked}
+                placeBlocked={placeBlocked}
+                autoPlace={selectedTrip.id === autoPlaceTripId}
                 onSelectTrip={selectTrip}
                 onClose={clear}
               />

@@ -272,6 +272,22 @@ export const evaluateRequestSchema = z
   })
   .refine(tariffReferencesOk, TARIFF_REFERENCES);
 
+/**
+ * POST /insert (contract/README.md, « InsertRequest et InsertResponse »): where one trip fits in the
+ * routes in place, the other routes kept. The trip's own lock is ignored (the regulator places it).
+ */
+export const insertRequestSchema = z
+  .strictObject({
+    ...dayRequestFields,
+    routes: z.array(routePlanSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} tournées au plus en place`),
+    /** The trip to place: on one of `routes` (a move), or on none (a trip without a vehicle). */
+    tripId: z.string().min(1),
+    /** Vehicles to try (« Appliquer », a drop on one vehicle); null or absent: every vehicle. */
+    vehicleIds: z.array(z.string()).max(MAX_VEHICLES).nullish(),
+  })
+  .refine(tariffReferencesOk, TARIFF_REFERENCES)
+  .refine((request) => request.trips.some((trip) => trip.id === request.tripId), { message: "tripId must name a trip of the request" });
+
 export const breakSlotSchema = z.strictObject({
   startMin: z.number().int(),
   endMin: z.number().int(),
@@ -364,6 +380,57 @@ export const planResponseSchema = z.strictObject({
   }),
 });
 
+const planMetaSchema = planResponseSchema.shape.meta;
+
+/** Why a vehicle cannot take the trip: its hours, its driver's break, its patients then, no room, or a rule. */
+export const rejectionKindSchema = z.enum(["SHIFT", "BREAK", "OCCUPIED", "NO_ROOM", "RULES"]);
+
+export const timeShiftSchema = z.strictObject({
+  tripId: z.string(),
+  pickupMin: z.number().int(),
+  dropoffMin: z.number().int(),
+  /** New minus former start (minutes, + later). */
+  pickupShiftMin: z.number().int(),
+  dropoffShiftMin: z.number().int(),
+});
+
+export const insertOptionSchema = z.strictObject({
+  vehicleId: z.string(),
+  pickupMin: z.number().int(),
+  dropoffMin: z.number().int(),
+  shared: z.boolean(),
+  coPassengerTripIds: z.array(z.string()),
+  deltaKm: z.number(),
+  deltaEmptyKm: z.number(),
+  deltaDurationMin: z.number().int(),
+  deltaRevenue: z.number(),
+  deltaCost: z.number(),
+  deltaMargin: z.number(),
+  shifts: z.array(timeShiftSchema),
+  /** The target route with the trip and, for a move, the source without it (absent when left empty). */
+  routes: z.array(routeSchema),
+  /** Results of every trip of `routes`, the placed one included. */
+  trips: z.array(tripResultSchema),
+  /** Rules these routes already broke and still do (never a new one). */
+  violations: z.array(violationSchema),
+});
+
+export const insertRejectionSchema = z.strictObject({
+  vehicleId: z.string(),
+  kind: rejectionKindSchema,
+  /** French, to follow the vehicle's name: « est en pause de 12:00 à 12:45 ». */
+  reason: z.string(),
+});
+
+export const insertResponseSchema = z.strictObject({
+  tripId: z.string(),
+  fromVehicleId: z.string().nullable(),
+  /** Best margin first. */
+  options: z.array(insertOptionSchema),
+  rejected: z.array(insertRejectionSchema),
+  meta: planMetaSchema,
+});
+
 export const healthSchema = z.strictObject({
   status: z.literal("ok"),
   matrixSource: z.enum(["osrm", "haversine"]),
@@ -390,3 +457,9 @@ export type PlanStop = z.infer<typeof stopSchema>;
 export type TripResult = z.infer<typeof tripResultSchema>;
 export type PlanKpis = z.infer<typeof kpisSchema>;
 export type Violation = z.infer<typeof violationSchema>;
+export type InsertRequest = z.input<typeof insertRequestSchema>;
+export type InsertResponse = z.infer<typeof insertResponseSchema>;
+export type InsertOption = z.infer<typeof insertOptionSchema>;
+export type InsertRejection = z.infer<typeof insertRejectionSchema>;
+export type RejectionKind = z.infer<typeof rejectionKindSchema>;
+export type TimeShift = z.infer<typeof timeShiftSchema>;

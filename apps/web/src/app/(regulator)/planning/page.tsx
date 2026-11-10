@@ -127,6 +127,8 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   const optimizeLabel = hasRoutes ? "Réoptimiser" : date === tomorrow ? "Optimiser demain" : `Optimiser le ${formatDayMonth(date)}`;
   const relativeDay = date === today ? "Aujourd'hui" : date === tomorrow ? "J+1" : null;
   const initialTripId = requestedTrip && view.trips.some((t) => t.id === requestedTrip) ? requestedTrip : null;
+  // « Où placer cette course ? » works on a validated or started day too (it asks first, and leaves the routes under way).
+  const placeBlocked = past ? "Date passée\u00a0: le planning n'est plus modifiable." : runningReason;
   // « Placer les non affectées » places only the trips the optimizer is sent (incomplete ones never are).
   const incomplete = new Set(view.excludedTrips.map((t) => t.tripId));
   const placeable = view.unassigned.filter((u) => !incomplete.has(u.tripId)).length;
@@ -273,7 +275,9 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
               }
               replanBlocked={replanBlocked ?? runningReason}
               lockBlocked={past ? "Date passée\u00a0: figer une course ne sert plus." : null}
+              placeBlocked={placeBlocked}
               initialTripId={initialTripId}
+              initialPlace={firstParam(params.placer) === "1"}
               crewChoices={view.crewChoices}
               crewRules={view.crewRules}
               crewChangeMode={past ? "none" : dayLocked ? "route" : "equipages"}

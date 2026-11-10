@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Info, Plus, TriangleAlert, UserX } from "lucide-react";
+import { Info, Plus, Search, TriangleAlert, UserX } from "lucide-react";
 import { LinkButton } from "@/components/ui/button";
 import { FormMessage } from "@/components/ui/form";
 import { Card, CardBody, EmptyState, PageHeader, Stat } from "@/components/ui/layout";
@@ -42,7 +42,7 @@ import {
   summarizeTrips,
   UNASSIGNED,
 } from "./trip-list";
-import { planningTripHref } from "@/lib/planning/links";
+import { placeTripHref, planningTripHref } from "@/lib/planning/links";
 import type { TripRowData } from "./trip-row";
 import { TripTable } from "./trip-table";
 import { keyMinute } from "./trip-rules";
@@ -269,7 +269,20 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
 
       {params.notice === "created" ? (
         <div className="mb-4 space-y-2">
-          <FormMessage tone="success">Course créée. Elle sera placée à la prochaine optimisation du planning.</FormMessage>
+          {createdId && date >= today ? (
+            // The same assistant as on the planning: placed now in a route in place, the others untouched.
+            <div className="flex flex-wrap items-center gap-3">
+              <FormMessage tone="success">
+                Course créée. Placez-la tout de suite dans une tournée en place, ou à la prochaine optimisation du planning.
+              </FormMessage>
+              <LinkButton href={placeTripHref(date, createdId)} size="sm" variant="primary">
+                <Search aria-hidden className="size-4" />
+                Où la placer&#x202F;?
+              </LinkButton>
+            </div>
+          ) : (
+            <FormMessage tone="success">Course créée. Elle sera placée à la prochaine optimisation du planning.</FormMessage>
+          )}
           {createdConflicts.length > 0 ? (
             <p role="note" className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
               <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-amber-700" />

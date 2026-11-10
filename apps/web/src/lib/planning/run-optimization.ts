@@ -187,7 +187,7 @@ function placementLoss(lostTripIds: readonly string[], request: OptimizeRequest)
   const more = lost.length > 3 ? ` et ${lost.length - 3} autre${lost.length > 4 ? "s" : ""}` : "";
   return (
     `ce placement aurait retiré ${plural(lost.length, "course déjà placée", "courses déjà placées")} de ${lost.length > 1 ? "leur" : "son"} ` +
-    `véhicule (${named}${more}). Placez les courses non affectées une à une avec «\u202fDéplacer vers…\u202f», ou réoptimisez la journée.`
+    `véhicule (${named}${more}). Placez les courses non affectées une à une avec «\u202fOù placer cette course\u202f?\u202f», ou réoptimisez la journée.`
   );
 }
 

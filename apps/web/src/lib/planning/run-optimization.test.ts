@@ -766,7 +766,7 @@ describe("«\u202fPlacer les non affectées\u202f» (runOptimization placeOnly)"
       ok: false,
       error:
         "Planning inchangé\u00a0: ce placement aurait retiré 1 course déjà placée de son véhicule (le retour de DURAND Paul). " +
-        "Placez les courses non affectées une à une avec «\u202fDéplacer vers…\u202f», ou réoptimisez la journée.",
+        "Placez les courses non affectées une à une avec «\u202fOù placer cette course\u202f?\u202f», ou réoptimisez la journée.",
     });
     // Not offered for confirmation either: the run is closed as not kept, with the trip by id only.
     const stored = fake.db.optimizationRun.update.mock.calls.at(-1)![0] as { data: { status: string; error: string; details: { kind: string } } };

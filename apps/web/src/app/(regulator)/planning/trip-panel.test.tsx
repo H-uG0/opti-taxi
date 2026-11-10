@@ -12,13 +12,18 @@ const actions = vi.hoisted(() => ({
   unlockTrip: vi.fn(async () => ({ ok: true, message: "Course défigée." })),
   moveTrip: vi.fn(async () => ({ ok: true, message: "Course déplacée." })),
   proposeExceptionalAmbulance: vi.fn(async () => ({ ok: true, message: "Course confiée à l'ambulance." })),
+  findPlaces: vi.fn(async () => ({ ok: false, error: "Service indisponible." })),
+  placeTrip: vi.fn(async () => ({ ok: true, message: "Course placée." })),
 }));
 vi.mock("./actions", () => actions);
 
 afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
 
-function renderPanel(trip: TripView, props: { replanBlocked?: string | null; lockBlocked?: string | null } = {}) {
+function renderPanel(
+  trip: TripView,
+  props: { replanBlocked?: string | null; lockBlocked?: string | null; placeBlocked?: string | null } = {},
+) {
   const { trips, vehicles } = planningFixture();
   const onClose = vi.fn();
   const onSelectTrip = vi.fn();
@@ -32,6 +37,7 @@ function renderPanel(trip: TripView, props: { replanBlocked?: string | null; loc
         date="2026-11-10"
         replanBlocked={props.replanBlocked ?? null}
         lockBlocked={props.lockBlocked ?? null}
+        placeBlocked={props.placeBlocked ?? null}
         onSelectTrip={onSelectTrip}
         onClose={onClose}
       />
@@ -88,8 +94,9 @@ describe("TripPanel (panneau course)", () => {
     cleanup();
 
     renderPanel({ ...planningFixture().trips["trip-a"]!, status: "CANCELLED" });
-    expect(screen.getByText("Course annulée.")).toBeTruthy();
+    expect(screen.getAllByText("Course annulée.")).toHaveLength(2);
     expect((screen.getByRole("button", { name: "Déplacer" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Chercher" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("offers an exceptional ambulance for a seated trip the optimizer left unassigned only, and sends the one chosen", async () => {
@@ -167,6 +174,20 @@ describe("TripPanel (panneau course)", () => {
     expect(actions.compareDocumentPosition(phone) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(actions.contains(screen.getByRole("button", { name: /Figer/ }))).toBe(true);
     expect(actions.contains(moveSelect())).toBe(true);
+    // « Où placer » first, the re-optimization behind it.
+    const search = screen.getByRole("button", { name: "Chercher" });
+    expect(search.compareDocumentPosition(moveSelect()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(moveSelect().closest("details")?.querySelector("summary")?.textContent).toBe("Ou figer sur un véhicule et réoptimiser la journée");
+  });
+
+  it("searches the places on a validated day, where the re-optimization is blocked, and not on a past date", () => {
+    renderPanel(planningFixture().trips["trip-a"]!, { replanBlocked: "Planning validé\u00a0: rouvrez-le pour le modifier." });
+    expect((screen.getByRole("button", { name: "Déplacer" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Chercher" }) as HTMLButtonElement).disabled).toBe(false);
+    cleanup();
+    renderPanel(planningFixture().trips["trip-a"]!, { placeBlocked: "Date passée\u00a0: le planning n'est plus modifiable." });
+    expect((screen.getByRole("button", { name: "Chercher" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Date passée : le planning n'est plus modifiable.")).toBeTruthy();
   });
 
   it("says the margin before the appointment, and flags it under 5 minutes", () => {
@@ -181,10 +202,11 @@ describe("TripPanel (panneau course)", () => {
     expect(screen.getByText("Dépose 5 min après le RDV")).toBeTruthy();
   });
 
-  it("freezes with «\u202fF\u202f» and goes to «\u202fDéplacer vers…\u202f» with «\u202fD\u202f», not while typing", async () => {
+  it("freezes with «\u202fF\u202f» and goes to «\u202fOù placer cette course\u202f?\u202f» with «\u202fD\u202f», not while typing", async () => {
     renderPanel(planningFixture().trips["trip-a"]!);
     fireEvent.keyDown(document.body, { key: "d" });
-    expect(document.activeElement).toBe(moveSelect());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Chercher" }));
+    expect(screen.getByRole("button", { name: "Chercher" }).getAttribute("aria-keyshortcuts")).toBe("D");
     // In the list, « f » is a letter for the list, not the shortcut.
     fireEvent.keyDown(moveSelect(), { key: "f" });
     expect(actions.lockTrip).not.toHaveBeenCalled();

@@ -19,6 +19,7 @@ import { DATABASE_ERROR, PLAN_CHANGED_ERROR, planningErrorMessage, UNEXPECTED_ER
 import { lockMessage, tripsToLock, tripsToUnlock, unlockMessage, type LockScope, type ScopeTrip } from "@/lib/planning/bulk-lock";
 import { lockPlanningDay } from "@/lib/planning/day-lock";
 import { loadPlanningDay } from "@/lib/planning/load";
+import { applyTripPlace, findTripPlaces, type FindPlacesOutcome } from "@/lib/planning/place-trip";
 import { LOCKED, lockAction, notLockedOn } from "@/lib/planning/lock";
 import {
   confirmPendingRun,
@@ -245,6 +246,48 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
       message: `Course de ${who} déplacée et figée sur ${target.label}. ${outcome.message}`,
       ...(outcome.warning ? { warning: true } : {}),
     };
+  });
+}
+
+/**
+ * « Où placer cette course ? » (INS-01): the best place of the trip in each vehicle's route in
+ * place, from the optimizer's POST /insert, nothing written. Read only: the panel shows trips the
+ * page already traced (plan.view); the answer names vehicles and trips by id.
+ */
+export async function findPlaces(tripId: string): Promise<FindPlacesOutcome> {
+  await requireUser("REGULATOR");
+  const id = idSchema.safeParse(tripId);
+  if (!id.success) return { ok: false, error: "Course introuvable (supprimée entre-temps\u202f?).", stale: true };
+  try {
+    return await findTripPlaces(id.data);
+  } catch (error) {
+    unstable_rethrow(error);
+    logError("[planning] findPlaces failed", error);
+    return { ok: false, error: planningErrorMessage(error) };
+  }
+}
+
+/**
+ * « Appliquer » a place of « Où placer cette course ? »: only the target route and, for a move,
+ * the source route are rewritten, the trip locked on its new vehicle, traced (trip.move,
+ * details.mode "insert"); the rest of the day does not move. `version`: the plan version the
+ * places were computed on; `confirmed`: the question answered on a validated or started day.
+ */
+export async function placeTrip(
+  tripId: string,
+  vehicleId: string,
+  version: string,
+  confirmed: string | null,
+): Promise<PlanningActionResult> {
+  const user = await requireUser("REGULATOR");
+  return guarded("placeTrip", async () => {
+    const args = z
+      .object({ tripId: idSchema, vehicleId: idSchema, version: z.string().min(1).max(64), confirmed: z.string().max(2000).nullable() })
+      .safeParse({ tripId, vehicleId, version, confirmed });
+    if (!args.success) return { ok: false, error: "Place invalide\u00a0: relancez «\u202fOù placer cette course\u202f?\u202f»." };
+    const outcome = await applyTripPlace(args.data.tripId, args.data.vehicleId, args.data.version, args.data.confirmed, user);
+    if (outcome.ok) refreshPages();
+    return outcome;
   });
 }
 
@@ -477,7 +520,7 @@ export async function lockTrip(tripId: string, shownVehicleId: string): Promise<
       return { ok: false, error: "Cette course est annulée\u00a0: rien à figer." };
     }
     if (!trip.route) {
-      return { ok: false, error: "Cette course n'est sur aucune tournée\u00a0: utilisez «\u202fDéplacer vers…\u202f» pour la placer et la figer." };
+      return { ok: false, error: "Cette course n'est sur aucune tournée\u00a0: utilisez «\u202fOù placer cette course\u202f?\u202f» pour la placer et la figer." };
     }
     const vehicleId = trip.route.vehicleId;
     if (vehicleId !== shown.data) return STALE_PLAN;

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { evaluateRequestSchema, optimizeRequestSchema, planResponseSchema } from "./contract";
+import { evaluateRequestSchema, insertRequestSchema, insertResponseSchema, optimizeRequestSchema, planResponseSchema } from "./contract";
 
 const fixtures = path.resolve(__dirname, "../../../../../contract/fixtures");
 const load = (name: string): unknown => JSON.parse(readFileSync(path.join(fixtures, name), "utf8"));
@@ -29,6 +29,25 @@ describe("optimizer contract fixtures", () => {
   it("accepts plan-response.json", () => {
     const parsed = planResponseSchema.parse(load("plan-response.json"));
     expect(parsed.status).toBe("OK");
+  });
+
+  it("accepts insert-request.json, a trip off every route", () => {
+    const parsed = insertRequestSchema.parse(load("insert-request.json"));
+    expect(parsed.tripId).toBe("trip_1");
+    expect(parsed.routes.flatMap((r) => r.stops).some((s) => s.tripId === parsed.tripId)).toBe(false);
+  });
+
+  it("refuses an insertion of an unknown trip, or with the routes of /optimize", () => {
+    const request = load("insert-request.json") as Record<string, unknown>;
+    expect(insertRequestSchema.safeParse({ ...request, tripId: "trip_404" }).success).toBe(false);
+    expect(insertRequestSchema.safeParse({ ...request, initialRoutes: request.routes }).success).toBe(false);
+    expect(insertRequestSchema.safeParse({ ...request, vehicleIds: ["veh_vsl_1"] }).success).toBe(true);
+  });
+
+  it("accepts insert-response.json", () => {
+    const parsed = insertResponseSchema.parse(load("insert-response.json"));
+    expect(parsed.options[0]?.vehicleId).toBe("veh_taxi_1");
+    expect(parsed.rejected[0]?.kind).toBe("SHIFT");
   });
 
   it("rejects an OUTBOUND trip without appointmentMin", () => {

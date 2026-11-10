@@ -9,9 +9,13 @@ import type { z } from "zod";
 import {
   evaluateRequestSchema,
   healthSchema,
+  insertRequestSchema,
+  insertResponseSchema,
   optimizeRequestSchema,
   planResponseSchema,
   type EvaluateRequest,
+  type InsertRequest,
+  type InsertResponse,
   type OptimizeRequest,
   type PlanResponse,
 } from "./contract";
@@ -177,6 +181,31 @@ export async function evaluate(request: EvaluateRequest): Promise<OptimizerResul
     body: body.data,
     timeoutMs: EVALUATE_TIMEOUT_MS,
   });
+}
+
+/**
+ * /insert runs no solver either (the Python insertion: under a second at 120 vehicles), but the
+ * regulator waits for it with the panel open: a short timeout says at once that the service is slow.
+ */
+export const INSERT_TIMEOUT_MS = 15_000;
+
+/** Said when the optimizer predates /insert (404: web deployed first). */
+export const INSERT_UNKNOWN_ERROR =
+  "Le service d'optimisation ne sait pas encore chercher la place d'une course (version plus ancienne que l'application)\u00a0: " +
+  "utilisez «\u202fFiger et réoptimiser\u202f» en attendant sa mise à jour.";
+
+/**
+ * POST /insert: the best place of one trip in each vehicle's route in place, the other routes kept.
+ * An optimizer older than the route answers 404: said as such.
+ */
+export async function insert(request: InsertRequest): Promise<OptimizerResult<InsertResponse>> {
+  const body = insertRequestSchema.safeParse(request);
+  if (!body.success) {
+    return { ok: false, error: `Requête de placement invalide\u00a0: ${formatIssues(body.error)}`, reason: "error" };
+  }
+  const result = await call("/insert", insertResponseSchema, { method: "POST", body: body.data, timeoutMs: INSERT_TIMEOUT_MS });
+  if (!result.ok && result.status === 404) return { ...result, error: INSERT_UNKNOWN_ERROR };
+  return result;
 }
 
 /** GET /health: is the service up, and which distance source does it use. */

@@ -11,6 +11,14 @@ export function planningTripHref(date: string, tripId: string): string {
 }
 
 /**
+ * « /planning?date=…&trip=…&placer=1 »: the trip selected and its places searched at once
+ * (« Où placer cette course ? »), from a trip just created.
+ */
+export function placeTripHref(date: string, tripId: string): string {
+  return `/planning?${new URLSearchParams({ date, trip: tripId, placer: "1" }).toString()}`;
+}
+
+/**
  * Courses of the date filtered on the patient (and the leg when given), by the
  * patient's id: a name never goes into a URL (proxy access logs, browser
  * history, Referer).

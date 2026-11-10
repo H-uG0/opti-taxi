@@ -73,6 +73,7 @@ function renderBoard(props: { planned?: boolean } = {}) {
         kpis={KPIS}
         replanBlocked={null}
         lockBlocked={null}
+        placeBlocked={null}
         initialTripId={null}
         crewChoices={[]}
         crewRules={{ minPairOverlapMin: 60 }}

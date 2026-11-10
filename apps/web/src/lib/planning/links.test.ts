@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { coursesTripHref, patientHref, planningTripHref, telHref } from "./links";
+import { coursesTripHref, patientHref, placeTripHref, planningTripHref, telHref } from "./links";
 
 describe("links between the planning and the other screens", () => {
   it("opens a trip on the planning of its date", () => {
     expect(planningTripHref("2026-11-10", "cmw1")).toBe("/planning?date=2026-11-10&trip=cmw1");
+  });
+
+  it("opens a trip just created on the planning, its places searched at once", () => {
+    expect(placeTripHref("2026-11-10", "cmw1")).toBe("/planning?date=2026-11-10&trip=cmw1&placer=1");
   });
 
   it("filters Courses on the patient (by id, never by name) and the leg", () => {

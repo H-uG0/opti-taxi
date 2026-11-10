@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { health, optimize, timeoutMessage, unreachableMessage } from "./client";
-import { MAX_TRIPS, MAX_VEHICLES, type OptimizeRequest } from "./contract";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { health, insert, INSERT_UNKNOWN_ERROR, optimize, timeoutMessage, unreachableMessage } from "./client";
+import { MAX_TRIPS, MAX_VEHICLES, type InsertRequest, type OptimizeRequest } from "./contract";
 import { optimizerHttpErrorMessage } from "./http-errors";
 import { optimizerAuthHeaders, optimizerToken, optimizerTokenWarning } from "./token";
 
@@ -119,6 +121,28 @@ describe("optimizer client: routes in place sent to an older optimizer", () => {
     fetchMock.mockResolvedValueOnce(refused());
     expect(await optimize(request)).toMatchObject({ ok: false, status: 422 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("optimizer client: POST /insert", () => {
+  const fixtures = path.resolve(__dirname, "../../../../../contract/fixtures");
+  const load = (name: string): unknown => JSON.parse(readFileSync(path.join(fixtures, name), "utf8"));
+
+  it("posts the request and reads the places of the trip", async () => {
+    fetchMock.mockResolvedValue(json(load("insert-response.json")));
+    const result = await insert(load("insert-request.json") as InsertRequest);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://optimizer.test/insert");
+    expect(result.ok && result.data.options[0]?.vehicleId).toBe("veh_taxi_1");
+  });
+
+  it("says when the optimizer predates /insert (404), and never sends an unknown trip", async () => {
+    fetchMock.mockResolvedValue(json({ detail: "Not Found" }, 404));
+    const result = await insert(load("insert-request.json") as InsertRequest);
+    expect(result).toMatchObject({ ok: false, error: INSERT_UNKNOWN_ERROR, status: 404 });
+    fetchMock.mockClear();
+    const unknown = await insert({ ...(load("insert-request.json") as InsertRequest), tripId: "trip_404" });
+    expect(unknown.ok).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
