@@ -21,6 +21,13 @@ export default async function RegulatorLayout({ children }: { children: React.Re
 
   return (
     <div className="flex min-h-below-banner">
+      {/* First stop of the keyboard: past the menu, straight to the page (seen only with the focus). */}
+      <a
+        href="#contenu"
+        className="sr-only z-[70] rounded-md bg-white text-sm font-medium text-brand-800 shadow-md ring-2 ring-brand-600 focus:not-sr-only focus:fixed focus:top-[calc(var(--demo-banner-h,0px)+0.5rem)] focus:left-2 focus:px-3 focus:py-2 focus:outline-none print:hidden"
+      >
+        Aller au contenu
+      </a>
       {/* The column (white, bordered) runs the page's whole height; its content stays pinned to the screen. */}
       <aside className="hidden w-60 shrink-0 border-r border-slate-200 bg-white lg:block print:hidden">
         <div className="sticky top-below-banner flex h-below-banner flex-col">
@@ -55,7 +62,9 @@ export default async function RegulatorLayout({ children }: { children: React.Re
         <div className="border-b border-slate-200 bg-white lg:hidden print:hidden">
           <RegulatorNav horizontal counts={counts} />
         </div>
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 print:p-0">{children}</main>
+        <main id="contenu" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 outline-none sm:px-6 lg:px-8 print:p-0">
+          {children}
+        </main>
       </div>
     </div>
   );

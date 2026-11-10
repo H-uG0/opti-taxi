@@ -1,11 +1,12 @@
 "use client";
 
-import { useTransition, type ReactNode } from "react";
+import { useEffect, useTransition, type ReactNode } from "react";
 import { useLinkStatus } from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react";
 import { LinkButton } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
+import { isShortcutKey } from "@/lib/planning/shortcuts";
 import { addDays, isIsoDate } from "@/lib/time";
 
 /** Inside a date link: its icon, or a spinner while the other date loads (same size: no layout shift). */
@@ -25,12 +26,15 @@ export function DateNav({
   tomorrow,
   basePath = "/planning",
   keepParams = [],
+  shortcuts = false,
 }: {
   date: string;
   tomorrow: string;
   basePath?: string;
   /** Query parameters kept from one date to the next (the planning's filters). */
   keepParams?: readonly string[];
+  /** « [ » and « ] » go to the previous and next day (the planning). */
+  shortcuts?: boolean;
 }) {
   const router = useRouter();
   const search = useSearchParams();
@@ -44,9 +48,31 @@ export function DateNav({
   };
   const [navigating, startTransition] = useTransition();
 
+  useEffect(() => {
+    if (!shortcuts) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key !== "[" && e.key !== "]") || !isShortcutKey(e)) return;
+      e.preventDefault();
+      const params = new URLSearchParams({ date: addDays(date, e.key === "[" ? -1 : 1) });
+      const current = new URLSearchParams(window.location.search);
+      for (const key of keepParams) {
+        const value = current.get(key);
+        if (value) params.set(key, value);
+      }
+      startTransition(() => router.push(`${basePath}?${params.toString()}`));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [shortcuts, date, keepParams, basePath, router]);
+
   return (
     <nav aria-label="Date" className={cn("flex items-center gap-1.5", navigating && "opacity-70")}>
-      <LinkButton href={href(addDays(date, -1))} aria-label="Jour précédent" title="Jour précédent">
+      <LinkButton
+        href={href(addDays(date, -1))}
+        aria-label="Jour précédent"
+        title={shortcuts ? "Jour précédent ( [ )" : "Jour précédent"}
+        aria-keyshortcuts={shortcuts ? "[" : undefined}
+      >
         <LinkIcon>
           <ChevronLeft aria-hidden className="size-4" />
         </LinkIcon>
@@ -71,7 +97,12 @@ export function DateNav({
         }}
         className="tabular h-10 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-xs focus:border-brand-500 focus:outline-2 focus:outline-brand-200"
       />
-      <LinkButton href={href(addDays(date, 1))} aria-label="Jour suivant" title="Jour suivant">
+      <LinkButton
+        href={href(addDays(date, 1))}
+        aria-label="Jour suivant"
+        title={shortcuts ? "Jour suivant ( ] )" : "Jour suivant"}
+        aria-keyshortcuts={shortcuts ? "]" : undefined}
+      >
         <LinkIcon>
           <ChevronRight aria-hidden className="size-4" />
         </LinkIcon>
