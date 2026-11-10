@@ -12,7 +12,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { ChevronRight, Lock, TriangleAlert } from "lucide-react";
+import { ChevronRight, Lock, PencilLine, TriangleAlert } from "lucide-react";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { cn } from "@/components/ui/cn";
 import { IDLE_VEHICLE_COLOR } from "@/lib/planning/colors";
@@ -46,6 +46,7 @@ import { formatDuration, formatMinute } from "@/lib/time";
 import { ClusterPopover } from "./cluster-popover";
 import { ReturnToCheckMark, SHARED_STRIPES, span, TrackTrips, type OpenCluster } from "./timeline-track";
 import { ROVING_ANCHOR, ROVING_PREFERRED, ROVING_ROW, useRovingGrid } from "./use-roving-grid";
+import { useTripDrag, type DragState, type TripDragApi } from "./use-trip-drag";
 
 export type { DepotGroupView as TimelineGroup } from "@/lib/planning/filter";
 
@@ -78,8 +79,30 @@ export type TimelineProps = {
   onZoomChange?: (zoom: ZoomLevel) => void;
   /** Said when no row is left (« Aucun véhicule ne correspond aux filtres. » by default). */
   emptyText?: string;
+  /** Drag and drop of the trips into the draft (INS-03); absent: the timeline only reads and selects. */
+  drag?: TripDragApi;
+  /** Rows whose route the draft changes: marked « Brouillon ». */
+  draftVehicleIds?: ReadonlySet<string>;
+  /** Trips highlighted a moment (a link of « Changements », a drop of the draft). */
+  flashTripIds?: ReadonlySet<string>;
   className?: string;
 };
+
+type DropHint = "ok" | "no" | null;
+
+const NO_FLASH: ReadonlySet<string> = new Set();
+
+/** How a row shows that the dragged trip is over it: allowed (dashed brand outline) or not (red wash). */
+function dropHintClass(hint: DropHint): string | false {
+  if (hint === "ok") return "outline-2 -outline-offset-2 outline-dashed outline-brand-600 bg-brand-50";
+  if (hint === "no") return "bg-red-50";
+  return false;
+}
+
+function hintOf(drag: DragState | null, rowId: string): DropHint {
+  if (!drag?.target || drag.target.rowId !== rowId || drag.target.rowId === drag.fromRowId) return null;
+  return drag.target.issue ? "no" : "ok";
+}
 
 /**
  * Columns, declared once on the grid and shared by every row through CSS
@@ -162,6 +185,12 @@ type RowProps = {
   onSelectTrip: (tripId: string) => void;
   onSelectVehicle: (vehicleId: string) => void;
   onOpenCluster: OpenCluster;
+  dropHint: DropHint;
+  /** The draft changes this row's route. */
+  draft: boolean;
+  flashIds: ReadonlySet<string>;
+  canDrag?: (tripId: string) => boolean;
+  draggingTripId: string | null;
 };
 
 /** Row badge: the vehicle's violations (its own and its trips'), by an icon and a count, named for screen readers. */
@@ -195,6 +224,11 @@ const TimelineRow = memo(function TimelineRow({
   onSelectTrip,
   onSelectVehicle,
   onOpenCluster,
+  dropHint,
+  draft,
+  flashIds,
+  canDrag,
+  draggingTripId,
 }: RowProps) {
   const { range, compact, zoomed } = geometry;
   const route = row.route;
@@ -230,9 +264,19 @@ const TimelineRow = memo(function TimelineRow({
     row.label,
     route ? pluralize(route.tripCount, "course") : row.available ? "sans tournée" : "indisponible",
     rowViolations && rowViolations.length > 0 ? pluralize(rowViolations.length, "violation") : null,
+    draft ? "tournée changée par le brouillon" : null,
   ]
     .filter(Boolean)
     .join(", ");
+  const draftMark = draft ? (
+    <span
+      className="inline-flex shrink-0 items-center gap-0.5 rounded bg-brand-100 px-1 py-px text-[10px] leading-none font-semibold text-brand-800"
+      title="Tournée changée par le brouillon, non enregistrée"
+    >
+      <PencilLine aria-hidden className="size-2.5" />
+      Brouillon
+    </span>
+  ) : null;
 
   return (
     <div
@@ -244,6 +288,7 @@ const TimelineRow = memo(function TimelineRow({
         ROW,
         "group/row border-b border-slate-100 text-xs text-slate-700 last:border-b-0",
         selected ? "bg-brand-50" : "hover:bg-slate-50",
+        dropHintClass(dropHint),
       )}
     >
       {/* Opaque background: the cell stays pinned over the track when the grid scrolls. */}
@@ -278,6 +323,7 @@ const TimelineRow = memo(function TimelineRow({
             </span>
             {labelSaysType ? null : <VehicleTypeBadge type={row.type} dot={false} />}
             {violationMark}
+            {draftMark}
             {compact && route ? (
               <span className="tabular shrink-0 text-[11px] text-slate-500">
                 {route.tripCount} course{route.tripCount > 1 ? "s" : ""}
@@ -329,7 +375,11 @@ const TimelineRow = memo(function TimelineRow({
         role="gridcell"
         aria-label={route ? `Tournée de ${label}\u00a0: ${pluralize(route.tripCount, "course")}` : `${label}\u00a0: aucune course`}
         // isolate: what the track draws (blocks, targets, the appointment line) stays under the pinned axis, rows and column.
-        className={cn("relative isolate self-center overflow-hidden rounded", compact ? "my-0.5 h-6" : "my-1.5 h-12")}
+        className={cn(
+          "relative isolate self-center overflow-hidden rounded",
+          compact ? "my-0.5 h-6" : "my-1.5 h-12",
+          draft && "outline-2 -outline-offset-1 outline-dashed outline-brand-500",
+        )}
         style={row.shift || off ? OFF_SHIFT_STYLE : undefined}
       >
         {row.shift ? (
@@ -403,6 +453,9 @@ const TimelineRow = memo(function TimelineRow({
             openClusterKey={openClusterKey}
             onSelectTrip={onSelectTrip}
             onOpenCluster={onOpenCluster}
+            flashIds={flashIds}
+            canDrag={canDrag}
+            draggingTripId={draggingTripId}
           />
         ) : null}
 
@@ -444,6 +497,12 @@ type PinnedProps = {
   openClusterKey: string | null;
   onSelectTrip: (tripId: string) => void;
   onOpenCluster: OpenCluster;
+  dropHint: DropHint;
+  /** A trip is being dragged: the row is a drop zone even when empty. */
+  dragging: boolean;
+  flashIds: ReadonlySet<string>;
+  canDrag?: (tripId: string) => boolean;
+  draggingTripId: string | null;
 };
 
 export const UNASSIGNED_ROW_ID = "a-placer";
@@ -463,6 +522,11 @@ const PinnedUnassignedRow = memo(function PinnedUnassignedRow({
   openClusterKey,
   onSelectTrip,
   onOpenCluster,
+  dropHint,
+  dragging,
+  flashIds,
+  canDrag,
+  draggingTripId,
 }: PinnedProps) {
   const { range } = geometry;
   const layout = useMemo(() => {
@@ -487,7 +551,7 @@ const PinnedUnassignedRow = memo(function PinnedUnassignedRow({
       data-pinned-row
       aria-label={`À placer, ${pluralize(tripIds.length, "course sans véhicule", "courses sans véhicule")}`}
       {...{ [ROVING_ROW]: "" }}
-      className={cn(ROW, "sticky z-[27] border-b border-amber-200 bg-amber-50 text-xs text-slate-700")}
+      className={cn(ROW, "sticky z-[27] border-b border-amber-200 bg-amber-50 text-xs text-slate-700", dropHintClass(dropHint))}
       style={{ top: AXIS_PX, height: PINNED_ROW_PX }}
     >
       <div role="rowheader" className="sticky left-0 z-[22] flex min-w-0 items-center bg-amber-50 pl-3 pr-3">
@@ -501,7 +565,11 @@ const PinnedUnassignedRow = memo(function PinnedUnassignedRow({
             <span className="sr-only"> {tripIds.length > 1 ? "courses sans véhicule" : "course sans véhicule"}</span>
           </span>
           <span className="truncate text-xs font-normal text-amber-900/80">
-            {missing > 0 ? `dont ${missing} sans horaire` : "créneau à tenir"}
+            {dragging && tripIds.length === 0
+              ? "déposer ici pour la retirer de sa tournée"
+              : missing > 0
+                ? `dont ${missing} sans horaire`
+                : "créneau à tenir"}
           </span>
         </p>
       </div>
@@ -529,6 +597,9 @@ const PinnedUnassignedRow = memo(function PinnedUnassignedRow({
           openClusterKey={openClusterKey}
           onSelectTrip={onSelectTrip}
           onOpenCluster={onOpenCluster}
+          flashIds={flashIds}
+          canDrag={canDrag}
+          draggingTripId={draggingTripId}
         />
       </div>
     </div>
@@ -616,6 +687,9 @@ export function Timeline({
   zoom = "day",
   onZoomChange,
   emptyText = "Aucun véhicule ne correspond aux filtres.",
+  drag: dragApi,
+  draftVehicleIds,
+  flashTripIds = NO_FLASH,
   className,
 }: TimelineProps) {
   const scroller = useRef<HTMLDivElement>(null);
@@ -648,7 +722,6 @@ export function Timeline({
       if (vehicleId) relevantRows.add(vehicleId);
     }
   }
-  const showPinned = unassignedTripIds.length > 0;
 
   // The track's width in pixels: how many minutes 24 px cover (targets), whether initials fit.
   useEffect(() => {
@@ -666,6 +739,14 @@ export function Timeline({
     if (scroller.current) revealInBox(scroller.current, element);
   }, []);
   const roving = useRovingGrid(grid, { selectionKey: `${selectedTripId ?? ""}|${selectedVehicleId ?? ""}`, reveal });
+  const rowLabels = useMemo(() => new Map(groups.flatMap((g) => g.rows.map((r) => [r.id, r.label] as const))), [groups]);
+  const rowLabel = useCallback((rowId: string) => (rowId === UNASSIGNED_ROW_ID ? "À placer" : (rowLabels.get(rowId) ?? "Véhicule")), [rowLabels]);
+  const tripName = useCallback((tripId: string) => trips[tripId]?.patientName ?? "la course", [trips]);
+  const dragging = useTripDrag({ api: dragApi, scrollerRef: scroller, gridRef: grid, unassignedRowId: UNASSIGNED_ROW_ID, rowLabel, tripName, reveal });
+  const drag = dragging.drag;
+  const canDrag = dragApi?.canDrag;
+  // While a trip is dragged, « À placer » is a drop zone even when no trip is without a vehicle.
+  const showPinned = unassignedTripIds.length > 0 || drag !== null;
 
   /** Minute at the middle of the visible track, kept while scrolling zoomed in: a closer zoom keeps it in the middle. */
   const centerMinute = useRef<number | null>(null);
@@ -803,7 +884,7 @@ export function Timeline({
     >
       <p id={hintId} className="sr-only">
         Flèches haut et bas&nbsp;: véhicule précédent ou suivant&#x202F;; gauche et droite&nbsp;: course précédente ou suivante&#x202F;; Entrée&nbsp;:
-        sélectionner&#x202F;; Échap&nbsp;: désélectionner.
+        sélectionner&#x202F;; Échap&nbsp;: désélectionner.{dragApi ? " M\u00a0: déplacer la course dans le brouillon." : ""}
       </p>
       <div
         ref={grid}
@@ -813,6 +894,9 @@ export function Timeline({
         className={zoomed ? ZOOMED_GRID : DAY_GRID}
         style={gridStyle}
         onKeyDown={roving.onKeyDown}
+        onKeyDownCapture={dragApi ? dragging.onKeyDownCapture : undefined}
+        onPointerDown={dragApi ? dragging.onPointerDown : undefined}
+        onClickCapture={dragApi ? dragging.onClickCapture : undefined}
         onFocus={roving.onFocus}
       >
         <div
@@ -868,6 +952,11 @@ export function Timeline({
             openClusterKey={cluster?.rowId === UNASSIGNED_ROW_ID ? cluster.key : null}
             onSelectTrip={onSelectTrip}
             onOpenCluster={openCluster}
+            dropHint={hintOf(drag, UNASSIGNED_ROW_ID)}
+            dragging={drag !== null}
+            flashIds={flashTripIds}
+            canDrag={canDrag}
+            draggingTripId={drag?.tripId ?? null}
           />
         ) : null}
         {groups.map((group) => {
@@ -941,6 +1030,11 @@ export function Timeline({
                       onSelectTrip={onSelectTrip}
                       onSelectVehicle={onSelectVehicle}
                       onOpenCluster={openCluster}
+                      dropHint={hintOf(drag, row.id)}
+                      draft={draftVehicleIds?.has(row.id) === true}
+                      flashIds={flashTripIds}
+                      canDrag={canDrag}
+                      draggingTripId={drag?.tripId ?? null}
                     />
                   ))}
                 </div>
@@ -956,6 +1050,30 @@ export function Timeline({
           </div>
         ) : null}
       </div>
+      {/* The dragged trip follows the pointer, with where it would go (the keyboard's move is said instead). */}
+      {drag && !drag.keyboard ? (
+        <div
+          aria-hidden
+          className={cn(
+            "pointer-events-none fixed z-[60] max-w-72 rounded-md px-2 py-1 text-xs font-medium shadow-lg",
+            drag.target?.issue ? "bg-red-700 text-white" : "bg-slate-900 text-white",
+          )}
+          style={{ left: drag.x + 14, top: drag.y + 14 }}
+        >
+          {tripName(drag.tripId)}
+          {drag.target ? (
+            <span className="block font-normal">
+              → {rowLabel(drag.target.rowId)}
+              {drag.target.issue ? `\u00a0: ${drag.target.issue}` : ""}
+            </span>
+          ) : (
+            <span className="block font-normal opacity-80">Déposez sur une autre ligne, ou sur «&#x202F;À placer&#x202F;»</span>
+          )}
+        </div>
+      ) : null}
+      <p aria-live="assertive" className="sr-only">
+        {dragging.announce}
+      </p>
       {cluster ? (
         <ClusterPopover
           anchor={cluster.anchor}
@@ -1049,6 +1167,15 @@ export function TimelineLegend({ showReturnToCheck = false }: { showReturnToChec
       </li>
       <li className={item}>
         <span aria-hidden className="h-3.5 w-8 shrink-0 rounded bg-amber-100 ring-1 ring-inset ring-amber-300" /> Pause
+      </li>
+      <li className={item}>
+        <span
+          aria-hidden
+          className="inline-flex h-4 w-8 shrink-0 items-center justify-center rounded bg-brand-100 text-[9px] font-semibold text-brand-800 outline-1 outline-dashed outline-brand-500"
+        >
+          <PencilLine className="size-2.5" />
+        </span>
+        Brouillon&nbsp;: tournée changée par un glisser-déposer, pas encore enregistrée (glissez une course vers une autre ligne, ou «&#x202F;M&#x202F;» au clavier)
       </li>
       <li className={item}>
         <span aria-hidden className="h-3.5 w-8 shrink-0 rounded ring-1 ring-inset ring-slate-200" style={OFF_SHIFT_STYLE} /> Hors horaires

@@ -9,7 +9,10 @@ import { PlanningActivityProvider } from "./planning-activity";
 import { PlanningBoard } from "./planning-board";
 
 // The server actions are not loaded, and the map (WebGL) is replaced by what the board gives it.
-const actions = vi.hoisted(() => ({ findPlaces: vi.fn(async () => ({ ok: false, error: "Service indisponible." })) }));
+const actions = vi.hoisted(() => ({
+  findPlaces: vi.fn(async () => ({ ok: false, error: "Service indisponible." })),
+  checkDraft: vi.fn(),
+}));
 vi.mock("./actions", () => ({
   lockTrip: vi.fn(),
   unlockTrip: vi.fn(),
@@ -20,11 +23,14 @@ vi.mock("./actions", () => ({
   changeRouteCrew: vi.fn(),
   findPlaces: actions.findPlaces,
   placeTrip: vi.fn(),
+  checkDraft: actions.checkDraft,
+  saveDraft: vi.fn(),
 }));
 // The filter is read from the address (Next.js keeps useSearchParams in step with it in the app).
 vi.mock("next/navigation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/navigation")>()),
   useSearchParams: () => new URLSearchParams(window.location.search),
+  useRouter: () => ({ refresh: vi.fn() }),
 }));
 const map = vi.hoisted(() => ({ props: null as PlanningMapProps | null }));
 vi.mock("@/components/map/planning-map-lazy", () => ({
@@ -174,5 +180,97 @@ describe("PlanningBoard", () => {
     expect(map.props?.onSelectionOnlyChange).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Taxi 1 \(Marseille\)/ }));
     expect(map.props?.onSelectionOnlyChange).toBeTypeOf("function");
+  });
+});
+
+describe("PlanningBoard: the drag-and-drop draft (INS-03)", () => {
+  const draftView = {
+    version: "v1",
+    moves: [{ tripId: "trip-a", toVehicleId: "vsl-1", fromVehicleId: "taxi-1", ok: true, pickupMinute: 412, dropoffMinute: 440, deltaKm: -1, deltaMargin: 6 }],
+    routes: [
+      {
+        vehicleId: "vsl-1",
+        route: {
+          startMinute: 400,
+          endMinute: 450,
+          distanceKm: 10,
+          emptyKm: 3,
+          revenue: 16,
+          cost: 9,
+          margin: 7,
+          breakStartMinute: null,
+          breakEndMinute: null,
+          stops: [
+            { tripId: "trip-a", kind: "PICKUP" as const, lat: 43.3, lng: 5.4, arrivalMinute: 412, startMinute: 412, departureMinute: 417, loadAfter: 1 },
+            { tripId: "trip-a", kind: "DROPOFF" as const, lat: 43.3, lng: 5.4, arrivalMinute: 440, startMinute: 440, departureMinute: 445, loadAfter: 0 },
+          ],
+        },
+      },
+    ],
+    trips: [{ tripId: "trip-a", vehicleId: "vsl-1", pickupMinute: 412, dropoffMinute: 440, shared: false, coPassengerTripIds: [], estimatedRevenue: 16, detourKm: 0 }],
+    before: { served: 2, violations: 0, revenue: 30, margin: -3.7, km: 18.4 },
+    after: { served: 2, violations: 0, revenue: 32, margin: 2.3, km: 17.4 },
+    newViolations: [],
+    shifted: [],
+    question: null,
+  };
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    actions.checkDraft.mockReset();
+    actions.checkDraft.mockResolvedValue({ ok: true, view: draftView });
+  });
+
+  it("checks a drop with the server, draws the draft on the timeline and counts it, kept for the tab", async () => {
+    renderBoard();
+    const trip = document.querySelector<HTMLElement>("[data-trip-ids='trip-a']")!;
+    trip.focus();
+    fireEvent.keyDown(trip, { key: "m" });
+    fireEvent.keyDown(trip, { key: "ArrowDown" });
+    await act(async () => {
+      fireEvent.keyDown(trip, { key: "Enter" });
+    });
+    expect(actions.checkDraft).toHaveBeenCalledWith("2026-11-10", [{ tripId: "trip-a", toVehicleId: "vsl-1" }]);
+    const bar = await screen.findByRole("region", { name: "Brouillon de la frise" });
+    expect(bar.textContent).toContain("1 modification non enregistrée");
+    expect(bar.textContent).toContain("marge +6 €");
+    const vsl = document.querySelector("[data-vehicle-id='vsl-1']")!;
+    expect(vsl.textContent).toContain("Brouillon");
+    expect(vsl.querySelector("[data-trip-ids='trip-a']")).not.toBeNull();
+    expect(JSON.parse(window.sessionStorage.getItem("opti-taxi:brouillon:2026-11-10") ?? "[]")).toEqual([{ tripId: "trip-a", toVehicleId: "vsl-1" }]);
+    // The trip's panel says it is moved in the draft only.
+    fireEvent.click(vsl.querySelector<HTMLElement>("[data-trip-ids='trip-a']")!);
+    expect(document.body.textContent).toContain("Dans le brouillon, non enregistré : sur VSL 1 (Marseille), prise en charge 06:52");
+    // « Annuler »: the plan in place again, nothing kept.
+    fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
+    expect(screen.queryByRole("region", { name: "Brouillon de la frise" })).toBeNull();
+    expect(window.sessionStorage.getItem("opti-taxi:brouillon:2026-11-10")).toBeNull();
+  });
+
+  it("takes a refused drop out of the draft, saying why", async () => {
+    actions.checkDraft.mockResolvedValue({
+      ok: true,
+      view: { ...draftView, moves: [{ tripId: "trip-a", toVehicleId: "vsl-1", fromVehicleId: "taxi-1", ok: false, reason: "VSL 1 (Marseille) est en pause de 12:00 à 12:45." }], routes: [], trips: [] },
+    });
+    renderBoard();
+    const trip = document.querySelector<HTMLElement>("[data-trip-ids='trip-a']")!;
+    trip.focus();
+    fireEvent.keyDown(trip, { key: "m" });
+    fireEvent.keyDown(trip, { key: "ArrowDown" });
+    await act(async () => {
+      fireEvent.keyDown(trip, { key: "Enter" });
+    });
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Déplacement refusé pour la course de Monique Aubert (aller, RDV 07:30) : VSL 1 (Marseille) est en pause de 12:00 à 12:45.",
+    );
+    expect(screen.getByRole("region", { name: "Brouillon de la frise" }).textContent).not.toContain("modification");
+    expect(window.sessionStorage.getItem("opti-taxi:brouillon:2026-11-10")).toBeNull();
+  });
+
+  it("checks again the draft kept for the date when the page opens", async () => {
+    window.sessionStorage.setItem("opti-taxi:brouillon:2026-11-10", JSON.stringify([{ tripId: "trip-a", toVehicleId: "vsl-1" }]));
+    renderBoard();
+    await waitFor(() => expect(actions.checkDraft).toHaveBeenCalledWith("2026-11-10", [{ tripId: "trip-a", toVehicleId: "vsl-1" }]));
+    expect((await screen.findByRole("region", { name: "Brouillon de la frise" })).textContent).toContain("1 modification non enregistrée");
   });
 });

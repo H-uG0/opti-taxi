@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { MousePointerClick } from "lucide-react";
+import { MousePointerClick, PencilLine } from "lucide-react";
 import { Card } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
 import { PlanningMapLazy } from "@/components/map/planning-map-lazy";
@@ -9,10 +9,13 @@ import type { MapTrip, MapVehicle } from "@/components/map/planning-geojson";
 import { IssuesPanel } from "@/components/planning/issues-panel";
 import { KpiStrip } from "@/components/planning/kpi-strip";
 import { Timeline } from "@/components/planning/timeline";
+import type { TripDragApi } from "@/components/planning/use-trip-drag";
 import { VehiclePanel } from "@/components/planning/vehicle-panel";
 import type { DroppedLock } from "@/lib/optimizer/build-request";
 import { scopeLockCounts, scopeTripOf } from "@/lib/planning/bulk-lock";
 import { displayColors, IDLE_VEHICLE_COLOR } from "@/lib/planning/colors";
+import { dragIssue, dropIssue, rowsWithDraft, tripsWithDraft } from "@/lib/planning/draft";
+import { tripLineText } from "@/lib/planning/naming";
 import { depotChoices, depotGroupViews, filterRows, groupByDepot, isFiltering, issueVehicleIds, subsetKpis } from "@/lib/planning/filter";
 import { pluralize } from "@/lib/planning/format";
 import { isShortcutKey, issueTargets, nextIssueTarget } from "@/lib/planning/shortcuts";
@@ -25,11 +28,14 @@ import type { CrewRules } from "@/lib/staff/day-crews";
 import type { CrewChoice } from "@/lib/staff/route-crew";
 import { STOP_KIND_LABELS } from "@/lib/labels";
 import { formatMinute } from "@/lib/time";
+import { DraftBar } from "./draft-bar";
 import { LockScopeButtons } from "./lock-scope-buttons";
+import { usePlanningActivity, useTripLink } from "./planning-activity";
 import { PlanningSearch } from "./planning-search";
 import { RouteCrewChange, type CrewChangeMode } from "./route-crew-form";
 import { TimelineToolbar } from "./timeline-toolbar";
 import { TripPanel } from "./trip-panel";
+import { usePlanningDraft } from "./use-planning-draft";
 import { usePlanningFilter } from "./use-planning-filter";
 
 export type PlanningBoardProps = {
@@ -70,6 +76,12 @@ export type PlanningBoardProps = {
 };
 
 const ACTIVE = (t: TripView) => t.status !== "CANCELLED" && t.status !== "NO_SHOW";
+
+/** How long a trip linked from « Changements » or just dropped stays highlighted on the timeline. */
+const FLASH_MS = 2400;
+const NO_FLASH: ReadonlySet<string> = new Set();
+
+const routeStarted = (row: Pick<VehicleRowView, "route"> | null | undefined) => row?.route?.stops.some((s) => s.completed) === true;
 
 /** A link seen only when it has the focus (« Passer la frise »). */
 const SKIP_LINK =
@@ -120,6 +132,37 @@ export function PlanningBoard({
   const depots = useMemo(() => depotChoices(vehicles), [vehicles]);
   const depotIds = useMemo(() => new Set(depots.map((d) => d.id)), [depots]);
   const { filter, setFilter, setTrip } = usePlanningFilter(depotIds);
+  const { busy } = usePlanningActivity();
+
+  // The drag-and-drop draft (INS-03): the timeline shows it, the rest of the board the plan in place.
+  const nameOf = useCallback((tripId: string) => {
+    const trip = tripsById[tripId];
+    return trip ? tripLineText(trip) : "une course";
+  }, [tripsById]);
+  const homeOf = useCallback((tripId: string) => tripsById[tripId]?.vehicleId ?? null, [tripsById]);
+  // A trip linked from « Changements », or just dropped in the draft: highlighted a moment on the timeline.
+  const [flash, setFlash] = useState<ReadonlySet<string>>(NO_FLASH);
+  const flashTrip = useCallback((tripId: string) => setFlash(new Set([tripId])), []);
+  useEffect(() => {
+    if (flash.size === 0) return;
+    const id = window.setTimeout(() => setFlash(NO_FLASH), FLASH_MS);
+    return () => window.clearTimeout(id);
+  }, [flash]);
+  const draft = usePlanningDraft({ date, version, homeOf, nameOf, onDropped: flashTrip });
+  const { drop: dropInDraft, checking: draftChecking } = draft;
+  const draftBlocked = placeBlocked !== null || !planned;
+  const draftView = draftBlocked ? null : draft.view;
+  const displayTripsById = useMemo(() => tripsWithDraft(tripsById, draftView), [tripsById, draftView]);
+  const displayVehicles = useMemo(
+    () =>
+      rowsWithDraft(vehicles, draftView, (tripId, kind) => {
+        const trip = tripsById[tripId];
+        return (kind === "PICKUP" ? trip?.pickupAddress : trip?.dropoffAddress) ?? "";
+      }),
+    [vehicles, draftView, tripsById],
+  );
+  const draftVehicleIds = useMemo(() => new Set(draftView?.routes.map((r) => r.vehicleId) ?? []), [draftView]);
+  const displayVehicleById = useMemo(() => new Map(displayVehicles.map((v) => [v.id, v])), [displayVehicles]);
 
   const [selection, setSelection] = useState<{ tripId: string | null; vehicleId: string | null }>(() => ({
     tripId: initialTripId,
@@ -141,12 +184,12 @@ export function PlanningBoard({
   // After a refresh the selected trip / vehicle may be gone: treat it as unselected.
   const selectedTrip = selection.tripId ? (tripsById[selection.tripId] ?? null) : null;
   const selectedVehicle = selection.vehicleId ? (vehicles.find((v) => v.id === selection.vehicleId) ?? null) : null;
-  // The highlighted vehicle follows the trip when the trip moved to another vehicle.
+  // The highlighted vehicle follows the trip when the trip moved to another vehicle (in the draft too).
   const highlightedVehicleId = useMemo(() => {
-    const trip = selection.tripId ? tripsById[selection.tripId] : undefined;
+    const trip = selection.tripId ? displayTripsById[selection.tripId] : undefined;
     if (trip) return trip.vehicleId;
     return selection.vehicleId !== null && vehicles.some((v) => v.id === selection.vehicleId) ? selection.vehicleId : null;
-  }, [selection, tripsById, vehicles]);
+  }, [selection, displayTripsById, vehicles]);
 
   // The trip selected is kept in the address (?trip=): a reload or a copied link opens it again.
   useEffect(() => setTrip(selectedTrip?.id ?? null), [selectedTrip?.id, setTrip]);
@@ -164,12 +207,29 @@ export function PlanningBoard({
 
   const selectTrip = useCallback(
     (tripId: string) => {
-      const vehicleId = tripsById[tripId]?.vehicleId ?? null;
+      const vehicleId = displayTripsById[tripId]?.vehicleId ?? null;
       setSelection({ tripId, vehicleId });
       setAutoPlaceTripId(null);
       reveal(vehicleId);
     },
-    [tripsById, reveal],
+    [displayTripsById, reveal],
+  );
+
+  const showTripHere = useCallback(
+    (tripId: string) => {
+      selectTrip(tripId);
+      flashTrip(tripId);
+    },
+    [selectTrip, flashTrip],
+  );
+  // A link of « Changements » (the plan waiting for confirmation, above the board): the trip is shown here.
+  const { subscribe } = useTripLink();
+  useEffect(
+    () =>
+      subscribe((tripId) => {
+        if (tripsById[tripId]) showTripHere(tripId);
+      }),
+    [subscribe, tripsById, showTripHere],
   );
   const selectVehicle = useCallback(
     (vehicleId: string) =>
@@ -247,7 +307,16 @@ export function PlanningBoard({
     () => filterRows(vehicles, filter, issueIds, highlightedVehicleId),
     [vehicles, filter, issueIds, highlightedVehicleId],
   );
-  const groups = useMemo(() => depotGroupViews(date, shown, vehicles, trips, tripsById), [date, shown, vehicles, trips, tripsById]);
+  // The timeline draws the draft: the rows it keeps, with their draft routes and trips.
+  const timelineRows = useMemo(
+    () => (draftView ? shown.map((row) => displayVehicleById.get(row.id) ?? row) : shown),
+    [draftView, shown, displayVehicleById],
+  );
+  const displayTrips = useMemo(() => (draftView ? Object.values(displayTripsById) : trips), [draftView, displayTripsById, trips]);
+  const groups = useMemo(
+    () => depotGroupViews(date, timelineRows, displayVehicles, displayTrips, displayTripsById),
+    [date, timelineRows, displayVehicles, displayTrips, displayTripsById],
+  );
   const collapsed = useMemo(() => new Set(filter.collapsed), [filter.collapsed]);
   const toggleGroup = useCallback(
     (depotId: string) =>
@@ -288,7 +357,37 @@ export function PlanningBoard({
     return displayColors(keptIds, extra);
   }, [kept, shown, highlightedVehicleId]);
   const colorOf = useCallback((v: VehicleRowView) => colors.get(v.id) ?? (v.route ? v.color : IDLE_VEHICLE_COLOR), [colors]);
-  const unassignedIds = useMemo(() => (planned ? unassigned.map((u) => u.tripId) : []), [planned, unassigned]);
+  const unassignedIds = useMemo(() => {
+    if (!planned) return [];
+    const ids = unassigned.map((u) => u.tripId);
+    if (!draftView) return ids;
+    // With the draft: the trips it places leave « À placer », those it takes out of a route come in.
+    const placed = ids.filter((id) => displayTripsById[id]?.vehicleId === null);
+    const takenOut = draftView.trips.filter((t) => t.vehicleId === null && !ids.includes(t.tripId)).map((t) => t.tripId);
+    return [...placed, ...takenOut];
+  }, [planned, unassigned, draftView, displayTripsById]);
+
+  // Drag and drop on the timeline: on a day the assistant may change (« Où placer » rules), one check at a time.
+  const dragApi = useMemo<TripDragApi | undefined>(() => {
+    if (draftBlocked) return undefined;
+    return {
+      canDrag: (tripId) => {
+        if (busy || draftChecking) return false;
+        const trip = displayTripsById[tripId];
+        if (!trip) return false;
+        return dragIssue(trip, routeStarted(trip.vehicleId ? displayVehicleById.get(trip.vehicleId) : null)) === null;
+      },
+      dropIssue: (tripId, vehicleId) => {
+        const trip = displayTripsById[tripId];
+        if (!trip) return "Course inconnue.";
+        const row = vehicleId ? displayVehicleById.get(vehicleId) : undefined;
+        if (vehicleId && !row) return "Véhicule inconnu.";
+        return dropIssue(trip, row ? { ...row, started: routeStarted(row) } : null);
+      },
+      onDrop: (tripId, vehicleId) => dropInDraft(tripId, vehicleId),
+    };
+  }, [draftBlocked, busy, draftChecking, dropInDraft, displayTripsById, displayVehicleById]);
+  const draftedSelected = selectedTrip && draftView ? (draft.moves.find((m) => m.tripId === selectedTrip.id) ?? null) : null;
 
   // « Sélection seule »: the map keeps the selected trip, its vehicle and its co-passengers' vehicles, or the
   // selected vehicle; with nothing selected it shows what the timeline shows, the button staying on (and able to be
@@ -387,6 +486,9 @@ export function PlanningBoard({
           <a href="#planning-panneau" className={SKIP_LINK}>
             Passer la frise
           </a>
+          {draftBlocked ? null : (
+            <DraftBar draft={draft} nameOf={nameOf} vehicleLabel={(id) => vehicleLabels[id] ?? "Véhicule"} onShowTrip={showTripHere} />
+          )}
           <TimelineToolbar
             search={<PlanningSearch trips={trips} vehicles={vehicles} onSelectTrip={selectTrip} onShowVehicle={showVehicle} />}
             filter={filter}
@@ -410,7 +512,7 @@ export function PlanningBoard({
           <Timeline
             className="min-h-0 flex-1"
             groups={groups}
-            trips={tripsById}
+            trips={displayTripsById}
             range={timeRange}
             selectedTripId={selectedTrip?.id ?? null}
             selectedVehicleId={highlightedVehicleId}
@@ -426,6 +528,9 @@ export function PlanningBoard({
             zoom={filter.zoom}
             onZoomChange={setZoom}
             emptyText={emptyText}
+            drag={dragApi}
+            draftVehicleIds={draftVehicleIds}
+            flashTripIds={flash}
             groupActions={
               planned
                 ? (group) => {
@@ -456,6 +561,25 @@ export function PlanningBoard({
           className="flex min-h-0 flex-col gap-3 outline-none"
         >
           <div ref={panelBox} className="min-w-0 space-y-3 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain">
+            {selectedTrip && draftedSelected ? (
+              <div className="flex items-start gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-950">
+                <PencilLine aria-hidden className="mt-0.5 size-3.5 shrink-0 text-brand-700" />
+                <p className="min-w-0 flex-1">
+                  Dans le brouillon, non enregistré&nbsp;: {draftedSelected.toVehicleId ? `sur ${vehicleLabels[draftedSelected.toVehicleId] ?? "un autre véhicule"}` : "à placer"}
+                  {displayTripsById[selectedTrip.id]?.plannedPickupMinute != null
+                    ? `, prise en charge ${formatMinute(displayTripsById[selectedTrip.id]?.plannedPickupMinute)}`
+                    : ""}
+                  . Le détail ci-dessous est celui du planning en place.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => draft.remove(selectedTrip.id)}
+                  className="shrink-0 font-medium text-brand-700 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-brand-600"
+                >
+                  Retirer du brouillon
+                </button>
+              </div>
+            ) : null}
             {selectedTrip ? (
               <TripPanel
                 key={selectedTrip.id}
@@ -509,7 +633,8 @@ export function PlanningBoard({
             ) : (
               <p className="flex items-start gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600">
                 <MousePointerClick aria-hidden className="mt-0.5 size-4 shrink-0 text-slate-400" />
-                Cliquez sur une course de la frise ou de la carte pour la voir, la figer ou la déplacer&#x202F;; sur un véhicule pour
+                Cliquez sur une course de la frise ou de la carte pour la voir, la figer ou la déplacer&#x202F;; glissez-la vers une autre
+                ligne pour préparer un déplacement (brouillon vérifié, «&#x202F;M&#x202F;» au clavier)&#x202F;; cliquez sur un véhicule pour
                 suivre sa tournée. «&#x202F;/&#x202F;» pour chercher, «&#x202F;?&#x202F;» pour les raccourcis, Échap pour désélectionner.
               </p>
             )}

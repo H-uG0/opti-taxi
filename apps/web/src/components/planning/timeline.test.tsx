@@ -510,3 +510,109 @@ describe("Timeline from the keyboard: Tab stop and depot headers", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("Timeline: drag and drop into the draft (INS-03)", () => {
+  const api = (overrides: Partial<NonNullable<TimelineProps["drag"]>> = {}) => ({
+    canDrag: vi.fn(() => true),
+    dropIssue: vi.fn((_tripId: string, vehicleId: string | null) => (vehicleId === "amb-1" ? "Véhicule non autorisé par la prescription." : null)),
+    onDrop: vi.fn(),
+    ...overrides,
+  });
+  const tripTarget = (tripId: string) => document.querySelector<HTMLElement>(`[data-trip-ids='${tripId}']`)!;
+  /** A pointer event as the browser sends it (jsdom has no PointerEvent: a mouse event with the pointer's fields). */
+  const pointer = (type: string, x: number, y: number) =>
+    Object.assign(new MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: y }), { pointerId: 1, pointerType: "mouse" });
+  const announced = () => document.querySelector("p[aria-live=assertive]")?.textContent ?? "";
+
+  it("moves a trip with the keyboard: M, the arrows to choose the row (each said), Entrée to drop", () => {
+    const drag = api();
+    renderTimeline({ drag, unassignedTripIds: ["trip-c"] });
+    const target = tripTarget("trip-a");
+    target.focus();
+    fireEvent.keyDown(target, { key: "m" });
+    expect(announced()).toMatch(/^Déplacement de la course de Monique Aubert : flèches haut et bas/);
+    // Rows in order: « À placer », then Manosque (VSL 2), then Marseille (Taxi 1, VSL 1, Ambulance 1).
+    fireEvent.keyDown(target, { key: "ArrowDown" });
+    expect(announced()).toBe("VSL 1 (Marseille) : déposer la course ici, Entrée pour confirmer.");
+    expect(rowOf("vsl-1").className).toContain("outline-dashed");
+    fireEvent.keyDown(target, { key: "ArrowDown" });
+    expect(announced()).toBe("Ambulance 1 (Marseille) : impossible, Véhicule non autorisé par la prescription.");
+    expect(rowOf("amb-1").className).toContain("bg-red-50");
+    fireEvent.keyDown(target, { key: "Enter" });
+    expect(drag.onDrop).not.toHaveBeenCalled();
+    fireEvent.keyDown(target, { key: "ArrowUp" });
+    fireEvent.keyDown(target, { key: "Enter" });
+    expect(drag.onDrop).toHaveBeenCalledWith("trip-a", "vsl-1");
+  });
+
+  it("drops a trip on « À placer », shown as a drop zone while it moves, and cancels with Échap", () => {
+    const drag = api();
+    renderTimeline({ drag });
+    expect(document.querySelector("[data-pinned-row]")).toBeNull();
+    const target = tripTarget("trip-a");
+    target.focus();
+    fireEvent.keyDown(target, { key: "m" });
+    expect(document.querySelector("[data-pinned-row]")?.textContent).toContain("déposer ici pour la retirer de sa tournée");
+    fireEvent.keyDown(target, { key: "Escape" });
+    expect(announced()).toBe("Déplacement annulé.");
+    expect(document.querySelector("[data-pinned-row]")).toBeNull();
+    fireEvent.keyDown(target, { key: "M" });
+    for (let i = 0; i < 4; i++) fireEvent.keyDown(target, { key: "ArrowUp" });
+    expect(announced()).toBe("À placer : retirer la course de sa tournée, Entrée pour confirmer.");
+    fireEvent.keyDown(target, { key: "Enter" });
+    expect(drag.onDrop).toHaveBeenCalledWith("trip-a", null);
+  });
+
+  it("drags a trip with the pointer onto another row: the row under it is the target, the click does not select", () => {
+    const drag = api();
+    const { onSelectTrip } = renderTimeline({ drag });
+    const target = tripTarget("trip-a");
+    const vslRow = rowOf("vsl-1");
+    const original = document.elementsFromPoint;
+    document.elementsFromPoint = () => [vslRow];
+    try {
+      act(() => {
+        target.dispatchEvent(pointer("pointerdown", 100, 100));
+      });
+      act(() => {
+        window.dispatchEvent(pointer("pointermove", 140, 160));
+      });
+      expect(vslRow.className).toContain("outline-dashed");
+      expect(screen.getByText(/→ VSL 1 \(Marseille\)/)).toBeTruthy();
+      act(() => {
+        window.dispatchEvent(pointer("pointerup", 140, 160));
+      });
+      fireEvent.click(target);
+    } finally {
+      document.elementsFromPoint = original;
+    }
+    expect(drag.onDrop).toHaveBeenCalledWith("trip-a", "vsl-1");
+    expect(onSelectTrip).not.toHaveBeenCalled();
+  });
+
+  it("keeps a short press a click, and leaves a trip that cannot move where it is", () => {
+    const drag = api({ canDrag: vi.fn((tripId: string) => tripId !== "trip-b") });
+    const { onSelectTrip } = renderTimeline({ drag });
+    const target = tripTarget("trip-a");
+    act(() => {
+      target.dispatchEvent(pointer("pointerdown", 100, 100));
+      window.dispatchEvent(pointer("pointermove", 102, 101));
+      window.dispatchEvent(pointer("pointerup", 102, 101));
+    });
+    fireEvent.click(target);
+    expect(onSelectTrip).toHaveBeenCalledWith("trip-a");
+    expect(drag.onDrop).not.toHaveBeenCalled();
+    const blocked = tripTarget("trip-b");
+    blocked.focus();
+    fireEvent.keyDown(blocked, { key: "m" });
+    expect(announced()).toMatch(/^Cette course ne peut pas être déplacée maintenant/);
+  });
+
+  it("marks the rows the draft changes, and highlights a trip a moment", () => {
+    renderTimeline({ draftVehicleIds: new Set(["taxi-1"]), flashTripIds: new Set(["trip-a"]) });
+    expect(rowOf("taxi-1").textContent).toContain("Brouillon");
+    expect(rowOf("taxi-1").getAttribute("aria-label")).toContain("tournée changée par le brouillon");
+    expect(rowOf("vsl-1").textContent).not.toContain("Brouillon");
+    expect(document.querySelector("[data-trip-block='trip-a']")?.className).toContain("ring-amber-400");
+  });
+});

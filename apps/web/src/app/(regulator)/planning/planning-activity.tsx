@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
   type ReactNode,
@@ -51,6 +52,22 @@ export function usePlanningActivity(): ActivityContext {
   const value = useContext(Context);
   if (!value) throw new Error("usePlanningActivity must be used inside <PlanningActivityProvider>");
   return value;
+}
+
+type TripLink = {
+  showTrip: (tripId: string) => void;
+  /** The board listens (selects the trip, highlights it); returns the unsubscribe. */
+  subscribe: (listener: (tripId: string) => void) => () => void;
+};
+
+const TripLinkContext = createContext<TripLink>({ showTrip: () => {}, subscribe: () => () => {} });
+
+/**
+ * Links to a trip from outside the board (the plan waiting for confirmation sits above it): the
+ * board selects the trip and highlights it on the timeline (planning-board.tsx).
+ */
+export function useTripLink() {
+  return useContext(TripLinkContext);
 }
 
 const FeedbackContext = createContext<{
@@ -114,10 +131,25 @@ export function PlanningActivityProvider({ timeLimitSec, children }: { timeLimit
   );
   const dismiss = useCallback(() => setFeedback(null), []);
   const status = useMemo(() => ({ activity, feedback, dismiss }), [activity, feedback, dismiss]);
+  const listeners = useRef(new Set<(tripId: string) => void>());
+  const tripLink = useMemo<TripLink>(
+    () => ({
+      showTrip: (tripId) => {
+        for (const listener of listeners.current) listener(tripId);
+      },
+      subscribe: (listener) => {
+        listeners.current.add(listener);
+        return () => listeners.current.delete(listener);
+      },
+    }),
+    [],
+  );
 
   return (
     <Context.Provider value={actions}>
-      <FeedbackContext.Provider value={status}>{children}</FeedbackContext.Provider>
+      <FeedbackContext.Provider value={status}>
+        <TripLinkContext.Provider value={tripLink}>{children}</TripLinkContext.Provider>
+      </FeedbackContext.Provider>
     </Context.Provider>
   );
 }

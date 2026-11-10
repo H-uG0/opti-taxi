@@ -25,6 +25,10 @@ export const TIMELINE_KEYS: readonly ShortcutHelp[] = [
   { keys: ["Début", "Fin"], label: "Première, dernière course de la ligne" },
   { keys: ["Page préc.", "Page suiv."], label: "Dix lignes plus haut, plus bas" },
   { keys: ["Entrée"], label: "Sélectionner (une pastille «\u00a0+3\u00a0» ouvre sa liste)" },
+  {
+    keys: ["M"],
+    label: "Déplacer la course dans le brouillon\u00a0: ↑ ↓ pour choisir la ligne (ou «\u00a0À placer\u00a0»), Entrée pour déposer, Échap pour annuler",
+  },
 ];
 
 type TargetLike = { closest?: (selector: string) => unknown; isContentEditable?: boolean } | null;

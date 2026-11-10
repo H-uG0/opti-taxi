@@ -20,6 +20,8 @@ import { lockMessage, tripsToLock, tripsToUnlock, unlockMessage, type LockScope,
 import { lockPlanningDay } from "@/lib/planning/day-lock";
 import { loadPlanningDay } from "@/lib/planning/load";
 import { applyTripPlace, findTripPlaces, type FindPlacesOutcome } from "@/lib/planning/place-trip";
+import { DRAFT_MAX_MOVES } from "@/lib/planning/draft";
+import { checkDraftPlan, saveDraftPlan, type CheckDraftOutcome } from "@/lib/planning/draft-plan";
 import { LOCKED, lockAction, notLockedOn } from "@/lib/planning/lock";
 import {
   confirmPendingRun,
@@ -29,11 +31,13 @@ import {
   OPTIMIZATION_IN_PROGRESS_ERROR,
   optimizationInProgress,
   PLANNING_TX_OPTIONS,
+  previewPendingSelection,
   replanBlocker,
   restorePreviousPlan,
   runOptimization,
   unassignedByLastPlan,
   withdrawLapsedProposals,
+  type PreviewOutcome,
   type RunOutcome,
 } from "@/lib/planning/run-optimization";
 import { EXCEPTIONAL_AMBULANCE_REASON, exceptionalAmbulanceIssue } from "@/lib/planning/exceptional-ambulance";
@@ -61,6 +65,8 @@ export type PlanningActionResult =
        * "driver", "crewMate", "form"); the banner then stays quiet.
        */
       fieldErrors?: Partial<Record<string, string>>;
+      /** The draft no longer holds as it is (a move refused, the plan changed): check it again on the plan of the moment. */
+      recheck?: boolean;
     };
 
 const dateSchema = z.string().refine((value) => isIsoDate(value));
@@ -291,6 +297,53 @@ export async function placeTrip(
   });
 }
 
+const draftMovesSchema = z
+  .array(z.object({ tripId: idSchema, toVehicleId: idSchema.nullable() }))
+  .min(1)
+  .max(DRAFT_MAX_MOVES);
+
+/**
+ * The drag-and-drop draft of the timeline (INS-03), « Vérifier »: the moves replayed on the plan of
+ * the moment by the optimizer (/insert for each trip dropped on a vehicle, /evaluate of the day),
+ * nothing written. Read only: it names trips and vehicles by id, the page already traced plan.view.
+ */
+export async function checkDraft(date: string, moves: { tripId: string; toVehicleId: string | null }[]): Promise<CheckDraftOutcome> {
+  await requireUser("REGULATOR");
+  const args = z.object({ date: dateSchema, moves: draftMovesSchema }).safeParse({ date, moves });
+  if (!args.success) return { ok: false, error: "Brouillon invalide\u00a0: annulez-le et recommencez." };
+  try {
+    return await checkDraftPlan(args.data.date, args.data.moves);
+  } catch (error) {
+    unstable_rethrow(error);
+    logError("[planning] checkDraft failed", error);
+    return { ok: false, error: planningErrorMessage(error) };
+  }
+}
+
+/**
+ * « Enregistrer » the draft: only the routes it changes are written (the stops that stay keep their
+ * ids), each moved trip locked on its new vehicle (unlocked when put in « À placer »), one trip.move
+ * event per trip (details.mode « draft »). `version`: the plan version the draft was shown on;
+ * `confirmed`: the question answered on a validated or started day.
+ */
+export async function saveDraft(
+  date: string,
+  version: string,
+  moves: { tripId: string; toVehicleId: string | null }[],
+  confirmed: string | null,
+): Promise<PlanningActionResult> {
+  const user = await requireUser("REGULATOR");
+  return guarded("saveDraft", async () => {
+    const args = z
+      .object({ date: dateSchema, version: z.string().min(1).max(64), moves: draftMovesSchema, confirmed: z.string().max(2000).nullable() })
+      .safeParse({ date, version, moves, confirmed });
+    if (!args.success) return { ok: false, error: "Brouillon invalide\u00a0: annulez-le et recommencez." };
+    const outcome = await saveDraftPlan(args.data.date, args.data.version, args.data.moves, args.data.confirmed, user);
+    if (outcome.ok) refreshPages();
+    return outcome;
+  });
+}
+
 /**
  * « Recours exceptionnel à une ambulance » (TAR-03, protocol of 24 September
  * 2025): a seated (TAP) trip the last optimization left without a vehicle goes
@@ -440,20 +493,50 @@ export async function proposeExceptionalAmbulance(tripId: string, vehicleId: str
   });
 }
 
+const selectionSchema = z.object({
+  refusedVehicleIds: z.array(idSchema).max(300),
+  key: z.string().min(1).max(128),
+});
+
 /**
- * « Remplacer quand même » : saves the plan computed by run `runId`, which
- * waited because it serves fewer trips, breaks more rules or loses margin
- * compared with the routes in place (lib/planning/plan-compare.ts).
+ * « Tout accepter », « Remplacer quand même » : saves the plan computed by run `runId`, which
+ * waited because it serves fewer trips, breaks more rules or loses margin compared with the routes
+ * in place (lib/planning/plan-compare.ts), or for the regulator to review what it changes.
+ * `selection` (« Enregistrer la sélection »): the vehicles that keep their route in place, and the
+ * key of the day « Vérifier la sélection » showed.
  */
-export async function confirmPlan(runId: string): Promise<PlanningActionResult> {
+export async function confirmPlan(
+  runId: string,
+  selection?: { refusedVehicleIds: string[]; key: string },
+): Promise<PlanningActionResult> {
   const user = await requireUser("REGULATOR");
   return guarded("confirmPlan", async () => {
     const id = idSchema.safeParse(runId);
     if (!id.success) return { ok: false, error: "Calcul introuvable\u00a0: rechargez la page.", stale: true };
-    const outcome = await confirmPendingRun(id.data, user);
+    const chosen = selection === undefined ? null : selectionSchema.safeParse(selection);
+    if (chosen && !chosen.success) return { ok: false, error: "Sélection invalide\u00a0: vérifiez-la de nouveau." };
+    const outcome = await confirmPendingRun(id.data, user, chosen?.data);
     refreshPages();
     return toResult(outcome);
   });
+}
+
+/**
+ * « Vérifier la sélection » (INS-02): the day a pending re-optimization makes when the vehicles of
+ * `refusedVehicleIds` keep their route in place, re-checked by the optimizer's /evaluate; nothing
+ * written. Read only: it names trips the page already traced (plan.view).
+ */
+export async function previewPlanSelection(runId: string, refusedVehicleIds: string[]): Promise<PreviewOutcome> {
+  await requireUser("REGULATOR");
+  const args = z.object({ runId: idSchema, refused: z.array(idSchema).min(1).max(300) }).safeParse({ runId, refused: refusedVehicleIds });
+  if (!args.success) return { ok: false, error: "Sélection invalide\u00a0: rechargez la page.", stale: true };
+  try {
+    return await previewPendingSelection(args.data.runId, args.data.refused);
+  } catch (error) {
+    unstable_rethrow(error);
+    logError("[planning] previewPlanSelection failed", error);
+    return { ok: false, error: planningErrorMessage(error) };
+  }
 }
 
 /** « Garder le planning actuel » : the plan waiting for confirmation is dropped. */

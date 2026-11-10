@@ -129,7 +129,15 @@ type TrackProps = {
   openClusterKey: string | null;
   onSelectTrip: (tripId: string) => void;
   onOpenCluster: OpenCluster;
+  /** Trips highlighted a moment (a link of « Changements », a drop of the draft). */
+  flashIds?: ReadonlySet<string>;
+  /** Whether a trip can be dragged (the draft): its target shows the grab cursor. */
+  canDrag?: (tripId: string) => boolean;
+  /** The trip being dragged: dimmed where it was. */
+  draggingTripId?: string | null;
 };
+
+const NO_FLASH: ReadonlySet<string> = new Set();
 
 /**
  * Trips of a timeline row: the blocks (drawn, hidden from screen readers),
@@ -154,6 +162,9 @@ export function TrackTrips({
   openClusterKey,
   onSelectTrip,
   onOpenCluster,
+  flashIds = NO_FLASH,
+  canDrag,
+  draggingTripId = null,
 }: TrackProps) {
   const unassigned = color === null;
   const perLane = !mergeTargets && targetsPerLane(lanes, compact);
@@ -197,6 +208,9 @@ export function TrackTrips({
               violating.has(block.tripId) && "outline-2 outline-offset-1 outline-slate-900 outline-dashed",
               isSelected && "z-[15] ring-2 ring-slate-900 ring-offset-1",
               !isSelected && isCompanion && "z-[15] ring-2 ring-shared ring-offset-1",
+              // Highlighted a moment: a wide amber ring, pulsing only when motion is welcome.
+              flashIds.has(block.tripId) && "z-[17] ring-4 ring-amber-400 ring-offset-1 motion-safe:animate-pulse",
+              block.tripId === draggingTripId && "opacity-40",
             )}
             style={style}
           >
@@ -248,6 +262,7 @@ export function TrackTrips({
             {...(containsSelected ? { [ROVING_PREFERRED]: "" } : {})}
             title={title}
             aria-label={title.replaceAll("\n", ", ")}
+            aria-keyshortcuts={single && canDrag?.(firstId) ? "M" : undefined}
             aria-pressed={single ? containsSelected : undefined}
             aria-haspopup={single ? undefined : "dialog"}
             aria-expanded={single ? undefined : openClusterKey === key}
@@ -268,6 +283,7 @@ export function TrackTrips({
               "group/target absolute z-20 rounded focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-600",
               "hover:bg-slate-900/[0.07] hover:ring-1 hover:ring-slate-400",
               !single && containsSelected && "ring-2 ring-slate-900",
+              single && canDrag?.(firstId) && "cursor-grab",
             )}
             style={{ ...span(target.from, target.to, range), top: box.top, height: box.height }}
           >
