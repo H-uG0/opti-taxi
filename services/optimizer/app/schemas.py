@@ -322,6 +322,23 @@ class EvaluateRequest(DayRequest):
     routes: list[RoutePlan] = Field(max_length=MAX_VEHICLES)
 
 
+class InsertRequest(DayRequest):
+    """Where one trip fits in the routes in place (contract/README.md, « POST /insert »)."""
+
+    routes: list[RoutePlan] = Field(max_length=MAX_VEHICLES)
+    """The routes in place, kept as they are: the trip only goes into one of them."""
+    trip_id: str = Field(min_length=1)
+    """The trip to place: on one of `routes` (a move), or on none (a trip without a vehicle)."""
+    vehicle_ids: list[str] | None = Field(default=None, max_length=MAX_VEHICLES)
+    """Vehicles to try (a drop on one vehicle, « Appliquer »); None: every vehicle of the request."""
+
+    @model_validator(mode="after")
+    def _known_trip(self) -> InsertRequest:
+        if all(trip.id != self.trip_id for trip in self.trips):
+            raise ValueError("tripId must name a trip of the request")
+        return self
+
+
 class BreakSlot(ContractModel):
     start_min: int
     end_min: int
@@ -415,6 +432,64 @@ class PlanResponse(ContractModel):
     unassigned: list[Unassigned]
     kpis: Kpis
     validation: Validation
+    meta: Meta
+
+
+RejectionKind = Literal["SHIFT", "BREAK", "OCCUPIED", "NO_ROOM", "RULES"]
+"""Why a vehicle cannot take the trip (InsertRejection): its hours, its driver's break, the patients it
+carries then, no room between its stops, or its route (as it is, or with the trip) failing a rule."""
+
+
+class TimeShift(ContractModel):
+    """A trip of the changed routes whose times move with the insertion."""
+
+    trip_id: str
+    pickup_min: int
+    dropoff_min: int
+    pickup_shift_min: int
+    """New minus former start of the pickup (minutes, + later)."""
+    dropoff_shift_min: int
+
+
+class InsertOption(ContractModel):
+    """The best place of the trip in one vehicle's route, with what it changes."""
+
+    vehicle_id: str
+    pickup_min: int
+    dropoff_min: int
+    shared: bool
+    co_passenger_trip_ids: list[str]
+    delta_km: float
+    delta_empty_km: float
+    delta_duration_min: int
+    delta_revenue: float
+    delta_cost: float
+    delta_margin: float
+    shifts: list[TimeShift]
+    routes: list[Route]
+    """The vehicle's route with the trip and, for a move, the former route without it (absent when
+    left without stops), timed and priced as /evaluate reports them."""
+    trips: list[TripResult]
+    """Results of every trip of `routes`, the placed one included."""
+    violations: list[Violation]
+    """Rules `routes` still break: never one the insertion adds (such a place is rejected)."""
+
+
+class InsertRejection(ContractModel):
+    vehicle_id: str
+    kind: RejectionKind
+    reason: str
+    """French, to follow the vehicle's name: « est en pause de 12:00 à 12:45 »."""
+
+
+class InsertResponse(ContractModel):
+    trip_id: str
+    from_vehicle_id: str | None
+    """Vehicle of the route the trip is on, None for a trip without a vehicle."""
+    options: list[InsertOption]
+    """Best margin first."""
+    rejected: list[InsertRejection]
+    """Vehicles of an allowed type that cannot take the trip (its current vehicle aside), request order."""
     meta: Meta
 
 

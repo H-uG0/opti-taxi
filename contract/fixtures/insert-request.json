@@ -1,0 +1,512 @@
+{
+  "date": "2026-11-03",
+  "settings": {
+    "waitBeforeAppointmentMin": 30,
+    "waitAfterSessionMin": 15,
+    "maxTotalWaitMin": 45,
+    "maxDetourKmPerExtraPatient": 10,
+    "maxDetourKmTotal": 30,
+    "pickupServiceMin": 5,
+    "dropoffServiceMin": 5,
+    "unassignedPenalty": 10000,
+    "timeLimitSec": 5,
+    "maxRideExtraMin": 30
+  },
+  "vehicles": [
+    {
+      "id": "veh_taxi_1",
+      "label": "Taxi 1 (Marseille)",
+      "type": "TAXI",
+      "capacity": 2,
+      "depot": {
+        "lat": 43.2965,
+        "lng": 5.3698
+      },
+      "department": "13",
+      "costPerKm": 0.32,
+      "costPerHour": 24,
+      "shiftStartMin": 360,
+      "shiftEndMin": 1140,
+      "break": {
+        "windowStartMin": 690,
+        "windowEndMin": 840,
+        "durationMin": 45
+      },
+      "tariffId": "taxi_13",
+      "tpmrEquipped": false
+    },
+    {
+      "id": "veh_vsl_1",
+      "label": "VSL 1 (Sisteron)",
+      "type": "VSL",
+      "capacity": 2,
+      "depot": {
+        "lat": 44.1955,
+        "lng": 5.9436
+      },
+      "department": "04",
+      "costPerKm": 0.3,
+      "costPerHour": 23,
+      "shiftStartMin": 390,
+      "shiftEndMin": 1110,
+      "break": null,
+      "tariffId": "vsl_certified",
+      "tpmrEquipped": true
+    },
+    {
+      "id": "veh_amb_1",
+      "label": "Ambulance 1 (Gap)",
+      "type": "AMBULANCE",
+      "capacity": 1,
+      "depot": {
+        "lat": 44.5594,
+        "lng": 6.0786
+      },
+      "department": "05",
+      "costPerKm": 0.42,
+      "costPerHour": 46,
+      "shiftStartMin": 420,
+      "shiftEndMin": 1140,
+      "break": {
+        "windowStartMin": 720,
+        "windowEndMin": 870,
+        "durationMin": 30
+      },
+      "tariffId": "ambulance_certified",
+      "tpmrEquipped": false
+    }
+  ],
+  "trips": [
+    {
+      "id": "trip_1",
+      "patientId": "pat_1",
+      "facilityId": "fac_dialyse_aix",
+      "direction": "OUTBOUND",
+      "pickup": {
+        "lat": 43.31,
+        "lng": 5.39
+      },
+      "dropoff": {
+        "lat": 43.526,
+        "lng": 5.438
+      },
+      "appointmentMin": 450,
+      "readyMin": null,
+      "allowedVehicleTypes": [
+        "TAXI",
+        "VSL"
+      ],
+      "shareable": true,
+      "lockedVehicleId": null,
+      "tariffId": null,
+      "bigCity": false,
+      "agglomeration": false,
+      "hospitalLinked": true,
+      "wheelchair": false,
+      "tollAmount": 0
+    },
+    {
+      "id": "trip_2",
+      "patientId": "pat_1",
+      "facilityId": "fac_dialyse_aix",
+      "direction": "RETURN",
+      "pickup": {
+        "lat": 43.526,
+        "lng": 5.438
+      },
+      "dropoff": {
+        "lat": 43.31,
+        "lng": 5.39
+      },
+      "appointmentMin": null,
+      "readyMin": 690,
+      "allowedVehicleTypes": [
+        "TAXI",
+        "VSL"
+      ],
+      "shareable": true,
+      "lockedVehicleId": null,
+      "tariffId": null,
+      "bigCity": false,
+      "agglomeration": false,
+      "hospitalLinked": true,
+      "wheelchair": false,
+      "tollAmount": 0
+    },
+    {
+      "id": "trip_3",
+      "patientId": "pat_2",
+      "facilityId": "fac_dialyse_aix",
+      "direction": "OUTBOUND",
+      "pickup": {
+        "lat": 43.33,
+        "lng": 5.41
+      },
+      "dropoff": {
+        "lat": 43.526,
+        "lng": 5.438
+      },
+      "appointmentMin": 450,
+      "readyMin": null,
+      "allowedVehicleTypes": [
+        "TAXI",
+        "VSL"
+      ],
+      "shareable": true,
+      "lockedVehicleId": null,
+      "tariffId": null,
+      "bigCity": false,
+      "agglomeration": false,
+      "hospitalLinked": true,
+      "wheelchair": true,
+      "tollAmount": 0
+    },
+    {
+      "id": "trip_4",
+      "patientId": "pat_2",
+      "facilityId": "fac_dialyse_aix",
+      "direction": "RETURN",
+      "pickup": {
+        "lat": 43.526,
+        "lng": 5.438
+      },
+      "dropoff": {
+        "lat": 43.33,
+        "lng": 5.41
+      },
+      "appointmentMin": null,
+      "readyMin": 690,
+      "allowedVehicleTypes": [
+        "TAXI",
+        "VSL"
+      ],
+      "shareable": true,
+      "lockedVehicleId": null,
+      "tariffId": null,
+      "bigCity": false,
+      "agglomeration": false,
+      "hospitalLinked": true,
+      "wheelchair": false,
+      "tollAmount": 0
+    },
+    {
+      "id": "trip_5",
+      "patientId": "pat_3",
+      "facilityId": "fac_ch_gap",
+      "direction": "OUTBOUND",
+      "pickup": {
+        "lat": 44.2,
+        "lng": 5.93
+      },
+      "dropoff": {
+        "lat": 44.56,
+        "lng": 6.08
+      },
+      "appointmentMin": 540,
+      "readyMin": null,
+      "allowedVehicleTypes": [
+        "AMBULANCE"
+      ],
+      "shareable": false,
+      "lockedVehicleId": null,
+      "tariffId": null,
+      "bigCity": false,
+      "agglomeration": false,
+      "hospitalLinked": false,
+      "wheelchair": false,
+      "tollAmount": 0
+    },
+    {
+      "id": "trip_6",
+      "patientId": "pat_3",
+      "facilityId": "fac_ch_gap",
+      "direction": "RETURN",
+      "pickup": {
+        "lat": 44.56,
+        "lng": 6.08
+      },
+      "dropoff": {
+        "lat": 44.2,
+        "lng": 5.93
+      },
+      "appointmentMin": null,
+      "readyMin": 660,
+      "allowedVehicleTypes": [
+        "AMBULANCE"
+      ],
+      "shareable": false,
+      "lockedVehicleId": null,
+      "pickupServiceMin": 10,
+      "dropoffServiceMin": 15,
+      "tariffId": null,
+      "bigCity": false,
+      "agglomeration": false,
+      "hospitalLinked": false,
+      "wheelchair": false,
+      "tollAmount": 0
+    },
+    {
+      "id": "trip_7",
+      "patientId": "pat_4",
+      "facilityId": "fac_radio_aix",
+      "direction": "OUTBOUND",
+      "pickup": {
+        "lat": 43.83,
+        "lng": 5.79
+      },
+      "dropoff": {
+        "lat": 43.535,
+        "lng": 5.43
+      },
+      "appointmentMin": 600,
+      "readyMin": null,
+      "allowedVehicleTypes": [
+        "TAXI",
+        "VSL"
+      ],
+      "shareable": false,
+      "lockedVehicleId": "veh_vsl_1",
+      "tariffId": null,
+      "bigCity": false,
+      "agglomeration": false,
+      "hospitalLinked": true,
+      "wheelchair": false,
+      "tollAmount": 4.2
+    }
+  ],
+  "tariffs": [
+    {
+      "id": "taxi_13",
+      "vehicleType": "TAXI",
+      "baseFare": 13,
+      "includedKm": 4,
+      "pricePerKm": 1.1,
+      "bigCityFare": 15,
+      "nightRate": 0.5,
+      "weekendRate": 0.5,
+      "emptyLegRateShort": 0.25,
+      "emptyLegRateLong": 0.5,
+      "emptyLegThresholdKm": 50,
+      "sharedDiscounts": [
+        {
+          "patients": 2,
+          "rate": 0.23
+        },
+        {
+          "patients": 3,
+          "rate": 0.35
+        },
+        {
+          "patients": 4,
+          "rate": 0.37
+        }
+      ],
+      "maxSharedPatients": 8,
+      "aloneDiscount": 0.05,
+      "aloneThresholdKm": 30,
+      "tpmrFare": 30
+    },
+    {
+      "id": "taxi_04",
+      "vehicleType": "TAXI",
+      "baseFare": 13,
+      "includedKm": 4,
+      "pricePerKm": 1.14,
+      "bigCityFare": 15,
+      "nightRate": 0.5,
+      "weekendRate": 0.5,
+      "emptyLegRateShort": 0.25,
+      "emptyLegRateLong": 0.5,
+      "emptyLegThresholdKm": 50,
+      "sharedDiscounts": [
+        {
+          "patients": 2,
+          "rate": 0.23
+        },
+        {
+          "patients": 3,
+          "rate": 0.35
+        },
+        {
+          "patients": 4,
+          "rate": 0.37
+        }
+      ],
+      "maxSharedPatients": 8,
+      "aloneDiscount": 0.05,
+      "aloneThresholdKm": 30,
+      "tpmrFare": 30
+    },
+    {
+      "id": "vsl_certified",
+      "vehicleType": "VSL",
+      "baseFare": 15.75,
+      "includedKm": 3,
+      "pricePerKm": 1.1,
+      "shortTripBands": [
+        {
+          "upToKm": 7,
+          "amount": 8.54
+        },
+        {
+          "upToKm": 8,
+          "amount": 7.68
+        },
+        {
+          "upToKm": 9,
+          "amount": 7.03
+        },
+        {
+          "upToKm": 10,
+          "amount": 6.35
+        },
+        {
+          "upToKm": 11,
+          "amount": 5.22
+        },
+        {
+          "upToKm": 12,
+          "amount": 4.62
+        },
+        {
+          "upToKm": 13,
+          "amount": 4.01
+        },
+        {
+          "upToKm": 14,
+          "amount": 3.41
+        },
+        {
+          "upToKm": 15,
+          "amount": 2.8
+        },
+        {
+          "upToKm": 16,
+          "amount": 2.07
+        },
+        {
+          "upToKm": 17,
+          "amount": 1.5
+        },
+        {
+          "upToKm": 18,
+          "amount": 0.91
+        }
+      ],
+      "nightRate": 0.5,
+      "weekendRate": 0.25,
+      "sharedDiscounts": [
+        {
+          "patients": 2,
+          "rate": 0.15
+        },
+        {
+          "patients": 3,
+          "rate": 0.33
+        }
+      ],
+      "maxSharedPatients": 3,
+      "billableDetourKm": [
+        10,
+        10
+      ],
+      "tpmrFare": 30
+    },
+    {
+      "id": "ambulance_certified",
+      "vehicleType": "AMBULANCE",
+      "baseFare": 57.39,
+      "aggloFare": 64.08,
+      "includedKm": 3,
+      "pricePerKm": 2.44,
+      "shortTripBands": [
+        {
+          "upToKm": 5,
+          "amount": 9.75
+        },
+        {
+          "upToKm": 10,
+          "amount": 7.53
+        },
+        {
+          "upToKm": 15,
+          "amount": 5.47
+        },
+        {
+          "upToKm": 19,
+          "amount": 3.42
+        }
+      ],
+      "nightRate": 0.75,
+      "weekendRate": 0.5,
+      "maxSharedPatients": 1
+    }
+  ],
+  "routes": [
+    {
+      "vehicleId": "veh_taxi_1",
+      "stops": [
+        {
+          "tripId": "trip_3",
+          "kind": "PICKUP"
+        },
+        {
+          "tripId": "trip_3",
+          "kind": "DROPOFF"
+        },
+        {
+          "tripId": "trip_2",
+          "kind": "PICKUP"
+        },
+        {
+          "tripId": "trip_4",
+          "kind": "PICKUP"
+        },
+        {
+          "tripId": "trip_4",
+          "kind": "DROPOFF"
+        },
+        {
+          "tripId": "trip_2",
+          "kind": "DROPOFF"
+        }
+      ]
+    },
+    {
+      "vehicleId": "veh_amb_1",
+      "stops": [
+        {
+          "tripId": "trip_5",
+          "kind": "PICKUP"
+        },
+        {
+          "tripId": "trip_5",
+          "kind": "DROPOFF"
+        },
+        {
+          "tripId": "trip_6",
+          "kind": "PICKUP"
+        },
+        {
+          "tripId": "trip_6",
+          "kind": "DROPOFF"
+        }
+      ]
+    },
+    {
+      "vehicleId": "veh_vsl_1",
+      "stops": [
+        {
+          "tripId": "trip_7",
+          "kind": "PICKUP"
+        },
+        {
+          "tripId": "trip_7",
+          "kind": "DROPOFF"
+        }
+      ]
+    }
+  ],
+  "tripId": "trip_1",
+  "vehicleIds": null
+}

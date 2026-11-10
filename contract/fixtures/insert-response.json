@@ -1,0 +1,224 @@
+{
+  "tripId": "trip_1",
+  "fromVehicleId": null,
+  "options": [
+    {
+      "vehicleId": "veh_taxi_1",
+      "pickupMin": 368,
+      "dropoffMin": 420,
+      "shared": true,
+      "coPassengerTripIds": [
+        "trip_3"
+      ],
+      "deltaKm": 0.03,
+      "deltaEmptyKm": -3.54,
+      "deltaDurationMin": 6,
+      "deltaRevenue": 36.34,
+      "deltaCost": 2.41,
+      "deltaMargin": 33.93,
+      "shifts": [
+        {
+          "tripId": "trip_3",
+          "pickupMin": 381,
+          "dropoffMin": 425,
+          "pickupShiftMin": 0,
+          "dropoffShiftMin": 5
+        }
+      ],
+      "routes": [
+        {
+          "vehicleId": "veh_taxi_1",
+          "startMin": 362,
+          "endMin": 803,
+          "distanceKm": 69.89,
+          "emptyKm": 5.77,
+          "loadedKm": 64.12,
+          "durationMin": 441,
+          "revenue": 160.4,
+          "cost": 198.76,
+          "margin": -38.36,
+          "break": {
+            "startMin": 758,
+            "endMin": 803
+          },
+          "stops": [
+            {
+              "tripId": "trip_1",
+              "kind": "PICKUP",
+              "location": {
+                "lat": 43.31,
+                "lng": 5.39
+              },
+              "arrivalMin": 368,
+              "startMin": 368,
+              "departureMin": 373,
+              "loadAfter": 1
+            },
+            {
+              "tripId": "trip_3",
+              "kind": "PICKUP",
+              "location": {
+                "lat": 43.33,
+                "lng": 5.41
+              },
+              "arrivalMin": 381,
+              "startMin": 381,
+              "departureMin": 386,
+              "loadAfter": 2
+            },
+            {
+              "tripId": "trip_1",
+              "kind": "DROPOFF",
+              "location": {
+                "lat": 43.526,
+                "lng": 5.438
+              },
+              "arrivalMin": 420,
+              "startMin": 420,
+              "departureMin": 425,
+              "loadAfter": 1
+            },
+            {
+              "tripId": "trip_3",
+              "kind": "DROPOFF",
+              "location": {
+                "lat": 43.526,
+                "lng": 5.438
+              },
+              "arrivalMin": 425,
+              "startMin": 425,
+              "departureMin": 430,
+              "loadAfter": 0
+            },
+            {
+              "tripId": "trip_2",
+              "kind": "PICKUP",
+              "location": {
+                "lat": 43.526,
+                "lng": 5.438
+              },
+              "arrivalMin": 430,
+              "startMin": 690,
+              "departureMin": 695,
+              "loadAfter": 1
+            },
+            {
+              "tripId": "trip_4",
+              "kind": "PICKUP",
+              "location": {
+                "lat": 43.526,
+                "lng": 5.438
+              },
+              "arrivalMin": 695,
+              "startMin": 695,
+              "departureMin": 700,
+              "loadAfter": 2
+            },
+            {
+              "tripId": "trip_4",
+              "kind": "DROPOFF",
+              "location": {
+                "lat": 43.33,
+                "lng": 5.41
+              },
+              "arrivalMin": 734,
+              "startMin": 734,
+              "departureMin": 739,
+              "loadAfter": 1
+            },
+            {
+              "tripId": "trip_2",
+              "kind": "DROPOFF",
+              "location": {
+                "lat": 43.31,
+                "lng": 5.39
+              },
+              "arrivalMin": 747,
+              "startMin": 747,
+              "departureMin": 752,
+              "loadAfter": 0
+            }
+          ]
+        }
+      ],
+      "trips": [
+        {
+          "tripId": "trip_1",
+          "vehicleId": "veh_taxi_1",
+          "pickupMin": 368,
+          "dropoffMin": 420,
+          "shared": true,
+          "coPassengerTripIds": [
+            "trip_3"
+          ],
+          "directKm": 31.63,
+          "rideKm": 32.06,
+          "detourKm": 0.43,
+          "revenue": 50.12,
+          "waitAtFacilityMin": 30
+        },
+        {
+          "tripId": "trip_2",
+          "vehicleId": "veh_taxi_1",
+          "pickupMin": 690,
+          "dropoffMin": 747,
+          "shared": true,
+          "coPassengerTripIds": [
+            "trip_4"
+          ],
+          "directKm": 31.63,
+          "rideKm": 32.06,
+          "detourKm": 0.43,
+          "revenue": 33.41,
+          "waitAtFacilityMin": 0
+        },
+        {
+          "tripId": "trip_3",
+          "vehicleId": "veh_taxi_1",
+          "pickupMin": 381,
+          "dropoffMin": 425,
+          "shared": true,
+          "coPassengerTripIds": [
+            "trip_1"
+          ],
+          "directKm": 28.48,
+          "rideKm": 28.48,
+          "detourKm": 0.0,
+          "revenue": 46.12,
+          "waitAtFacilityMin": 25
+        },
+        {
+          "tripId": "trip_4",
+          "vehicleId": "veh_taxi_1",
+          "pickupMin": 695,
+          "dropoffMin": 734,
+          "shared": true,
+          "coPassengerTripIds": [
+            "trip_2"
+          ],
+          "directKm": 28.48,
+          "rideKm": 28.48,
+          "detourKm": 0.0,
+          "revenue": 30.75,
+          "waitAtFacilityMin": 5
+        }
+      ],
+      "violations": []
+    }
+  ],
+  "rejected": [
+    {
+      "vehicleId": "veh_vsl_1",
+      "kind": "SHIFT",
+      "reason": "ne peut pas l'assurer dans ses heures de service (06:30–18:30)"
+    }
+  ],
+  "meta": {
+    "matrixSource": "haversine",
+    "trafficSource": "none",
+    "solverStatus": "INSERT",
+    "objective": null,
+    "wallTimeMs": 4,
+    "warnings": []
+  }
+}

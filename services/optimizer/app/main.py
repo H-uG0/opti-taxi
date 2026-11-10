@@ -19,7 +19,7 @@ from fastapi import FastAPI
 
 from app import service
 from app.matrix import configured_osrm_url
-from app.schemas import EvaluateRequest, Health, OptimizeRequest, PlanResponse
+from app.schemas import EvaluateRequest, Health, InsertRequest, InsertResponse, OptimizeRequest, PlanResponse
 from app.security import BodySizeLimit, RequireToken, SolveSlots, log_startup_settings, max_concurrent_solves
 
 logging.basicConfig(
@@ -39,7 +39,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="Opti-Taxi — service d'optimisation",
     version="1.0.0",
-    description="Tournées J+1 (OR-Tools, PDPTW) et évaluation de plannings, contrat web <-> optimizer v1.",
+    description="Tournées J+1 (OR-Tools, PDPTW), évaluation de plannings et place d'une course, contrat web <-> optimizer v1.",
     lifespan=lifespan,
 )
 app.add_middleware(BodySizeLimit)
@@ -64,3 +64,9 @@ def optimize(request: OptimizeRequest) -> PlanResponse:
 def evaluate(request: EvaluateRequest) -> PlanResponse:
     """Recompute times, km, revenue and violations of a given plan (no solver: not counted as a solve)."""
     return service.evaluate(request)
+
+
+@app.post("/insert")
+def insert(request: InsertRequest) -> InsertResponse:
+    """Best place of one trip in each vehicle's route in place, routes kept (no solver: not counted as a solve)."""
+    return service.insert(request)

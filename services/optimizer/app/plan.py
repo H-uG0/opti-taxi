@@ -182,6 +182,55 @@ def plan_margin(ctx: PlanContext, sequences: Mapping[str, Sequence[StopRef]]) ->
     return cents_to_euros(revenue) - sum(_route_cost(schedule) for schedule in schedules), served
 
 
+def _placed_result(
+    ctx: PlanContext, trip: Trip, placement: _TripPlacement, schedules: Sequence[RouteSchedule]
+) -> tuple[TripResult, int, int]:
+    """Result of a trip found in the routes, its invoice (cents, 0 unless picked up and dropped off
+    on one route) and the position of the route it belongs to."""
+    direct_km = ctx.direct_km(trip)
+    anchor = placement.pickup or placement.dropoff
+    assert anchor is not None
+    schedule = schedules[anchor[0]]
+    minutes: dict[StopKind, int] = {}
+    if placement.pickup is not None:
+        minutes["PICKUP"] = schedules[placement.pickup[0]].stops[placement.pickup[1]].start_min
+    if placement.dropoff is not None:
+        minutes["DROPOFF"] = schedules[placement.dropoff[0]].stops[placement.dropoff[1]].start_min
+    revenue = _revenue_cents(ctx, trip, schedules, placement) if placement.complete else 0
+    result = TripResult(
+        trip_id=trip.id,
+        vehicle_id=schedule.vehicle.id,
+        pickup_min=minutes.get("PICKUP"),
+        dropoff_min=minutes.get("DROPOFF"),
+        shared=bool(placement.co_passengers),
+        co_passenger_trip_ids=sorted(placement.co_passengers),
+        direct_km=round(direct_km, KM_DIGITS),
+        ride_km=round(placement.ride_km, KM_DIGITS),
+        detour_km=round(max(0.0, placement.ride_km - direct_km), KM_DIGITS) if placement.complete else 0.0,
+        revenue=cents_to_euros(revenue),
+        wait_at_facility_min=_wait_at_facility(trip, minutes),
+    )
+    return result, revenue, anchor[0]
+
+
+def route_results(ctx: PlanContext, sequences: Mapping[str, Sequence[StopRef]]) -> tuple[list[Route], list[TripResult]]:
+    """The routes of these sequences and the results of the trips they carry (request order), timed
+    and priced exactly as build_response reports them, without the rest of the day: the routes an
+    insertion changes (app/insertion.py)."""
+    schedules = _schedules(ctx, sequences)
+    placements = _locate_trips(schedules)
+    route_revenue = [0] * len(schedules)
+    results: list[TripResult] = []
+    for trip in ctx.request.trips:
+        placement = placements.get(trip.id)
+        if placement is None:
+            continue
+        result, revenue, r = _placed_result(ctx, trip, placement, schedules)
+        route_revenue[r] += revenue
+        results.append(result)
+    return [_route_model(schedule, cents_to_euros(route_revenue[r])) for r, schedule in enumerate(schedules)], results
+
+
 def build_response(ctx: PlanContext, outcome: PlanOutcome, started_at: float) -> PlanResponse:
     """PlanResponse of the given sequences; `started_at` is a time.perf_counter() value."""
     schedules = _schedules(ctx, outcome.sequences)
@@ -191,7 +240,6 @@ def build_response(ctx: PlanContext, outcome: PlanOutcome, started_at: float) ->
     """Cents."""
     unassigned: list[Unassigned] = []
     for trip in ctx.request.trips:
-        direct_km = ctx.direct_km(trip)
         placement = placements.get(trip.id)
         if placement is None:
             unassigned.append(
@@ -205,7 +253,7 @@ def build_response(ctx: PlanContext, outcome: PlanOutcome, started_at: float) ->
                     dropoff_min=None,
                     shared=False,
                     co_passenger_trip_ids=[],
-                    direct_km=round(direct_km, KM_DIGITS),
+                    direct_km=round(ctx.direct_km(trip), KM_DIGITS),
                     ride_km=0.0,
                     detour_km=0.0,
                     revenue=0.0,
@@ -213,33 +261,9 @@ def build_response(ctx: PlanContext, outcome: PlanOutcome, started_at: float) ->
                 )
             )
             continue
-        anchor = placement.pickup or placement.dropoff
-        assert anchor is not None
-        schedule = schedules[anchor[0]]
-        minutes: dict[StopKind, int] = {}
-        if placement.pickup is not None:
-            minutes["PICKUP"] = schedules[placement.pickup[0]].stops[placement.pickup[1]].start_min
-        if placement.dropoff is not None:
-            minutes["DROPOFF"] = schedules[placement.dropoff[0]].stops[placement.dropoff[1]].start_min
-        revenue = 0
-        if placement.complete:
-            revenue = _revenue_cents(ctx, trip, schedules, placement)
-            route_revenue[anchor[0]] += revenue
-        trip_results.append(
-            TripResult(
-                trip_id=trip.id,
-                vehicle_id=schedule.vehicle.id,
-                pickup_min=minutes.get("PICKUP"),
-                dropoff_min=minutes.get("DROPOFF"),
-                shared=bool(placement.co_passengers),
-                co_passenger_trip_ids=sorted(placement.co_passengers),
-                direct_km=round(direct_km, KM_DIGITS),
-                ride_km=round(placement.ride_km, KM_DIGITS),
-                detour_km=round(max(0.0, placement.ride_km - direct_km), KM_DIGITS) if placement.complete else 0.0,
-                revenue=cents_to_euros(revenue),
-                wait_at_facility_min=_wait_at_facility(trip, minutes),
-            )
-        )
+        result, revenue, r = _placed_result(ctx, trip, placement, schedules)
+        route_revenue[r] += revenue
+        trip_results.append(result)
 
     routes = [_route_model(schedule, cents_to_euros(route_revenue[r])) for r, schedule in enumerate(schedules)]
     violations = [

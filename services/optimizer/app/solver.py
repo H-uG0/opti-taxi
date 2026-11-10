@@ -478,11 +478,17 @@ class _DayModel:
         """Per pickup node: revenue lost (cents) with each candidate tariff (see _lost_revenue_cents)."""
         self._best_cents: dict[str, int] = {}
         """Best estimated revenue (cents) of each routable trip among its candidate vehicles."""
-        self._meter_rows: list[list[int]] = []
+        self._meter_rows: Sequence[Sequence[int]] = []
+        """Distance-dimension transit (meters) between nodes, rows[a][b] (computed on demand by app/insertion.py)."""
         self._limit_functions: list[Callable[[int, int], int]] = []
         """Pickup-to-delivery limit callbacks, kept alive while the C++ model uses them."""
         self._layout()
         self.manager = pywrapcp.RoutingIndexManager(len(self.nodes), len(fleet), list(range(len(fleet))), list(range(len(fleet))))
+        self._make_model()
+
+    def _make_model(self) -> None:
+        """The OR-Tools routing model and its constraints, with the tables the Python steps read
+        (an insertion into the routes in place needs only those: app/insertion.py)."""
         self.routing = pywrapcp.RoutingModel(self.manager)
         self._build()
 
@@ -1557,13 +1563,7 @@ class _DayModel:
         around the reason. `schedules` caches the timing of each route (schedule.py, as the response
         reports it) across the trips left out; past `deadline`, the reason only gives the trip's
         times. Checked like the final passes, on the times schedule.py reports."""
-        p_node, d_node = self.trip_nodes[trip.id]
-        pickup, delivery = self.nodes[p_node], self.nodes[d_node]
-        ride = pickup.service_min + self._leg(pickup, delivery)
-        if trip.direction == "OUTBOUND":
-            begin, span = delivery.window.close - ride, (delivery.window.open - ride, delivery.window.close)
-        else:
-            begin, span = pickup.window.open, (pickup.window.open, pickup.window.close + ride)
+        begin, ride, span = self.ride_span(trip)
         head = f"{REASON_DROPPED_PREFIX} {hhmm(begin)} à {hhmm(begin + ride)}{NBSP}: "
         candidates = self._candidates[trip.id]
         found: list[tuple[str, str]] = []
@@ -1577,6 +1577,16 @@ class _DayModel:
         finally:
             self._exact_checks = False
         return head + self._obstacles_text(trip, candidates, found)
+
+    def ride_span(self, trip: Trip) -> tuple[int, int, tuple[int, int]]:
+        """(latest pickup of an outbound or earliest of a return, its pickup and ride minutes, every
+        minute the trip may ride): the times a reason gives and the span _obstacle looks at."""
+        p_node, d_node = self.trip_nodes[trip.id]
+        pickup, delivery = self.nodes[p_node], self.nodes[d_node]
+        ride = pickup.service_min + self._leg(pickup, delivery)
+        if trip.direction == "OUTBOUND":
+            return delivery.window.close - ride, ride, (delivery.window.open - ride, delivery.window.close)
+        return pickup.window.open, ride, (pickup.window.open, pickup.window.close + ride)
 
     def _obstacles_text(self, trip: Trip, candidates: Sequence[int], found: Sequence[tuple[str, str]]) -> str:
         """The obstacles of every compatible vehicle (_obstacle), worded for left_out_reason."""
@@ -1957,6 +1967,11 @@ class _DayModel:
         sequence = self._first_feasible(v, route, self._insertion_positions(route, v, trip), trip)
         if sequence is not None:
             return sequence
+        return self._insertion_moving_break(route, v, trip)
+
+    def _insertion_moving_break(self, route: Sequence[int], v: int, trip: Trip) -> tuple[float, list[int]] | None:
+        """Cheapest feasible route with the trip inserted once the vehicle's break leaves its place
+        and takes its cheapest feasible empty position again (see _cheapest_insertion), None if none."""
         held = [k for k, index in enumerate(route) if self.node_at(index).role is Role.BREAK]
         if not held:
             return None

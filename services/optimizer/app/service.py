@@ -1,14 +1,16 @@
-"""The two operations of the service, independent of HTTP: optimize a day, evaluate a given plan."""
+"""The operations of the service, independent of HTTP: optimize a day, evaluate a given plan, place
+one trip in the routes in place (app/insertion.py)."""
 
 from __future__ import annotations
 
 import logging
 import time
 
+from app import insertion
 from app.context import make_context, request_points
 from app.matrix import build_matrix, configured_osrm_url
 from app.plan import PlanOutcome, build_response
-from app.schemas import EvaluateRequest, OptimizeRequest, PlanResponse
+from app.schemas import EvaluateRequest, InsertRequest, InsertResponse, OptimizeRequest, PlanResponse
 from app.solver import solve
 from app.traffic import with_traffic
 from app.validator import check_plan_references
@@ -90,6 +92,21 @@ def evaluate(request: EvaluateRequest) -> PlanResponse:
         request.date,
         len(response.routes),
         len(response.validation.violations),
+        response.meta.wall_time_ms,
+    )
+    return response
+
+
+def insert(request: InsertRequest) -> InsertResponse:
+    """Best place of one trip in each vehicle's route in place, or why there is none (no solver)."""
+    response = insertion.insert(request)
+    logger.info(
+        "insert %s: %d routes, %s, %d option(s), %d vehicle(s) without a place, %d ms",
+        request.date,
+        len(request.routes),
+        "move" if response.from_vehicle_id else "place",
+        len(response.options),
+        len(response.rejected),
         response.meta.wall_time_ms,
     )
     return response

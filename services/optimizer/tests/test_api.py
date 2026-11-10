@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.schemas import PlanResponse
+from app.schemas import InsertResponse, PlanResponse
 from tests.builders import load_fixture
 
 client = TestClient(app)
@@ -46,6 +46,20 @@ def test_evaluate_returns_a_contract_plan(monkeypatch: pytest.MonkeyPatch) -> No
     assert data["meta"]["solverStatus"] == "EVALUATE"
     assert any(route.get("break") is not None for route in data["routes"])
     assert PlanResponse.model_validate(data).validation.valid
+
+
+def test_insert_returns_the_places_of_a_trip(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OSRM_URL", raising=False)
+    response = client.post("/insert", json=load_fixture("insert-request.json"))
+    assert response.status_code == 200
+    data = response.json()
+    assert {"tripId", "fromVehicleId", "options", "rejected", "meta"} == data.keys()
+    assert data["meta"]["solverStatus"] == "INSERT"
+    assert "deltaMargin" in data["options"][0] and "pickupShiftMin" in data["options"][0]["shifts"][0]
+    assert InsertResponse.model_validate(data).options[0].vehicle_id == "veh_taxi_1"
+    body = load_fixture("insert-request.json")
+    body["tripId"] = "trip_404"
+    assert client.post("/insert", json=body).status_code == 422
 
 
 def test_optimize_falls_back_when_osrm_is_down(monkeypatch: pytest.MonkeyPatch) -> None:

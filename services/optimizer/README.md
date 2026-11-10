@@ -9,6 +9,7 @@ ajustés à la main par le régulateur. Contrat d'échange avec le web : [`contr
 | `GET /health` | sonde ; indique la source des distances (`osrm` ou `haversine`) |
 | `POST /optimize` | `OptimizeRequest` → `PlanResponse` : tournées de la journée |
 | `POST /evaluate` | `EvaluateRequest` → `PlanResponse` : horaires, km, CA et violations d'un planning donné |
+| `POST /insert` | `InsertRequest` → `InsertResponse` : meilleure place d'une course dans chaque tournée en place, les autres inchangées (« Où placer cette course ? ») |
 
 Une requête invalide est refusée en **422** (validation pydantic). Chaque réponse contient le
 résultat du **validateur indépendant** (`validation.valid`, `validation.violations`).
@@ -29,7 +30,7 @@ Variables d'environnement :
 | --- | --- |
 | `OSRM_URL` | ex. `http://localhost:5050` : temps et distances routiers via OSRM. Vide : estimation à vol d'oiseau. |
 | `LOG_LEVEL` | `info` par défaut (temps de calcul de chaque requête dans les journaux). |
-| `OPTIMIZER_TOKEN` | jeton partagé avec le web : toutes les adresses sauf `/health` (`/optimize`, `/evaluate`, `/docs`, `/openapi.json`) exigent `Authorization: Bearer <jeton>` (sinon `401`, avant toute lecture de la requête). Vide : aucun contrôle, signalé au démarrage (développement seulement). Générer avec `openssl rand -base64 32`. |
+| `OPTIMIZER_TOKEN` | jeton partagé avec le web : toutes les adresses sauf `/health` (`/optimize`, `/evaluate`, `/insert`, `/docs`, `/openapi.json`) exigent `Authorization: Bearer <jeton>` (sinon `401`, avant toute lecture de la requête). Vide : aucun contrôle, signalé au démarrage (développement seulement). Générer avec `openssl rand -base64 32`. |
 | `OPTIMIZER_MAX_CONCURRENT_SOLVES` | calculs simultanés, 2 par défaut (1 à 8) ; au-delà, `/optimize` répond `429` (« réessayez dans une minute » côté web). Un calcul à 120 véhicules occupe 2 à 4 Go. |
 | `OPTIMIZER_MAX_BODY_MB` | taille maximale d'une requête, 10 Mo par défaut (sinon `413`). |
 
@@ -74,7 +75,8 @@ docker compose up -d --build optimizer
 | `app/plan.py` | assemblage de la réponse : horaires, km à vide / en charge, partage, CA, coût, marge |
 | `app/validator.py` | validateur indépendant des contraintes dures (codes de violation du contrat) |
 | `app/kpis.py` | indicateurs de la journée |
-| `app/service.py`, `app/main.py` | opérations `optimize` / `evaluate` et API HTTP |
+| `app/insertion.py` | place d'une course dans les tournées en place (`/insert`) : le modèle du solveur sans OR-Tools (`_InsertionModel`), son insertion Python, les places calculées exactement puis validées |
+| `app/service.py`, `app/main.py` | opérations `optimize` / `evaluate` / `insert` et API HTTP |
 | `app/security.py` | jeton d'accès, nombre de calculs simultanés, taille des requêtes |
 
 ## Choix de modélisation
@@ -333,6 +335,16 @@ indicateurs.
 (`UNKNOWN_REFERENCE`), arrêts répétés gardés une fois (`DUPLICATE_TRIP`), horaires au plus tôt,
 puis validation. Les courses absentes du planning sont « Non planifiée ». Une pause qui
 retarderait un patient n'est pas placée : la violation `BREAK` est signalée à la place.
+
+**`/insert`** (`insertion.py`) garde le planning en place : la course entre dans la tournée d'un
+véhicule et, pour un déplacement, sort de la sienne (les autres arrêts gardent leur ordre). Pas de
+modèle OR-Tools (9 s à 120 véhicules) : `_InsertionModel` reprend du solveur les nœuds des tournées
+des véhicules candidats et de la course, les contrôles exacts et l'insertion Python (pause déplacée
+au besoin). Les trois places les moins coûteuses de chaque véhicule sont calculées comme `/evaluate`
+(`plan.route_results`) ; la meilleure marge est retenue si le validateur ne trouve aucune violation
+nouvelle sur les tournées changées et celles de l'autre trajet de leurs patients. Sinon, le motif
+de `_DayModel._obstacle` (celui des courses non affectées). 0,55 s en médiane et 0,81 s au plus sur
+les 290 courses du 11/11 du grand jeu (`tests/test_insertion.py` borne à 2 s).
 
 **Validateur** (`validator.py`) : indépendant du solveur et du calcul des horaires, il revérifie à
 partir de la requête, de la matrice et des tournées produites (avec leurs horaires) chaque règle :

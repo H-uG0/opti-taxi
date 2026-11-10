@@ -1,12 +1,13 @@
 # Contrat web ↔ optimizer (v1)
 
-Le service `services/optimizer` expose trois routes HTTP JSON :
+Le service `services/optimizer` expose quatre routes HTTP JSON :
 
 | Route | Corps | Réponse | Rôle |
 | --- | --- | --- | --- |
 | `GET /health` | — | `{"status":"ok","matrixSource":"osrm"\|"haversine"}` | sonde |
 | `POST /optimize` | `OptimizeRequest` | `PlanResponse` | calcule les tournées d'une journée |
 | `POST /evaluate` | `EvaluateRequest` | `PlanResponse` | recalcule horaires, km, CA et violations d'un planning donné (ajustement manuel) |
+| `POST /insert` | `InsertRequest` | `InsertResponse` | meilleure place d'une course dans chaque tournée en place, les autres tournées inchangées (« Où placer cette course ? ») |
 
 Implémentations : `apps/web/src/lib/optimizer/contract.ts` (zod) et
 `services/optimizer/app/schemas.py` (pydantic). Les fichiers de `fixtures/` doivent être acceptés
@@ -16,16 +17,16 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
 
 ## Authentification et limites
 
-- **Jeton** : quand `OPTIMIZER_TOKEN` est défini sur le service, `POST /optimize` et `POST /evaluate`
-  exigent l'en-tête `Authorization: Bearer <OPTIMIZER_TOKEN>` (comparaison en temps constant) et
+- **Jeton** : quand `OPTIMIZER_TOKEN` est défini sur le service, `POST /optimize`, `POST /evaluate` et
+  `POST /insert` exigent l'en-tête `Authorization: Bearer <OPTIMIZER_TOKEN>` (comparaison en temps constant) et
   répondent `401` sans lui ou avec un autre jeton. `GET /health` reste libre. Le web envoie l'en-tête
   dès que sa propre variable `OPTIMIZER_TOKEN` est définie (même valeur des deux côtés). Sans jeton
   configuré, le service accepte tout appel et le signale au démarrage (développement seulement).
 - **Calculs simultanés** : `POST /optimize` répond `429` (en-tête `Retry-After: 30`) quand
-  `OPTIMIZER_MAX_CONCURRENT_SOLVES` calculs (2 par défaut) tournent déjà. `/evaluate`, sans solveur,
-  n'est pas compté.
+  `OPTIMIZER_MAX_CONCURRENT_SOLVES` calculs (2 par défaut) tournent déjà. `/evaluate` et `/insert`, sans
+  solveur, ne sont pas comptés.
 - **Taille** : un corps de plus de `OPTIMIZER_MAX_BODY_MB` Mo (10 par défaut) reçoit `413` avant
-  d'être lu. Une requête porte au plus 300 véhicules (`vehicles`, et `routes` pour `/evaluate`),
+  d'être lu. Une requête porte au plus 300 véhicules (`vehicles`, et `routes` pour `/evaluate` et `/insert`),
   3 000 courses (`trips`) et 500 grilles (`tariffs`) ; au-delà, `422`. Un `tariffId` (véhicule ou course)
   qui ne nomme aucune grille, ou deux grilles de même `id`, donnent aussi `422`.
 - **Version** : les grilles par `id` (novembre 2026) remplacent la recherche par (type, département) : le web
@@ -242,6 +243,66 @@ arrêt (sans horaires : l'optimizer les recalcule au plus tôt) :
 ```
 
 Les courses absentes de `routes` sont non affectées.
+
+## InsertRequest et InsertResponse (`POST /insert`)
+
+Où placer **une** course sans toucher au reste : le planning en place (`routes`, comme pour `/evaluate`)
+reste tel quel, la course entre dans la tournée d'un véhicule et, si elle était sur une tournée (un
+déplacement), en sort (les autres arrêts gardent leur ordre, leurs horaires suivent). Aucun solveur :
+l'insertion Python de l'optimizer (`services/optimizer/app/insertion.py`), sous la seconde à 120 véhicules.
+
+```jsonc
+{
+  "...": "tous les champs de EvaluateRequest (date, settings, vehicles, trips, tariffs, routes)",
+  "tripId": "trip_1",                   // la course à placer : sur une tournée de `routes` ou sur aucune (422 si inconnue)
+  "vehicleIds": null                    // facultatif : véhicules à essayer (« Appliquer », un dépôt sur une ligne) ; null = tous
+}
+```
+
+Le verrou de la course à placer (`lockedVehicleId`) est ignoré : c'est le régulateur qui la place. Pour chaque
+véhicule d'un type autorisé (sauf le sien), l'optimizer :
+
+1. écarte un véhicule qui ne peut pas assurer la course seul dans ses heures de service (`SHIFT`) ou dont la
+   pause ne tient pas dans son horaire (`BREAK`) ;
+2. écarte un véhicule dont la tournée en place ne passe plus ses contrôles, ou n'est pas cohérente (`RULES`) :
+   elle enfreint déjà une règle, à réoptimiser ou à corriger d'abord ;
+3. cherche les places possibles avec les contrôles exacts de l'insertion (fenêtres, places, transport
+   exclusif, détour, temps à bord, attente au lieu de soins, temps de travail, sur les horaires que calcule
+   `/evaluate`) ; la pause se déplace si la course ne tient qu'à sa place ;
+4. calcule exactement (comme `/evaluate` : abattement de partage, retour à vide, horaires prévus) les trois
+   places les moins coûteuses et garde celle de meilleure marge que le validateur indépendant accepte : aucune
+   violation sur les tournées changées qu'elles n'avaient pas déjà (les tournées de l'autre trajet de leurs
+   patients sont validées avec elles, pour l'attente cumulée) ;
+5. sinon, dit pourquoi, avec les mots des motifs de non-affectation de `/optimize` (`OCCUPIED`, `BREAK`,
+   `NO_ROOM`) : la phrase suit le nom du véhicule (« Taxi 4 est en pause de 12:00 à 12:45 »).
+
+```jsonc
+{
+  "tripId": "trip_1",
+  "fromVehicleId": null,                // véhicule de sa tournée actuelle, null pour une course non affectée
+  "options": [{                         // une par véhicule qui peut la prendre, meilleure marge d'abord
+    "vehicleId": "veh_taxi_1",
+    "pickupMin": 368, "dropoffMin": 420,// horaires prévus de la course à cette place
+    "shared": true, "coPassengerTripIds": ["trip_3"],
+    "deltaKm": 0.03,                    // écarts avec le planning en place : les deux tournées changées
+    "deltaEmptyKm": -3.54,              //   (la cible, et la source d'un déplacement)
+    "deltaDurationMin": 6,
+    "deltaRevenue": 36.34, "deltaCost": 2.41, "deltaMargin": 33.93,
+    "shifts": [{ "tripId": "trip_3", "pickupMin": 381, "dropoffMin": 425, "pickupShiftMin": 0, "dropoffShiftMin": 5 }],
+                                        // autres courses de ces tournées dont un horaire bouge (minutes, + plus tard)
+    "routes": [ /* Route */ ],          // la tournée cible avec la course et, pour un déplacement, la source sans elle
+                                        //   (absente si elle n'a plus d'arrêt), comme les donne /evaluate
+    "trips": [ /* TripResult */ ],      // résultats de chaque course de ces tournées, la course placée comprise
+    "violations": []                    // ce que ces tournées enfreignaient déjà et enfreignent encore (jamais une nouvelle)
+  }],
+  "rejected": [{ "vehicleId": "veh_vsl_1", "kind": "SHIFT", "reason": "ne peut pas l'assurer dans ses heures de service (06:30–18:30)" }],
+                                        // SHIFT | BREAK | OCCUPIED | NO_ROOM | RULES, dans l'ordre des véhicules
+  "meta": { "matrixSource": "haversine", "trafficSource": "none", "solverStatus": "INSERT", "objective": null, "wallTimeMs": 4, "warnings": [] }
+}
+```
+
+Le web enregistre une option telle quelle (« Appliquer ») après l'avoir redemandée pour ce seul véhicule
+(`vehicleIds`) sur les données du moment : seules la tournée cible et la tournée source changent.
 
 ## PlanResponse
 
