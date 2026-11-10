@@ -456,7 +456,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
         // Became unavailable since it was fixed: the seat gets a replacement, the other member stays.
         const absence = absenceOf.get(id);
         const why = absence ? planningAbsenceText(absence).toLowerCase() : "désactivé";
-        d.issues.push({ level: "info", seat, message: `${SEAT_LABEL[seat]} fixé indisponible (${staffName(person)} : ${why})` });
+        d.issues.push({ level: "info", seat, message: `${SEAT_LABEL[seat]} fixé indisponible (${staffName(person)}\u00a0: ${why})` });
         d.holder[seat] = person;
         d.open.add(seat);
         continue;
@@ -499,7 +499,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
       d.holder[seat] = person;
       const why = defaultUnavailable(person, vehicle, seat, seat === "crewMate" ? other(d, seat) : undefined);
       if (why) {
-        d.issues.push({ level: "info", seat, message: `${SEAT_LABEL[seat]} attitré indisponible (${staffName(person)} : ${why})` });
+        d.issues.push({ level: "info", seat, message: `${SEAT_LABEL[seat]} attitré indisponible (${staffName(person)}\u00a0: ${why})` });
         continue;
       }
       setSeat(d, seat, person.id);
@@ -615,12 +615,12 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
     }
     if (far) {
       const depot = far.person.depotId ? depots.get(far.person.depotId) : undefined;
-      const where = `${depot ? `dépôt de ${depot.name}, ` : ""}${Math.round(far.km)} km`;
-      return `${base} dans un rayon de ${rules.maxReplacementKm.toLocaleString("fr-FR")} km (Paramètres) : ${staffName(far.person)} (${where}) est libre`;
+      const where = `${depot ? `dépôt de ${depot.name}, ` : ""}${Math.round(far.km)}\u00a0km`;
+      return `${base} dans un rayon de ${rules.maxReplacementKm.toLocaleString("fr-FR")}\u00a0km (Paramètres)\u00a0: ${staffName(far.person)} (${where}) est libre`;
     }
-    if (kept) return `${base} sans entamer la réserve du dépôt (Paramètres) : ${staffName(kept)} reste en réserve`;
+    if (kept) return `${base} sans entamer la réserve du dépôt (Paramètres)\u00a0: ${staffName(kept)} reste en réserve`;
     if (breakless) {
-      return `${base} : ${staffName(breakless)} est libre, mais l'équipage dépasserait 6 h de travail sans pause de 20 min (art. L. 3121-16)`;
+      return `${base}\u00a0: ${staffName(breakless)} est libre, mais l'équipage dépasserait 6\u00a0h de travail sans pause de 20\u00a0min (art. L. 3121-16)`;
     }
     return base;
   };
@@ -630,7 +630,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
     const depot = c.person.depotId ? depots.get(c.person.depotId) : undefined;
     if (!c.sameDepot) {
       if (c.person.depotId === null) notes.push("sans dépôt");
-      else if (c.km !== null && depot) notes.push(`dépôt de ${depot.name}, ${Math.round(c.km)} km`);
+      else if (c.km !== null && depot) notes.push(`dépôt de ${depot.name}, ${Math.round(c.km)}\u00a0km`);
       else notes.push("autre dépôt");
     }
     const holder = d.holder[seat];
@@ -638,7 +638,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
       const own = shiftText({ start: c.person.shiftStartMinute, end: c.person.shiftEndMinute });
       notes.push(`horaire ${own} au lieu de ${shiftText({ start: holder.shiftStartMinute, end: holder.shiftEndMinute })}`);
     }
-    return `${SEAT_LABEL[seat]} remplaçant proposé : ${staffName(c.person)}${notes.length > 0 ? ` (${notes.join(" ; ")})` : ""}`;
+    return `${SEAT_LABEL[seat]} remplaçant proposé\u00a0: ${staffName(c.person)}${notes.length > 0 ? ` (${notes.join("\u202f; ")})` : ""}`;
   };
 
   const place = (d: Draft, seat: Seat, c: Candidate) => {
@@ -695,7 +695,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
       d.issues.push({
         level: "info",
         seat,
-        message: `${SEAT_LABEL[seat]} attitré proposé sur ${elsewhere} (${staffName(person)}) : ${lacking.charAt(0).toLowerCase()}${lacking.slice(1)} pour cette ambulance`,
+        message: `${SEAT_LABEL[seat]} attitré proposé sur ${elsewhere} (${staffName(person)})\u00a0: ${lacking.charAt(0).toLowerCase()}${lacking.slice(1)} pour cette ambulance`,
       });
     } else {
       // Nobody needs them: they stay on their ambulance, which still lacks its partner.
@@ -744,7 +744,7 @@ export function resolveDayCrews(input: DayCrewInput): DayCrewPlan {
         issues.push({ level: "error", seat, message: `${name} n'a pas la qualification requise pour ce poste` });
       }
       if (!person.workDays.includes(weekday)) {
-        issues.push({ level: "info", seat, message: `${name} ne travaille pas habituellement le ${dayName} : affectation exceptionnelle` });
+        issues.push({ level: "info", seat, message: `${name} ne travaille pas habituellement le ${dayName}\u00a0: affectation exceptionnelle` });
       }
     }
     const driver = d.driverId ? people.get(d.driverId) : undefined;

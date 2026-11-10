@@ -148,13 +148,13 @@ export function PendingPlanBanner({ run }: { run: RunView & { pending: NonNullab
             <NamedList
               title={`${pluralize(lostTrips.length, "course servie", "courses servies")} actuellement ${
                 lostTrips.length > 1 ? "resteraient" : "resterait"
-              } sans véhicule :`}
+              } sans véhicule\u00a0:`}
               items={lostTrips}
             />
           ) : null}
           {violations.length > 0 ? (
             <NamedList
-              title={`${restore ? "Violations du planning précédent" : "Violations du nouveau calcul"} (${violations.length}) :`}
+              title={`${restore ? "Violations du planning précédent" : "Violations du nouveau calcul"} (${violations.length})\u00a0:`}
               items={violations}
             />
           ) : null}
@@ -194,8 +194,8 @@ export function RestorePlanButton({
     return (
       <span role="group" aria-label="Revenir au planning précédent" className="inline-flex flex-wrap items-center gap-2">
         <span className="text-slate-700">
-          Rétablir les tournées remplacées par le dernier calcul ({served} quand elles ont été remplacées ; ce qui ne
-          peut plus être assuré aujourd&apos;hui sera laissé de côté) ?
+          Rétablir les tournées remplacées par le dernier calcul ({served} quand elles ont été remplacées&#x202F;; ce qui ne
+          peut plus être assuré aujourd&apos;hui sera laissé de côté)&#x202F;?
         </span>
         <Button
           size="sm"
@@ -222,7 +222,7 @@ export function RestorePlanButton({
       title={
         off ??
         `Rétablit les tournées remplacées par le dernier calcul (${served} à ce moment-là), horaires recalculés avec ` +
-          "les données du jour ; ce qui ne peut plus être assuré est laissé de côté."
+          "les données du jour\u202f; ce qui ne peut plus être assuré est laissé de côté."
       }
       onClick={() => setConfirming(true)}
     >

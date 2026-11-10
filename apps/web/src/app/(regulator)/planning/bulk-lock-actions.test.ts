@@ -35,7 +35,7 @@ vi.mock("@/lib/planning/run-optimization", () => ({
 }));
 vi.mock("@/lib/planning/version", () => ({
   loadPlanVersion: vi.fn(async () => version.current),
-  STALE_PLAN_ERROR: "Le planning a changé depuis l'affichage : rechargez la page.",
+  STALE_PLAN_ERROR: "Le planning a changé depuis l'affichage\u00a0: rechargez la page.",
 }));
 
 const DATE = "2099-01-05";
@@ -80,7 +80,7 @@ describe("lockRoutes", () => {
     expect(result).toEqual({
       ok: true,
       message:
-        "La tournée de Taxi 1 : 2 courses figées, elles resteront sur leur véhicule à la prochaine optimisation. 1 course figée sur un autre véhicule y reste.",
+        "La tournée de Taxi 1\u00a0: 2 courses figées, elles resteront sur leur véhicule à la prochaine optimisation. 1 course figée sur un autre véhicule y reste.",
     });
     // Conditional: still unlocked and still on that vehicle's route when written.
     expect(fake.trip.updateManyAndReturn).toHaveBeenCalledWith({
@@ -106,7 +106,7 @@ describe("lockRoutes", () => {
   it("locks a depot vehicle by vehicle, one event on the depot", async () => {
     fake.trip.findMany.mockResolvedValue([trip("a", "t1"), trip("b", "v1"), trip("c", "v1")]);
     const result = await lockRoutes(DATE, { kind: "depot", depotId: "dep_gap" }, "v1");
-    expect(result).toMatchObject({ ok: true, message: expect.stringMatching(/^Les tournées du dépôt Gap : 3 courses figées/) });
+    expect(result).toMatchObject({ ok: true, message: expect.stringMatching(/^Les tournées du dépôt Gap\u00a0: 3 courses figées/) });
     expect(fake.trip.updateManyAndReturn).toHaveBeenCalledTimes(2);
     expect(events()).toEqual([
       expect.objectContaining({
@@ -122,7 +122,7 @@ describe("lockRoutes", () => {
     fake.trip.findMany.mockResolvedValue([trip("a", "t1"), trip("b", "t1")]);
     fake.trip.updateManyAndReturn.mockResolvedValue([{ id: "b" }]);
     const result = await lockRoutes(DATE, { kind: "day" }, "v1");
-    expect(result).toMatchObject({ ok: true, message: expect.stringMatching(/^Toutes les tournées du jour : 1 course figée/) });
+    expect(result).toMatchObject({ ok: true, message: expect.stringMatching(/^Toutes les tournées du jour\u00a0: 1 course figée/) });
     expect(events()[0]).toMatchObject({ details: { scope: "day", trips: 1, tripIds: ["b"], vehicleIds: ["t1"] } });
   });
 
@@ -178,7 +178,7 @@ describe("unlockRoutes", () => {
     expect(result).toEqual({
       ok: true,
       message:
-        "Toutes les tournées du jour : 2 courses défigées, la prochaine optimisation pourra les changer de véhicule. 1 recours exceptionnel à une ambulance reste figé : défigez-le depuis la course.",
+        "Toutes les tournées du jour\u00a0: 2 courses défigées, la prochaine optimisation pourra les changer de véhicule. 1 recours exceptionnel à une ambulance reste figé\u00a0: défigez-le depuis la course.",
       warning: true,
     });
     expect(fake.trip.updateManyAndReturn).toHaveBeenCalledWith({

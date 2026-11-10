@@ -83,7 +83,7 @@ describe("vehicleSchema", () => {
     expect(taxi.defaultCrewMateId).toBeNull();
   });
 
-  it("reads the TPMR equipment checkbox (ticked: « on », unticked: absent)", () => {
+  it("reads the TPMR equipment checkbox (ticked: «\u202fon\u202f», unticked: absent)", () => {
     expect(vehicleSchema.parse(valid).tpmrEquipped).toBe(false);
     const fitted = vehicleSchema.parse({ ...valid, tpmrEquipped: "on" });
     expect(fitted.tpmrEquipped).toBe(true);
@@ -142,7 +142,7 @@ describe("crew qualifications", () => {
 
   it("describes requirements and scopes in French", () => {
     expect(qualificationRequirement(["AUXILIARY", "DEA"])).toBe("Auxiliaire ambulancier ou Ambulancier DE");
-    expect(qualificationScope("DEA")).toBe("Conduite : VSL, ambulance · Équipier : ambulance · Au moins un dans chaque équipage d'ambulance");
-    expect(qualificationScope("TAXI_CARD")).toBe("Conduite : taxi");
+    expect(qualificationScope("DEA")).toBe("Conduite\u00a0: VSL, ambulance · Équipier\u00a0: ambulance · Au moins un dans chaque équipage d'ambulance");
+    expect(qualificationScope("TAXI_CARD")).toBe("Conduite\u00a0: taxi");
   });
 });

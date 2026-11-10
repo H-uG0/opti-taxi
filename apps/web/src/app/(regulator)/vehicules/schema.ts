@@ -71,7 +71,7 @@ export const vehicleSchema = vehicleFields
       ctx.addIssue({
         code: "custom",
         path: ["capacity"],
-        message: `Entre 1 et ${MAX_SHARED_CAPACITY} patients (règle de V : 2).`,
+        message: `Entre 1 et ${MAX_SHARED_CAPACITY} patients (règle de V\u00a0: 2).`,
       });
     }
     if (v.type === "AMBULANCE" && v.defaultCrewMateId !== null && v.defaultCrewMateId === v.defaultDriverId) {

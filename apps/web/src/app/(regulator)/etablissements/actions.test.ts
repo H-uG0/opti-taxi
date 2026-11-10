@@ -74,7 +74,7 @@ describe("setFacilityActive", () => {
     const result = await setFacilityActive(INITIAL_ACTION_RESULT, request(true));
 
     expect(recorded()).toEqual([]);
-    expect(result).toEqual({ ok: true, message: "Cet établissement était déjà actif : rien n'a été modifié." });
+    expect(result).toEqual({ ok: true, message: "Cet établissement était déjà actif\u00a0: rien n'a été modifié." });
   });
 
   it("refuses the deactivation while active recurrences lead to the facility", async () => {
@@ -85,7 +85,7 @@ describe("setFacilityActive", () => {
 
     expect(recorded()).toEqual([]);
     expect(result.ok).toBe(false);
-    expect(result.message).toMatch(/^Désactivation impossible : 2 récurrences actives mènent à cet établissement\./);
+    expect(result.message).toMatch(/^Désactivation impossible\u00a0: 2 récurrences actives mènent à cet établissement\./);
   });
 
   it("reports a facility that no longer exists", async () => {

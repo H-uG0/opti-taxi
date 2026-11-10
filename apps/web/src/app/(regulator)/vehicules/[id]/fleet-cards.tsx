@@ -75,7 +75,7 @@ export function DeadlineForm({ action }: { action: Action }) {
             ))}
           </Select>
         </Field>
-        <Field label="Précision (facultatif)" htmlFor="due-label" hint="Ex. « Vidange + filtres »." error={errors.label}>
+        <Field label="Précision (facultatif)" htmlFor="due-label" hint="Ex. «&#x202F;Vidange + filtres&#x202F;»." error={errors.label}>
           <Input id="due-label" name="label" maxLength={60} defaultValue={valueOf(values, "label")} />
         </Field>
         <Field label="Échéance (date)" htmlFor="due-date" error={errors.dueDate}>
@@ -85,7 +85,7 @@ export function DeadlineForm({ action }: { action: Action }) {
           <UnitInput id="due-km" name="dueKm" inputMode="numeric" unit="km" defaultValue={valueOf(values, "dueKm")} />
         </Field>
       </div>
-      <p className="text-xs text-slate-500">Date, kilométrage ou les deux : l&apos;alerte part au premier atteint.</p>
+      <p className="text-xs text-slate-500">Date, kilométrage ou les deux&nbsp;: l&apos;alerte part au premier atteint.</p>
       <div className="flex justify-end">
         <SubmitButton pendingLabel={SAVING_LABEL} variant="secondary">
           Ajouter l&apos;échéance

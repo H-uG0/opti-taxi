@@ -143,7 +143,7 @@ export function RecurrenceForm({
                   key={day}
                   title={WEEKDAY_LABELS[day]}
                   className={cn(
-                    "inline-flex h-9 min-w-14 cursor-pointer items-center justify-center gap-1.5 rounded-md border px-2.5 text-sm font-medium transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-brand-600",
+                    "inline-flex h-9\u00a0min-w-14 cursor-pointer items-center justify-center gap-1.5 rounded-md border px-2.5 text-sm font-medium transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-brand-600",
                     checked
                       ? "border-brand-600 bg-brand-50 text-brand-800"
                       : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
@@ -164,7 +164,7 @@ export function RecurrenceForm({
             })}
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <span>Raccourcis :</span>
+            <span>Raccourcis&nbsp;:</span>
             {PRESETS.map((preset) => (
               <button
                 key={preset.label}
@@ -221,7 +221,7 @@ export function RecurrenceForm({
             error={errors.legs}
             hint={
               readyMinute !== null && legs !== "OUTBOUND" && readyMinute < 1440
-                ? `Retour : prise en charge à partir de ${formatMinute(readyMinute)}`
+                ? `Retour\u00a0: prise en charge à partir de ${formatMinute(readyMinute)}`
                 : undefined
             }
           >
@@ -255,7 +255,7 @@ export function RecurrenceForm({
               aria-invalid={errors.startDate ? true : undefined}
             />
           </Field>
-          <Field label="Date de fin" htmlFor="endDate" error={errors.endDate} hint="Facultative — vide : sans fin prévue">
+          <Field label="Date de fin" htmlFor="endDate" error={errors.endDate} hint="Facultative — vide&nbsp;: sans fin prévue">
             <Input
               id="endDate"
               name="endDate"

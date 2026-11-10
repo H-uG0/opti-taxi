@@ -10,7 +10,7 @@ import { formatShortDate, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import { deadlineSchema, fuelSchema, odometerConflict, unavailabilitySchema } from "./fleet-schema";
 import { toUpcomingRoutes, upcomingRouteDates } from "./_lib/upcoming-routes";
 
-const VEHICLE_GONE = "Ce véhicule n'existe plus : rechargez la page.";
+const VEHICLE_GONE = "Ce véhicule n'existe plus\u00a0: rechargez la page.";
 
 function refreshPages(vehicleId: string) {
   revalidatePath("/vehicules");
@@ -38,7 +38,7 @@ async function plannedDaysNotice(vehicleId: string, from: string, to: string): P
   if (dates.length === 0) return "";
   const listed = dates.slice(0, 5).map(formatShortDate).join(", ");
   const days = dates.length > 1 ? "ces jours" : "ce jour";
-  return ` Tournées déjà calculées avec ce véhicule le${dates.length > 1 ? "s" : ""} ${listed}${dates.length > 5 ? "…" : ""} : relancez l'optimisation de ${days} depuis le planning.`;
+  return ` Tournées déjà calculées avec ce véhicule le${dates.length > 1 ? "s" : ""} ${listed}${dates.length > 5 ? "…" : ""}\u00a0: relancez l'optimisation de ${days} depuis le planning.`;
 }
 
 /**
@@ -83,7 +83,7 @@ export async function addUnavailability(vehicleId: string, _state: FormState, fo
     });
   });
   refreshPages(id);
-  return successState(`Indisponibilité enregistrée : le véhicule ne sera pas planifié ces jours-là.${await plannedDaysNotice(id, startDate, endDate)}`);
+  return successState(`Indisponibilité enregistrée\u00a0: le véhicule ne sera pas planifié ces jours-là.${await plannedDaysNotice(id, startDate, endDate)}`);
 }
 
 export async function deleteUnavailability(vehicleId: string, unavailabilityId: string): Promise<FormState> {

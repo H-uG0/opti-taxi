@@ -86,7 +86,7 @@ describe("readCrewForm", () => {
     expect(changedRows(rows).map((row) => row.vehicleId)).toEqual(["amb"]);
   });
 
-  it("reads « Laisser au dépôt » as a change, even on a row that already shows nobody", () => {
+  it("reads «\u202fLaisser au dépôt\u202f» as a change, even on a row that already shows nobody", () => {
     const { rows } = readCrewForm(
       {
         // Nobody available: choosing « Laisser au dépôt » keeps it there on purpose.
@@ -110,9 +110,9 @@ describe("readCrewForm", () => {
 
   it("reports a malformed id or version on its field", () => {
     expect(readCrewForm({ "driver:taxi": "../x" }, VEHICLES).errors).toEqual({
-      "driver:taxi": "Personne inconnue : rechargez la page.",
+      "driver:taxi": "Personne inconnue\u00a0: rechargez la page.",
     });
-    expect(readCrewForm({ "version:taxi": "hier" }, VEHICLES).errors).toEqual({ "driver:taxi": "Page périmée : rechargez la page." });
+    expect(readCrewForm({ "version:taxi": "hier" }, VEHICLES).errors).toEqual({ "driver:taxi": "Page périmée\u00a0: rechargez la page." });
   });
 });
 
@@ -135,13 +135,13 @@ describe("concurrency on the fixed crews", () => {
   it("refuses a row a colleague fixed, changed or reset since, and says who", () => {
     const later = new Date("2026-11-09T13:40:00.000Z");
     expect(concurrentChangeErrors([row("taxi", "")], new Map([["taxi", { updatedAt: later, updatedBy: "Marie Dupont" }]]))).toEqual({
-      "driver:taxi": "Modifié par Marie Dupont le 09/11 à 14:40 entre-temps : rechargez la page pour voir son choix.",
+      "driver:taxi": "Modifié par Marie Dupont le 09/11 à 14:40 entre-temps\u00a0: rechargez la page pour voir son choix.",
     });
     expect(concurrentChangeErrors([row("taxi", at.toISOString())], new Map([["taxi", { updatedAt: later, updatedBy: null }]]))).toEqual({
-      "driver:taxi": "Modifié le 09/11 à 14:40 entre-temps : rechargez la page pour voir son choix.",
+      "driver:taxi": "Modifié le 09/11 à 14:40 entre-temps\u00a0: rechargez la page pour voir son choix.",
     });
     expect(concurrentChangeErrors([row("taxi", at.toISOString())], new Map())).toEqual({
-      "driver:taxi": "Remis à la proposition automatique par un collègue entre-temps : rechargez la page.",
+      "driver:taxi": "Remis à la proposition automatique par un collègue entre-temps\u00a0: rechargez la page.",
     });
   });
 
@@ -167,11 +167,11 @@ describe("concurrency on the fixed crews", () => {
     const amb = { ...row("amb", ""), crewMateId: "m2" };
     expect(
       unavailableChoiceErrors([amb], people, [{ driverId: "d9", kind: "SICK", startDate: "2026-11-09", endDate: "2026-11-10" }], "2026-11-09"),
-    ).toEqual({ "driver:amb": "ROUX Paul : absence du 09/11/2026 au 10/11/2026", "mate:amb": "FAURE Léa est désactivé" });
+    ).toEqual({ "driver:amb": "ROUX Paul\u00a0: absence du 09/11/2026 au 10/11/2026", "mate:amb": "FAURE Léa est désactivé" });
     expect(unavailableChoiceErrors([amb], people, [], "2026-11-09")).toEqual({ "mate:amb": "FAURE Léa est désactivé" });
   });
 
-  it("reads the vehicle of a « Revenir à la proposition » or « Fixer cette proposition » button", () => {
+  it("reads the vehicle of a «\u202fRevenir à la proposition\u202f» or «\u202fFixer cette proposition\u202f» button", () => {
     expect(unfixIntentVehicle("unfix:veh_12")).toBe("veh_12");
     expect(unfixIntentVehicle("unfix:../x")).toBeNull();
     expect(unfixIntentVehicle("save")).toBeNull();
@@ -184,7 +184,7 @@ describe("concurrency on the fixed crews", () => {
     expect(asShown(shown)).toMatchObject({ vehicleId: "taxi", driverId: "rep", crewMateId: null, park: false, version: "2026-11-09T13:32:05.120Z" });
   });
 
-  it("reads the versions a page showed, for « Revenir aux propositions »", () => {
+  it("reads the versions a page showed, for «\u202fRevenir aux propositions\u202f»", () => {
     const values = { "version:taxi": "2026-11-09T13:32:05.120Z", "version:amb": "", "version:old": "hier" };
     expect(shownVersions(values, ["taxi", "amb", "old"])).toEqual([{ vehicleId: "taxi", updatedAt: new Date("2026-11-09T13:32:05.120Z") }]);
   });
@@ -197,7 +197,7 @@ describe("crewFormErrors", () => {
         crew({
           issues: [
             { level: "info", seat: "driver", message: "affectation exceptionnelle" },
-            { level: "error", seat: "driver", message: "Paul ROUX : congé le 09/11/2026" },
+            { level: "error", seat: "driver", message: "Paul ROUX\u00a0: congé le 09/11/2026" },
             { level: "error", seat: "driver", message: "second" },
           ],
         }),
@@ -208,7 +208,7 @@ describe("crewFormErrors", () => {
         }),
       ],
     });
-    expect(errors).toEqual({ "driver:taxi": "Paul ROUX : congé le 09/11/2026", "mate:amb": "ne doivent pas travailler ensemble" });
+    expect(errors).toEqual({ "driver:taxi": "Paul ROUX\u00a0: congé le 09/11/2026", "mate:amb": "ne doivent pas travailler ensemble" });
   });
 
   it("only checks the rows asked for (the changed ones)", () => {
@@ -282,7 +282,7 @@ describe("a change taking a person from another fixed crew", () => {
   }
 
   const message =
-    "X x fait déjà partie de l'équipage fixé de Taxi B ce jour : revenez d'abord à la proposition sur Taxi B, ou choisissez quelqu'un d'autre.";
+    "X x fait déjà partie de l'équipage fixé de Taxi B ce jour\u00a0: revenez d'abord à la proposition sur Taxi B, ou choisissez quelqu'un d'autre.";
 
   it("refuses it on the changed row when that row comes first in display order", () => {
     // Taxi A (changed) comes before Taxi B (fixed with x): the crews of the day would give x to Taxi A.
@@ -296,7 +296,7 @@ describe("a change taking a person from another fixed crew", () => {
     const { errors, broken } = check([{ vehicleId: "taxiA", driverId: "x", crewMateId: null }], [change("taxiB", "x", "b")]);
     expect(errors).toEqual({
       "driver:taxiB":
-        "X x fait déjà partie de l'équipage fixé de Taxi A ce jour : revenez d'abord à la proposition sur Taxi A, ou choisissez quelqu'un d'autre.",
+        "X x fait déjà partie de l'équipage fixé de Taxi A ce jour\u00a0: revenez d'abord à la proposition sur Taxi A, ou choisissez quelqu'un d'autre.",
     });
     expect(broken).toEqual([]);
   });

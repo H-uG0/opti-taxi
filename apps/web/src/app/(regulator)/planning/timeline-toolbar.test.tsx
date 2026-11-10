@@ -24,7 +24,7 @@ function renderToolbar(filter = EMPTY_FILTER) {
 }
 
 describe("TimelineToolbar", () => {
-  it("opens the help with « ? » from anywhere: the legend and the shortcuts, closed by Escape", () => {
+  it("opens the help with «\u202f?\u202f» from anywhere: the legend and the shortcuts, closed by Escape", () => {
     renderToolbar();
     fireEvent.keyDown(document.body, { key: "?" });
     const help = screen.getByRole("dialog", { name: "Aide du planning" });

@@ -51,7 +51,7 @@ function depotText(person: CrewPersonOption, seat: SeatContext, depots: DepotInf
   const name = depots.names.get(person.depotId) ?? "autre dépôt";
   if (person.depotId === seat.depotId) return { text: name, km: 0 };
   const km = depots.km.get(seat.depotId)?.get(person.depotId);
-  return km === undefined ? { text: name, km: Number.POSITIVE_INFINITY } : { text: `${name}, ${Math.round(km)} km`, km };
+  return km === undefined ? { text: name, km: Number.POSITIVE_INFINITY } : { text: `${name}, ${Math.round(km)}\u00a0km`, km };
 }
 
 const NOT_QUALIFIED = "non qualifié pour ce poste";

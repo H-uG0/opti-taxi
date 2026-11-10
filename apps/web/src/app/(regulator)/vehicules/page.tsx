@@ -170,7 +170,7 @@ export default async function VehiclesPage({
             ? `${active.length} véhicule${active.length > 1 ? "s" : ""} actif${active.length > 1 ? "s" : ""} — ${counts}` +
               (overdue > 0 ? ` · ${overdue} échéance${overdue > 1 ? "s" : ""} dépassée${overdue > 1 ? "s" : ""}` : "") +
               (soon > 0 ? ` · ${soon} échéance${soon > 1 ? "s" : ""} sous 30 jours` : "")
-            : "Flotte proposée à l'optimisation : type, capacité, dépôt, équipage et coût kilométrique."
+            : "Flotte proposée à l'optimisation\u00a0: type, capacité, dépôt, équipage et coût kilométrique."
         }
         actions={
           <LinkButton href="/vehicules/nouveau" variant="primary">
@@ -329,7 +329,7 @@ export default async function VehiclesPage({
                             {isAmbulance ? (
                               vehicle.defaultCrewMate ? (
                                 <p className="text-xs text-slate-500">
-                                  Équipier :{" "}
+                                  Équipier&nbsp;:{" "}
                                   <Link
                                     href={`/chauffeurs/${vehicle.defaultCrewMate.id}`}
                                     className="underline-offset-2 hover:text-brand-700 hover:underline"
@@ -345,7 +345,7 @@ export default async function VehiclesPage({
                                   Équipier à affecter
                                 </WarningBadge>
                               ) : (
-                                <p className="text-xs text-slate-500">Équipier : aucun</p>
+                                <p className="text-xs text-slate-500">Équipier&nbsp;: aucun</p>
                               )
                             ) : null}
                             {qualificationProblem ? (
@@ -445,7 +445,7 @@ function FleetNotesCell({ outToday, alerts }: { outToday: OutageNote; alerts: Al
         </WarningBadge>
       ) : null}
       {alerts.slice(0, 2).map(({ deadline, state }, i) => (
-        <WarningBadge key={i} tone={state.status === "overdue" ? "danger" : "warning"} detail={`${deadlineName(deadline)} : ${state.text}`}>
+        <WarningBadge key={i} tone={state.status === "overdue" ? "danger" : "warning"} detail={`${deadlineName(deadline)}\u00a0: ${state.text}`}>
           {deadlineName(deadline)}
         </WarningBadge>
       ))}

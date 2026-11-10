@@ -69,7 +69,7 @@ export function VehiclePanel({
             </span>
           ) : null}
         </p>
-        {!vehicle.available ? <p className="text-red-700">Indisponible : {vehicle.unavailableReason ?? "hors service"}</p> : null}
+        {!vehicle.available ? <p className="text-red-700">Indisponible&nbsp;: {vehicle.unavailableReason ?? "hors service"}</p> : null}
         {route ? (
           <p className="tabular text-slate-600">
             {formatMinute(route.startMinute)} → {formatMinute(route.endMinute)} · {formatKmRounded(route.distanceKm)} (
@@ -113,7 +113,7 @@ export function VehiclePanel({
                   />
                   <span className="min-w-0">
                     <span className="block truncate">
-                      <span className="sr-only">{STOP_KIND_LABELS[stop.kind]} : </span>
+                      <span className="sr-only">{STOP_KIND_LABELS[stop.kind]}&nbsp;: </span>
                       {trip?.patientName ?? "Course"}
                       {stop.loadAfter > 1 ? <span className="ml-1 text-xs font-medium text-shared-strong">(partagé)</span> : null}
                       {trip?.lockedVehicleId === vehicle.id && stop.kind === "PICKUP" ? (

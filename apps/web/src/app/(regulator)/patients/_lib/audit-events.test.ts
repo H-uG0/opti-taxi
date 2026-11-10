@@ -23,7 +23,7 @@ describe("activationEvent", () => {
 describe("patientUpdateEvents", () => {
   const update = { action: "patient.update", entity: "Patient", entityId: "p1" };
 
-  it("records the update alone when this save did not switch « actif »", () => {
+  it("records the update alone when this save did not switch «\u202factif\u202f»", () => {
     expect(patientUpdateEvents("p1", { value: true, switched: false })).toEqual([update]);
     // A stale form repeating a deactivation done meanwhile by someone else.
     expect(patientUpdateEvents("p1", { value: false, switched: false })).toEqual([update]);
@@ -43,12 +43,12 @@ describe("patientUpdateEvents", () => {
 
 describe("alreadyInStateMessage", () => {
   it("tells that nothing changed, in the record's gender", () => {
-    expect(alreadyInStateMessage("patient", false)).toBe("Ce patient était déjà désactivé : rien n'a été modifié.");
-    expect(alreadyInStateMessage("patient", true)).toBe("Ce patient était déjà actif : rien n'a été modifié.");
-    expect(alreadyInStateMessage("recurrence", false)).toBe("Cette récurrence était déjà désactivée : rien n'a été modifié.");
-    expect(alreadyInStateMessage("recurrence", true)).toBe("Cette récurrence était déjà active : rien n'a été modifié.");
-    expect(alreadyInStateMessage("facility", false)).toBe("Cet établissement était déjà désactivé : rien n'a été modifié.");
-    expect(alreadyInStateMessage("facility", true)).toBe("Cet établissement était déjà actif : rien n'a été modifié.");
+    expect(alreadyInStateMessage("patient", false)).toBe("Ce patient était déjà désactivé\u00a0: rien n'a été modifié.");
+    expect(alreadyInStateMessage("patient", true)).toBe("Ce patient était déjà actif\u00a0: rien n'a été modifié.");
+    expect(alreadyInStateMessage("recurrence", false)).toBe("Cette récurrence était déjà désactivée\u00a0: rien n'a été modifié.");
+    expect(alreadyInStateMessage("recurrence", true)).toBe("Cette récurrence était déjà active\u00a0: rien n'a été modifié.");
+    expect(alreadyInStateMessage("facility", false)).toBe("Cet établissement était déjà désactivé\u00a0: rien n'a été modifié.");
+    expect(alreadyInStateMessage("facility", true)).toBe("Cet établissement était déjà actif\u00a0: rien n'a été modifié.");
   });
 });
 

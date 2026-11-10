@@ -103,7 +103,7 @@ export function PatientForm({
             label="Mobilité"
             htmlFor="mobility"
             error={errors.mobility}
-            hint="Allongé : transport en ambulance ; assis ou fauteuil : taxi ou VSL"
+            hint="Allongé&nbsp;: transport en ambulance&#x202F;; assis ou fauteuil&nbsp;: taxi ou VSL"
           >
             <Select
               id="mobility"
@@ -153,7 +153,7 @@ export function PatientForm({
           role="alert"
           className="scroll-mt-6 space-y-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950"
         >
-          <p className="font-semibold">Fiches proches déjà enregistrées :</p>
+          <p className="font-semibold">Fiches proches déjà enregistrées&nbsp;:</p>
           <ul className="space-y-1">
             {similar.map((p) => (
               <li key={p.id}>

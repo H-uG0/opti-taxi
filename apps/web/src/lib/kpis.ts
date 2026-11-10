@@ -470,20 +470,20 @@ export function resolveKpiRange(input: { from?: string | null; to?: string | nul
   let to = tomorrow;
   if (rawTo !== null) {
     if (isIsoDate(rawTo)) to = rawTo;
-    else errors.push("Date de fin invalide : J+1 est utilisé.");
+    else errors.push("Date de fin invalide\u00a0: J+1 est utilisé.");
   }
   let from = addDays(to, -(DEFAULT_RANGE_DAYS - 1));
   if (rawFrom !== null) {
     if (isIsoDate(rawFrom)) from = rawFrom;
-    else errors.push(`Date de début invalide : les ${DEFAULT_RANGE_DAYS} jours précédant la date de fin sont affichés.`);
+    else errors.push(`Date de début invalide\u00a0: les ${DEFAULT_RANGE_DAYS} jours précédant la date de fin sont affichés.`);
   }
   if (from > to) {
     [from, to] = [to, from];
-    errors.push("La date de début était après la date de fin : les deux dates ont été inversées.");
+    errors.push("La date de début était après la date de fin\u00a0: les deux dates ont été inversées.");
   }
   if (dayCount(from, to) > MAX_RANGE_DAYS) {
     from = addDays(to, -(MAX_RANGE_DAYS - 1));
-    errors.push(`La période est limitée à ${MAX_RANGE_DAYS} jours : elle commence le ${formatShortDate(from)}.`);
+    errors.push(`La période est limitée à ${MAX_RANGE_DAYS} jours\u00a0: elle commence le ${formatShortDate(from)}.`);
   }
   return { from, to, error: errors.length > 0 ? errors.join(" ") : null };
 }

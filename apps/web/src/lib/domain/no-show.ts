@@ -55,14 +55,14 @@ export function returnsToCheckAfterNoShow(trips: readonly DayLeg[]): Set<string>
 }
 
 /** Short flag shown on the return trip (badge, list entry). */
-export const OUTBOUND_NO_SHOW_LABEL = "Aller : patient absent — vérifier le retour";
+export const OUTBOUND_NO_SHOW_LABEL = "Aller\u00a0: patient absent — vérifier le retour";
 
 /** Short flag of one entry in a list that already gives the advice once. */
-export const OUTBOUND_NO_SHOW_SHORT_LABEL = "Aller : patient absent";
+export const OUTBOUND_NO_SHOW_SHORT_LABEL = "Aller\u00a0: patient absent";
 
 /**
  * What the regulator should do about it. Always shown after a flag that
  * already says the patient was absent, so it does not repeat it.
  */
 export const OUTBOUND_NO_SHOW_ADVICE =
-  "Appelez le patient pour savoir s'il a rejoint l'établissement par ses propres moyens ; sinon, annulez le retour.";
+  "Appelez le patient pour savoir s'il a rejoint l'établissement par ses propres moyens\u202f; sinon, annulez le retour.";

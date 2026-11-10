@@ -22,7 +22,7 @@ import { computeDayKpis, type KpiRouteSource, type KpiTripSource } from "./view"
 const NONE = new Set<string>();
 
 describe("filter in the URL", () => {
-  it("reads depots, types, states, « masquer les libres », folded groups, density, zoom and the map's mode", () => {
+  it("reads depots, types, states, «\u202fmasquer les libres\u202f», folded groups, density, zoom and the map's mode", () => {
     const filter = parseFilter(
       new URLSearchParams(
         "date=2026-11-10&depot=d1,d2,d1&type=taxi,ambulance,bus&etat=libre,a-traiter&masquer=libres&replie=d2&densite=compacte&zoom=4h&carte=selection",
@@ -114,7 +114,7 @@ describe("which vehicles a filter keeps", () => {
     expect(filterRows(vehicles, { ...EMPTY_FILTER, types: ["TAXI"] }, NONE, "amb-1").map((v) => v.id)).toEqual(["taxi-1", "amb-1"]);
   });
 
-  it("finds the vehicles with something to handle, as « À traiter » lists them", () => {
+  it("finds the vehicles with something to handle, as «\u202fÀ traiter\u202f» lists them", () => {
     const { trips } = planningFixture();
     const onVsl = { ...trips, "trip-v": tripView({ id: "trip-v", vehicleId: "vsl-1" }), "trip-r": tripView({ id: "trip-r", vehicleId: "amb-1" }) };
     const ids = issueVehicleIds({

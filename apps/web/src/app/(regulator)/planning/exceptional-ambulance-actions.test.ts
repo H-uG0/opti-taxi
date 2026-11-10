@@ -77,11 +77,11 @@ beforeEach(() => {
 
 describe("proposeExceptionalAmbulance", () => {
   it("keeps the proposal with the plan that serves the trip in the ambulance, its reason traced", async () => {
-    fake.runOptimization.mockResolvedValue({ ok: true, runId: "r1", message: "Planning optimisé : 10/10 courses servies." });
+    fake.runOptimization.mockResolvedValue({ ok: true, runId: "r1", message: "Planning optimisé\u00a0: 10/10 courses servies." });
     const result = await proposeExceptionalAmbulance("t1", "amb");
     expect(result).toEqual({
       ok: true,
-      message: "Course de MARTIN Jeanne confiée à Ambulance 1 : recours exceptionnel, facturé au tarif VSL. Planning optimisé : 10/10 courses servies.",
+      message: "Course de MARTIN Jeanne confiée à Ambulance 1\u00a0: recours exceptionnel, facturé au tarif VSL. Planning optimisé\u00a0: 10/10 courses servies.",
     });
     expect(fake.db.trip.updateMany).toHaveBeenCalledTimes(1);
     expect(fake.db.trip.updateMany.mock.calls[0]![0]).toMatchObject({
@@ -99,7 +99,7 @@ describe("proposeExceptionalAmbulance", () => {
     fake.runOptimization.mockResolvedValue({
       ok: false,
       moveRejected: true,
-      error: "Déplacement refusé : Ambulance 1 ne peut pas servir l'aller de MARTIN Jeanne. Le planning n'a pas été modifié.",
+      error: "Déplacement refusé\u00a0: Ambulance 1 ne peut pas servir l'aller de MARTIN Jeanne. Le planning n'a pas été modifié.",
     });
     // The refused move already put the lock back: only the proposal is left to withdraw.
     fake.db.trip.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 }).mockResolvedValueOnce({ count: 1 });
@@ -107,8 +107,8 @@ describe("proposeExceptionalAmbulance", () => {
     expect(result).toEqual({
       ok: false,
       error:
-        "Déplacement refusé : Ambulance 1 ne peut pas servir l'aller de MARTIN Jeanne. Le planning n'a pas été modifié. " +
-        "Le recours exceptionnel à Ambulance 1 est retiré : la course de MARTIN Jeanne reste sans véhicule.",
+        "Déplacement refusé\u00a0: Ambulance 1 ne peut pas servir l'aller de MARTIN Jeanne. Le planning n'a pas été modifié. " +
+        "Le recours exceptionnel à Ambulance 1 est retiré\u00a0: la course de MARTIN Jeanne reste sans véhicule.",
     });
     const proposedAt = fake.db.trip.updateMany.mock.calls[0]![0].data.exceptionalAmbulanceAt;
     expect(fake.db.trip.updateMany.mock.calls[2]![0]).toEqual({
@@ -123,7 +123,7 @@ describe("proposeExceptionalAmbulance", () => {
     const result = await proposeExceptionalAmbulance("t1", "amb");
     expect(result).toEqual({
       ok: false,
-      error: "Le service d'optimisation ne répond pas. Le recours exceptionnel à Ambulance 1 est retiré : la course de MARTIN Jeanne reste sans véhicule.",
+      error: "Le service d'optimisation ne répond pas. Le recours exceptionnel à Ambulance 1 est retiré\u00a0: la course de MARTIN Jeanne reste sans véhicule.",
     });
     // The lock written for the proposal, if still there and the trip still without a route.
     expect(fake.db.trip.updateMany.mock.calls[1]![0]).toEqual({
@@ -134,9 +134,9 @@ describe("proposeExceptionalAmbulance", () => {
   });
 
   it("keeps the proposal while its plan waits for the regulator's confirmation", async () => {
-    fake.runOptimization.mockResolvedValue({ ok: false, needsConfirmation: true, error: "Remplacer quand même ?" });
+    fake.runOptimization.mockResolvedValue({ ok: false, needsConfirmation: true, error: "Remplacer quand même\u202f?" });
     const result = await proposeExceptionalAmbulance("t1", "amb");
-    expect(result).toEqual({ ok: false, needsConfirmation: true, error: "Remplacer quand même ?" });
+    expect(result).toEqual({ ok: false, needsConfirmation: true, error: "Remplacer quand même\u202f?" });
     expect(fake.db.trip.updateMany).toHaveBeenCalledTimes(1);
     expect(auditedActions()).toEqual(["trip.exceptional_ambulance"]);
   });
@@ -160,7 +160,7 @@ describe("proposeExceptionalAmbulance", () => {
   it("is refused without a VSL grid in force that day: it could not be billed at the VSL tariff", async () => {
     fake.vslGrid.mockResolvedValue(undefined);
     const result = await proposeExceptionalAmbulance("t1", "amb");
-    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/^Aucune grille VSL en vigueur le .* : créez-la dans Grilles tarifaires/) });
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/^Aucune grille VSL en vigueur le .*\u00a0: créez-la dans Grilles tarifaires/) });
     expect(fake.db.trip.updateMany).not.toHaveBeenCalled();
   });
 });
@@ -171,7 +171,7 @@ describe("unlockTrip", () => {
     expect(result).toEqual({
       ok: true,
       message:
-        "Course défigée et recours exceptionnel à l'ambulance retiré : la prochaine optimisation la confiera à un taxi ou un VSL, ou la laissera sans véhicule.",
+        "Course défigée et recours exceptionnel à l'ambulance retiré\u00a0: la prochaine optimisation la confiera à un taxi ou un VSL, ou la laissera sans véhicule.",
     });
     expect(fake.db.trip.updateMany.mock.calls[1]![0]).toEqual({
       where: { id: "t1", exceptionalAmbulanceAt: { not: null } },
@@ -183,7 +183,7 @@ describe("unlockTrip", () => {
   it("says nothing of an exceptional ambulance the trip did not have", async () => {
     fake.db.trip.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
     const result = await unlockTrip("t1");
-    expect(result).toEqual({ ok: true, message: "Course défigée : la prochaine optimisation pourra la changer de véhicule." });
+    expect(result).toEqual({ ok: true, message: "Course défigée\u00a0: la prochaine optimisation pourra la changer de véhicule." });
     expect(auditedActions()).toEqual(["trip.unlock"]);
   });
 });

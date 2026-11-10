@@ -74,7 +74,7 @@ export function BillingSettingsForm({ action, initial }: { action: Action; initi
         options={EMPTY_LEG_LABELS}
         values={values}
         error={errors.emptyLegRule}
-        hint="Compté pour les courses vers ou depuis un établissement de dialyse, de chimiothérapie ou de radiothérapie ; pas pour une entrée ou une sortie d'hospitalisation, dont le motif reste dans votre logiciel de facturation. À confirmer : faut-il le compter, et à partir de quand un retour est-il « à vide » ?"
+        hint="Compté pour les courses vers ou depuis un établissement de dialyse, de chimiothérapie ou de radiothérapie&#x202F;; pas pour une entrée ou une sortie d'hospitalisation, dont le motif reste dans votre logiciel de facturation. À confirmer&nbsp;: faut-il le compter, et à partir de quand un retour est-il «&#x202F;à vide&#x202F;»&#x202F;?"
       />
       <div className="grid gap-4 sm:grid-cols-2">
         <Choice<SurchargeOrder>
@@ -163,21 +163,21 @@ export function AreaForm({ action, initial, submitLabel }: { action: Action; ini
         <Field label="Nom" htmlFor="name" error={errors.name} className="lg:col-span-2">
           <Input id="name" name="name" required maxLength={80} defaultValue={valueOf(values, "name")} />
         </Field>
-        <Field label="Département" htmlFor="department" error={errors.department} hint="Celui des communes, sauf mention « (30) ».">
+        <Field label="Département" htmlFor="department" error={errors.department} hint="Celui des communes, sauf mention «&#x202F;(30)&#x202F;».">
           <Input id="department" name="department" required maxLength={3} className="uppercase" defaultValue={valueOf(values, "department")} />
         </Field>
         <Field
           label="Communes"
           htmlFor="communes"
           error={errors.communes}
-          hint="Une par ligne. Une commune d'un autre département : « Les Angles (30) »."
+          hint="Une par ligne. Une commune d'un autre département&nbsp;: «&#x202F;Les Angles (30)&#x202F;»."
           className="sm:col-span-2"
         >
           <Textarea id="communes" name="communes" rows={6} defaultValue={valueOf(values, "communes")} />
         </Field>
         <div className="space-y-4 sm:col-span-2">
           <Choice name="rule" label="Règle" options={AREA_RULE_LABELS} values={values} error={errors.rule} />
-          <Field label="Commune centre (règle « vers la commune centre »)" htmlFor="hubCommune" error={errors.hubCommune}>
+          <Field label="Commune centre (règle «&#x202F;vers la commune centre&#x202F;»)" htmlFor="hubCommune" error={errors.hubCommune}>
             <Input id="hubCommune" name="hubCommune" maxLength={80} defaultValue={valueOf(values, "hubCommune")} />
           </Field>
         </div>

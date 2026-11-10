@@ -170,13 +170,13 @@ function ViolationBadge({ violations }: { violations: readonly ViolationView[] }
   return (
     <span
       className="inline-flex shrink-0 items-center gap-0.5 rounded bg-slate-900 px-1 py-px text-[11px] leading-none font-semibold text-amber-300"
-      title={`${pluralize(violations.length, "violation")} : ${labels}`}
+      title={`${pluralize(violations.length, "violation")}\u00a0: ${labels}`}
     >
       <TriangleAlert aria-hidden className="size-3" strokeWidth={2.5} />
       <span className="tabular">{violations.length}</span>
       <span className="sr-only">
         {" "}
-        {violations.length > 1 ? "violations" : "violation"} : {labels}
+        {violations.length > 1 ? "violations" : "violation"}&nbsp;: {labels}
       </span>
     </span>
   );
@@ -264,7 +264,7 @@ const TimelineRow = memo(function TimelineRow({
           aria-pressed={selected}
           // The free slots are said with the vehicle when the arrows reach it (the row's own name may hide its content).
           aria-describedby={slots.length > 0 ? slotsId : undefined}
-          title={[row.label, crewLine, row.unavailableReason ? `Indisponible : ${row.unavailableReason}` : null].filter(Boolean).join("\n")}
+          title={[row.label, crewLine, row.unavailableReason ? `Indisponible\u00a0: ${row.unavailableReason}` : null].filter(Boolean).join("\n")}
           className="block w-full min-w-0 rounded text-left focus-visible:outline-2 focus-visible:outline-brand-600"
         >
           <span className="flex min-w-0 items-center gap-1.5">
@@ -287,7 +287,7 @@ const TimelineRow = memo(function TimelineRow({
             {compact && !row.available ? (
               <span className="shrink-0 text-[11px] font-medium text-red-700">
                 <span aria-hidden>Indispo.</span>
-                <span className="sr-only">Indisponible : {row.unavailableReason ?? "véhicule hors service"}</span>
+                <span className="sr-only">Indisponible&nbsp;: {row.unavailableReason ?? "véhicule hors service"}</span>
               </span>
             ) : null}
           </span>
@@ -301,7 +301,7 @@ const TimelineRow = memo(function TimelineRow({
           )}
           {!row.available && !compact ? (
             <span className="mt-0.5 block truncate text-xs font-medium text-red-700" title={row.unavailableReason ?? undefined}>
-              Indisponible : {row.unavailableReason ?? "véhicule hors service"}
+              Indisponible&nbsp;: {row.unavailableReason ?? "véhicule hors service"}
             </span>
           ) : null}
           {route && !compact ? (
@@ -319,7 +319,7 @@ const TimelineRow = memo(function TimelineRow({
         </button>
         {slots.length > 0 ? (
           <span id={slotsId} className="sr-only">
-            {slots.length > 1 ? "Créneaux libres" : "Créneau libre"} :{" "}
+            {slots.length > 1 ? "Créneaux libres" : "Créneau libre"}&nbsp;:{" "}
             {slots.map((s) => `${formatMinute(s.start)} – ${formatMinute(s.end)}`).join(", ")}.
           </span>
         ) : null}
@@ -327,9 +327,9 @@ const TimelineRow = memo(function TimelineRow({
 
       <div
         role="gridcell"
-        aria-label={route ? `Tournée de ${label} : ${pluralize(route.tripCount, "course")}` : `${label} : aucune course`}
+        aria-label={route ? `Tournée de ${label}\u00a0: ${pluralize(route.tripCount, "course")}` : `${label}\u00a0: aucune course`}
         // isolate: what the track draws (blocks, targets, the appointment line) stays under the pinned axis, rows and column.
-        className={cn("relative isolate self-center overflow-hidden rounded", compact ? "my-0.5 h-6" : "my-1.5 h-12")}
+        className={cn("relative isolate self-center overflow-hidden rounded", compact ? "my-0.5\u00a0h-6" : "my-1.5\u00a0h-12")}
         style={row.shift || off ? OFF_SHIFT_STYLE : undefined}
       >
         {row.shift ? (
@@ -337,7 +337,7 @@ const TimelineRow = memo(function TimelineRow({
             aria-hidden
             className="absolute inset-y-0 bg-white ring-1 ring-inset ring-slate-200"
             style={span(row.shift.start, row.shift.end, range)}
-            title={`Horaires : ${formatMinute(row.shift.start)} – ${formatMinute(row.shift.end)}`}
+            title={`Horaires\u00a0: ${formatMinute(row.shift.start)} – ${formatMinute(row.shift.end)}`}
           />
         ) : off ? null : (
           <div aria-hidden className="absolute inset-0 bg-white ring-1 ring-inset ring-slate-200" />
@@ -362,7 +362,7 @@ const TimelineRow = memo(function TimelineRow({
             aria-hidden
             className="absolute inset-y-1 rounded border border-dashed border-amber-300"
             style={span(row.breakWindow.start, row.breakWindow.end, range)}
-            title={`Fenêtre de pause ${formatMinute(row.breakWindow.start)} – ${formatMinute(row.breakWindow.end)} (${row.breakWindow.duration} min)`}
+            title={`Fenêtre de pause ${formatMinute(row.breakWindow.start)} – ${formatMinute(row.breakWindow.end)} (${row.breakWindow.duration}\u00a0min)`}
           />
         ) : null}
         {route ? (
@@ -493,7 +493,7 @@ const PinnedUnassignedRow = memo(function PinnedUnassignedRow({
       <div role="rowheader" className="sticky left-0 z-[22] flex min-w-0 items-center bg-amber-50 pl-3 pr-3">
         <p
           className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-amber-900"
-          title="Le créneau où chaque course sans véhicule doit être servie : arrivée avant le RDV (aller), prise en charge après la séance (retour)"
+          title="Le créneau où chaque course sans véhicule doit être servie&nbsp;: arrivée avant le RDV (aller), prise en charge après la séance (retour)"
         >
           <span className="shrink-0 whitespace-nowrap">À placer</span>
           <span className="tabular rounded-full bg-white px-1.5 text-xs font-medium ring-1 ring-amber-300">
@@ -507,7 +507,7 @@ const PinnedUnassignedRow = memo(function PinnedUnassignedRow({
       </div>
       <div
         role="gridcell"
-        aria-label={`Courses à placer : ${pluralize(tripIds.length, "course")}`}
+        aria-label={`Courses à placer\u00a0: ${pluralize(tripIds.length, "course")}`}
         className="relative isolate my-0.5 h-6 self-center overflow-hidden rounded bg-white/70"
       >
         <div aria-hidden className="pointer-events-none absolute inset-0" style={gridLines(range, geometry.gridStep)} />
@@ -582,7 +582,7 @@ function ZoomChoice({ zoom, onChange }: { zoom: ZoomLevel; onChange: (zoom: Zoom
           <span
             aria-hidden
             className={cn(
-              "flex h-6 min-w-6 items-center justify-center rounded-[5px] px-1.5 text-xs font-medium",
+              "flex h-6\u00a0min-w-6 items-center justify-center rounded-[5px] px-1.5 text-xs font-medium",
               "peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-brand-600",
               zoom === level ? "bg-brand-700 text-white" : "text-slate-600 peer-hover:bg-slate-100",
             )}
@@ -802,8 +802,8 @@ export function Timeline({
       className={cn("@container relative overflow-auto overscroll-contain", className)}
     >
       <p id={hintId} className="sr-only">
-        Flèches haut et bas : véhicule précédent ou suivant ; gauche et droite : course précédente ou suivante ; Entrée :
-        sélectionner ; Échap : désélectionner.
+        Flèches haut et bas&nbsp;: véhicule précédent ou suivant&#x202F;; gauche et droite&nbsp;: course précédente ou suivante&#x202F;; Entrée&nbsp;:
+        sélectionner&#x202F;; Échap&nbsp;: désélectionner.
       </p>
       <div
         ref={grid}
@@ -818,7 +818,7 @@ export function Timeline({
         <div
           role="row"
           data-timeline-axis
-          className={cn(ROW, "sticky top-0 z-30 h-8 border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600")}
+          className={cn(ROW, "sticky top-0 z-30\u00a0h-8 border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600")}
         >
           <div role="columnheader" className="sticky left-0 z-[22] flex items-center gap-2 bg-slate-50 pr-1 pl-3 uppercase tracking-wide">
             <span>Véhicule</span>
@@ -991,7 +991,7 @@ export function TimelineLegend({ showReturnToCheck = false }: { showReturnToChec
         <span aria-hidden className={cn(block, "bg-blue-600 text-white")}>
           MA
         </span>
-        Course : de la prise en charge à la dépose (initiales du patient)
+        Course&nbsp;: de la prise en charge à la dépose (initiales du patient)
       </li>
       <li className={item}>
         <span aria-hidden className={cn(block, "text-white")} style={{ backgroundColor: "#2563eb", backgroundImage: SHARED_STRIPES }} />
@@ -1009,15 +1009,15 @@ export function TimelineLegend({ showReturnToCheck = false }: { showReturnToChec
         <span aria-hidden className="inline-flex h-4 w-8 shrink-0 items-center justify-center">
           <span className="inline-flex h-4 items-center rounded-full bg-white px-1 text-[10px] font-bold text-slate-800 ring-1 ring-slate-400">+3</span>
         </span>
-        Courses rapprochées : la pastille ouvre leur liste
+        Courses rapprochées&nbsp;: la pastille ouvre leur liste
       </li>
       <li className={item}>
         <span aria-hidden className={cn(block, "border-[1.5px] border-dashed border-amber-700 bg-amber-100")} />
-        À placer : créneau où la course sans véhicule doit être servie
+        À placer&nbsp;: créneau où la course sans véhicule doit être servie
       </li>
       <li className={item}>
         <span aria-hidden className="h-3.5 w-8 shrink-0 rounded-sm" style={FREE_SLOT_STYLE} />
-        Créneau libre de 30 min ou plus
+        Créneau libre de 30&nbsp;min ou plus
       </li>
       <li className={item}>
         <span aria-hidden className="relative inline-flex h-4 w-8 shrink-0 justify-center">
@@ -1030,7 +1030,7 @@ export function TimelineLegend({ showReturnToCheck = false }: { showReturnToChec
           <span className="h-4 border-l-2 border-dashed border-amber-600" />
           <TriangleAlert className="absolute right-0 size-3 text-amber-700" strokeWidth={2.5} />
         </span>
-        Moins de 5 min de marge avant le RDV
+        Moins de 5&nbsp;min de marge avant le RDV
       </li>
       <li className={item}>
         <span aria-hidden className="relative inline-flex h-4 w-8 shrink-0 items-center">
@@ -1039,13 +1039,13 @@ export function TimelineLegend({ showReturnToCheck = false }: { showReturnToChec
             <TriangleAlert className="size-2.5" strokeWidth={3} />
           </span>
         </span>
-        Violation (pointillé et pastille) ; sur la ligne : nombre de violations
+        Violation (pointillé et pastille)&#x202F;; sur la ligne&nbsp;: nombre de violations
       </li>
       <li className={item}>
         <span aria-hidden className="inline-flex h-4 w-8 shrink-0 items-center">
           <span className="h-0 w-8 border-t-2 border-dashed border-slate-500" />
         </span>
-        Tournée : départ et retour au dépôt ; en pointillé, sans patient à bord (à vide)
+        Tournée&nbsp;: départ et retour au dépôt&#x202F;; en pointillé, sans patient à bord (à vide)
       </li>
       <li className={item}>
         <span aria-hidden className="h-3.5 w-8 shrink-0 rounded bg-amber-100 ring-1 ring-inset ring-amber-300" /> Pause
@@ -1058,11 +1058,11 @@ export function TimelineLegend({ showReturnToCheck = false }: { showReturnToChec
           <span aria-hidden className="inline-flex w-8 shrink-0 justify-center">
             <ReturnToCheckMark />
           </span>
-          Retour à vérifier (aller : patient absent)
+          Retour à vérifier (aller&nbsp;: patient absent)
         </li>
       ) : null}
       <li className="text-slate-500">
-        Couleur : celle du véhicule, la même sur la carte. Le type (taxi, VSL, ambulance) est dans le nom ou la pastille du
+        Couleur&nbsp;: celle du véhicule, la même sur la carte. Le type (taxi, VSL, ambulance) est dans le nom ou la pastille du
         véhicule, et sur la carte dans la forme de ses arrêts.
       </li>
     </ul>

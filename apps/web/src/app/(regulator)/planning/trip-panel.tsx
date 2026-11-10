@@ -62,7 +62,7 @@ function PhoneLink({ phone, label }: { phone: string; label: string }) {
   return (
     <a
       href={telHref(phone)}
-      aria-label={`${label} : ${phone}`}
+      aria-label={`${label}\u00a0: ${phone}`}
       className="tabular inline-flex items-center gap-1 font-medium text-brand-700 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-brand-600"
     >
       <Phone aria-hidden className="size-3.5" />
@@ -72,7 +72,7 @@ function PhoneLink({ phone, label }: { phone: string; label: string }) {
 }
 
 const MOVE_HELP =
-  "La course est figée sur ce véhicule, puis le reste de la journée est réoptimisé. Si ce véhicule ne peut pas la prendre, le planning reste inchangé ; si d'autres courses perdaient leur véhicule, le nouveau planning attend votre confirmation.";
+  "La course est figée sur ce véhicule, puis le reste de la journée est réoptimisé. Si ce véhicule ne peut pas la prendre, le planning reste inchangé\u202f; si d'autres courses perdaient leur véhicule, le nouveau planning attend votre confirmation.";
 
 const PANEL_LINK =
   "inline-flex min-h-6 items-center gap-1 rounded text-xs font-medium text-brand-700 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-brand-600";
@@ -223,7 +223,7 @@ export function TripPanel({
               <span className="ml-1.5 text-xs text-amber-800">figée sur un véhicule indisponible</span>
             ) : null}
             {trip.exceptionalAmbulance ? (
-              <span className="mt-0.5 block text-xs text-slate-500">« Défiger » retire le recours exceptionnel à l&apos;ambulance.</span>
+              <span className="mt-0.5 block text-xs text-slate-500">«&#x202F;Défiger&#x202F;» retire le recours exceptionnel à l&apos;ambulance.</span>
             ) : null}
           </p>
           {trip.lockedVehicleId ? (
@@ -237,7 +237,7 @@ export function TripPanel({
               title={
                 lockBlocked ??
                 (trip.exceptionalAmbulance
-                  ? "Retire le recours exceptionnel : la prochaine optimisation confiera la course à un taxi ou un VSL, ou la laissera sans véhicule"
+                  ? "Retire le recours exceptionnel\u00a0: la prochaine optimisation confiera la course à un taxi ou un VSL, ou la laissera sans véhicule"
                   : "L'optimisation pourra de nouveau changer la course de véhicule")
               }
             >
@@ -316,8 +316,8 @@ export function TripPanel({
               Recours exceptionnel à une ambulance
             </p>
             <p className="text-xs text-slate-500">
-              Aucun taxi ni VSL ne peut la prendre ? Une ambulance peut faire ce transport assis, facturé au tarif VSL. À
-              réserver aux cas sans autre solution : le motif est tracé sur la course et compté au tableau de bord.
+              Aucun taxi ni VSL ne peut la prendre&#x202F;? Une ambulance peut faire ce transport assis, facturé au tarif VSL. À
+              réserver aux cas sans autre solution&nbsp;: le motif est tracé sur la course et compté au tableau de bord.
             </p>
             <div className="flex gap-2">
               <label htmlFor={ambulanceSelectId} className="sr-only">
@@ -394,7 +394,7 @@ export function TripPanel({
                   <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
                   {mark.marginMin < 0
                     ? `Dépose ${formatDuration(-mark.marginMin)} après le RDV`
-                    : `Marge de ${formatDuration(mark.marginMin)} avant le RDV (moins de ${TIGHT_MARGIN_MIN} min)`}
+                    : `Marge de ${formatDuration(mark.marginMin)} avant le RDV (moins de ${TIGHT_MARGIN_MIN}\u00a0min)`}
                 </span>
               ) : (
                 <span className="text-slate-500"> · marge {formatDuration(mark.marginMin)}</span>
@@ -461,7 +461,7 @@ export function TripPanel({
           <Row label="CA estimé">
             <span className="tabular font-medium">{formatEuros(trip.estimatedRevenue)}</span>
             {trip.exceptionalAmbulance ? (
-              <span className="mt-0.5 block text-xs text-slate-500">Ambulance pour un transport assis : tarif VSL.</span>
+              <span className="mt-0.5 block text-xs text-slate-500">Ambulance pour un transport assis&nbsp;: tarif VSL.</span>
             ) : null}
           </Row>
         </div>

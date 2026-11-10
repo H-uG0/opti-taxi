@@ -139,7 +139,7 @@ export default async function DriversPage({
         description={
           activeCount > 0
             ? `${activeCount} personne${activeCount > 1 ? "s" : ""} active${activeCount > 1 ? "s" : ""}${absentTomorrow > 0 ? ` · ${absentTomorrow} absente${absentTomorrow > 1 ? "s" : ""} demain` : ""} — qualifications, jours, horaires et pauses utilisés par l'optimiseur.`
-            : "Chauffeurs, auxiliaires et ambulanciers DE : qualifications, jours, horaires et pauses utilisés par l'optimiseur."
+            : "Chauffeurs, auxiliaires et ambulanciers DE\u00a0: qualifications, jours, horaires et pauses utilisés par l'optimiseur."
         }
         actions={
           <LinkButton href="/chauffeurs/nouveau" variant="primary">
@@ -265,10 +265,10 @@ export default async function DriversPage({
                     const breakText = describeBreak(driver);
                     const multiSeatText =
                       multiSeat > 1
-                        ? `Dans l'équipage par défaut de ${multiSeat} véhicules actifs : ne roule que sur un par jour, les autres reçoivent un remplaçant s'il y en a un de libre (page Équipages).`
+                        ? `Dans l'équipage par défaut de ${multiSeat} véhicules actifs\u00a0: ne roule que sur un par jour, les autres reçoivent un remplaçant s'il y en a un de libre (page Équipages).`
                         : null;
                     const workTimeText = workTime
-                      ? `${workTime} : le véhicule qu'il conduit n'est pas planifié tant que la pause n'est pas réglée sur sa fiche.`
+                      ? `${workTime}\u00a0: le véhicule qu'il conduit n'est pas planifié tant que la pause n'est pas réglée sur sa fiche.`
                       : null;
                     return (
                       <tr key={driver.id} className={driver.active ? "hover:bg-slate-50" : "bg-slate-50/60 text-slate-500"}>
@@ -333,7 +333,7 @@ export default async function DriversPage({
                           <VehicleLinks vehicles={driver.defaultForVehicles} />
                           {driver.crewMateForVehicles.length > 0 ? (
                             <p className="text-xs text-slate-500">
-                              Équipier : <VehicleLinks vehicles={driver.crewMateForVehicles} inline />
+                              Équipier&nbsp;: <VehicleLinks vehicles={driver.crewMateForVehicles} inline />
                             </p>
                           ) : null}
                           {driver.defaultForVehicles.length === 0 && driver.crewMateForVehicles.length === 0 ? (

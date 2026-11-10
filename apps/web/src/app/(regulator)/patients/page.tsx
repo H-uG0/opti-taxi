@@ -62,7 +62,7 @@ function describeResults(total: number, status: StatusFilter, q: string): string
   if (total === 0) return "Aucun patient pour ces critères.";
   const plural = total > 1 ? "s" : "";
   const adjective = status === "actifs" ? ` actif${plural}` : status === "inactifs" ? ` désactivé${plural}` : "";
-  return `${new Intl.NumberFormat("fr-FR").format(total)} patient${plural}${adjective}${q ? ` correspondant à « ${q} »` : ""}`;
+  return `${new Intl.NumberFormat("fr-FR").format(total)} patient${plural}${adjective}${q ? ` correspondant à «\u202f${q}\u202f»` : ""}`;
 }
 
 export default async function PatientsPage({
@@ -251,7 +251,7 @@ export default async function PatientsPage({
                           {renewed && renewal ? (
                             <Badge tone={toAttach > 0 ? "warning" : "neutral"} className="tabular whitespace-nowrap">
                               {toAttach > 0
-                                ? `Renouvelée : ${toAttach > 1 ? "récurrences" : "récurrence"} à rattacher`
+                                ? `Renouvelée\u00a0: ${toAttach > 1 ? "récurrences" : "récurrence"} à rattacher`
                                 : `Renouvelée jusqu'au ${formatShortDate(toIsoDate(renewal.validTo))}`}
                             </Badge>
                           ) : (

@@ -85,7 +85,7 @@ export function AccountForm({
         error={errors.password}
         hint={
           hasAccount
-            ? `Laissez vide pour conserver le mot de passe actuel. ${MIN_PASSWORD_LENGTH} caractères minimum ; ` +
+            ? `Laissez vide pour conserver le mot de passe actuel. ${MIN_PASSWORD_LENGTH} caractères minimum\u202f; ` +
               "le chauffeur le remplacera par le sien à sa prochaine connexion."
             : `${MIN_PASSWORD_LENGTH} caractères minimum. Le chauffeur le remplacera par le sien à sa première connexion.`
         }
@@ -136,15 +136,15 @@ export function AccountForm({
       </Field>
       {generated ? (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" role="status">
-          Notez ce mot de passe provisoire pour le communiquer au chauffeur : il ne sera plus affiché après
+          Notez ce mot de passe provisoire pour le communiquer au chauffeur&nbsp;: il ne sera plus affiché après
           l&apos;enregistrement.
         </p>
       ) : null}
       {hasAccount ? (
         <p className="text-xs text-slate-500">
           {accountActive
-            ? "Changer l'adresse ou le mot de passe déconnecte le chauffeur : il se reconnecte avec ses nouveaux identifiants."
-            : "L'accès est désactivé : les identifiants modifiés serviront une fois l'accès réactivé."}
+            ? "Changer l'adresse ou le mot de passe déconnecte le chauffeur\u00a0: il se reconnecte avec ses nouveaux identifiants."
+            : "L'accès est désactivé\u00a0: les identifiants modifiés serviront une fois l'accès réactivé."}
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">

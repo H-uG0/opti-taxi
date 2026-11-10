@@ -369,7 +369,7 @@ export function bulkCancelMessage(result: { cancelled: number; fromRoutes: numbe
   }
   if (result.skipped > 0) {
     parts.push(
-      `${plural(result.skipped, "course non annulée", "courses non annulées")} : déjà ${result.skipped > 1 ? "commencées, terminées ou modifiées" : "commencée, terminée ou modifiée"} entre-temps.`,
+      `${plural(result.skipped, "course non annulée", "courses non annulées")}\u00a0: déjà ${result.skipped > 1 ? "commencées, terminées ou modifiées" : "commencée, terminée ou modifiée"} entre-temps.`,
     );
   }
   return parts.join(" ");
@@ -378,9 +378,9 @@ export function bulkCancelMessage(result: { cancelled: number; fromRoutes: numbe
 /** Feedback of « Générer les courses » : what was created or brought back between fromIso and toIso. */
 export function generationMessage(result: { created: number; revived: number }, fromIso: string, toIso: string): string {
   const period = fromIso === toIso ? `Le ${formatShortDate(fromIso)}` : `Du ${formatShortDate(fromIso)} au ${formatShortDate(toIso)}`;
-  if (result.created + result.revived === 0) return `${period} : toutes les courses régulières existent déjà.`;
+  if (result.created + result.revived === 0) return `${period}\u00a0: toutes les courses régulières existent déjà.`;
   const done = [];
   if (result.created > 0) done.push(plural(result.created, "course créée", "courses créées"));
   if (result.revived > 0) done.push(plural(result.revived, "course annulée automatiquement rétablie", "courses annulées automatiquement rétablies"));
-  return `${period} : ${done.join(", ")}.`;
+  return `${period}\u00a0: ${done.join(", ")}.`;
 }

@@ -86,7 +86,7 @@ export default async function FacilityPage({
                 confirm={
                   facility.active
                     ? {
-                        question: `Désactiver « ${facility.name} » ? Il ne sera plus proposé dans les nouvelles récurrences. L'historique est conservé.`,
+                        question: `Désactiver «\u202f${facility.name}\u202f»\u202f? Il ne sera plus proposé dans les nouvelles récurrences. L'historique est conservé.`,
                         confirmLabel: "Oui, désactiver l'établissement",
                         keepLabel: "Garder l'établissement actif",
                       }
@@ -103,7 +103,7 @@ export default async function FacilityPage({
           <SyncNotice query={query} />
           {!facility.active ? (
             <Notice size="sm" tone="info">
-              Établissement désactivé : il n&apos;est plus proposé dans les nouvelles récurrences. Son historique est conservé.
+              Établissement désactivé&nbsp;: il n&apos;est plus proposé dans les nouvelles récurrences. Son historique est conservé.
             </Notice>
           ) : null}
         </div>
@@ -125,7 +125,7 @@ export default async function FacilityPage({
             </Item>
             <Item label="Temps d'arrêt en plus">
               {facility.extraServiceMin > 0 ? (
-                <span className="tabular">{facility.extraServiceMin} min à chaque dépose et prise en charge ici</span>
+                <span className="tabular">{facility.extraServiceMin}&nbsp;min à chaque dépose et prise en charge ici</span>
               ) : (
                 <span className="text-slate-500">Aucun</span>
               )}

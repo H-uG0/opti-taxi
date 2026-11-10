@@ -17,7 +17,7 @@ export const ZOOM_LEVELS: readonly ZoomLevel[] = ["day", "4h", "2h"];
 /** Minutes shown in the visible part of the track; « day » shows the whole range. */
 export const ZOOM_VISIBLE_MINUTES: Record<Exclude<ZoomLevel, "day">, number> = { "4h": 240, "2h": 120 };
 
-export const ZOOM_LABELS: Record<ZoomLevel, string> = { day: "Journée", "4h": "4 h", "2h": "2 h" };
+export const ZOOM_LABELS: Record<ZoomLevel, string> = { day: "Journée", "4h": "4\u00a0h", "2h": "2\u00a0h" };
 
 /** Smallest click target (WCAG 2.5.8): 24 CSS px. */
 export const MIN_TARGET_PX = 24;
@@ -47,7 +47,7 @@ export type AxisTick = { minute: number; label: string };
 export function tickLabel(minute: number): string {
   const hours = Math.floor(minute / 60) % 24;
   const minutes = minute % 60;
-  return minutes === 0 ? `${hours} h` : `${hours} h ${String(minutes).padStart(2, "0")}`;
+  return minutes === 0 ? `${hours}\u00a0h` : `${hours}\u00a0h ${String(minutes).padStart(2, "0")}`;
 }
 
 /** Room a label of the axis needs (« 10 h 30 » at 11 px, and a gap). */

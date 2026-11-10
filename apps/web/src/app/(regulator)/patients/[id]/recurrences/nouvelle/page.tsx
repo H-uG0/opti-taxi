@@ -43,7 +43,7 @@ export default async function NewRecurrencePage({ params }: { params: Promise<{ 
       </BackLink>
       <PageHeader
         title="Nouvelle récurrence"
-        description="Ex. dialyse lundi, mercredi, vendredi, RDV 07:30 : les courses de la semaine seront générées à partir de ce rythme."
+        description="Ex. dialyse lundi, mercredi, vendredi, RDV 07:30&nbsp;: les courses de la semaine seront générées à partir de ce rythme."
       />
       {prescriptions.length === 0 || facilities.length === 0 ? (
         <EmptyState
@@ -61,8 +61,8 @@ export default async function NewRecurrencePage({ params }: { params: Promise<{ 
           }
         >
           {prescriptions.length === 0
-            ? "Une récurrence s'appuie sur une prescription : saisissez-la d'abord."
-            : "Une récurrence mène à un établissement de soins : créez-le d'abord."}
+            ? "Une récurrence s'appuie sur une prescription\u00a0: saisissez-la d'abord."
+            : "Une récurrence mène à un établissement de soins\u00a0: créez-le d'abord."}
         </EmptyState>
       ) : (
         <RecurrenceForm

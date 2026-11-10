@@ -70,7 +70,7 @@ const CENTS_DENOMINATOR = 10n ** 17n;
 
 /** `value` x 10^decimals, rounded half up from the shortest writing of `value` (>= 0). */
 export function scaledInt(value: number, decimals: number): bigint {
-  if (!Number.isFinite(value) || value < 0) throw new RangeError(`Montant invalide : ${value}`);
+  if (!Number.isFinite(value) || value < 0) throw new RangeError(`Montant invalide\u00a0: ${value}`);
   const [mantissa = "0", exponent] = String(value).toLowerCase().split("e");
   const [whole = "0", fraction = ""] = mantissa.split(".");
   const shift = Number(exponent ?? 0) - fraction.length + decimals;

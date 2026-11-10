@@ -109,11 +109,11 @@ export type RunOptions = {
 export const PLANNING_TX_OPTIONS = { maxWait: 15_000, timeout: 60_000 } as const;
 
 export const OPTIMIZATION_IN_PROGRESS_ERROR =
-  "Une optimisation de cette date est en cours : attendez la fin du calcul puis rechargez la page.";
+  "Une optimisation de cette date est en cours\u00a0: attendez la fin du calcul puis rechargez la page.";
 
 export const NO_ROUTES_TO_KEEP_ERROR =
-  "Aucune tournée en place ce jour : lancez l'optimisation de la journée, qui place toutes les courses.";
-export const NOTHING_TO_PLACE_ERROR = "Aucune course sans véhicule à placer : toutes les courses du jour sont dans une tournée.";
+  "Aucune tournée en place ce jour\u00a0: lancez l'optimisation de la journée, qui place toutes les courses.";
+export const NOTHING_TO_PLACE_ERROR = "Aucune course sans véhicule à placer\u00a0: toutes les courses du jour sont dans une tournée.";
 
 function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
   return `${count} ${count > 1 ? pluralForm : singular}`;
@@ -122,8 +122,8 @@ function plural(count: number, singular: string, pluralForm = `${singular}s`): s
 /** « Placer les non affectées » when every trip without a vehicle is incomplete (never sent to the optimizer). */
 export function incompleteOnlyError(count: number): string {
   return count > 1
-    ? `Aucune course à placer : les ${count} courses sans véhicule restantes sont incomplètes (voir « À traiter ») et ne peuvent pas être calculées.`
-    : "Aucune course à placer : la course sans véhicule restante est incomplète (voir « À traiter ») et ne peut pas être calculée.";
+    ? `Aucune course à placer\u00a0: les ${count} courses sans véhicule restantes sont incomplètes (voir «\u202fÀ traiter\u202f») et ne peuvent pas être calculées.`
+    : "Aucune course à placer\u00a0: la course sans véhicule restante est incomplète (voir «\u202fÀ traiter\u202f») et ne peut pas être calculée.";
 }
 
 /** « Placer les non affectées » : what the computation was asked to do. */
@@ -187,12 +187,12 @@ function placementLoss(lostTripIds: readonly string[], request: OptimizeRequest)
   const more = lost.length > 3 ? ` et ${lost.length - 3} autre${lost.length > 4 ? "s" : ""}` : "";
   return (
     `ce placement aurait retiré ${plural(lost.length, "course déjà placée", "courses déjà placées")} de ${lost.length > 1 ? "leur" : "son"} ` +
-    `véhicule (${named}${more}). Placez les courses non affectées une à une avec « Déplacer vers… », ou réoptimisez la journée.`
+    `véhicule (${named}${more}). Placez les courses non affectées une à une avec «\u202fDéplacer vers…\u202f», ou réoptimisez la journée.`
   );
 }
 
 function seconds(ms: number): string {
-  return `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(ms / 1000)} s`;
+  return `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(ms / 1000)}\u00a0s`;
 }
 
 /**
@@ -223,7 +223,7 @@ async function runningRuns(
  * savePlan checks the same rule again, under row locks, before writing.
  */
 export async function replanBlocker(isoDate: string): Promise<string | null> {
-  if (isoDate < todayIso()) return `Le ${formatLongDate(isoDate)} est passé : son planning n'est plus modifiable.`;
+  if (isoDate < todayIso()) return `Le ${formatLongDate(isoDate)} est passé\u00a0: son planning n'est plus modifiable.`;
   const serviceDate = fromIsoDate(isoDate);
   const [validatedRoutes, startedTrips, completedStops] = await Promise.all([
     db.route.count({ where: { serviceDate, status: "VALIDATED" } }),
@@ -317,9 +317,9 @@ class ReplaceRefused extends Error {
   }
 }
 
-export const NOT_PENDING_ERROR = "Ce calcul n'attend plus de confirmation (déjà traité ou remplacé par un autre) : rechargez la page.";
-const INPUT_CHANGED_ERROR = `${NOT_KEPT_PREFIX} : les données du jour ont changé depuis (courses, courses figées, équipages, véhicules ou paramètres). Relancez l'optimisation.`;
-const PLAN_CHANGED_SINCE_ERROR = `${NOT_KEPT_PREFIX} : le planning en place a changé depuis. Relancez l'optimisation.`;
+export const NOT_PENDING_ERROR = "Ce calcul n'attend plus de confirmation (déjà traité ou remplacé par un autre)\u00a0: rechargez la page.";
+const INPUT_CHANGED_ERROR = `${NOT_KEPT_PREFIX}\u00a0: les données du jour ont changé depuis (courses, courses figées, équipages, véhicules ou paramètres). Relancez l'optimisation.`;
+const PLAN_CHANGED_SINCE_ERROR = `${NOT_KEPT_PREFIX}\u00a0: le planning en place a changé depuis. Relancez l'optimisation.`;
 
 type Actor = Pick<SessionUser, "id" | "role">;
 
@@ -436,14 +436,14 @@ async function prepareRequest(
       ok: false,
       error:
         excluded > 0
-          ? `Aucune course exploitable le ${formatLongDate(isoDate)} : ${plural(excluded, "course incomplète", "courses incomplètes")} (voir la liste).`
-          : `Aucune course à planifier le ${formatLongDate(isoDate)} : aucune récurrence ne prévoit de course ce jour (ou leurs prescriptions ont expiré). Saisissez une course ponctuelle, ou vérifiez les prescriptions.`,
+          ? `Aucune course exploitable le ${formatLongDate(isoDate)}\u00a0: ${plural(excluded, "course incomplète", "courses incomplètes")} (voir la liste).`
+          : `Aucune course à planifier le ${formatLongDate(isoDate)}\u00a0: aucune récurrence ne prévoit de course ce jour (ou leurs prescriptions ont expiré). Saisissez une course ponctuelle, ou vérifiez les prescriptions.`,
     };
   }
   if (request.vehicles.length === 0) {
     return {
       ok: false,
-      error: "Aucun véhicule disponible ce jour : vérifiez les chauffeurs attitrés, leurs jours de travail et les équipiers des ambulances.",
+      error: "Aucun véhicule disponible ce jour\u00a0: vérifiez les chauffeurs attitrés, leurs jours de travail et les équipiers des ambulances.",
     };
   }
   return { ok: true, input, build };
@@ -535,7 +535,7 @@ export async function dropPendingRuns(
   for (const old of pending) {
     await tx.optimizationRun.update({
       where: { id: old.id },
-      data: { status: "FAILED", error: `${NOT_KEPT_PREFIX} : ${why}`, details: withoutPending(old.details) },
+      data: { status: "FAILED", error: `${NOT_KEPT_PREFIX}\u00a0: ${why}`, details: withoutPending(old.details) },
     });
   }
 }
@@ -602,10 +602,10 @@ function successMessage(
   if (tariffNote) parts.push(tariffNote);
   const violations = plan.validation.violations.length;
   if (violations > 0) parts.push(`${plural(violations, "violation")} à vérifier`);
-  if (kind === "place" && placement) return `${placementText(placement)} : ${parts.join(" · ")}.`;
+  if (kind === "place" && placement) return `${placementText(placement)}\u00a0: ${parts.join(" · ")}.`;
   const what =
     kind === "restore" ? "Planning précédent rétabli" : kept ? "Planning en place conservé, aucun meilleur trouvé" : "Planning optimisé";
-  return `${what} : ${parts.join(" · ")}.`;
+  return `${what}\u00a0: ${parts.join(" · ")}.`;
 }
 
 /**
@@ -653,7 +653,7 @@ async function finishRun(args: {
   if (plan.status === "NO_SOLUTION") {
     return failRun(
       runId,
-      `Aucune solution trouvée en ${request.settings.timeLimitSec} s. Augmentez le temps de calcul dans les paramètres ou vérifiez les horaires des chauffeurs et des courses.`,
+      `Aucune solution trouvée en ${request.settings.timeLimitSec}\u00a0s. Augmentez le temps de calcul dans les paramètres ou vérifiez les horaires des chauffeurs et des courses.`,
       meta,
     );
   }
@@ -719,7 +719,7 @@ async function finishRun(args: {
           const subject = kind === "restore" ? "Le planning précédent" : kind === "place" ? "Ce placement" : "Ce calcul";
           const question = comparisonQuestion(comparison, concerns, subject);
           const asked = move
-            ? `Déplacement de ${tripRef(move.tripId)} vers ${move.vehicleLabel} : ${lostByMove}${lostByMove ? question : lowerFirst(question)}`
+            ? `Déplacement de ${tripRef(move.tripId)} vers ${move.vehicleLabel}\u00a0: ${lostByMove}${lostByMove ? question : lowerFirst(question)}`
             : question;
           throw new ReplaceRefused("confirm", asked, comparison, version);
         }
@@ -728,8 +728,8 @@ async function finishRun(args: {
   } catch (error) {
     if (error instanceof ReplaceRefused && error.reason === "place") {
       // Not a failure of the computation: its plan is not kept (the banner says « Placement … non retenu », from its kind).
-      await failRun(runId, `${NOT_KEPT_PREFIX} : ${error.message}`, { ...meta, details: runDetailsJson(plan, { kind }) });
-      return { ok: false, error: await shown(`Planning inchangé : ${error.message}`) };
+      await failRun(runId, `${NOT_KEPT_PREFIX}\u00a0: ${error.message}`, { ...meta, details: runDetailsJson(plan, { kind }) });
+      return { ok: false, error: await shown(`Planning inchangé\u00a0: ${error.message}`) };
     }
     if (error instanceof ReplaceRefused && error.comparison && error.version) {
       const { comparison, version: compared, message } = error;
@@ -883,7 +883,7 @@ export async function restorePreviousPlan(isoDate: string, user: Actor): Promise
     new Set(build.request.trips.map((t) => t.id)),
   );
   if (routes.length === 0) {
-    return { ok: false, error: "Le planning précédent ne peut plus être rétabli : ses véhicules ou ses courses ne sont plus à planifier ce jour." };
+    return { ok: false, error: "Le planning précédent ne peut plus être rétabli\u00a0: ses véhicules ou ses courses ne sont plus à planifier ce jour." };
   }
 
   const runId = await startRun(isoDate, user, build.request, input.settings.solverTimeLimitSec);
@@ -918,7 +918,7 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
   const isoDate = toIsoDate(run.serviceDate);
   const pending = readPendingPlan(run.details);
   const kind = readRunDetails(run)?.kind ?? "optimize";
-  if (!pending) return dropPendingRun(run.id, run.details, `${NOT_KEPT_PREFIX} : calcul illisible. Relancez l'optimisation.`);
+  if (!pending) return dropPendingRun(run.id, run.details, `${NOT_KEPT_PREFIX}\u00a0: calcul illisible. Relancez l'optimisation.`);
 
   const { lockChange } = pending;
   // « Placer les non affectées » : pinned again to the routes in place (unchanged since, or the request differs).
@@ -936,7 +936,7 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
         }
       : relocked,
   );
-  if (!prepared.ok) return dropPendingRun(run.id, run.details, `${NOT_KEPT_PREFIX} : ${prepared.error}`);
+  if (!prepared.ok) return dropPendingRun(run.id, run.details, `${NOT_KEPT_PREFIX}\u00a0: ${prepared.error}`);
   const { build } = prepared;
   if (requestHash(build.request) !== pending.requestHash) return dropPendingRun(run.id, run.details, INPUT_CHANGED_ERROR);
 
@@ -974,7 +974,7 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
         if (version !== pending.basedOnVersion) throw new ReplaceRefused("stale", PLAN_CHANGED_SINCE_ERROR);
         // A placement is never confirmed into taking trips off their vehicle (a plan held before this rule).
         const loss = assignments ? placementLoss(comparison.lostTripIds, build.request) : null;
-        if (loss) throw new ReplaceRefused("place", `${NOT_KEPT_PREFIX} : ${loss}`);
+        if (loss) throw new ReplaceRefused("place", `${NOT_KEPT_PREFIX}\u00a0: ${loss}`);
       },
     });
   } catch (error) {
@@ -984,7 +984,7 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
       return { ok: false, error: await shownMessage(error.message) };
     }
     if (error instanceof ReplaceRefused) return dropPendingRun(run.id, run.details, error.message);
-    if (error instanceof PlanBlockedError) return dropPendingRun(run.id, run.details, `${NOT_KEPT_PREFIX} : ${error.message}`);
+    if (error instanceof PlanBlockedError) return dropPendingRun(run.id, run.details, `${NOT_KEPT_PREFIX}\u00a0: ${error.message}`);
     logError("[planning] saving a confirmed plan failed", error, { runId: run.id, serviceDate: isoDate });
     return { ok: false, error: "Le planning n'a pas pu être enregistré (erreur de base de données). Réessayez." };
   }
@@ -1003,7 +1003,7 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
   return {
     ok: true,
     runId: run.id,
-    message: `${what} : ${saved.served}/${saved.served + saved.unassigned} courses servies · ${plural(saved.routes, "tournée")}.`,
+    message: `${what}\u00a0: ${saved.served}/${saved.served + saved.unassigned} courses servies · ${plural(saved.routes, "tournée")}.`,
     ...(warning ? { warning: true } : {}),
   };
 }
@@ -1034,7 +1034,7 @@ export async function discardPendingRun(
     await lockPlanningDay(tx, isoDate);
     const { count } = await tx.optimizationRun.updateMany({
       where: { id: runId, status: "AWAITING_CONFIRMATION" },
-      data: { status: "FAILED", error: `${NOT_KEPT_PREFIX} : le planning en place a été conservé.`, details: withoutPending(run.details) },
+      data: { status: "FAILED", error: `${NOT_KEPT_PREFIX}\u00a0: le planning en place a été conservé.`, details: withoutPending(run.details) },
     });
     if (count > 0) await trace(tx, isoDate);
     return count > 0;

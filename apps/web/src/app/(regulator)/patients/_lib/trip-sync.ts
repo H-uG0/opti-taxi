@@ -379,19 +379,19 @@ export function describeSync(s: SyncSummary): string | null {
   if (s.revived > 0) done.push(`${s.revived} rétablie${s.revived > 1 ? "s" : ""}`);
   if (s.updated > 0) done.push(`${s.updated} mise${s.updated > 1 ? "s" : ""} à jour`);
   if (s.cancelled > 0) done.push(`${s.cancelled} annulée${s.cancelled > 1 ? "s" : ""}`);
-  if (done.length > 0) sentences.push(`Courses à venir : ${done.join(", ")}.`);
+  if (done.length > 0) sentences.push(`Courses à venir\u00a0: ${done.join(", ")}.`);
   if (s.detached > 0) {
     sentences.push(
       s.detached === 1
-        ? "1 course a été retirée de sa tournée : réoptimisez la journée concernée."
-        : `${s.detached} courses ont été retirées de leur tournée : réoptimisez les journées concernées.`,
+        ? "1 course a été retirée de sa tournée\u00a0: réoptimisez la journée concernée."
+        : `${s.detached} courses ont été retirées de leur tournée\u00a0: réoptimisez les journées concernées.`,
     );
   }
   if (s.deferred > 0) {
     sentences.push(
       s.deferred === 1
-        ? "1 course d'aujourd'hui, déjà dans une tournée, n'a pas été modifiée : ajustez-la dans Courses et prévenez le chauffeur."
-        : `${s.deferred} courses d'aujourd'hui, déjà dans une tournée, n'ont pas été modifiées : ajustez-les dans Courses et prévenez les chauffeurs.`,
+        ? "1 course d'aujourd'hui, déjà dans une tournée, n'a pas été modifiée\u00a0: ajustez-la dans Courses et prévenez le chauffeur."
+        : `${s.deferred} courses d'aujourd'hui, déjà dans une tournée, n'ont pas été modifiées\u00a0: ajustez-les dans Courses et prévenez les chauffeurs.`,
     );
   }
   return sentences.length > 0 ? sentences.join(" ") : null;

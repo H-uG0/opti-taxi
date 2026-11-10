@@ -88,26 +88,26 @@ const announcement = () => document.querySelector("[aria-live='polite'].sr-only"
 const mapVehicleIds = () => map.props?.vehicles.map((v) => v.id);
 
 describe("PlanningBoard", () => {
-  it("goes to the next entry of « À traiter » with « N », selects it and says it", () => {
+  it("goes to the next entry of «\u202fÀ traiter\u202f» with «\u202fN\u202f», selects it and says it", () => {
     renderBoard();
     act(() => {
       fireEvent.keyDown(document.body, { key: "n" });
     });
-    expect(announcement()).toBe("À traiter, 1 sur 1 : Colette Imbert");
+    expect(announcement()).toBe("À traiter, 1 sur 1\u00a0: Colette Imbert");
     expect(screen.getByRole("heading", { name: "Colette Imbert" })).toBeTruthy();
     // Not while typing.
     act(() => {
       fireEvent.keyDown(screen.getByPlaceholderText("Patient, véhicule, chauffeur…"), { key: "n" });
     });
-    expect(announcement()).toBe("À traiter, 1 sur 1 : Colette Imbert");
+    expect(announcement()).toBe("À traiter, 1 sur 1\u00a0: Colette Imbert");
   });
 
-  it("names « N » after the panel's title before the first optimization", () => {
+  it("names «\u202fN\u202f» after the panel's title before the first optimization", () => {
     renderBoard({ planned: false });
     act(() => {
       fireEvent.keyDown(document.body, { key: "n" });
     });
-    expect(announcement()).toBe("Courses à planifier, 1 sur 1 : Colette Imbert");
+    expect(announcement()).toBe("Courses à planifier, 1 sur 1\u00a0: Colette Imbert");
     expect(map.props?.planned).toBe(false);
   });
 
@@ -119,7 +119,7 @@ describe("PlanningBoard", () => {
     expect(dot?.style.background).toBe("rgb(29, 78, 216)");
   });
 
-  it("keeps « Sélection seule » on while nothing is selected (it can be turned off) and applies it to the next selection without moving the map", () => {
+  it("keeps «\u202fSélection seule\u202f» on while nothing is selected (it can be turned off) and applies it to the next selection without moving the map", () => {
     window.history.replaceState(null, "", "/planning?carte=selection");
     renderBoard();
     // Nothing selected: the map shows what the timeline shows, the button stays pressed and usable.
@@ -145,7 +145,7 @@ describe("PlanningBoard", () => {
     expect(map.props?.datasetKey).toBe(key);
   });
 
-  it("disables « Sélection seule » only when it is off and nothing is selected", () => {
+  it("disables «\u202fSélection seule\u202f» only when it is off and nothing is selected", () => {
     renderBoard();
     expect(map.props?.selectionOnly).toBe(false);
     expect(map.props?.onSelectionOnlyChange).toBeNull();

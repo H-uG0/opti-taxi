@@ -25,7 +25,7 @@ describe("one-key shortcuts", () => {
     expect(isShortcutKey(key("f", document.body))).toBe(true);
   });
 
-  it("leave Ctrl, Alt and Cmd to the browser, but accept AltGr (« [ » and « ] » on a French keyboard)", () => {
+  it("leave Ctrl, Alt and Cmd to the browser, but accept AltGr («\u202f[\u202f» and «\u202f]\u202f» on a French keyboard)", () => {
     expect(isShortcutKey(key("f", document.body, { ctrlKey: true }))).toBe(false);
     expect(isShortcutKey(key("f", document.body, { altKey: true }))).toBe(false);
     expect(isShortcutKey(key("f", document.body, { metaKey: true }))).toBe(false);
@@ -33,7 +33,7 @@ describe("one-key shortcuts", () => {
     expect(isShortcutKey({ ...key("n", document.body), defaultPrevented: true })).toBe(false);
   });
 
-  it("accept Option on a Mac for the signs it types (« [ », « ] », « / »), never for a letter", () => {
+  it("accept Option on a Mac for the signs it types («\u202f[\u202f», «\u202f]\u202f», «\u202f/\u202f»), never for a letter", () => {
     // ⌥⇧5 on a French Mac keyboard: altKey, no AltGraph, the key is already « [ ».
     expect(isShortcutKey(key("[", document.body, { altKey: true }))).toBe(true);
     expect(isShortcutKey(key("]", document.body, { altKey: true }))).toBe(true);
@@ -44,7 +44,7 @@ describe("one-key shortcuts", () => {
     expect(isShortcutKey(key("[", document.body, { altKey: true, metaKey: true }))).toBe(false);
   });
 
-  it("ignore a key held down: its repeats would undo the action (« F ») or race through the list (« N »)", () => {
+  it("ignore a key held down: its repeats would undo the action («\u202fF\u202f») or race through the list («\u202fN\u202f»)", () => {
     expect(isShortcutKey({ ...key("f", document.body), repeat: true })).toBe(false);
     expect(isShortcutKey({ ...key("f", document.body), repeat: false })).toBe(true);
   });
@@ -58,7 +58,7 @@ describe("one-key shortcuts", () => {
   });
 });
 
-describe("« N » through « À traiter »", () => {
+describe("«\u202fN\u202f» through «\u202fÀ traiter\u202f»", () => {
   const args = {
     planned: true,
     unassigned: [{ tripId: "u1" }, { tripId: "half", servedPartner: { tripId: "p", vehicleId: "v9" } }],

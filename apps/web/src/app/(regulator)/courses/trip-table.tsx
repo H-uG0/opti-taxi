@@ -99,7 +99,7 @@ export function TripTable({ rows, caption }: { rows: TripRowData[]; caption: str
       </Table>
       {picked.length > 0 ? (
         <p id={jumpHintId} className="sr-only">
-          Entrée : aller à l&apos;annulation des courses sélectionnées, en bas de la liste.
+          Entrée&nbsp;: aller à l&apos;annulation des courses sélectionnées, en bas de la liste.
         </p>
       ) : null}
       {picked.length > 0 ? (
@@ -306,7 +306,7 @@ export function bulkConfirmText({
 }): string {
   const label = reason ? CANCELLATION_REASON_LABELS[reason as keyof typeof CANCELLATION_REASON_LABELS] : "?";
   return [
-    `Annuler ${plural(count, "course", "courses")} pour le motif « ${label} » ?`,
+    `Annuler ${plural(count, "course", "courses")} pour le motif «\u202f${label}\u202f»\u202f?`,
     inRoutes > 0 ? (inRoutes > 1 ? `${inRoutes} seront retirées de leur tournée.` : "Une sera retirée de sa tournée.") : null,
     shared ? "Les co-passagers restés seuls ne seront plus en transport partagé." : null,
     returnsLeft > 0 ? `${returnsLeft > 1 ? `${returnsLeft} retours de ces patients restent prévus` : "Le retour de ce patient reste prévu"}.` : null,

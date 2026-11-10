@@ -17,8 +17,8 @@ import { SYNC_TX_OPTIONS, syncOpenTrips } from "@/app/(regulator)/patients/_lib/
 import { formString, messageState, type ActionResult, type FormState } from "@/lib/forms";
 import { parseFacilityForm } from "./_lib/schema";
 
-const NOT_FOUND = "Établissement introuvable : il a peut-être été supprimé. Rechargez la page.";
-const CHANGED_MEANWHILE = "L'établissement vient d'être modifié depuis un autre poste : rechargez la page.";
+const NOT_FOUND = "Établissement introuvable\u00a0: il a peut-être été supprimé. Rechargez la page.";
+const CHANGED_MEANWHILE = "L'établissement vient d'être modifié depuis un autre poste\u00a0: rechargez la page.";
 
 /** Facility names appear on the patient pages too. */
 function revalidateReferential() {
@@ -129,7 +129,7 @@ export async function setFacilityActive(_prev: ActionResult, formData: FormData)
     if (active || n === 0) return { ok: false, message: CHANGED_MEANWHILE };
     return {
       ok: false,
-      message: `Désactivation impossible : ${n === 1 ? "1 récurrence active mène" : `${n} récurrences actives mènent`} à cet établissement. Désactivez-les ou changez leur établissement d'abord.`,
+      message: `Désactivation impossible\u00a0: ${n === 1 ? "1 récurrence active mène" : `${n} récurrences actives mènent`} à cet établissement. Désactivez-les ou changez leur établissement d'abord.`,
     };
   }
 

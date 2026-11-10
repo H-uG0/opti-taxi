@@ -54,7 +54,7 @@ export function KpiStrip({
       {scope ? (
         <Figure
           label="Courses servies"
-          title={`Courses servies par les véhicules affichés ; ${unassignedHint} sur la journée (une course sans véhicule n'est à aucun dépôt)`}
+          title={`Courses servies par les véhicules affichés\u202f; ${unassignedHint} sur la journée (une course sans véhicule n'est à aucun dépôt)`}
           value={kpis.tripsServed}
           hint={unassigned > 0 ? `${unassigned} à placer (jour)` : "toutes placées"}
           tone={unassigned > 0 ? "warn" : "default"}
@@ -82,7 +82,7 @@ export function KpiStrip({
       <Figure label="Km à vide" title="Part des km roulés sans patient à bord" value={formatPercent(kpis.emptyKmRatio)} hint={formatKmRounded(kpis.emptyKm)} />
       <Figure
         label="Partagé"
-        title="Transport partagé : part des courses servies avec un autre patient à bord"
+        title="Transport partagé&nbsp;: part des courses servies avec un autre patient à bord"
         value={formatPercent(kpis.sharedTripRatio)}
         hint={pluralize(kpis.sharedTrips, "course", "courses")}
       />
@@ -100,7 +100,7 @@ export function KpiStrip({
         <Figure
           label="Violations"
           value={kpis.violations ?? "?"}
-          title={kpis.violations === null ? "Détail indisponible : réoptimisez" : "Contraintes dures non respectées (horaires, capacité, détour, attente…)"}
+          title={kpis.violations === null ? "Détail indisponible\u00a0: réoptimisez" : "Contraintes dures non respectées (horaires, capacité, détour, attente…)"}
           hint={kpis.violations === null ? "à réoptimiser" : kpis.violations > 0 ? "contraintes dures" : "conforme"}
           tone={kpis.violations === null ? "warn" : kpis.violations > 0 ? "bad" : "good"}
         />

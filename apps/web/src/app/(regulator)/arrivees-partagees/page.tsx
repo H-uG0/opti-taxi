@@ -171,7 +171,7 @@ export default async function SharedArrivalsPage({
                 ) : (
                   <PrintButton
                     label="Imprimer la liste interne"
-                    title="Document interne : il contient les patients de tous les établissements. Pour un accueil, imprimez sa fiche."
+                    title="Document interne&nbsp;: il contient les patients de tous les établissements. Pour un accueil, imprimez sa fiche."
                   />
                 )
               ) : null}
@@ -182,8 +182,8 @@ export default async function SharedArrivalsPage({
 
       {facilities.length > 0 && !facilityFilter ? (
         <p className="mb-3 hidden rounded-md border border-slate-400 px-3 py-2 text-sm font-semibold text-slate-900 print:block">
-          Document interne à la régulation : il contient les patients de plusieurs établissements (données de santé). Ne
-          pas le transmettre à un accueil : imprimez la fiche de chaque établissement.
+          Document interne à la régulation&nbsp;: il contient les patients de plusieurs établissements (données de santé). Ne
+          pas le transmettre à un accueil&nbsp;: imprimez la fiche de chaque établissement.
         </p>
       ) : null}
 
@@ -195,7 +195,7 @@ export default async function SharedArrivalsPage({
           {facilityFilter ? null : (
             <span className="print:hidden">
               {" "}
-              Chaque accueil ne reçoit que la fiche de son établissement (bouton « Fiche pour l&apos;accueil »).
+              Chaque accueil ne reçoit que la fiche de son établissement (bouton «&#x202F;Fiche pour l&apos;accueil&#x202F;»).
             </span>
           )}
         </span>
@@ -237,8 +237,8 @@ export default async function SharedArrivalsPage({
             }
           >
             {routeCount === 0
-              ? "Optimisez la journée : les transports partagés apparaîtront ici, établissement par établissement."
-              : "Aucune course n'est partagée dans les tournées de ce jour : il n'y a pas d'accueil à prévenir."}
+              ? "Optimisez la journée\u00a0: les transports partagés apparaîtront ici, établissement par établissement."
+              : "Aucune course n'est partagée dans les tournées de ce jour\u00a0: il n'y a pas d'accueil à prévenir."}
           </EmptyState>
         )
       ) : (
@@ -272,7 +272,7 @@ export default async function SharedArrivalsPage({
             <p className="mb-4 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 print:hidden">
               <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
               <span>
-                Certaines tournées ne sont pas encore validées : la liste peut changer.{" "}
+                Certaines tournées ne sont pas encore validées&nbsp;: la liste peut changer.{" "}
                 <Link href={`/planning?date=${date}`} className="font-medium underline underline-offset-2">
                   Valider le planning
                 </Link>
@@ -300,7 +300,7 @@ export default async function SharedArrivalsPage({
                         className="tabular inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
                       >
                         <Phone aria-hidden className="size-4 text-brand-700" />
-                        Accueil : {facility.phone}
+                        Accueil&nbsp;: {facility.phone}
                       </a>
                     ) : (
                       <p className="inline-flex items-center gap-1.5 text-sm text-amber-800">
@@ -426,7 +426,7 @@ function GroupTable({
                         <span className="ml-1.5 inline-block print:hidden">
                           <Badge tone="danger">
                             <TriangleAlert aria-hidden className="size-3" />
-                            Refus de partage : à réoptimiser
+                            Refus de partage&nbsp;: à réoptimiser
                           </Badge>
                         </span>
                       ) : null}

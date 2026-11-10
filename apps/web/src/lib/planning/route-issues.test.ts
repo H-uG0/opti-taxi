@@ -83,34 +83,34 @@ describe("vehicleIssues", () => {
   it("names who replaces an absent driver in the crew of the day", () => {
     const people = [...PEOPLE, person("spare", ["TAXI_CARD"])];
     const [issue] = issuesAfter({ people, absences: [{ driverId: "taxi1", kind: "LEAVE", startDate: MONDAY, endDate: MONDAY }] });
-    expect(issue?.changes).toEqual(["X taxi1 (chauffeur) : absence le 09/11/2026 ; équipage du jour : X spare"]);
+    expect(issue?.changes).toEqual(["X taxi1 (chauffeur)\u00a0: absence le 09/11/2026\u202f; équipage du jour\u00a0: X spare"]);
   });
 
   it("flags a route whose driver is now absent, without saying why", () => {
     const [issue] = issuesAfter({ absences: [{ driverId: "taxi1", kind: "SICK", startDate: MONDAY, endDate: MONDAY }] });
     // The day crew found nobody else: the vehicle is blocked, and the route's driver is absent.
     expect(issue?.vehicleId).toBe("A");
-    expect(issue?.changes).toContain("X taxi1 (chauffeur) : absence le 09/11/2026");
+    expect(issue?.changes).toContain("X taxi1 (chauffeur)\u00a0: absence le 09/11/2026");
     expect(issue?.changes.join(" ")).not.toMatch(/maladie/i);
   });
 
   it("flags a crew of the day that can no longer work, in a few words for the work-time rule", () => {
     const breakless = { breakWindowStartMinute: null, breakWindowEndMinute: null, breakMinutes: 0 };
     const [issue] = issuesAfter({ people: PEOPLE.map((p) => (p.id === "taxi1" ? { ...p, ...breakless } : p)) });
-    expect(issue?.changes).toEqual(["Pause de 20 min requise : horaire de 13 h 00 sans pause (art. L. 3121-16)"]);
+    expect(issue?.changes).toEqual(["Pause de 20\u00a0min requise\u00a0: horaire de 13\u00a0h 00 sans pause (art. L. 3121-16)"]);
     const blocked = issuesAfter({ saved: [{ vehicleId: "A", driverId: "dea1", crewMateId: null }] }).find((i) => i.vehicleId === "A");
-    expect(blocked?.changes).toContain("Équipage du jour bloqué : X dea1 n'a pas la qualification requise pour ce poste");
+    expect(blocked?.changes).toContain("Équipage du jour bloqué\u00a0: X dea1 n'a pas la qualification requise pour ce poste");
   });
 
   it("flags a crew changed on the crew screen after the computation", () => {
     const [issue] = issuesAfter({ saved: [{ vehicleId: "A", driverId: "taxi2", crewMateId: null }] });
-    expect(issue?.changes).toEqual(["Chauffeur changé : X taxi1 sur la tournée, X taxi2 dans l'équipage du jour"]);
+    expect(issue?.changes).toEqual(["Chauffeur changé\u00a0: X taxi1 sur la tournée, X taxi2 dans l'équipage du jour"]);
   });
 
   it("checks the crew mate of an ambulance", () => {
     const [issue] = issuesAfter({ people: PEOPLE.map((p) => (p.id === "aux1" ? { ...p, active: false } : p)) });
     expect(issue?.vehicleId).toBe("Amb");
-    expect(issue?.changes).toContain("X aux1 (équipier) : désactivé depuis le calcul");
+    expect(issue?.changes).toContain("X aux1 (équipier)\u00a0: désactivé depuis le calcul");
   });
 
   it("flags a route on a vehicle deactivated since", () => {
@@ -121,7 +121,7 @@ describe("vehicleIssues", () => {
   });
 
   it("reports an overdue inspection or insurance on every vehicle that drives that day", () => {
-    const alert = "Contrôle technique : échéance dépassée (01/11/2026)";
+    const alert = "Contrôle technique\u00a0: échéance dépassée (01/11/2026)";
     const issues = issuesAfter({}, { fleetAlerts: new Map([["B", [alert]], ["A", [alert]]]) });
     expect(issues.map((i) => [i.vehicleId, i.hasRoute, i.changes, i.compliance])).toEqual([
       ["A", true, [], [alert]],

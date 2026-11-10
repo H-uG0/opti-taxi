@@ -49,8 +49,8 @@ export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planR
           <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
           <span>
             <span className="font-semibold">L&apos;optimisation du {formatDateTime(interrupted.startedAt)} ne s&apos;est pas terminée</span>
-            {interrupted.requestedBy ? ` (lancée par ${interrupted.requestedBy})` : ""} : le serveur a sans doute redémarré
-            pendant le calcul. Relancez l&apos;optimisation{planRun ? " ; les tournées affichées sont celles du calcul précédent" : ""}.
+            {interrupted.requestedBy ? ` (lancée par ${interrupted.requestedBy})` : ""}&nbsp;: le serveur a sans doute redémarré
+            pendant le calcul. Relancez l&apos;optimisation{planRun ? "\u202f; les tournées affichées sont celles du calcul précédent" : ""}.
           </span>
         </p>
       ) : null}
@@ -59,8 +59,8 @@ export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planR
         <p role="status" className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm text-sky-900">
           <LoaderCircle aria-hidden className="size-4 shrink-0 motion-safe:animate-spin" />
           Une optimisation de cette date a démarré le {formatDateTime(running.startedAt)}
-          {running.requestedBy ? ` (${running.requestedBy})` : ""} pour {pluralize(running.tripsCount, "course")} : calcul
-          d&apos;environ {running.timeLimitSec} s. Un bandeau proposera de recharger le planning à la fin du calcul.
+          {running.requestedBy ? ` (${running.requestedBy})` : ""} pour {pluralize(running.tripsCount, "course")}&nbsp;: calcul
+          d&apos;environ {running.timeLimitSec}&nbsp;s. Un bandeau proposera de recharger le planning à la fin du calcul.
         </p>
       ) : null}
 
@@ -69,7 +69,7 @@ export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planR
           <CircleX aria-hidden className="mt-0.5 size-4 shrink-0" />
           <p className="min-w-0 break-words">
             <span className="font-semibold">Échec de l&apos;optimisation du {formatDateTime(failed.startedAt)}</span>
-            {planRun ? " (les tournées affichées sont celles du calcul précédent)" : ""} : {failed.error ?? "erreur inconnue"}
+            {planRun ? " (les tournées affichées sont celles du calcul précédent)" : ""}&nbsp;: {failed.error ?? "erreur inconnue"}
           </p>
         </div>
       ) : null}
@@ -80,7 +80,7 @@ export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planR
           <span className="min-w-0 break-words">
             {NOT_KEPT_LABEL[notKept.kind ?? "optimize"]} du {formatDateTime(notKept.startedAt)}
             {notKept.requestedBy ? ` (${notKept.requestedBy})` : ""} non retenu
-            {notKept.error ? ` : ${notKept.error.slice(NOT_KEPT_PREFIX.length).replace(/^\s*:\s*/, "")}` : "."}
+            {notKept.error ? `\u00a0: ${notKept.error.slice(NOT_KEPT_PREFIX.length).replace(/^\s*:\s*/, "")}` : "."}
           </span>
         </p>
       ) : null}
@@ -121,12 +121,12 @@ export function PlanRunLine({ planRun, restore }: { planRun: RunView | null; res
       </span>
       {dot}
       {planRun.matrixSource === "haversine" ? (
-        <span className="inline-flex items-center gap-1 text-amber-800" title="Distances et temps estimés à vol d'oiseau, faute de calcul routier : prévenez la personne qui gère l'application si cela dure">
+        <span className="inline-flex items-center gap-1 text-amber-800" title="Distances et temps estimés à vol d'oiseau, faute de calcul routier&nbsp;: prévenez la personne qui gère l'application si cela dure">
           <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
-          distances à vol d&apos;oiseau : km, horaires et CA approximatifs
+          distances à vol d&apos;oiseau&nbsp;: km, horaires et CA approximatifs
         </span>
       ) : (
-        <span>distances : {MATRIX_SOURCE_LABELS[planRun.matrixSource ?? ""] ?? planRun.matrixSource ?? "—"}</span>
+        <span>distances&nbsp;: {MATRIX_SOURCE_LABELS[planRun.matrixSource ?? ""] ?? planRun.matrixSource ?? "—"}</span>
       )}
       {planRun.trafficSource ? (
         <>
@@ -153,7 +153,7 @@ export function PlanRunLine({ planRun, restore }: { planRun: RunView | null; res
         <span className="inline-flex flex-wrap items-center gap-x-2">
           {dot}
           <span>
-            Planning remplacé : {pluralize(planRun.previous.served, "course servie", "courses servies")}, marge{" "}
+            Planning remplacé&nbsp;: {pluralize(planRun.previous.served, "course servie", "courses servies")}, marge{" "}
             {formatEurosRounded(planRun.previous.margin)}
           </span>
           {restore}

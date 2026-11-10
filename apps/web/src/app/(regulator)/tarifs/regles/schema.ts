@@ -68,7 +68,7 @@ export const areaSchema = z
       ctx.addIssue({ code: "custom", path: ["communes"], message: "Au moins une commune." });
     }
     if (v.rule === "TO_HUB" && !v.hubCommune) {
-      ctx.addIssue({ code: "custom", path: ["hubCommune"], message: "La règle « vers la commune centre » demande cette commune." });
+      ctx.addIssue({ code: "custom", path: ["hubCommune"], message: "La règle «\u202fvers la commune centre\u202f» demande cette commune." });
     }
     if (v.validFrom !== null && v.validTo !== null && v.validTo < v.validFrom) {
       ctx.addIssue({ code: "custom", path: ["validTo"], message: AFTER_START });

@@ -19,8 +19,8 @@ const extraServiceMin = z.preprocess(
   z
     .number({ error: "Nombre de minutes attendu" })
     .int("Nombre entier de minutes attendu")
-    .min(0, "0 min au moins")
-    .max(MAX_FACILITY_EXTRA_SERVICE_MIN, `${MAX_FACILITY_EXTRA_SERVICE_MIN} min au plus`),
+    .min(0, "0\u00a0min au moins")
+    .max(MAX_FACILITY_EXTRA_SERVICE_MIN, `${MAX_FACILITY_EXTRA_SERVICE_MIN}\u00a0min au plus`),
 );
 
 export const facilitySchema = z.object({

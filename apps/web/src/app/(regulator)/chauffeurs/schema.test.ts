@@ -82,17 +82,17 @@ describe("driverSchema", () => {
     expect(zero.breakMinutes).toBe(0);
   });
 
-  it("requires a break of 20 min or more over 6 hours (art. L. 3121-16)", () => {
+  it("requires a break of 20\u00a0min or more over 6 hours (art. L. 3121-16)", () => {
     const blank = { breakWindowStart: "", breakWindowEnd: "", breakMinutes: "" };
     expect(errorsOf({ ...valid, ...blank }).breakWindowStart).toBe(
-      "Pause obligatoire pour un horaire de 11 h 30 : au moins 20 min au-delà de 6 h de travail (Code du travail, art. L. 3121-16).",
+      "Pause obligatoire pour un horaire de 11\u00a0h 30\u00a0: au moins 20\u00a0min au-delà de 6\u00a0h de travail (Code du travail, art. L. 3121-16).",
     );
     expect(errorsOf({ ...valid, breakMinutes: "15" }).breakMinutes).toBe(
-      "Au moins 20 min pour un horaire de 11 h 30 (au-delà de 6 h de travail, Code du travail, art. L. 3121-16).",
+      "Au moins 20\u00a0min pour un horaire de 11\u00a0h 30 (au-delà de 6\u00a0h de travail, Code du travail, art. L. 3121-16).",
     );
     expect(errorsOf({ ...valid, breakMinutes: "20" })).toEqual({});
     const short = { breakWindowEnd: "13:00", breakMinutes: "15" };
-    expect(errorsOf({ ...valid, ...short, shiftEnd: "13:01" }).breakMinutes).toMatch(/^Au moins 20 min pour un horaire de 6 h 01/);
+    expect(errorsOf({ ...valid, ...short, shiftEnd: "13:01" }).breakMinutes).toMatch(/^Au moins 20\u00a0min pour un horaire de 6\u00a0h 01/);
     expect(errorsOf({ ...valid, ...short, shiftEnd: "13:00" })).toEqual({});
   });
 
@@ -105,7 +105,7 @@ describe("driverSchema", () => {
   it("checks the break window", () => {
     expect(errorsOf({ ...valid, breakWindowEnd: "11:00" }).breakWindowEnd).toMatch(/après son début/);
     expect(errorsOf({ ...valid, breakWindowStart: "13:30", breakMinutes: "45" }).breakMinutes).toBe(
-      "La fenêtre (30 min) est plus courte que la pause (45 min).",
+      "La fenêtre (30\u00a0min) est plus courte que la pause (45\u00a0min).",
     );
     expect(errorsOf({ ...valid, breakWindowStart: "06:00" }).breakWindowStart).toMatch(/07:00 – 18:30/);
     expect(errorsOf({ ...valid, breakWindowEnd: "19:00" }).breakWindowStart).toMatch(/comprise dans les horaires/);
@@ -128,7 +128,7 @@ describe("driverSchema", () => {
 
   it("describes the break", () => {
     expect(describeBreak({ breakWindowStartMinute: 690, breakWindowEndMinute: 840, breakMinutes: 45 })).toBe(
-      "45 min entre 11:30 et 14:00",
+      "45\u00a0min entre 11:30 et 14:00",
     );
     expect(describeBreak({ breakWindowStartMinute: null, breakWindowEndMinute: null, breakMinutes: 0 })).toBeNull();
   });
@@ -139,10 +139,10 @@ describe("assignmentConflicts", () => {
     expect(assignmentConflicts(["DEA"], [{ label: "Ambulance 1", type: "AMBULANCE" }], [])).toEqual([]);
     expect(assignmentConflicts(["AUXILIARY"], [{ label: "VSL 1", type: "VSL" }], [])).toEqual([]);
     expect(assignmentConflicts(["TAXI_CARD"], [{ label: "VSL 1", type: "VSL" }], [])).toEqual([
-      "chauffeur par défaut de « VSL 1 » (requis : Auxiliaire ambulancier ou Ambulancier DE)",
+      "chauffeur par défaut de «\u202fVSL 1\u202f» (requis\u00a0: Auxiliaire ambulancier ou Ambulancier DE)",
     ]);
     expect(assignmentConflicts(["TAXI_CARD"], [], [{ label: "Ambulance 2", type: "AMBULANCE" }])).toEqual([
-      "équipier par défaut de « Ambulance 2 » (requis : Auxiliaire ambulancier ou Ambulancier DE)",
+      "équipier par défaut de «\u202fAmbulance 2\u202f» (requis\u00a0: Auxiliaire ambulancier ou Ambulancier DE)",
     ]);
   });
 
@@ -151,7 +151,7 @@ describe("assignmentConflicts", () => {
     expect(assignmentConflicts(["AUXILIARY"], [{ label: "Ambulance 1", type: "AMBULANCE", partner: ["DEA"] }], [])).toEqual([]);
     // The DEA of the pair loses the diploma: the pair has none left.
     expect(assignmentConflicts(["AUXILIARY"], [], [{ label: "Ambulance 1", type: "AMBULANCE", partner: ["AUXILIARY"] }])).toEqual([
-      "équipier par défaut de « Ambulance 1 » (l'équipage doit compter un ambulancier DE)",
+      "équipier par défaut de «\u202fAmbulance 1\u202f» (l'équipage doit compter un ambulancier DE)",
     ]);
     // No partner yet: the crew mate of the day will have to be a DEA, nothing to refuse here.
     expect(assignmentConflicts(["AUXILIARY"], [{ label: "Ambulance 1", type: "AMBULANCE", partner: null }], [])).toEqual([]);
@@ -241,14 +241,14 @@ describe("accountUpdateMessage", () => {
 
   it("on an active account, asks to pass on the new credentials and says open sessions end", () => {
     expect(accountUpdateMessage(emailOnly, true)).toBe(
-      `Identifiant modifié : communiquez-le au chauffeur. Il se connecte désormais avec la nouvelle adresse et son mot de passe actuel. ${OPEN_SESSION_NOTE}`,
+      `Identifiant modifié\u00a0: communiquez-le au chauffeur. Il se connecte désormais avec la nouvelle adresse et son mot de passe actuel. ${OPEN_SESSION_NOTE}`,
     );
     expect(accountUpdateMessage(passwordOnly, true)).toBe(
-      "Mot de passe provisoire défini : communiquez-le au chauffeur. L'ancien mot de passe ne permet plus de se connecter. " +
+      "Mot de passe provisoire défini\u00a0: communiquez-le au chauffeur. L'ancien mot de passe ne permet plus de se connecter. " +
         `${PROVISIONAL_PASSWORD_NOTE} ${OPEN_SESSION_NOTE}`,
     );
     expect(accountUpdateMessage(both, true)).toBe(
-      "Identifiant modifié et mot de passe provisoire défini : communiquez-les au chauffeur. " +
+      "Identifiant modifié et mot de passe provisoire défini\u00a0: communiquez-les au chauffeur. " +
         `L'ancien mot de passe ne permet plus de se connecter. ${PROVISIONAL_PASSWORD_NOTE} ${OPEN_SESSION_NOTE}`,
     );
   });
@@ -262,7 +262,7 @@ describe("accountUpdateMessage", () => {
       expect(message).not.toMatch(/se connecte désormais|ne permet plus/);
     }
     expect(accountUpdateMessage(emailOnly, false)).toBe(
-      `Identifiant modifié : communiquez-le au chauffeur. ${ACCESS_STILL_DISABLED_NOTE}`,
+      `Identifiant modifié\u00a0: communiquez-le au chauffeur. ${ACCESS_STILL_DISABLED_NOTE}`,
     );
   });
 });

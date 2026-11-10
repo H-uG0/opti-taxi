@@ -252,13 +252,13 @@ describe("formatting", () => {
 
   it("reports the trips created and brought back over the generated days", () => {
     expect(generationMessage({ created: 12, revived: 0 }, "2026-11-03", "2026-11-08")).toBe(
-      "Du 03/11/2026 au 08/11/2026 : 12 courses créées.",
+      "Du 03/11/2026 au 08/11/2026\u00a0: 12 courses créées.",
     );
     expect(generationMessage({ created: 1, revived: 2 }, "2026-11-03", "2026-11-08")).toBe(
-      "Du 03/11/2026 au 08/11/2026 : 1 course créée, 2 courses annulées automatiquement rétablies.",
+      "Du 03/11/2026 au 08/11/2026\u00a0: 1 course créée, 2 courses annulées automatiquement rétablies.",
     );
     expect(generationMessage({ created: 0, revived: 0 }, "2026-11-08", "2026-11-08")).toBe(
-      "Le 08/11/2026 : toutes les courses régulières existent déjà.",
+      "Le 08/11/2026\u00a0: toutes les courses régulières existent déjà.",
     );
   });
 });

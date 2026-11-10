@@ -29,14 +29,14 @@ describe("deadlineState", () => {
 
   it("tells overdue and soon by mileage, ignores it without a reading", () => {
     expect(deadlineState(deadline({ dueKm: 90_000 }), TODAY, 90_400).status).toBe("overdue");
-    expect(deadlineState(deadline({ dueKm: 90_000 }), TODAY, 89_300)).toEqual({ status: "soon", text: "Dans 700 km" });
+    expect(deadlineState(deadline({ dueKm: 90_000 }), TODAY, 89_300)).toEqual({ status: "soon", text: "Dans 700\u00a0km" });
     expect(deadlineState(deadline({ dueKm: 90_000 }), TODAY, null).status).toBe("ok");
   });
 
   it("keeps the worst of date and mileage, and a done deadline is done", () => {
     const both = deadlineState(deadline({ dueDate: "2027-03-01", dueKm: 90_000 }), TODAY, 89_500);
     expect(both.status).toBe("soon");
-    expect(both.text).toBe("Le 01/03/2027 · Dans 500 km");
+    expect(both.text).toBe("Le 01/03/2027 · Dans 500\u00a0km");
     expect(deadlineState(deadline({ dueDate: "2026-11-01", doneDate: "2026-10-30" }), TODAY, null)).toEqual({
       status: "done",
       text: "Fait le 30/10/2026",
@@ -85,9 +85,9 @@ describe("complianceAlerts (inspection and insurance on the service date)", () =
   });
 
   it("reports an inspection or insurance already overdue on the service date", () => {
-    expect(complianceAlerts([deadline({})], "2026-11-10", null)).toEqual(["Contrôle technique : échéance dépassée (09/11/2026)"]);
+    expect(complianceAlerts([deadline({})], "2026-11-10", null)).toEqual(["Contrôle technique\u00a0: échéance dépassée (09/11/2026)"]);
     expect(complianceAlerts([deadline({ kind: "INSURANCE", label: "AXA" })], "2026-11-10", null)).toEqual([
-      "Assurance (AXA) : échéance dépassée (09/11/2026)",
+      "Assurance (AXA)\u00a0: échéance dépassée (09/11/2026)",
     ]);
   });
 
@@ -99,7 +99,7 @@ describe("complianceAlerts (inspection and insurance on the service date)", () =
 
   it("counts a mileage deadline passed at the last odometer reading", () => {
     expect(complianceAlerts([deadline({ dueDate: null, dueKm: 120_000 })], "2026-11-10", 121_000)).toEqual([
-      "Contrôle technique : échéance dépassée",
+      "Contrôle technique\u00a0: échéance dépassée",
     ]);
   });
 });

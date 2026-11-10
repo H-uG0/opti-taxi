@@ -703,7 +703,7 @@ describe("distance sources", () => {
 });
 
 describe("simulated days", () => {
-  it("marks a day « simulé » when one of its runs comes from the history simulation, and counts them over the period", () => {
+  it("marks a day «\u202fsimulé\u202f» when one of its runs comes from the history simulation, and counts them over the period", () => {
     const run = (serviceDate: string, simulated?: boolean): KpiRun => ({ serviceDate, startedAt: paris(serviceDate, "06:00"), simulated });
     const data: KpiData = {
       routes: [route({ serviceDate: "2026-11-02" }), route({ serviceDate: "2026-11-03" })],

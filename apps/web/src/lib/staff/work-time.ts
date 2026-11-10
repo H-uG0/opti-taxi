@@ -46,8 +46,8 @@ function breach(person: BreakSettings, shift: Shift): { length: number; why: str
     person.breakMinutes <= 0 || person.breakWindowStartMinute === null || person.breakWindowEndMinute === null
       ? "sans pause"
       : fitted
-        ? `avec une pause de ${person.breakMinutes} min`
-        : `avec une fenêtre de pause qui ne laisse pas ${person.breakMinutes} min dans l'horaire`;
+        ? `avec une pause de ${person.breakMinutes}\u00a0min`
+        : `avec une fenêtre de pause qui ne laisse pas ${person.breakMinutes}\u00a0min dans l'horaire`;
   return { length, why };
 }
 
@@ -60,8 +60,8 @@ export function workTimeIssue(person: BreakSettings, shift: Shift, name: string)
   const found = breach(person, shift);
   if (!found) return null;
   return (
-    `Horaire de ${formatDuration(found.length)} ${found.why} : au-delà de 6 h de travail, une pause d'au moins ` +
-    `${MIN_LEGAL_BREAK_MIN} min est obligatoire (${WORK_TIME_ARTICLE}). Réglez la pause de ${name} ` +
+    `Horaire de ${formatDuration(found.length)} ${found.why}\u00a0: au-delà de 6\u00a0h de travail, une pause d'au moins ` +
+    `${MIN_LEGAL_BREAK_MIN}\u00a0min est obligatoire (${WORK_TIME_ARTICLE}). Réglez la pause de ${name} ` +
     "(fiche du chauffeur) ou raccourcissez son horaire"
   );
 }
@@ -74,5 +74,5 @@ export function workTimeIssue(person: BreakSettings, shift: Shift, name: string)
 export function workTimeSummary(person: BreakSettings, shift: Shift): string | null {
   const found = breach(person, shift);
   if (!found) return null;
-  return `Pause de ${MIN_LEGAL_BREAK_MIN} min requise : horaire de ${formatDuration(found.length)} ${found.why} (art. L. 3121-16)`;
+  return `Pause de ${MIN_LEGAL_BREAK_MIN}\u00a0min requise\u00a0: horaire de ${formatDuration(found.length)} ${found.why} (art. L. 3121-16)`;
 }

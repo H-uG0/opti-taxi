@@ -104,7 +104,7 @@ export function Headline({
         </p>
         {previous && mixedDistanceSources(focus, previous) ? (
           <p role="note" className="text-sm text-amber-800">
-            Distances calculées différemment ces deux jours (routières ou estimées à vol d&apos;oiseau) : comparaison des
+            Distances calculées différemment ces deux jours (routières ou estimées à vol d&apos;oiseau)&nbsp;: comparaison des
             km et des durées indicative.
           </p>
         ) : null}
@@ -112,7 +112,7 @@ export function Headline({
 
       {noRoutes ? (
         <p className="mb-3 text-sm text-slate-600">
-          Aucune tournée ce jour : les indicateurs s&apos;afficheront après l&apos;optimisation.
+          Aucune tournée ce jour&nbsp;: les indicateurs s&apos;afficheront après l&apos;optimisation.
         </p>
       ) : null}
 
@@ -123,7 +123,7 @@ export function Headline({
           hint={
             <>
               <Line>
-                Réalisé :{" "}
+                Réalisé&nbsp;:{" "}
                 {realized.value !== null ? (
                   <>
                     <span className="tabular font-medium text-slate-700">{realized.value}</span>
@@ -193,13 +193,13 @@ export function Headline({
                       focus.maxDelayMinutes !== null ? ` · max ${formatDuration(focus.maxDelayMinutes)}` : ""
                     }`
                   : focus.upcoming
-                    ? "Réel : jour à venir"
+                    ? "Réel\u00a0: jour à venir"
                     : focus.realizedOutbound > 0
                       ? "Heures de dépose non saisies"
                       : "Aucun aller déposé"}
               </Line>
               <Line>
-                Prévu : {focus.plannedLateArrivals} en retard sur{" "}
+                Prévu&nbsp;: {focus.plannedLateArrivals} en retard sur{" "}
                 {plural(focus.plannedOutbound, "aller")}
               </Line>
               <Delta

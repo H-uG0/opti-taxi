@@ -84,17 +84,17 @@ describe("checkRouteCrewChange", () => {
   });
 
   it("refuses a finished route, an unchanged crew or an empty seat", () => {
-    expect(check({ remaining: null }).errors).toEqual({ form: "Tournée terminée : son équipage ne se change plus." });
+    expect(check({ remaining: null }).errors).toEqual({ form: "Tournée terminée\u00a0: son équipage ne se change plus." });
     expect(check({ next: { driverId: "aux1", crewMateId: "dea1" } }).errors).toEqual({ form: "Équipage inchangé." });
     expect(check({ next: { driverId: "aux1", crewMateId: null } }).errors).toEqual({
-      crewMate: "Une ambulance part à deux : choisissez un équipier.",
+      crewMate: "Une ambulance part à deux\u00a0: choisissez un équipier.",
     });
     expect(check({ next: { driverId: "dea1", crewMateId: "dea1" } }).errors.crewMate).toMatch(/deux personnes différentes/);
   });
 
   it("applies the rules of the crews of the day to the people put on the route", () => {
     expect(check({ absences: [{ driverId: "dea2", kind: "SICK", startDate: MONDAY, endDate: MONDAY }] }).errors).toEqual({
-      crewMate: "DEA2 dea2 : absence le 09/11/2026.",
+      crewMate: "DEA2 dea2\u00a0: absence le 09/11/2026.",
     });
     expect(check({ people: new Map([...PEOPLE, ["dea2", { ...PEOPLE.get("dea2")!, active: false }]]) }).errors.crewMate).toBe(
       "DEA2 dea2 est désactivé.",
@@ -106,7 +106,7 @@ describe("checkRouteCrewChange", () => {
       "DEA2 dea2 est déjà sur la tournée de VSL 2 ce jour.",
     );
     expect(check({ next: { driverId: "aux1", crewMateId: "late" } }).errors.crewMate).toBe(
-      "Horaire de LATE late (10:00 – 19:00) : ne couvre pas la suite de la tournée (07:00 – 18:00).",
+      "Horaire de LATE late (10:00 – 19:00)\u00a0: ne couvre pas la suite de la tournée (07:00 – 18:00).",
     );
   });
 
@@ -115,7 +115,7 @@ describe("checkRouteCrewChange", () => {
       "AUX1 aux1 et DEA2 dea2 ne doivent pas travailler ensemble.",
     );
     expect(check({ next: { driverId: "aux1", crewMateId: "aux2" } }).errors.crewMate).toBe(
-      "Il faut au moins un ambulancier DE dans l'équipage, au volant ou auprès du patient : ni AUX1 aux1 ni AUX2 aux2 ne l'est.",
+      "Il faut au moins un ambulancier DE dans l'équipage, au volant ou auprès du patient\u00a0: ni AUX1 aux1 ni AUX2 aux2 ne l'est.",
     );
   });
 
@@ -124,7 +124,7 @@ describe("checkRouteCrewChange", () => {
     const people = new Map([...PEOPLE, ["drv", person("drv", ["AUXILIARY"], [360, 1080])], ["eve", person("eve", ["DEA"], [900, 1140])]]);
     const late = { people, current: { driverId: "drv", crewMateId: "dea1" }, remaining: { start: 930, end: 1070 } };
     expect(check({ ...late, next: { driverId: "drv", crewMateId: "eve" } }).errors.crewMate).toBe(
-      "DRV drv et EVE eve n'ont que 3 h 00 d'horaire commun (4 h 00 au moins, Paramètres).",
+      "DRV drv et EVE eve n'ont que 3\u00a0h 00 d'horaire commun (4\u00a0h 00 au moins, Paramètres).",
     );
     expect(check({ ...late, next: { driverId: "drv", crewMateId: "eve" }, rules: { minPairOverlapMin: 180 } }).errors).toEqual({});
     // Every change accepted gives a crew of the day (DayCrew) that resolves without a blocking problem.
@@ -162,7 +162,7 @@ describe("checkRouteCrewChange", () => {
     const aux = person("aux1", ["AUXILIARY"]);
     expect(pairProblem(aux, person("aux2", ["AUXILIARY"]), "AMBULANCE", DEFAULT_CREW_RULES)).toMatch(/^Il faut au moins un ambulancier DE/);
     expect(pairProblem(aux, person("dea", ["DEA"], [960, 1140]), "AMBULANCE", DEFAULT_CREW_RULES)).toBe(
-      "AUX1 aux1 et DEA dea n'ont que 3 h 00 d'horaire commun (4 h 00 au moins, Paramètres).",
+      "AUX1 aux1 et DEA dea n'ont que 3\u00a0h 00 d'horaire commun (4\u00a0h 00 au moins, Paramètres).",
     );
     // Exactly the minimum is enough.
     expect(pairProblem(aux, person("dea", ["DEA"], [900, 1140]), "AMBULANCE", DEFAULT_CREW_RULES)).toBeNull();
@@ -175,7 +175,7 @@ describe("checkRouteCrewChange", () => {
     expect(check({ absences: [{ driverId: "aux1", kind: "LEAVE", startDate: MONDAY, endDate: MONDAY }] }).errors).toEqual({});
     expect(check({ next: { driverId: "aux1", crewMateId: "sat" } })).toEqual({
       errors: {},
-      notes: ["SAT sat ne travaille pas habituellement le lundi : affectation exceptionnelle."],
+      notes: ["SAT sat ne travaille pas habituellement le lundi\u00a0: affectation exceptionnelle."],
     });
   });
 
@@ -224,7 +224,7 @@ describe("crewChoices", () => {
     const marseille = { lat: 43.3, lng: 5.4 };
     const byId = new Map(choices.map((c) => [c.id, c]));
     expect(choiceDepotText(byId.get("aux")!, marseille)).toBeNull();
-    expect(choiceDepotText(byId.get("kevin")!, marseille)).toMatch(/^dépôt de Manosque, \d+ km$/);
+    expect(choiceDepotText(byId.get("kevin")!, marseille)).toMatch(/^dépôt de Manosque, \d+ km$/);
     expect(choiceDepotText(byId.get("nowhere")!, marseille)).toBe("sans dépôt");
     // Same depot first (the auxiliary before the more versatile DEA), then the nearest depot, then no depot.
     expect(rankChoices(choices, marseille).map((c) => c.id)).toEqual(["aux", "zdea", "kevin", "nowhere"]);

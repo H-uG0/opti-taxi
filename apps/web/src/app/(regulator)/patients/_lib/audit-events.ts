@@ -43,7 +43,7 @@ export function alreadyInStateMessage(kind: ActivatedKind, active: boolean): str
   const subject = { patient: "Ce patient", recurrence: "Cette récurrence", facility: "Cet établissement" }[kind];
   const feminine = kind === "recurrence";
   const state = active ? `déjà acti${feminine ? "ve" : "f"}` : `déjà désactivé${feminine ? "e" : ""}`;
-  return `${subject} était ${state} : rien n'a été modifié.`;
+  return `${subject} était ${state}\u00a0: rien n'a été modifié.`;
 }
 
 /** One recurrence.attach_renewal per recurrence moved to the renewed prescription. */

@@ -163,7 +163,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
       />
 
       <div className="space-y-6">
-        {locked ? <FormMessage tone="info">Équipages non modifiables : {locked}</FormMessage> : null}
+        {locked ? <FormMessage tone="info">Équipages non modifiables&nbsp;: {locked}</FormMessage> : null}
         {!locked && routeCount > 0 ? (
           <FormMessage tone="info">
             Des tournées sont déjà calculées pour ce jour avec leurs équipages. Après un changement ici, relancez
@@ -182,7 +182,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
                 <p>
                   Des tournées ont été calculées avant un changement de véhicule ou d&apos;équipage. {locked}
                   {date >= todayIso()
-                    ? " Pour remplacer une personne sans réoptimiser : planning, panneau du véhicule, « Changer l'équipage »."
+                    ? " Pour remplacer une personne sans réoptimiser\u00a0: planning, panneau du véhicule, «\u202fChanger l'équipage\u202f»."
                     : ""}{" "}
                   <Link href={`/planning?date=${date}`} className="font-medium underline">
                     Ouvrir le planning
@@ -190,7 +190,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
                 </p>
               ) : (
                 <p>
-                  Des tournées ont été calculées avant un changement de véhicule ou d&apos;équipage : relancez
+                  Des tournées ont été calculées avant un changement de véhicule ou d&apos;équipage&nbsp;: relancez
                   l&apos;optimisation depuis le{" "}
                   <Link href={`/planning?date=${date}`} className="font-medium underline">
                     planning
@@ -200,13 +200,13 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
               )
             ) : null}
             {issues.some((issue) => issue.compliance.length > 0) ? (
-              <p>Échéance dépassée : vérifiez le véhicule avant de le faire rouler.</p>
+              <p>Échéance dépassée&nbsp;: vérifiez le véhicule avant de le faire rouler.</p>
             ) : null}
             <ul className="list-disc space-y-0.5 pl-5">
               {issues.map((issue) => (
                 <li key={issue.vehicleId}>
                   <span className="font-medium">{issue.label}</span>
-                  {issue.hasRoute ? "" : " (sans tournée)"} — {[...issue.changes, ...issue.compliance].join(" ; ")}
+                  {issue.hasRoute ? "" : " (sans tournée)"} — {[...issue.changes, ...issue.compliance].join("\u202f; ")}
                 </li>
               ))}
             </ul>
@@ -216,9 +216,9 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
           {fixedCount > 0
             ? `${fixedCount} équipage${fixedCount > 1 ? "s fixés" : " fixé"} pour ce jour, utilisé${fixedCount > 1 ? "s" : ""} tel${fixedCount > 1 ? "s" : ""} quel${fixedCount > 1 ? "s" : ""} par l'optimisation. Les autres véhicules ont leur`
             : "Chaque véhicule a son"}{" "}
-          équipage attitré quand il est disponible, sinon un remplaçant qualifié : du même dépôt d&apos;abord, puis du
-          dépôt le plus proche (Paramètres, « Équipages »), qui couvre l&apos;horaire du titulaire, en gardant les
-          ambulanciers DE pour les ambulances. Modifiez une ligne pour la fixer, ou « Fixer cette proposition » pour
+          équipage attitré quand il est disponible, sinon un remplaçant qualifié&nbsp;: du même dépôt d&apos;abord, puis du
+          dépôt le plus proche (Paramètres, «&#x202F;Équipages&#x202F;»), qui couvre l&apos;horaire du titulaire, en gardant les
+          ambulanciers DE pour les ambulances. Modifiez une ligne pour la fixer, ou «&#x202F;Fixer cette proposition&#x202F;» pour
           garder le remplaçant proposé.
         </p>
 
@@ -244,7 +244,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
                 </ul>
               )}
               <p className="mt-3 text-xs text-slate-500">
-                Les absences se saisissent dans la fiche de chaque chauffeur. Gardes et formations sont nommées ici ; les
+                Les absences se saisissent dans la fiche de chaque chauffeur. Gardes et formations sont nommées ici&#x202F;; les
                 autres motifs ne sont visibles que sur la fiche.
               </p>
             </CardBody>
@@ -253,7 +253,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
             <CardHeader title={`Disponibles sans véhicule (${plan.idle.length})`} />
             <CardBody className="text-sm text-slate-700">
               {plan.idle.length === 0 ? (
-                <p className="text-slate-500">Personne : tout le personnel disponible a un poste.</p>
+                <p className="text-slate-500">Personne&nbsp;: tout le personnel disponible a un poste.</p>
               ) : (
                 <ul className="space-y-1">
                   {plan.idle.map((id) => {

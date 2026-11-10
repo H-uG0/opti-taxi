@@ -62,8 +62,8 @@ const bodySchema = z.object({
 type StatusBody = z.infer<typeof bodySchema>;
 
 // The phone refreshes the roadmap after any refusal (driver-app.tsx), a conflict included.
-const CONFLICT_ERROR = "Le statut a changé entre-temps (autre membre de l'équipage ?). La feuille de route est actualisée.";
-const SERVER_ERROR = "Enregistrement impossible pour le moment : le statut reste gardé et sera renvoyé.";
+const CONFLICT_ERROR = "Le statut a changé entre-temps (autre membre de l'équipage\u202f?). La feuille de route est actualisée.";
+const SERVER_ERROR = "Enregistrement impossible pour le moment\u00a0: le statut reste gardé et sera renvoyé.";
 
 type Recorded = { status: number; body: StatusResponseBody };
 
@@ -95,7 +95,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   const recorded =
     stopId.success && body.success
       ? await recordStopStatus(user, stopId.data, body.data, receivedAt)
-      : failure(400, "invalid", "Statut illisible : actualisez la feuille de route.");
+      : failure(400, "invalid", "Statut illisible\u00a0: actualisez la feuille de route.");
 
   // Any exchange with the phone renews a driver's session close to its end (never a revoked one:
   // currentDriver checked it above).

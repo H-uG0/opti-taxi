@@ -93,12 +93,12 @@ export function checkRouteCrewChange(input: RouteCrewChangeInput): RouteCrewChec
   const next: RouteCrew = { driverId: input.next.driverId, crewMateId: ambulance ? input.next.crewMateId : null };
   const errors: RouteCrewCheck["errors"] = {};
   const notes: string[] = [];
-  if (input.remaining === null) return { errors: { form: "Tournée terminée : son équipage ne se change plus." }, notes };
+  if (input.remaining === null) return { errors: { form: "Tournée terminée\u00a0: son équipage ne se change plus." }, notes };
   if (next.driverId === current.driverId && next.crewMateId === (ambulance ? current.crewMateId : null)) {
     return { errors: { form: "Équipage inchangé." }, notes };
   }
   if (next.driverId === null) errors.driver = "Choisissez un chauffeur.";
-  if (ambulance && next.crewMateId === null) errors.crewMate = "Une ambulance part à deux : choisissez un équipier.";
+  if (ambulance && next.crewMateId === null) errors.crewMate = "Une ambulance part à deux\u00a0: choisissez un équipier.";
   if (next.driverId !== null && next.driverId === next.crewMateId) {
     errors.crewMate = "Le chauffeur et l'équipier doivent être deux personnes différentes.";
   }
@@ -111,7 +111,7 @@ export function checkRouteCrewChange(input: RouteCrewChangeInput): RouteCrewChec
     if (id === null || id === (seat === "driver" ? current.driverId : current.crewMateId)) continue;
     const person = people.get(id);
     if (!person) {
-      errors[seat] = "Personne introuvable : rechargez la page.";
+      errors[seat] = "Personne introuvable\u00a0: rechargez la page.";
       continue;
     }
     const name = staffName(person);
@@ -120,16 +120,16 @@ export function checkRouteCrewChange(input: RouteCrewChangeInput): RouteCrewChec
     const required = seatRequirement(vehicle.type, seat) ?? [];
     let problem: string | null = null;
     if (!person.active) problem = `${name} est désactivé.`;
-    else if (absence) problem = `${name} : ${planningAbsenceText(absence).toLowerCase()}.`;
+    else if (absence) problem = `${name}\u00a0: ${planningAbsenceText(absence).toLowerCase()}.`;
     else if (!isQualified(person, vehicle.type, seat)) {
       problem = `${name} n'a pas la qualification requise pour être ${SEAT_NOUN[seat]} (${required.map((q) => QUALIFICATION_LABELS[q]).join(" ou ")}).`;
     } else if (elsewhere) problem = `${name} est déjà sur la tournée de ${elsewhere.vehicleLabel} ce jour.`;
     else if (person.shiftStartMinute > remaining.start || person.shiftEndMinute < remaining.end) {
-      problem = `Horaire de ${name} (${shiftText({ start: person.shiftStartMinute, end: person.shiftEndMinute })}) : ne couvre pas la suite de la tournée (${shiftText(remaining)}).`;
+      problem = `Horaire de ${name} (${shiftText({ start: person.shiftStartMinute, end: person.shiftEndMinute })})\u00a0: ne couvre pas la suite de la tournée (${shiftText(remaining)}).`;
     }
     if (problem) errors[seat] = problem;
     else if (!person.workDays.includes(weekday)) {
-      notes.push(`${name} ne travaille pas habituellement le ${(WEEKDAY_LABELS[weekday] ?? "").toLowerCase()} : affectation exceptionnelle.`);
+      notes.push(`${name} ne travaille pas habituellement le ${(WEEKDAY_LABELS[weekday] ?? "").toLowerCase()}\u00a0: affectation exceptionnelle.`);
     }
   }
   if (Object.keys(errors).length > 0) return { errors, notes };
@@ -160,7 +160,7 @@ export function pairProblem(
 ): string | null {
   if (type !== "AMBULANCE") return null;
   if (!completesCrew(driver, mate, type)) {
-    return `Il faut au moins un ${oneOfNoun(type)} dans l'équipage, au volant ou auprès du patient : ni ${staffName(driver)} ni ${staffName(mate)} ne l'est.`;
+    return `Il faut au moins un ${oneOfNoun(type)} dans l'équipage, au volant ou auprès du patient\u00a0: ni ${staffName(driver)} ni ${staffName(mate)} ne l'est.`;
   }
   const shared = sharedMinutes(driver, mate);
   if (shared < rules.minPairOverlapMin) {
@@ -279,7 +279,7 @@ const SAME_DEPOT_KM = 0.1;
 export function choiceDepotText(choice: Pick<CrewChoice, "depot">, vehicleDepot: { lat: number; lng: number }): string | null {
   const km = choiceDepotKm(choice, vehicleDepot);
   if (km === null || !choice.depot) return "sans dépôt";
-  return km < SAME_DEPOT_KM ? null : `dépôt de ${choice.depot.name}, ${Math.round(km)} km`;
+  return km < SAME_DEPOT_KM ? null : `dépôt de ${choice.depot.name}, ${Math.round(km)}\u00a0km`;
 }
 
 /**

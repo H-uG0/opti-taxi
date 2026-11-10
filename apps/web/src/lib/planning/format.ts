@@ -17,7 +17,7 @@ export function formatEurosRounded(value: number | null | undefined): string {
 
 /** 152.34 -> "152 km". */
 export function formatKmRounded(value: number | null | undefined): string {
-  return value === null || value === undefined ? "—" : `${integer.format(value)} km`;
+  return value === null || value === undefined ? "—" : `${integer.format(value)}\u00a0km`;
 }
 
 /** 6.444 -> "6,4". */
@@ -29,9 +29,9 @@ export function formatDecimal(value: number | null | undefined): string {
 export function formatSeconds(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return "—";
   const seconds = ms / 1000;
-  if (seconds < 60) return `${decimal1.format(seconds)} s`;
+  if (seconds < 60) return `${decimal1.format(seconds)}\u00a0s`;
   const whole = Math.round(seconds);
-  return `${Math.floor(whole / 60)} min ${String(whole % 60).padStart(2, "0")} s`;
+  return `${Math.floor(whole / 60)}\u00a0min ${String(whole % 60).padStart(2, "0")}\u00a0s`;
 }
 
 export { UNKNOWN_AUTHOR } from "@/lib/record-trace";
@@ -83,11 +83,11 @@ export function tariffZoneName(gap: Pick<TariffGap, "vehicleType" | "department"
 
 /** "VSL 04 — VSL 2, VSL 5 ; Taxi 05 — Taxi 9" (vehicle labels often hold parentheses themselves). */
 export function tariffGapList(gaps: readonly TariffGap[]): string {
-  return gaps.map((gap) => `${tariffZoneName(gap)} — ${gap.vehicles.join(", ")}`).join(" ; ");
+  return gaps.map((gap) => `${tariffZoneName(gap)} — ${gap.vehicles.join(", ")}`).join("\u202f; ");
 }
 
 /** Part of the optimization message: "sans grille tarifaire : VSL 04, Taxi 05 (CA estimé à 0 €)", "" when none. */
 export function tariffGapNote(gaps: readonly TariffGap[]): string {
   if (gaps.length === 0) return "";
-  return `sans grille tarifaire : ${gaps.map(tariffZoneName).join(", ")} (CA estimé à 0 €)`;
+  return `sans grille tarifaire\u00a0: ${gaps.map(tariffZoneName).join(", ")} (CA estimé à 0\u00a0€)`;
 }

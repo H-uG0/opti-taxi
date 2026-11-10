@@ -188,7 +188,7 @@ describe("stopControls", () => {
   it("blocks the dropoff until the pickup is recorded", () => {
     expect(stopControls(snapshot("DROPOFF", "ASSIGNED"), true)).toEqual({
       primary: "DROPOFF",
-      blockedReason: "Prise en charge non saisie : enregistrez-la d'abord.",
+      blockedReason: "Prise en charge non saisie\u00a0: enregistrez-la d'abord.",
       noShow: false,
       undo: false,
     });

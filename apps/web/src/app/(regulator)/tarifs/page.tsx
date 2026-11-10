@@ -78,7 +78,7 @@ function sharingText(grid: TariffGrid): string {
   const discounts = readSharedDiscounts(grid.sharedDiscounts);
   if (discounts.length === 0) return "—";
   // « 23 / 35 / 37 % »: one percent sign for the row.
-  return `${discounts.map((d) => formatPercent(d.rate).replace(/\s*%$/, "")).join(" / ")} %`;
+  return `${discounts.map((d) => formatPercent(d.rate).replace(/\s*%$/, "")).join(" / ")}\u00a0%`;
 }
 
 export default async function TariffsPage({
@@ -153,22 +153,22 @@ export default async function TariffsPage({
               <>
                 <strong>Entreprise certifiée</strong>
                 {currentPeriod ? ` depuis le ${formatShortDate(toIsoDate(currentPeriod.validFrom))}` : ""} (géolocalisation certifiée et
-                SEFi) : VSL et ambulances aux grilles majorées.
+                SEFi)&nbsp;: VSL et ambulances aux grilles majorées.
               </>
             ) : (
               <>
-                <strong>Entreprise non certifiée</strong> demain : VSL et ambulances aux grilles socle.
+                <strong>Entreprise non certifiée</strong> demain&nbsp;: VSL et ambulances aux grilles socle.
               </>
             )}{" "}
-            Siège : {settings?.hqCity ? `${settings.hqCity} (${settings.hqDepartment ?? "?"})` : "non renseigné"}. Taxis : grille du
-            département de leur ADS. Lecture retenue : {EMPTY_LEG_SHORT[settings?.emptyLegRule ?? "DEPOT"]}, abattement selon les{" "}
+            Siège&nbsp;: {settings?.hqCity ? `${settings.hqCity} (${settings.hqDepartment ?? "?"})` : "non renseigné"}. Taxis&nbsp;: grille du
+            département de leur ADS. Lecture retenue&nbsp;: {EMPTY_LEG_SHORT[settings?.emptyLegRule ?? "DEPOT"]}, abattement selon les{" "}
             {PATIENT_COUNT_SHORT[settings?.sharedPatientCount ?? "DISTINCT"]}.{" "}
             <Link href="/tarifs/regles" className="font-medium underline underline-offset-2">
               Modifier les règles de facturation
             </Link>
           </p>
           <p>
-            Les montants changent avec la convention des taxis et les avenants des transporteurs sanitaires : ils se saisissent ici,
+            Les montants changent avec la convention des taxis et les avenants des transporteurs sanitaires&nbsp;: ils se saisissent ici,
             jamais dans le code. Pour un nouvel avenant, <strong>dupliquez</strong> la grille et indiquez sa date d&apos;effet.
           </p>
         </Notice>
@@ -178,7 +178,7 @@ export default async function TariffsPage({
             tone="warning"
             title={`Véhicules sans grille en vigueur entre le ${formatShortDate(tomorrow)} et le ${formatShortDate(coverageEnd)}`}
           >
-            <p>Ces jours-là, l&apos;optimiseur estimera leur chiffre d&apos;affaires à 0 € :</p>
+            <p>Ces jours-là, l&apos;optimiseur estimera leur chiffre d&apos;affaires à 0&nbsp;€&nbsp;:</p>
             <ul className="list-disc space-y-1 pl-5">
               {coverage.map((alert) => (
                 <li key={`${alert.vehicleType}/${alert.department}`}>
@@ -191,7 +191,7 @@ export default async function TariffsPage({
               ))}
             </ul>
             <p>
-              Créez la grille qui prend le relais (« Dupliquer » sur la grille actuelle, puis sa date d&apos;effet), ou vérifiez la
+              Créez la grille qui prend le relais («&#x202F;Dupliquer&#x202F;» sur la grille actuelle, puis sa date d&apos;effet), ou vérifiez la
               certification et le siège dans les règles de facturation.
             </p>
           </Notice>

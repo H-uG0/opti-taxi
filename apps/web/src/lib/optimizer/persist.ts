@@ -63,10 +63,10 @@ export type ReplanState = {
  */
 export function replanBlockReason(isoDate: string, state: ReplanState): string | null {
   if (state.validatedRoutes > 0) {
-    return `Le planning du ${formatLongDate(isoDate)} est validé : rouvrez-le avant de le modifier.`;
+    return `Le planning du ${formatLongDate(isoDate)} est validé\u00a0: rouvrez-le avant de le modifier.`;
   }
   if (state.startedTrips > 0 || state.completedStops > 0) {
-    return "La journée a commencé (courses déjà prises en charge) : la réoptimisation en cours de journée n'est pas disponible dans cette version.";
+    return "La journée a commencé (courses déjà prises en charge)\u00a0: la réoptimisation en cours de journée n'est pas disponible dans cette version.";
   }
   return null;
 }

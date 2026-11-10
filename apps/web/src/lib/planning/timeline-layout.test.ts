@@ -29,7 +29,7 @@ const stop = (sequence: number, tripId: string, kind: Kind, arrival: number, sta
 });
 
 describe("zoom", () => {
-  it("widens the track so that 4 h or 2 h fill the visible part, never narrower than the day", () => {
+  it("widens the track so that 4\u00a0h or 2\u00a0h fill the visible part, never narrower than the day", () => {
     expect(zoomFactor(RANGE, "day")).toBe(1);
     expect(zoomFactor(RANGE, "4h")).toBe(3.5);
     expect(zoomFactor(RANGE, "2h")).toBe(7);
@@ -39,15 +39,15 @@ describe("zoom", () => {
     expect(zoomIn("2h")).toBeNull();
   });
 
-  it("labels the axis every 2 h for a long day, every hour at 4 h, every half hour at 2 h", () => {
+  it("labels the axis every 2\u00a0h for a long day, every hour at 4\u00a0h, every half hour at 2\u00a0h", () => {
     expect(axisTicks({ start: 300, end: 1260 }, "day").map((t) => t.minute)).toEqual([360, 480, 600, 720, 840, 960, 1080, 1200]);
     expect(axisTicks({ start: 360, end: 1080 }, "day")).toHaveLength(13);
     expect(axisTicks(RANGE, "4h")).toHaveLength(15);
-    expect(axisTicks({ start: 420, end: 540 }, "2h").map((t) => t.label)).toEqual(["7 h", "7 h 30", "8 h", "8 h 30", "9 h"]);
-    expect(tickLabel(1470)).toBe("0 h 30");
+    expect(axisTicks({ start: 420, end: 540 }, "2h").map((t) => t.label)).toEqual(["7\u00a0h", "7\u00a0h 30", "8\u00a0h", "8\u00a0h 30", "9\u00a0h"]);
+    expect(tickLabel(1470)).toBe("0\u00a0h 30");
     // Labels that would touch on a narrow track: every 2 h, then 3 h.
     expect(axisTicks({ start: 360, end: 1140 }, "day", 0.6).map((t) => t.minute)).toEqual([360, 480, 600, 720, 840, 960, 1080]);
-    expect(axisTicks({ start: 360, end: 1140 }, "day", 0.3).map((t) => t.label)).toEqual(["6 h", "9 h", "12 h", "15 h", "18 h"]);
+    expect(axisTicks({ start: 360, end: 1140 }, "day", 0.3).map((t) => t.label)).toEqual(["6\u00a0h", "9\u00a0h", "12\u00a0h", "15\u00a0h", "18\u00a0h"]);
     expect(axisTicks({ start: 420, end: 540 }, "2h", 1).map((t) => t.minute)).toEqual([420, 480, 540]);
   });
 
@@ -94,7 +94,7 @@ describe("click targets", () => {
     ]);
   });
 
-  it("merges targets that would overlap into one listing their trips in time order (« +3 »)", () => {
+  it("merges targets that would overlap into one listing their trips in time order («\u202f+3\u202f»)", () => {
     const targets = clickTargets([block("c", 630, 640), block("a", 600, 610), block("b", 612, 618)], 30, RANGE, false);
     expect(targets).toEqual([{ tripIds: ["a", "b", "c"], from: 590, to: 650, lane: null }]);
   });
@@ -115,7 +115,7 @@ describe("click targets", () => {
     ]);
   });
 
-  it("splits a chain of trips minutes apart into several « +N », touching, never one for hours", () => {
+  it("splits a chain of trips minutes apart into several «\u202f+N\u202f», touching, never one for hours", () => {
     // The whole day at 1 440 px: 24 px ≈ 41 min; ten 20-minute trips, one every 30 min from 06:52.
     const chain = Array.from({ length: 10 }, (_, i) => block(`t${i}`, 412 + 30 * i, 432 + 30 * i));
     const targets = clickTargets(chain, 41, RANGE, false);
@@ -155,7 +155,7 @@ describe("free slots", () => {
     ],
   };
 
-  it("finds the gaps of 30 min or more: before and after the route in the shift, and the empty waits", () => {
+  it("finds the gaps of 30\u00a0min or more: before and after the route in the shift, and the empty waits", () => {
     expect(freeSlots({ start: 360, end: 1020 }, route)).toEqual([
       { start: 360, end: 400 },
       { start: 470, end: 540 },
@@ -163,7 +163,7 @@ describe("free slots", () => {
     ]);
   });
 
-  it("takes the break out of a gap, and drops what is left under 30 min", () => {
+  it("takes the break out of a gap, and drops what is left under 30\u00a0min", () => {
     expect(freeSlots({ start: 380, end: 1020 }, { ...route, breakStartMinute: 480, breakEndMinute: 525 })).toEqual([
       { start: 700, end: 1020 },
     ]);

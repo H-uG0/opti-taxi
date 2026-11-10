@@ -50,10 +50,10 @@ export function deadlineState(d: Deadline, today: string, odometerKm: number | n
     else parts.push({ status: "ok", text: `Le ${formatShortDate(d.dueDate)}` });
   }
   if (d.dueKm !== null) {
-    if (odometerKm === null) parts.push({ status: "ok", text: `À ${nf.format(d.dueKm)} km (compteur inconnu)` });
-    else if (odometerKm >= d.dueKm) parts.push({ status: "overdue", text: `Dépassée : ${nf.format(odometerKm)} km pour ${nf.format(d.dueKm)} km` });
-    else if (d.dueKm - odometerKm <= SOON_KM) parts.push({ status: "soon", text: `Dans ${nf.format(d.dueKm - odometerKm)} km` });
-    else parts.push({ status: "ok", text: `À ${nf.format(d.dueKm)} km` });
+    if (odometerKm === null) parts.push({ status: "ok", text: `À ${nf.format(d.dueKm)}\u00a0km (compteur inconnu)` });
+    else if (odometerKm >= d.dueKm) parts.push({ status: "overdue", text: `Dépassée\u00a0: ${nf.format(odometerKm)}\u00a0km pour ${nf.format(d.dueKm)}\u00a0km` });
+    else if (d.dueKm - odometerKm <= SOON_KM) parts.push({ status: "soon", text: `Dans ${nf.format(d.dueKm - odometerKm)}\u00a0km` });
+    else parts.push({ status: "ok", text: `À ${nf.format(d.dueKm)}\u00a0km` });
   }
   if (parts.length === 0) return { status: "ok", text: "Sans date ni kilométrage" };
   const rank: Record<DeadlineStatus, number> = { overdue: 0, soon: 1, ok: 2, done: 3 };
@@ -91,6 +91,6 @@ export function complianceAlerts(deadlines: readonly Deadline[], isoDate: string
     .filter((d) => COMPLIANCE_KINDS.includes(d.kind) && deadlineState(d, isoDate, odometerKm).status === "overdue")
     .map((d) => {
       const since = d.dueDate !== null && d.dueDate < isoDate ? ` (${formatShortDate(d.dueDate)})` : "";
-      return `${deadlineName(d)} : échéance dépassée${since}`;
+      return `${deadlineName(d)}\u00a0: échéance dépassée${since}`;
     });
 }

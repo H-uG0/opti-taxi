@@ -165,7 +165,7 @@ describe("StatusQueue", () => {
         { stopId: "stop_1", action: "PICKUP", observedAt: 10 },
         { stopId: "stop_2", action: "PICKUP", observedAt: 20 },
       ],
-      answers: [{ kind: "refused", error: "Course annulée par la régulation : statut non modifiable.", serverTime: 5 }],
+      answers: [{ kind: "refused", error: "Course annulée par la régulation\u00a0: statut non modifiable.", serverTime: 5 }],
     });
     await queue.start();
     await queue.flush();
@@ -173,7 +173,7 @@ describe("StatusQueue", () => {
     expect(storage.values()).toEqual([]);
     expect(queue.getSnapshot()).toMatchObject({
       pending: 0,
-      refusals: [{ stopId: "stop_1", action: "PICKUP", error: "Course annulée par la régulation : statut non modifiable." }],
+      refusals: [{ stopId: "stop_1", action: "PICKUP", error: "Course annulée par la régulation\u00a0: statut non modifiable." }],
       byStop: { stop_2: { phase: "sent" } },
     });
     expect(queue.getSnapshot().byStop.stop_1).toBeUndefined();

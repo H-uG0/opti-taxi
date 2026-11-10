@@ -313,7 +313,7 @@ export function TimelineToolbar({
             type="button"
             aria-pressed={filter.compact}
             onClick={() => onChange({ ...filter, compact: !filter.compact })}
-            title={filter.compact ? "Revenir aux lignes détaillées (équipage, chiffres)" : "Lignes de 28 px sur une ligne : plus de véhicules à l'écran"}
+            title={filter.compact ? "Revenir aux lignes détaillées (équipage, chiffres)" : "Lignes de 28 px sur une ligne\u00a0: plus de véhicules à l'écran"}
             className={cn(
               ICON_BUTTON,
               "h-7 text-xs",

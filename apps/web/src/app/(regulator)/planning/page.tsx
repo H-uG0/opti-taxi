@@ -49,14 +49,14 @@ export async function generateMetadata({ searchParams }: { searchParams: SearchP
 function runningReasonOf(view: PlanningDayView): string | null {
   const run = view.lastRun;
   if (!run || run.status !== "RUNNING" || run.interrupted) return null;
-  return `Une optimisation de cette date est en cours (lancée le ${formatDateTime(run.startedAt)}${run.requestedBy ? ` par ${run.requestedBy}` : ""}) : attendez la fin du calcul.`;
+  return `Une optimisation de cette date est en cours (lancée le ${formatDateTime(run.startedAt)}${run.requestedBy ? ` par ${run.requestedBy}` : ""})\u00a0: attendez la fin du calcul.`;
 }
 
 /** Why the routes of the day cannot be recomputed (mirrors replanBlocker on the server). */
 function replanBlockedReason(view: PlanningDayView, past: boolean): string | null {
-  if (past) return "Date passée : le planning n'est plus modifiable.";
-  if (view.dayStatus === "VALIDATED" || view.dayStatus === "MIXED") return "Planning validé : rouvrez-le pour le modifier.";
-  if (view.dayStarted) return "Journée commencée : la réoptimisation en cours de journée n'est pas disponible.";
+  if (past) return "Date passée\u00a0: le planning n'est plus modifiable.";
+  if (view.dayStatus === "VALIDATED" || view.dayStatus === "MIXED") return "Planning validé\u00a0: rouvrez-le pour le modifier.";
+  if (view.dayStarted) return "Journée commencée\u00a0: la réoptimisation en cours de journée n'est pas disponible.";
   return null;
 }
 
@@ -85,7 +85,7 @@ function headerDescription(view: PlanningDayView, availableVehicles: number): st
  * says that no recurrence does.
  */
 function emptyDayText(past: boolean, missing: readonly MissingRecurrence[]): string {
-  if (past) return "Journée passée : aucune course n'y a été enregistrée.";
+  if (past) return "Journée passée\u00a0: aucune course n'y a été enregistrée.";
   if (missing.length > 0) {
     const sessions = missing.length > 1 ? `${missing.length} récurrences actives prévoient des séances` : "1 récurrence active prévoit une séance";
     return `${sessions} ce jour, mais aucune course n'existe encore (voir ci-dessus). Saisissez une course ponctuelle si besoin.`;
@@ -263,7 +263,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
                 </div>
               }
               replanBlocked={replanBlocked ?? runningReason}
-              lockBlocked={past ? "Date passée : figer une course ne sert plus." : null}
+              lockBlocked={past ? "Date passée\u00a0: figer une course ne sert plus." : null}
               initialTripId={initialTripId}
               crewChoices={view.crewChoices}
               crewRules={view.crewRules}

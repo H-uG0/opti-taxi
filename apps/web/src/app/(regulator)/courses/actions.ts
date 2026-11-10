@@ -94,7 +94,7 @@ export async function generateWeekTrips(_prev: GenerationResult, formData: FormD
   if (!range) {
     return {
       ok: false,
-      message: `Semaine du ${formatShortDate(week.from)} au ${formatShortDate(week.to)} déjà passée : les courses ne sont générées qu'à partir de demain.`,
+      message: `Semaine du ${formatShortDate(week.from)} au ${formatShortDate(week.to)} déjà passée\u00a0: les courses ne sont générées qu'à partir de demain.`,
       skipped: [],
     };
   }
@@ -137,7 +137,7 @@ export async function completeDayTrips(date: string): Promise<{ changed: boolean
 /** The app's form state (lib/forms): one message per field, the typed values echoed, a new submissionId each answer. */
 export type NewTripState = FormState;
 
-const OUTSIDE_FRANCE_MESSAGE = "Adresse localisée hors de France métropolitaine : précisez-la ou saisissez les coordonnées.";
+const OUTSIDE_FRANCE_MESSAGE = "Adresse localisée hors de France métropolitaine\u00a0: précisez-la ou saisissez les coordonnées.";
 
 /**
  * Destination of a private trip without facility: typed coordinates (already
@@ -154,7 +154,7 @@ async function freeDestination(
     return { ok: true, destination: { facilityId: null, address, lat, lng } };
   }
   if (!geocoderEnabled()) {
-    return { ok: false, field: "destinationLat", message: "Géocodage indisponible : saisissez la latitude et la longitude." };
+    return { ok: false, field: "destinationLat", message: "Géocodage indisponible\u00a0: saisissez la latitude et la longitude." };
   }
   if (!allowGeocodeSearch(user.id)) {
     return { ok: false, field: "destinationAddress", message: GEOCODE_THROTTLED_MESSAGE };
@@ -167,13 +167,13 @@ async function freeDestination(
       return { ok: false, field: "destinationAddress", message: OUTSIDE_FRANCE_MESSAGE };
     }
     if (match.status === "not_found") {
-      return { ok: false, field: "destinationAddress", message: "Adresse introuvable ou imprécise : précisez-la ou saisissez les coordonnées." };
+      return { ok: false, field: "destinationAddress", message: "Adresse introuvable ou imprécise\u00a0: précisez-la ou saisissez les coordonnées." };
     }
     const best = match.result;
     return { ok: true, destination: { facilityId: null, address: best.label, lat: best.lat, lng: best.lng } };
   } catch (error) {
     logError("[courses] geocodeAddress failed", error);
-    return { ok: false, field: "destinationAddress", message: "Le géocodage n'a pas répondu : saisissez la latitude et la longitude." };
+    return { ok: false, field: "destinationAddress", message: "Le géocodage n'a pas répondu\u00a0: saisissez la latitude et la longitude." };
   }
 }
 
@@ -261,7 +261,7 @@ const DETACHED_PLANNING = {
 /** Cancelling (or restoring) also drops the lock: the trip starts afresh. */
 const CLEARED_PLANNING = { ...DETACHED_PLANNING, lockedVehicleId: null } satisfies Prisma.TripUncheckedUpdateManyInput;
 
-const CONCURRENT_CHANGE = "La course a changé entre-temps : rechargez la page.";
+const CONCURRENT_CHANGE = "La course a changé entre-temps\u00a0: rechargez la page.";
 
 /**
  * Runs a transaction that takes a trip out of its route (and records its audit
@@ -319,7 +319,7 @@ function aloneMessage(nowAlone: readonly string[], cancelled: readonly { id: str
 
 /** Reminder when the day's plan is validated: it must be reopened before re-optimizing. */
 function validatedHint(routeStatus: RouteStatus | null | undefined): string {
-  return routeStatus === "VALIDATED" ? " Le planning est validé : rouvrez-le avant de réoptimiser." : "";
+  return routeStatus === "VALIDATED" ? " Le planning est validé\u00a0: rouvrez-le avant de réoptimiser." : "";
 }
 
 /** A trip the cancellation reads: its state, its route and when it is picked up (lateness). */
@@ -369,7 +369,7 @@ export async function cancelTrip(_prev: ActionResult, formData: FormData): Promi
   ]);
   if (!trip) return failure("Course introuvable.");
   if (!canCancel(trip.status)) return failure("Seule une course pas encore commencée peut être annulée.");
-  if (returnTripId && (!back || !isReturnOf(back, trip))) return failure("Le retour à annuler ne correspond pas à cet aller : rechargez la page.");
+  if (returnTripId && (!back || !isReturnOf(back, trip))) return failure("Le retour à annuler ne correspond pas à cet aller\u00a0: rechargez la page.");
   // A return already started, cancelled or closed meanwhile is left as it is: the outbound trip is still cancelled.
   const trips = back && canCancel(back.status) ? [trip, back] : [trip];
 
@@ -477,7 +477,7 @@ export async function cancelTrips(_prev: ActionResult, formData: FormData): Prom
     }
     return result;
   });
-  if (!detached) return failure("Les courses ont changé entre-temps : rechargez la page, rien n'a été annulé.");
+  if (!detached) return failure("Les courses ont changé entre-temps\u00a0: rechargez la page, rien n'a été annulé.");
 
   const refresh = await refreshLeftRoutes(detached.routeIds);
   if (cancelled.length > 0) revalidateTripViews();
@@ -564,11 +564,11 @@ export async function restoreTrip(_prev: ActionResult, formData: FormData): Prom
   revalidateTripViews();
   const warning = tripConflicts({ ...trip, status: "PLANNED" }, sameDay)
     .map((conflict) => conflictLabel(conflict, trip.direction))
-    .join(" ; ");
+    .join("\u202f; ");
   return {
     ok: true,
-    message: `Course rétablie : elle sera placée à la prochaine optimisation.${noticeOf(refresh)}${
-      warning ? ` Attention : ${warning}. Vérifiez qu'il ne s'agit pas d'un doublon.` : ""
+    message: `Course rétablie\u00a0: elle sera placée à la prochaine optimisation.${noticeOf(refresh)}${
+      warning ? ` Attention\u00a0: ${warning}. Vérifiez qu'il ne s'agit pas d'un doublon.` : ""
     }`,
   };
 }
@@ -598,7 +598,7 @@ export async function rescheduleTrip(_prev: ActionResult, formData: FormData): P
   const minute = parsed.data.time;
   // Same time as stored (double submit, form saved unchanged): nothing is written or traced.
   if ((trip.direction === "OUTBOUND" ? trip.appointmentMinute : trip.readyMinute) === minute) {
-    return { ok: true, message: `Horaire inchangé : ${keyMinuteLabel(trip.direction)} à ${formatMinute(minute)}.` };
+    return { ok: true, message: `Horaire inchangé\u00a0: ${keyMinuteLabel(trip.direction)} à ${formatMinute(minute)}.` };
   }
   const timeData = trip.direction === "OUTBOUND" ? { appointmentMinute: minute } : { readyMinute: minute };
 
@@ -652,12 +652,12 @@ export async function rescheduleTrip(_prev: ActionResult, formData: FormData): P
   }
   // On a day under way the date can no longer be re-optimized (replanBlockReason).
   const replace = refresh.dayStarted
-    ? ` La journée a commencé : la course ne peut plus être replacée par l'optimisation, organisez ce transport à part.${adviceOf(refresh, trip.route?.status)}`
+    ? ` La journée a commencé\u00a0: la course ne peut plus être replacée par l'optimisation, organisez ce transport à part.${adviceOf(refresh, trip.route?.status)}`
     : ` Réoptimisez le planning pour la replacer.${validatedHint(trip.route?.status)}`;
   return {
     ok: true,
     message:
-      `${label} La tournée de ${vehicle} ne tenait plus (${fit.reason}) : la course en a été retirée.` +
+      `${label} La tournée de ${vehicle} ne tenait plus (${fit.reason})\u00a0: la course en a été retirée.` +
       `${aloneMessage(detached.nowAlone)}${noticeOf(refresh)}${replace}`,
   };
 }
@@ -685,7 +685,7 @@ export async function setTripToll(_prev: ActionResult, formData: FormData): Prom
   revalidateTripViews();
   return {
     ok: true,
-    message: toll === null ? "Péage retiré." : `Péage de ${formatEuros(toll)} enregistré : compté dans le CA au prochain calcul du planning.`,
+    message: toll === null ? "Péage retiré." : `Péage de ${formatEuros(toll)} enregistré\u00a0: compté dans le CA au prochain calcul du planning.`,
   };
 }
 
@@ -737,7 +737,7 @@ export async function recordSharingDecision(_prev: ActionResult, formData: FormD
   let message = `${SHARING_DECISION_LABELS[decision]} enregistré.`;
   if (decision === "REFUSED") {
     message += trip.shared
-      ? " La course reste partagée dans le planning actuel (signalée « à réoptimiser ») : réoptimisez pour la transporter seule."
+      ? " La course reste partagée dans le planning actuel (signalée «\u202fà réoptimiser\u202f»)\u00a0: réoptimisez pour la transporter seule."
       : " Le partage ne sera plus proposé à la prochaine optimisation.";
   }
   return { ok: true, message };

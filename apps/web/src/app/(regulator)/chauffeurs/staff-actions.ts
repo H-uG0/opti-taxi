@@ -9,7 +9,7 @@ import { loadStaffImpact, staffImpactNotice } from "@/lib/staff/impact";
 import { fromIsoDate, todayIso } from "@/lib/time";
 import { absenceSchema, incompatibilitySchema, orderedPair } from "./staff-schema";
 
-const DRIVER_GONE = "Ce chauffeur n'existe plus : rechargez la page.";
+const DRIVER_GONE = "Ce chauffeur n'existe plus\u00a0: rechargez la page.";
 
 function refreshPages(driverId: string) {
   revalidatePath(`/chauffeurs/${driverId}`);
@@ -78,7 +78,7 @@ export async function addIncompatibility(driverId: string, _state: FormState, fo
   if (parsed.data.otherId === id.data) return errorState({ otherId: "Choisissez une autre personne." }, values);
 
   const people = await db.driver.findMany({ where: { id: { in: [id.data, parsed.data.otherId] } }, select: { id: true } });
-  if (people.length < 2) return messageState("Personne introuvable : rechargez la page.", values);
+  if (people.length < 2) return messageState("Personne introuvable\u00a0: rechargez la page.", values);
   const pair = orderedPair(id.data, parsed.data.otherId);
   try {
     await db.$transaction(async (tx) => {
@@ -101,7 +101,7 @@ export async function addIncompatibility(driverId: string, _state: FormState, fo
   revalidatePath(`/chauffeurs/${parsed.data.otherId}`);
   // Only the days and fixed crews where the two work together.
   const impact = await loadStaffImpact(db, [id.data, parsed.data.otherId], todayIso(), null, true);
-  return successState(`Paire enregistrée : ces deux personnes ne seront plus proposées ensemble.${staffImpactNotice(impact, "pair")}`);
+  return successState(`Paire enregistrée\u00a0: ces deux personnes ne seront plus proposées ensemble.${staffImpactNotice(impact, "pair")}`);
 }
 
 export async function deleteIncompatibility(driverId: string, incompatibilityId: string): Promise<FormState> {

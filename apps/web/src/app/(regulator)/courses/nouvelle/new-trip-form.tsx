@@ -95,7 +95,7 @@ function NewTripFields({
       <FormMessage>{state.message}</FormMessage>
 
       <Fieldset legend="Patient et prise en charge">
-        <Field label="Patient" htmlFor="patientId" error={errors.patientId} hint={patient ? `Mobilité : ${patient.mobilityLabel}` : undefined}>
+        <Field label="Patient" htmlFor="patientId" error={errors.patientId} hint={patient ? `Mobilité\u00a0: ${patient.mobilityLabel}` : undefined}>
           <Select
             id="patientId"
             name="patientId"
@@ -230,7 +230,7 @@ function NewTripFields({
                 label="Latitude"
                 htmlFor="destinationLat"
                 error={errors.destinationLat}
-                hint={geocoder ? "Remplie par « Localiser l'adresse », ou laissée vide : l'adresse est localisée à l'enregistrement." : "Obligatoire (géocodage non configuré)."}
+                hint={geocoder ? "Remplie par «\u202fLocaliser l'adresse\u202f», ou laissée vide\u00a0: l'adresse est localisée à l'enregistrement." : "Obligatoire (géocodage non configuré)."}
               >
                 <Input
                   id="destinationLat"
@@ -298,7 +298,7 @@ function NewTripFields({
 
       <section aria-label="Règles appliquées" className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm">
         <p className="flex flex-wrap items-center gap-1.5 text-slate-700">
-          <span className="font-medium">Véhicules autorisés :</span>
+          <span className="font-medium">Véhicules autorisés&nbsp;:</span>
           {payer === "CPAM" && !prescription ? (
             <span className="text-slate-500">selon la prescription</span>
           ) : (
@@ -306,7 +306,7 @@ function NewTripFields({
           )}
         </p>
         <p className="mt-1 text-slate-700">
-          <span className="font-medium">Transport partagé :</span>{" "}
+          <span className="font-medium">Transport partagé&nbsp;:</span>{" "}
           {payer === "PRIVATE"
             ? "non (client privé)"
             : !prescription
@@ -314,7 +314,7 @@ function NewTripFields({
               : shareable
                 ? "possible sur ce trajet (proposition à tracer sur la course)"
                 : mode === "AMBULANCE"
-                  ? "non (ambulance : un seul patient)"
+                  ? "non (ambulance\u00a0: un seul patient)"
                   : "non autorisé par la prescription sur ce trajet"}
         </p>
       </section>

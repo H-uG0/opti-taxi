@@ -39,7 +39,7 @@ export function previousAnswerLine(status: SharingDecision, respondedAt: Date | 
   const when = respondedAt ? formatDateTime(respondedAt, undefined, "always") : null;
   const by = respondedByName?.trim();
   // Author before date, as the traces shown next to the answer (lib/record-trace).
-  return `[Réponse précédente : ${SHARING_DECISION_LABELS[status].toLowerCase()}${by ? ` par ${by}` : ""}${when ? ` le ${when}` : ""}]`;
+  return `[Réponse précédente\u00a0: ${SHARING_DECISION_LABELS[status].toLowerCase()}${by ? ` par ${by}` : ""}${when ? ` le ${when}` : ""}]`;
 }
 
 /**

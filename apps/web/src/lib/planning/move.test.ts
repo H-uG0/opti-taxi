@@ -101,7 +101,7 @@ describe("moveRequestIssue", () => {
       MOVE,
     );
     expect(shown(issue)).toBe(
-      "La course de Jeanne Martin est incomplète (Aller sans heure de rendez-vous) : complétez-la dans Courses avant de la déplacer.",
+      "La course de Jeanne Martin est incomplète (Aller sans heure de rendez-vous)\u00a0: complétez-la dans Courses avant de la déplacer.",
     );
   });
 
@@ -109,18 +109,18 @@ describe("moveRequestIssue", () => {
     const issue = moveRequestIssue(
       build({
         trips: [trip("t1", null)],
-        droppedLocks: [{ tripId: "t1", vehicleId: "vsl_gre", vehicleLabel: "VSL Grenoble", reason: "Véhicule indisponible ce jour : Chauffeur absent le mardi" }],
+        droppedLocks: [{ tripId: "t1", vehicleId: "vsl_gre", vehicleLabel: "VSL Grenoble", reason: "Véhicule indisponible ce jour\u00a0: Chauffeur absent le mardi" }],
       }),
       MOVE,
     );
     expect(shown(issue)).toBe(
-      "VSL Grenoble ne peut pas recevoir la course de Jeanne Martin : Véhicule indisponible ce jour : Chauffeur absent le mardi.",
+      "VSL Grenoble ne peut pas recevoir la course de Jeanne Martin\u00a0: Véhicule indisponible ce jour\u00a0: Chauffeur absent le mardi.",
     );
   });
 
   it("detects a trip cancelled or locked elsewhere meanwhile", () => {
     expect(shown(moveRequestIssue(build({ trips: [trip("t2", null)] }), MOVE))).toBe(
-      "La course de Jeanne Martin n'est plus à planifier (annulée entre-temps ?).",
+      "La course de Jeanne Martin n'est plus à planifier (annulée entre-temps\u202f?).",
     );
     expect(shown(moveRequestIssue(build({ trips: [trip("t1", "taxi_mrs")] }), MOVE))).toMatch(/autre véhicule entre-temps/);
   });
@@ -142,10 +142,10 @@ describe("movePlacementIssue", () => {
       labels,
     );
     expect(shown(issue)).toBe(
-      "Déplacement refusé : VSL Grenoble ne peut pas servir la course de Jeanne Martin (Horaires inatteignables pour le véhicule figé VSL Grenoble). Le planning n'a pas été modifié.",
+      "Déplacement refusé\u00a0: VSL Grenoble ne peut pas servir la course de Jeanne Martin (Horaires inatteignables pour le véhicule figé VSL Grenoble). Le planning n'a pas été modifié.",
     );
     expect(shown(movePlacementIssue(plan([]), MOVE, labels))).toBe(
-      "Déplacement refusé : VSL Grenoble ne peut pas servir la course de Jeanne Martin. Le planning n'a pas été modifié.",
+      "Déplacement refusé\u00a0: VSL Grenoble ne peut pas servir la course de Jeanne Martin. Le planning n'a pas été modifié.",
     );
   });
 
@@ -175,11 +175,11 @@ describe("patient names and technical records (OptimizationRun.error)", () => {
     }
   });
 
-  it("resolves a reference to the patient's name, or to « une course » once the trip is gone", () => {
+  it("resolves a reference to the patient's name, or to «\u202fune course\u202f» once the trip is gone", () => {
     expect(resolveTripRefs(`${tripRef("t1")} a été figée ailleurs.`, () => "Jeanne Martin")).toBe(
       "La course de Jeanne Martin a été figée ailleurs.",
     );
-    expect(resolveTripRefs(`Refusé : ${tripRef("cmabc_123")} ailleurs.`, () => null)).toBe("Refusé : une course ailleurs.");
+    expect(resolveTripRefs(`Refusé\u00a0: ${tripRef("cmabc_123")} ailleurs.`, () => null)).toBe("Refusé\u00a0: une course ailleurs.");
     // A message without reference (every other run error) is left as is.
     expect(resolveTripRefs("aucune solution trouvée", () => "X")).toBe("aucune solution trouvée");
   });

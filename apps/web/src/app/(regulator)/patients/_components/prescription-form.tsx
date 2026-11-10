@@ -61,7 +61,7 @@ export function PrescriptionForm({
             label="Mode prescrit"
             htmlFor="mode"
             error={errors.mode}
-            hint={`Mobilité du patient : ${MOBILITY_LABELS[mobility].toLowerCase()}`}
+            hint={`Mobilité du patient\u00a0: ${MOBILITY_LABELS[mobility].toLowerCase()}`}
           >
             <Select
               id="mode"
@@ -132,7 +132,7 @@ export function PrescriptionForm({
         </div>
         {validity && (validity.state === "expired" || validity.state === "expiring") ? (
           <Notice size="sm" tone={validity.state === "expired" ? "danger" : "warning"}>
-            {validityLabel({ validFrom, validTo }, todayIso)} : aucune course ne sera générée après la fin de validité.
+            {validityLabel({ validFrom, validTo }, todayIso)}&nbsp;: aucune course ne sera générée après la fin de validité.
           </Notice>
         ) : null}
 

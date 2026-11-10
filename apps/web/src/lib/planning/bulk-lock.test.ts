@@ -97,19 +97,19 @@ describe("messages", () => {
 
   it("agrees with the number of trips", () => {
     expect(lockMessage({ kind: "route", vehicleId: "t1" }, "Taxi 1", 1, { lockedElsewhere: 0 })).toBe(
-      "La tournée de Taxi 1 : 1 course figée, elle restera sur son véhicule à la prochaine optimisation.",
+      "La tournée de Taxi 1\u00a0: 1 course figée, elle restera sur son véhicule à la prochaine optimisation.",
     );
     expect(lockMessage({ kind: "day" }, null, 0, { lockedElsewhere: 2 })).toBe(
       "Toutes les courses du jour sont déjà figées. 2 courses figées sur un autre véhicule y restent.",
     );
     expect(lockMessage({ kind: "depot", depotId: "d" }, "Gap", 0, { lockedElsewhere: 0 })).toBe(
-      "Rien à figer dans les tournées du dépôt Gap : leurs courses sont déjà figées.",
+      "Rien à figer dans les tournées du dépôt Gap\u00a0: leurs courses sont déjà figées.",
     );
     expect(lockMessage({ kind: "route", vehicleId: "t1" }, "Taxi 1", 0, { lockedElsewhere: 0 })).toBe(
-      "Rien à figer dans la tournée de Taxi 1 : ses courses sont déjà figées.",
+      "Rien à figer dans la tournée de Taxi 1\u00a0: ses courses sont déjà figées.",
     );
     expect(unlockMessage({ kind: "depot", depotId: "d" }, "Gap", 1, { keptExceptional: 2 })).toBe(
-      "Les tournées du dépôt Gap : 1 course défigée, la prochaine optimisation pourra la changer de véhicule. 2 recours exceptionnels à une ambulance restent figés : défigez-les depuis la course.",
+      "Les tournées du dépôt Gap\u00a0: 1 course défigée, la prochaine optimisation pourra la changer de véhicule. 2 recours exceptionnels à une ambulance restent figés\u00a0: défigez-les depuis la course.",
     );
     expect(unlockMessage({ kind: "route", vehicleId: "t1" }, "Taxi 1", 0, { keptExceptional: 0 })).toBe("Rien à défiger dans la tournée de Taxi 1.");
     expect(unlockMessage({ kind: "day" }, null, 0, { keptExceptional: 0 })).toBe("Aucune course du jour n'est figée.");

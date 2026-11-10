@@ -180,12 +180,12 @@ export function DriverForm({
         <div className="space-y-2">
           <p className="text-sm font-medium text-slate-700">Pause</p>
           <p className="text-xs text-slate-500">
-            L&apos;optimiseur place la pause n&apos;importe où dans la fenêtre. Obligatoire au-delà de 6 h d&apos;horaire :
-            au moins 20 min (Code du travail, art. L. 3121-16). Laissez les trois champs vides seulement pour un horaire
-            de 6 h ou moins.
+            L&apos;optimiseur place la pause n&apos;importe où dans la fenêtre. Obligatoire au-delà de 6&nbsp;h d&apos;horaire&nbsp;:
+            au moins 20&nbsp;min (Code du travail, art. L. 3121-16). Laissez les trois champs vides seulement pour un horaire
+            de 6&nbsp;h ou moins.
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Field label="Fenêtre : à partir de" htmlFor="breakWindowStart" error={errors.breakWindowStart}>
+            <Field label="Fenêtre&nbsp;: à partir de" htmlFor="breakWindowStart" error={errors.breakWindowStart}>
               <Input
                 id="breakWindowStart"
                 name="breakWindowStart"
@@ -195,7 +195,7 @@ export function DriverForm({
                 aria-invalid={Boolean(errors.breakWindowStart)}
               />
             </Field>
-            <Field label="Fenêtre : jusqu'à" htmlFor="breakWindowEnd" error={errors.breakWindowEnd}>
+            <Field label="Fenêtre&nbsp;: jusqu'à" htmlFor="breakWindowEnd" error={errors.breakWindowEnd}>
               <Input
                 id="breakWindowEnd"
                 name="breakWindowEnd"
@@ -227,7 +227,7 @@ export function DriverForm({
           label="Coût d'une heure de tournée (€/h)"
           htmlFor="hourlyCost"
           error={errors.hourlyCost}
-          hint="L'optimiseur multiplie ce coût par toute la durée de la tournée, du départ au retour au dépôt, pause comprise. Saisissez le coût chargé (salaire, charges, congés, heures supplémentaires) ramené à cette durée : par exemple 17,50 € pour un salarié qui coûte 18,60 € par heure travaillée et dont 94 % de la tournée est payée."
+          hint="L'optimiseur multiplie ce coût par toute la durée de la tournée, du départ au retour au dépôt, pause comprise. Saisissez le coût chargé (salaire, charges, congés, heures supplémentaires) ramené à cette durée&nbsp;: par exemple 17,50&nbsp;€ pour un salarié qui coûte 18,60&nbsp;€ par heure travaillée et dont 94&nbsp;% de la tournée est payée."
         >
           <UnitInput
             id="hourlyCost"

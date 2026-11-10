@@ -46,10 +46,10 @@ export default async function EditPrescriptionPage({
       {recurrences > 0 || openTrips > 0 ? (
         <Notice size="sm" tone="info" className="mb-5 max-w-3xl">
           {recurrences > 0
-            ? `${recurrences === 1 ? "1 récurrence s'appuie" : `${recurrences} récurrences s'appuient`} sur cette prescription : les prochaines courses générées suivront le nouveau mode et les nouvelles dates. `
+            ? `${recurrences === 1 ? "1 récurrence s'appuie" : `${recurrences} récurrences s'appuient`} sur cette prescription\u00a0: les prochaines courses générées suivront le nouveau mode et les nouvelles dates. `
             : null}
           {openTrips > 0
-            ? `${openTripsLabel(openTrips)} déjà ${openTrips === 1 ? "générée suit" : "générées suivent"} aussi la modification à l'enregistrement : véhicule autorisé et partage selon le nouveau mode ; ${openTrips === 1 ? "annulée si elle sort" : "annulées si elles sortent"} de la nouvelle validité ; ${openTrips === 1 ? "retirée de sa tournée si elle n'y est plus compatible" : "retirées de leur tournée si elles n'y sont plus compatibles"}.`
+            ? `${openTripsLabel(openTrips)} déjà ${openTrips === 1 ? "générée suit" : "générées suivent"} aussi la modification à l'enregistrement\u00a0: véhicule autorisé et partage selon le nouveau mode\u202f; ${openTrips === 1 ? "annulée si elle sort" : "annulées si elles sortent"} de la nouvelle validité\u202f; ${openTrips === 1 ? "retirée de sa tournée si elle n'y est plus compatible" : "retirées de leur tournée si elles n'y sont plus compatibles"}.`
             : null}
         </Notice>
       ) : null}

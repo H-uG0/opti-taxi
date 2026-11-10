@@ -42,7 +42,7 @@ function attempt(limiter: AttemptLimiter, key: string): boolean {
   return true;
 }
 
-describe("AttemptLimiter, e-mail rule (5 failures / 15 min, then 15 min)", () => {
+describe("AttemptLimiter, e-mail rule (5 failures / 15\u00a0min, then 15\u00a0min)", () => {
   it("lets 5 attempts through, refuses the 6th for 15 minutes, then lets the e-mail try again", () => {
     const clock = fakeClock();
     const limiter = new AttemptLimiter(EMAIL_RULE, { now: clock.now });
@@ -99,7 +99,7 @@ describe("AttemptLimiter, e-mail rule (5 failures / 15 min, then 15 min)", () =>
   });
 });
 
-describe("AttemptLimiter, address rule (30 attempts / 5 min, then 5 min)", () => {
+describe("AttemptLimiter, address rule (30 attempts / 5\u00a0min, then 5\u00a0min)", () => {
   it("allows 30 attempts in 5 minutes and refuses the 31st", () => {
     const clock = fakeClock();
     const limiter = new AttemptLimiter(ADDRESS_RULE, { now: clock.now });
@@ -302,7 +302,7 @@ describe("gateLoginAttempt", () => {
     return { clock, limiters: createLoginLimiters({ now: clock.now }) };
   }
 
-  it("refuses the 6th attempt on one e-mail for 15 min, whether the account exists or not", () => {
+  it("refuses the 6th attempt on one e-mail for 15\u00a0min, whether the account exists or not", () => {
     const { clock, limiters } = setup();
     for (let i = 0; i < 5; i++) expect(gateLoginAttempt(limiters, "x@example.fr", A)).toBeNull();
     expect(gateLoginAttempt(limiters, "x@example.fr", A)).toEqual({ by: "email", retryInMin: 15 });
@@ -342,7 +342,7 @@ describe("gateLoginAttempt", () => {
     expect(gateLoginAttempt(limiters, "x@example.fr", B)).toBeNull();
   });
 
-  it("refuses the 31st attempt from one address for 5 min and does not count it against the e-mail", () => {
+  it("refuses the 31st attempt from one address for 5\u00a0min and does not count it against the e-mail", () => {
     const { clock, limiters } = setup();
     for (let i = 0; i < 30; i++) expect(gateLoginAttempt(limiters, `spray-${i}@example.fr`, A)).toBeNull();
     for (let i = 0; i < 10; i++) {

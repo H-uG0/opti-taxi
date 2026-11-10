@@ -25,7 +25,7 @@ export type ToolbarProps = {
   unassignedCount?: number;
 };
 
-const RUNNING_ELSEWHERE = "Une optimisation de cette date est en cours sur un autre poste : attendez la fin du calcul.";
+const RUNNING_ELSEWHERE = "Une optimisation de cette date est en cours sur un autre poste\u00a0: attendez la fin du calcul.";
 
 export function PlanningToolbar({
   date,
@@ -68,7 +68,7 @@ export function PlanningToolbar({
       <Button
         onClick={() => run("Optimisation en cours…", () => optimizeDay(date), { long: true })}
         disabled={busy || optimizeOff !== null}
-        title={optimizeOff ?? "Calcule les tournées ; les courses figées restent sur leur véhicule"}
+        title={optimizeOff ?? "Calcule les tournées\u202f; les courses figées restent sur leur véhicule"}
         aria-describedby={optimizeOff ? "optimize-blocked" : undefined}
       >
         <Sparkles aria-hidden className="size-4" />
@@ -87,7 +87,7 @@ export function PlanningToolbar({
           disabled={busy || optimizeOff !== null}
           title={
             optimizeOff ??
-            `Place ${unassignedCount > 1 ? `les ${unassignedCount} courses non affectées` : "la course non affectée"} dans les tournées en place : les autres courses restent sur leur véhicule pour ce calcul (sans être figées), leurs horaires peuvent bouger`
+            `Place ${unassignedCount > 1 ? `les ${unassignedCount} courses non affectées` : "la course non affectée"} dans les tournées en place\u00a0: les autres courses restent sur leur véhicule pour ce calcul (sans être figées), leurs horaires peuvent bouger`
           }
           aria-describedby={optimizeOff ? "optimize-blocked" : undefined}
         >
@@ -104,7 +104,7 @@ export function PlanningToolbar({
             variant="secondary"
             onClick={() => validate(null)}
             disabled={busy || validateOff !== null}
-            title={validateOff ?? "Les tournées passent en « Validée » : les chauffeurs les voient comme définitives"}
+            title={validateOff ?? "Les tournées passent en «\u202fValidée\u202f»\u00a0: les chauffeurs les voient comme définitives"}
             aria-describedby={validateOff ? "validate-blocked" : undefined}
           >
             <CheckCheck aria-hidden className="size-4" />
@@ -136,7 +136,7 @@ export function PlanningToolbar({
           variant="secondary"
           onClick={() => run("Réouverture du planning…", () => reopenDay(date))}
           disabled={busy}
-          title="Repasse les tournées en « Proposée » pour les ajuster ou les réoptimiser"
+          title="Repasse les tournées en «&#x202F;Proposée&#x202F;» pour les ajuster ou les réoptimiser"
         >
           <LockOpen aria-hidden className="size-4" />
           Rouvrir

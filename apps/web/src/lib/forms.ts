@@ -34,7 +34,7 @@ export const IDLE_STATE: FormState = {
 };
 
 export const REQUIRED = "Champ obligatoire.";
-export const GENERIC_ERROR = "Le formulaire contient des erreurs : corrigez les champs signalés.";
+export const GENERIC_ERROR = "Le formulaire contient des erreurs\u00a0: corrigez les champs signalés.";
 
 /** Label of a button while its action runs; a save says « Enregistrement… » (SAVING_LABEL). */
 export const PENDING_LABEL = "En cours…";
@@ -192,13 +192,14 @@ export type NumberOptions = {
 };
 
 function numberSchema({ min, max, integer = false, unit, minMessage, maxMessage }: NumberOptions) {
-  const suffix = unit ? ` ${unit}` : "";
+  // A no-break space between the number and its unit (« 10 €/km »).
+  const suffix = unit ? `\u00a0${unit}` : "";
   let schema = z.number({
     error: (issue) => (issue.input === undefined ? REQUIRED : "Nombre attendu (ex. 12,5)."),
   });
   if (integer) schema = schema.int("Nombre entier attendu.");
-  if (min !== undefined) schema = schema.min(min, minMessage ?? `Minimum : ${formatNumber(min)}${suffix}.`);
-  if (max !== undefined) schema = schema.max(max, maxMessage ?? `Maximum : ${formatNumber(max)}${suffix}.`);
+  if (min !== undefined) schema = schema.min(min, minMessage ?? `Minimum\u00a0: ${formatNumber(min)}${suffix}.`);
+  if (max !== undefined) schema = schema.max(max, maxMessage ?? `Maximum\u00a0: ${formatNumber(max)}${suffix}.`);
   return schema;
 }
 

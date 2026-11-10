@@ -98,7 +98,7 @@ export function depotsCollection(
       type: "Feature",
       geometry: { type: "Point", coordinates: position(d.point) },
       properties: {
-        title: `Dépôt ${d.label} : ${d.vehicles.map((v) => v.label).join(", ")}`,
+        title: `Dépôt ${d.label}\u00a0: ${d.vehicles.map((v) => v.label).join(", ")}`,
         vehicleIds: d.vehicles.map((v) => v.id).join(","),
       },
     })),

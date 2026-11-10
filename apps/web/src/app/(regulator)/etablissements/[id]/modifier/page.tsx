@@ -30,7 +30,7 @@ export default async function EditFacilityPage({ params }: { params: Promise<{ i
           openTrips === 1
             ? "Un changement d'adresse s'applique aussi à la course à venir non commencée vers cet établissement (retirée de sa tournée si elle y est déjà)."
             : openTrips > 1
-              ? `Un changement d'adresse s'applique aussi aux ${openTripsLabel(openTrips)} non commencées vers cet établissement ; celles déjà dans une tournée en sont retirées.`
+              ? `Un changement d'adresse s'applique aussi aux ${openTripsLabel(openTrips)} non commencées vers cet établissement\u202f; celles déjà dans une tournée en sont retirées.`
               : "Un changement d'adresse s'applique aux courses générées ensuite."
         }
       />

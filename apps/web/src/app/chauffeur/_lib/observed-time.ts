@@ -93,5 +93,5 @@ export function previousStatusAt(
  * time, and is told that tapping again would record the current time.
  */
 export const TOO_OLD_ERROR =
-  "Statut saisi il y a plus de 3 h, non enregistré. Appelez la régulation et donnez-lui l'heure réelle ; " +
+  "Statut saisi il y a plus de 3\u00a0h, non enregistré. Appelez la régulation et donnez-lui l'heure réelle\u202f; " +
   "un nouvel appui enregistrerait l'heure actuelle.";

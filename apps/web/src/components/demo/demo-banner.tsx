@@ -17,7 +17,7 @@ export function DemoBanner() {
       className="sticky top-0 z-40 flex h-(--demo-banner-h) items-center justify-center overflow-hidden bg-amber-300 px-4 text-xs whitespace-nowrap font-semibold text-amber-950 print:hidden"
     >
       DÉMO — données fictives
-      <span className="font-normal max-sm:hidden">&nbsp;· identifiants publics : ne saisissez aucune donnée réelle</span>
+      <span className="font-normal max-sm:hidden">&nbsp;· identifiants publics&nbsp;: ne saisissez aucune donnée réelle</span>
     </div>
   );
 }

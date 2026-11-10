@@ -188,7 +188,7 @@ describe("replanBlockReason", () => {
   });
 
   it("protects a validated planning", () => {
-    expect(replanBlockReason("2026-11-03", { ...clear, validatedRoutes: 2 })).toMatch(/est validé : rouvrez-le/);
+    expect(replanBlockReason("2026-11-03", { ...clear, validatedRoutes: 2 })).toMatch(/est validé\u00a0: rouvrez-le/);
   });
 
   it("protects the drivers' field timestamps", () => {

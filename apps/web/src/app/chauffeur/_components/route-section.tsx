@@ -45,7 +45,7 @@ function RouteHeader({ route, titleId }: { route: RouteView; titleId: string }) 
 
       {route.status === "PROPOSED" ? (
         <p className="border-y border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-950">
-          Tournée provisoire : elle peut encore changer avant sa validation par la régulation.
+          Tournée provisoire&nbsp;: elle peut encore changer avant sa validation par la régulation.
         </p>
       ) : null}
 
@@ -66,7 +66,7 @@ function RouteHeader({ route, titleId }: { route: RouteView; titleId: string }) 
         ) : null}
         {route.partner ? (
           <p>
-            {route.role === "DRIVER" ? "Équipier" : "Conducteur"} : <span className="font-semibold text-slate-900">{route.partner}</span>
+            {route.role === "DRIVER" ? "Équipier" : "Conducteur"}&nbsp;: <span className="font-semibold text-slate-900">{route.partner}</span>
           </p>
         ) : null}
         {route.partner && route.partnerPhone ? (
@@ -77,14 +77,14 @@ function RouteHeader({ route, titleId }: { route: RouteView; titleId: string }) 
           />
         ) : null}
         <p>
-          Dépôt : <span className="font-semibold text-slate-900">{vehicle.depot.name}</span>
+          Dépôt&nbsp;: <span className="font-semibold text-slate-900">{vehicle.depot.name}</span>
         </p>
         <div>
           <p className="tabular flex justify-between font-medium text-slate-800">
             <span>
               {progress.closed} / {progress.total} arrêts faits
             </span>
-            <span>{percent} %</span>
+            <span>{percent}&nbsp;%</span>
           </p>
           <div aria-hidden className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200">
             <div className="h-full rounded-full bg-emerald-600" style={{ width: `${percent}%` }} />
@@ -145,7 +145,7 @@ function DepotNotes({ notes, className }: { notes: string; className?: string })
     <p className={cn("flex items-start gap-2 text-sm whitespace-pre-line text-slate-700", className)}>
       <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-slate-500" />
       <span>
-        <span className="font-semibold">Accès au dépôt : </span>
+        <span className="font-semibold">Accès au dépôt&nbsp;: </span>
         {notes}
       </span>
     </p>
@@ -166,7 +166,7 @@ function ReturnMarker({ route, finished }: { route: RouteView; finished: boolean
     <li className="scroll-mt-24 space-y-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-4">
       <p className="flex items-center gap-2 text-base font-semibold text-emerald-950">
         <Flag aria-hidden className="size-5" />
-        Tous les arrêts sont faits : retour au dépôt
+        Tous les arrêts sont faits&nbsp;: retour au dépôt
       </p>
       <p className="text-sm text-emerald-950">
         <span className="font-semibold">{vehicle.depot.name}</span> · {vehicle.depot.address} · prévu à{" "}

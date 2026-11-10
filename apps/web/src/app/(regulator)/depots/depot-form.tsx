@@ -72,7 +72,7 @@ function DepotFields({ values, errors, geocoderEnabled }: { values: FormValues; 
     <>
       <Fieldset legend="Dépôt">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="Nom du dépôt" htmlFor="name" hint="Ex. « Sisteron »." error={errors.name} className="lg:col-span-2">
+          <Field label="Nom du dépôt" htmlFor="name" hint="Ex. «&#x202F;Sisteron&#x202F;»." error={errors.name} className="lg:col-span-2">
             <Input
               id="name"
               name="name"
@@ -137,13 +137,13 @@ function DepotFields({ values, errors, geocoderEnabled }: { values: FormValues; 
           </Field>
           <div id="coordinates-hint" className="space-y-1 text-xs text-slate-500 sm:col-span-2 lg:self-end">
             <p>
-              Remplies par « Localiser l&apos;adresse », ou en degrés décimaux : dans OpenStreetMap ou Google Maps, un clic
-              droit sur le dépôt affiche « 43.2965, 5.3698 » ; collez ce texte dans l&apos;un des deux champs, ils seront
+              Remplies par «&#x202F;Localiser l&apos;adresse&#x202F;», ou en degrés décimaux&nbsp;: dans OpenStreetMap ou Google Maps, un clic
+              droit sur le dépôt affiche «&#x202F;43.2965, 5.3698&#x202F;»&#x202F;; collez ce texte dans l&apos;un des deux champs, ils seront
               remplis ensemble.
             </p>
             {hasCoordinates && !coordinatesInFrance ? (
               <p>
-                <InlineWarning>Hors de France métropolitaine : latitude et longitude inversées ?</InlineWarning>
+                <InlineWarning>Hors de France métropolitaine&nbsp;: latitude et longitude inversées&#x202F;?</InlineWarning>
               </p>
             ) : null}
             {coordinatesInFrance ? (

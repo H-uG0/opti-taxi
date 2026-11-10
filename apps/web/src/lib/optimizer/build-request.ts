@@ -417,7 +417,7 @@ export function decideVehicle(vehicle: VehicleInput, weekday: number): VehicleDe
       breakRule = { windowStartMin: fitted.windowStart, windowEndMin: fitted.windowEnd, durationMin: fitted.duration };
     } else {
       // Only on a shift of 6 hours or less (workTimeSummary): no break is owed.
-      notes.push(`${vehicle.label} : pause ignorée, la fenêtre de pause ne laisse pas ${driver.breakMinutes} min dans l'horaire`);
+      notes.push(`${vehicle.label}\u00a0: pause ignorée, la fenêtre de pause ne laisse pas ${driver.breakMinutes}\u00a0min dans l'horaire`);
     }
   }
 
@@ -493,7 +493,7 @@ function lockDropReason(
     return trip.allowedVehicleTypes.includes(vehicle.type) ? null : "Type de véhicule non autorisé pour cette course";
   }
   const skip = skipped.get(lockedVehicleId);
-  if (skip) return `Véhicule indisponible ce jour : ${skip.reason}`;
+  if (skip) return `Véhicule indisponible ce jour\u00a0: ${skip.reason}`;
   if (allVehicles.get(lockedVehicleId)?.active === false) return "Véhicule désactivé";
   return "Véhicule introuvable";
 }
@@ -693,7 +693,7 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
       ...notes,
       ...[...seatedGridMissing].map(
         (label) =>
-          `${label} : recours exceptionnel sans grille VSL en vigueur ce jour, la course est estimée au tarif ambulance. Créez la grille VSL dans Grilles tarifaires.`,
+          `${label}\u00a0: recours exceptionnel sans grille VSL en vigueur ce jour, la course est estimée au tarif ambulance. Créez la grille VSL dans Grilles tarifaires.`,
       ),
     ],
     tariffGaps: tariffGaps(

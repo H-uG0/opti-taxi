@@ -76,7 +76,7 @@ export function crewCompositionError(
   const oneOf = crewOneOfRequirement(type);
   if (!oneOf || !driver || !crewMate) return null;
   if (crewHoldsRequired(type, [driver.qualifications, crewMate.qualifications])) return null;
-  return `Il faut au moins un ${qualificationNoun(oneOf)} dans l'équipage d'${VEHICLE_TYPE_WITH_ARTICLE[type].replace(/^une? /, "")}, au volant ou auprès du patient : ni ${driver.name} ni ${crewMate.name} ne l'est.`;
+  return `Il faut au moins un ${qualificationNoun(oneOf)} dans l'équipage d'${VEHICLE_TYPE_WITH_ARTICLE[type].replace(/^une? /, "")}, au volant ou auprès du patient\u00a0: ni ${driver.name} ni ${crewMate.name} ne l'est.`;
 }
 
 /** A crew member as the forms show it. */
@@ -161,7 +161,7 @@ export function otherSeats(seats: ReadonlyMap<string, readonly CrewSeat[]>, pers
 
 /** "chauffeur par défaut de « VSL 2 » et équipier de « Ambulance 1 »". */
 function describeSeats(seats: readonly CrewSeat[]): string {
-  const parts = seats.map((seat) => `${seat.role === "driver" ? "chauffeur par défaut" : "équipier"} de « ${seat.label} »`);
+  const parts = seats.map((seat) => `${seat.role === "driver" ? "chauffeur par défaut" : "équipier"} de «\u202f${seat.label}\u202f»`);
   if (parts.length <= 1) return parts[0] ?? "";
   return `${parts.slice(0, -1).join(", ")} et ${parts[parts.length - 1]}`;
 }
@@ -177,7 +177,7 @@ function describeSeats(seats: readonly CrewSeat[]): string {
 export function sharedCrewWarning(name: string, others: readonly CrewSeat[]): string | null {
   if (others.length === 0) return null;
   const many = others.length > 1;
-  return `${name} est déjà ${describeSeats(others)} : une personne ne roule que sur un véhicule par jour, ${many ? "les autres recevront" : "l'autre recevra"} un remplaçant s'il y en a un de libre (page Équipages).`;
+  return `${name} est déjà ${describeSeats(others)}\u00a0: une personne ne roule que sur un véhicule par jour, ${many ? "les autres recevront" : "l'autre recevra"} un remplaçant s'il y en a un de libre (page Équipages).`;
 }
 
 /**
@@ -193,8 +193,8 @@ export function qualificationScope(qualification: Qualification): string {
     return rule !== null && hasRequiredQualification([qualification], rule);
   });
   const parts: string[] = [];
-  if (drive.length > 0) parts.push(`Conduite : ${drive.map((t) => names[t]).join(", ")}`);
-  if (crew.length > 0) parts.push(`Équipier : ${crew.map((t) => names[t]).join(", ")}`);
+  if (drive.length > 0) parts.push(`Conduite\u00a0: ${drive.map((t) => names[t]).join(", ")}`);
+  if (crew.length > 0) parts.push(`Équipier\u00a0: ${crew.map((t) => names[t]).join(", ")}`);
   for (const t of types) {
     const oneOf = crewOneOfRequirement(t);
     if (!oneOf) continue;

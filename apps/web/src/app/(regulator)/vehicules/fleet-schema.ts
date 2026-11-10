@@ -71,10 +71,10 @@ export function odometerConflict(
   const nf = new Intl.NumberFormat("fr-FR");
   for (const o of others) {
     if (o.date <= entry.date && o.odometerKm > entry.odometerKm) {
-      return `Compteur inférieur au relevé du ${formatShortDate(o.date)} (${nf.format(o.odometerKm)} km).`;
+      return `Compteur inférieur au relevé du ${formatShortDate(o.date)} (${nf.format(o.odometerKm)}\u00a0km).`;
     }
     if (o.date > entry.date && o.odometerKm < entry.odometerKm) {
-      return `Compteur supérieur au relevé suivant du ${formatShortDate(o.date)} (${nf.format(o.odometerKm)} km).`;
+      return `Compteur supérieur au relevé suivant du ${formatShortDate(o.date)} (${nf.format(o.odometerKm)}\u00a0km).`;
     }
   }
   return null;

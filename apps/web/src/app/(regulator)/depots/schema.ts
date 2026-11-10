@@ -52,8 +52,8 @@ export const depotSchema = z
         code: "custom",
         path: ["lat"],
         message: isInFrance(v.lng, v.lat)
-          ? "Latitude et longitude semblent inversées (Marseille : latitude 43,30 ; longitude 5,37)."
-          : "Coordonnées hors de France métropolitaine : vérifiez la latitude et la longitude.",
+          ? "Latitude et longitude semblent inversées (Marseille\u00a0: latitude 43,30\u202f; longitude 5,37)."
+          : "Coordonnées hors de France métropolitaine\u00a0: vérifiez la latitude et la longitude.",
       });
     }
   });
@@ -95,6 +95,6 @@ export function movedDepotNotice(routes: readonly UpcomingRoute[]): string | nul
   const days = dates.length > 1 ? "ces jours" : "ce jour";
   return (
     `Dépôt enregistré. ${count} tournée${many ? "s" : ""} à venir (${dateText}) ${many ? "partent" : "part"} encore de ` +
-    `l'ancienne position du dépôt : relancez l'optimisation de ${days} depuis le planning.`
+    `l'ancienne position du dépôt\u00a0: relancez l'optimisation de ${days} depuis le planning.`
   );
 }

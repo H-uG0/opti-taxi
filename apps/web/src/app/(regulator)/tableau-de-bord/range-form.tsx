@@ -38,7 +38,7 @@ export function RangeForm({ from, to, tomorrow }: { from: string; to: string; to
         </button>
       </form>
       <nav aria-label="Périodes prédéfinies" className="flex flex-wrap items-center gap-1">
-        <span className="mr-1 text-xs text-slate-500">Jusqu&apos;à J+1 :</span>
+        <span className="mr-1 text-xs text-slate-500">Jusqu&apos;à J+1&nbsp;:</span>
         {PRESETS.map((days) => {
           const presetFrom = addDays(tomorrow, -(days - 1));
           const active = from === presetFrom && to === tomorrow;

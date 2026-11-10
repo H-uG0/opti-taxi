@@ -67,5 +67,5 @@ export function validationIssues(view: ValidationView): string[] {
 
 /** The question shown before validating a day with issues. */
 export function validationQuestion(issues: readonly string[]): string {
-  return `Le planning comporte ${listing(issues)}. Valider quand même ?`;
+  return `Le planning comporte ${listing(issues)}. Valider quand même\u202f?`;
 }

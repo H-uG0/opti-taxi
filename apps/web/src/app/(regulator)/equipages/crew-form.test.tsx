@@ -67,7 +67,7 @@ describe("CrewForm", () => {
   it("chooses a person from the grouped list and counts the change", () => {
     render(<CrewForm date="2026-11-11" rows={ROWS} people={PEOPLE} depots={DEPOTS} locked={null} hasSavedCrews={false} />);
     expect(screen.getByRole("button", { name: "Aucune modification" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Chauffeur de Taxi 3 : — Aucun chauffeur —" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chauffeur de Taxi 3\u00a0: — Aucun chauffeur —" }));
     const list = screen.getByRole("listbox");
     // The free person of the depot first; bob is on Taxi 2.
     expect(within(list).getByRole("group", { name: "Libres — dépôt Gap" }).textContent).toContain("CYD");
@@ -97,7 +97,7 @@ describe("CrewForm", () => {
     search.params = new URLSearchParams("etat=a-traiter");
     render(<CrewForm date="2026-11-11" rows={ROWS} people={PEOPLE} depots={DEPOTS} locked={null} hasSavedCrews={false} />);
     expect(screen.getAllByRole("button", { name: /^Chauffeur de/ }).map((b) => b.getAttribute("aria-label"))).toEqual([
-      "Chauffeur de Taxi 3 : — Aucun chauffeur —",
+      "Chauffeur de Taxi 3\u00a0: — Aucun chauffeur —",
     ]);
     expect(screen.getByLabelText("À traiter seulement (1)")).toBeTruthy();
   });
@@ -120,7 +120,7 @@ describe("CrewForm", () => {
 
   it("starts afresh on another date: the seats of the day before are neither shown nor counted as changes", () => {
     const { rerender } = render(<CrewForm date="2026-11-11" rows={ROWS} people={PEOPLE} depots={DEPOTS} locked={null} hasSavedCrews={false} />);
-    fireEvent.click(screen.getByRole("button", { name: "Chauffeur de Taxi 3 : — Aucun chauffeur —" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chauffeur de Taxi 3\u00a0: — Aucun chauffeur —" }));
     fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: /CYD/ }));
     expect(screen.getByRole("button", { name: "Enregistrer la modification" })).toBeTruthy();
     // « Jour suivant »: the same page with the next day's rows (bob absent, Taxi 3 out of service).
@@ -128,7 +128,7 @@ describe("CrewForm", () => {
     rerender(<CrewForm date="2026-11-12" rows={next} people={PEOPLE} depots={DEPOTS} locked={null} hasSavedCrews={false} />);
     expect(screen.getByRole("button", { name: "Aucune modification" })).toBeTruthy();
     expect(screen.queryByText("Modifié")).toBeNull();
-    expect(screen.getByRole("button", { name: "Chauffeur de Taxi 2 : — Aucun chauffeur —" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Chauffeur de Taxi 2\u00a0: — Aucun chauffeur —" })).toBeTruthy();
     expect(field("driver:Taxi 2")?.value).toBe("");
   });
 
@@ -142,7 +142,7 @@ describe("CrewForm", () => {
     fireEvent.click(link);
     expect(screen.queryByRole("alertdialog")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Chauffeur de Taxi 3 : — Aucun chauffeur —" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chauffeur de Taxi 3\u00a0: — Aucun chauffeur —" }));
     fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: /CYD/ }));
     // Another date: asked in the app's dialog (never the browser's), the link does not navigate meanwhile.
     expect(fireEvent.click(link)).toBe(false);

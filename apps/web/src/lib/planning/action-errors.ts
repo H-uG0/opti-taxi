@@ -10,13 +10,13 @@
  */
 import { isConcurrentWriteError } from "./detach";
 
-export const PLAN_CHANGED_ERROR = "Le planning a changé entre-temps : rechargez la page.";
+export const PLAN_CHANGED_ERROR = "Le planning a changé entre-temps\u00a0: rechargez la page.";
 
 export const DATABASE_ERROR =
-  "La base de données n'a pas répondu à temps : l'action n'a pas été enregistrée. Réessayez dans un instant.";
+  "La base de données n'a pas répondu à temps\u00a0: l'action n'a pas été enregistrée. Réessayez dans un instant.";
 
 export const UNEXPECTED_ERROR =
-  "Erreur inattendue sur le serveur : l'action n'a peut-être pas abouti. Rechargez la page pour voir l'état réel du planning.";
+  "Erreur inattendue sur le serveur\u00a0: l'action n'a peut-être pas abouti. Rechargez la page pour voir l'état réel du planning.";
 
 /** A Prisma client error (duck-typed: no Prisma value is imported). */
 function isDatabaseError(error: unknown): boolean {

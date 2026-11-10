@@ -115,14 +115,14 @@ function vehicleIssuesIntro(
   if (changed) {
     if (crewChangeOnRoute) {
       changedText =
-        "Changements survenus depuis le calcul : pour remplacer une personne sans réoptimiser, sélectionnez le véhicule puis « Changer l'équipage ». ";
+        "Changements survenus depuis le calcul\u00a0: pour remplacer une personne sans réoptimiser, sélectionnez le véhicule puis «\u202fChanger l'équipage\u202f». ";
     } else if (replanBlocked) changedText = `Changements survenus depuis le calcul. ${replanBlocked} `;
-    else changedText = "Changements survenus depuis le calcul : réoptimisez pour appliquer les équipages du jour. ";
+    else changedText = "Changements survenus depuis le calcul\u00a0: réoptimisez pour appliquer les équipages du jour. ";
   }
   return (
     <>
       {changedText}
-      {compliance ? "Échéance dépassée : vérifiez le véhicule avant de le faire rouler. " : null}
+      {compliance ? "Échéance dépassée\u00a0: vérifiez le véhicule avant de le faire rouler. " : null}
       <Link href={`/equipages?date=${date}`} className="font-medium text-brand-700 underline-offset-2 hover:underline">
         Équipages du jour
       </Link>
@@ -133,8 +133,8 @@ function vehicleIssuesIntro(
 /** Why a leg without a vehicle comes first: the patient's other leg is planned. */
 function halfServedText(trip: TripView | undefined, vehicleLabel: string): string {
   return trip?.direction === "OUTBOUND"
-    ? `Aller sans véhicule : le retour est planifié sur ${vehicleLabel}`
-    : `Retour sans véhicule : l'aller est planifié sur ${vehicleLabel}`;
+    ? `Aller sans véhicule\u00a0: le retour est planifié sur ${vehicleLabel}`
+    : `Retour sans véhicule\u00a0: l'aller est planifié sur ${vehicleLabel}`;
 }
 
 /** Everything the regulator should look at: half-served patients, vehicles to review, returns after an absence, unassigned trips, violations, stale or ignored locks. */
@@ -178,7 +178,7 @@ export function IssuesPanel({
           {!violationsKnown ? (
             <p className="px-4 py-3 text-sm text-amber-800">
               Le dernier calcul signalait des violations, mais leur détail n&apos;a pas été enregistré (calcul plus
-              ancien) : relancez l&apos;optimisation pour les revoir.
+              ancien)&nbsp;: relancez l&apos;optimisation pour les revoir.
             </p>
           ) : null}
 
@@ -187,7 +187,7 @@ export function IssuesPanel({
               icon={<House aria-hidden className="size-3.5" />}
               title={`Aller ou retour sans véhicule (${halfServed.length})`}
               tone="red"
-              intro="L'autre trajet du patient est planifié : sans celui-ci, il reste au lieu de soins ou n'y est pas conduit. Placez la course à la main, réoptimisez, ou annulez-la avec le motif « Confiée à un confrère »."
+              intro="L'autre trajet du patient est planifié&nbsp;: sans celui-ci, il reste au lieu de soins ou n'y est pas conduit. Placez la course à la main, réoptimisez, ou annulez-la avec le motif «&#x202F;Confiée à un confrère&#x202F;»."
             >
               {halfServed.map((u) => (
                 <li key={u.tripId}>
@@ -317,7 +317,7 @@ export function IssuesPanel({
               {droppedLocks.map((d) => (
                 <li key={d.tripId}>
                   <TripButton tripId={d.tripId} trips={trips} selected={d.tripId === selectedTripId} onSelect={onSelectTrip}>
-                    Figée sur {d.vehicleLabel ?? "un véhicule supprimé"} : {d.reason}
+                    Figée sur {d.vehicleLabel ?? "un véhicule supprimé"}&nbsp;: {d.reason}
                   </TripButton>
                 </li>
               ))}

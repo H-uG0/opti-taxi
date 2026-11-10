@@ -101,11 +101,11 @@ export function describeSeries(
 ): string {
   const first = points[0];
   const last = points[points.length - 1];
-  if (!first || !last) return `${title} : aucune donnée.`;
+  if (!first || !last) return `${title}\u00a0: aucune donnée.`;
   const range = `du ${formatDate(first.date)} au ${formatDate(last.date)}`;
   const known = points.filter((p): p is ChartPoint & { value: number } => p.value !== null && Number.isFinite(p.value));
   const head = known[0];
-  if (!head) return `${title}, ${range} : aucune donnée.`;
+  if (!head) return `${title}, ${range}\u00a0: aucune donnée.`;
 
   let lowest = head;
   let highest = head;
@@ -116,7 +116,7 @@ export function describeSeries(
   const latest = known[known.length - 1] ?? head;
   const days = known.length > 1 ? `${known.length} jours renseignés` : "1 jour renseigné";
   return (
-    `${title}, ${range} : ${days} ; minimum ${format(lowest.value)} le ${formatDate(lowest.date)}, ` +
+    `${title}, ${range}\u00a0: ${days}\u202f; minimum ${format(lowest.value)} le ${formatDate(lowest.date)}, ` +
     `maximum ${format(highest.value)} le ${formatDate(highest.date)}, ` +
     `dernière valeur ${format(latest.value)} le ${formatDate(latest.date)}.`
   );

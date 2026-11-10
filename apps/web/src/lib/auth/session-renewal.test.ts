@@ -15,12 +15,12 @@ const endingIn = (hours: number) => new Date(NOW.getTime() + hours * HOUR);
 const SIGNED_IN = new Date(NOW.getTime() - 10.5 * HOUR);
 
 describe("session renewal", () => {
-  it("lasts 12 h from the signature", () => {
+  it("lasts 12\u00a0h from the signature", () => {
     expect(SESSION_HOURS).toBe(12);
     expect(sessionExpiryFrom(NOW)).toEqual(endingIn(12));
   });
 
-  it("renews a driver's session once fewer than 5 h are left", () => {
+  it("renews a driver's session once fewer than 5\u00a0h are left", () => {
     expect(DRIVER_RENEW_BELOW_HOURS).toBe(5);
     // Signed in at 19:00 the evening before: 1 h 30 left when the first pickups start.
     expect(shouldRenewSession("DRIVER", endingIn(1.5), NOW, SIGNED_IN)).toBe(true);

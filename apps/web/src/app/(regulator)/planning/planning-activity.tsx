@@ -96,7 +96,7 @@ export function PlanningActivityProvider({ timeLimitSec, children }: { timeLimit
         } catch {
           setFeedback({
             tone: "error",
-            text: "L'action n'a pas abouti (connexion au serveur perdue ?). Rechargez la page pour voir l'état réel du planning.",
+            text: "L'action n'a pas abouti (connexion au serveur perdue\u202f?). Rechargez la page pour voir l'état réel du planning.",
             reload: true,
           });
         } finally {
@@ -136,7 +136,7 @@ function Elapsed({ startedAt, expectedSec }: { startedAt: number; expectedSec: n
     <>
       {/* Seen, not read: inside the live region, a counter changing twice a second would be announced over and over. */}
       <span aria-hidden className="tabular text-brand-700">
-        {seconds} s{expected ? ` / ~${expected} s` : null}
+        {seconds}&nbsp;s{expected ? ` / ~${expected}\u00a0s` : null}
       </span>
       {progress !== null ? (
         <span aria-hidden className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden rounded-b-lg bg-brand-100">
@@ -189,7 +189,7 @@ export function PlanningActivityBanner({ className }: { className?: string }) {
         <Elapsed startedAt={activity.startedAt} expectedSec={activity.expectedSec} />
         {activity.expectedSec !== null ? (
           <span className="hidden text-brand-800/80 md:inline">
-            Le solveur explore les combinaisons pendant {activity.expectedSec} s au plus ; vous pouvez rester sur la page.
+            Le solveur explore les combinaisons pendant {activity.expectedSec}&nbsp;s au plus&#x202F;; vous pouvez rester sur la page.
           </span>
         ) : null}
       </div>

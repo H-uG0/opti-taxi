@@ -87,7 +87,7 @@ export function FacilityForm({
           label="Temps d'arrêt en plus (min)"
           htmlFor="extraServiceMin"
           error={errors.extraServiceMin}
-          hint="Ajouté à la dépose d'un aller et à la prise en charge d'un retour ici : accueil éloigné, service à l'étage… 0 par défaut."
+          hint="Ajouté à la dépose d'un aller et à la prise en charge d'un retour ici&nbsp;: accueil éloigné, service à l'étage… 0 par défaut."
           className="sm:max-w-md"
         >
           <Input

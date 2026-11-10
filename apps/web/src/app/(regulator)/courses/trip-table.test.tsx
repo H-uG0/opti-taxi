@@ -98,7 +98,7 @@ describe("Annuler la sélection", () => {
 
     fireEvent.click(within(bar).getByRole("button", { name: "Annuler les 4 courses" }));
     const confirm = within(bar).getByRole("group", { name: "Confirmer l'annulation" });
-    expect(confirm.textContent).toContain("Annuler 4 courses pour le motif « Hospitalisation » ? 2 seront retirées de leur tournée.");
+    expect(confirm.textContent).toContain("Annuler 4 courses pour le motif «\u202fHospitalisation\u202f»\u202f? 2 seront retirées de leur tournée.");
     expect(confirm.textContent).toContain("sera tracée course par course");
 
     expect(within(confirm).getByRole("button", { name: "Oui, annuler les 4 courses" }).getAttribute("type")).toBe("submit");
@@ -122,7 +122,7 @@ describe("Annuler la sélection", () => {
 
   it("words the question for one trip", () => {
     expect(bulkConfirmText({ count: 1, reason: "PATIENT", inRoutes: 1, shared: true, returnsLeft: 1 })).toBe(
-      "Annuler 1 course pour le motif « Demande du patient » ? Une sera retirée de sa tournée. Les co-passagers restés seuls ne seront plus en transport partagé. Le retour de ce patient reste prévu. Chaque course gardera son motif et l'annulation sera tracée course par course.",
+      "Annuler 1 course pour le motif «\u202fDemande du patient\u202f»\u202f? Une sera retirée de sa tournée. Les co-passagers restés seuls ne seront plus en transport partagé. Le retour de ce patient reste prévu. Chaque course gardera son motif et l'annulation sera tracée course par course.",
     );
   });
 });

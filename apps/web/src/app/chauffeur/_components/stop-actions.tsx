@@ -56,13 +56,13 @@ function waitingText(local: LocalStatus, sessionLost: boolean): string {
   if (local.uncertain) {
     // Sent without a final answer (timeout, cut): the server may already have it; a replay changes nothing.
     return undo
-      ? "Envoi incertain : elle est peut-être déjà enregistrée ; elle est renvoyée sans doublon."
-      : "Envoi incertain : il est peut-être déjà enregistré ; il est renvoyé sans doublon.";
+      ? "Envoi incertain\u00a0: elle est peut-être déjà enregistrée\u202f; elle est renvoyée sans doublon."
+      : "Envoi incertain\u00a0: il est peut-être déjà enregistré\u202f; il est renvoyé sans doublon.";
   }
-  if (sessionLost) return `En attente d'envoi : ${undo ? "elle part" : "il part, avec l'heure du geste,"} après la reconnexion.`;
+  if (sessionLost) return `En attente d'envoi\u00a0: ${undo ? "elle part" : "il part, avec l'heure du geste,"} après la reconnexion.`;
   return undo
-    ? "En attente d'envoi : elle part dès que le réseau revient."
-    : "En attente d'envoi : il part dès que le réseau revient, avec l'heure du geste.";
+    ? "En attente d'envoi\u00a0: elle part dès que le réseau revient."
+    : "En attente d'envoi\u00a0: il part dès que le réseau revient, avec l'heure du geste.";
 }
 
 /** The latest status tapped on this stop, in place of the buttons until the page shows it. */
@@ -113,7 +113,7 @@ function LocalStatusPanel({ stopId, local }: { stopId: string; local: LocalStatu
         {local.phase === "sent"
           ? "Enregistré."
           : slow
-            ? "Réseau lent : l'envoi continue, le statut est gardé sur le téléphone."
+            ? "Réseau lent\u00a0: l'envoi continue, le statut est gardé sur le téléphone."
             : "Envoi en cours…"}
       </p>
     </div>
@@ -171,9 +171,9 @@ export function StopActions({
       <div role="group" aria-labelledby={`${reasonId}-confirm`} className="space-y-3 rounded-xl border border-red-200 bg-red-50 p-3">
         <div>
           <p id={`${reasonId}-confirm`} className="text-base font-semibold text-red-950">
-            Confirmer l&apos;absence de {patient} ?
+            Confirmer l&apos;absence de {patient}&#x202F;?
           </p>
-          <p className="text-sm text-red-900">La course passe en « Absent » et sa dépose est retirée de la tournée.</p>
+          <p className="text-sm text-red-900">La course passe en «&#x202F;Absent&#x202F;» et sa dépose est retirée de la tournée.</p>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <button

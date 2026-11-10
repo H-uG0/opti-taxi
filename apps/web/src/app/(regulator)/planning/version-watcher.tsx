@@ -82,7 +82,7 @@ export function PlanningVersionWatcher({ date, shown }: { date: string; shown: D
     >
       <p className="min-w-0">
         <span className="font-semibold">Planning modifié</span> depuis l&apos;affichage (autre poste, autre onglet ou
-        calcul terminé){remote?.running ? " ; une optimisation de cette date est en cours" : ""}.
+        calcul terminé){remote?.running ? "\u202f; une optimisation de cette date est en cours" : ""}.
       </p>
       <Button size="sm" variant="secondary" onClick={() => router.refresh()}>
         <RefreshCw aria-hidden className="size-3.5" />

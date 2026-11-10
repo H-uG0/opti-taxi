@@ -81,14 +81,14 @@ export function moveRequestIssue(
   const ref = tripRef(move.tripId);
   const excluded = build.excludedTrips.find((t) => t.tripId === move.tripId);
   if (excluded) {
-    return `${ref} est incomplète (${clause(excluded.reason)}) : complétez-la dans Courses avant de la déplacer.`;
+    return `${ref} est incomplète (${clause(excluded.reason)})\u00a0: complétez-la dans Courses avant de la déplacer.`;
   }
   const dropped = build.droppedLocks.find((l) => l.tripId === move.tripId);
-  if (dropped) return `${move.vehicleLabel} ne peut pas recevoir ${ref} : ${clause(dropped.reason)}.`;
+  if (dropped) return `${move.vehicleLabel} ne peut pas recevoir ${ref}\u00a0: ${clause(dropped.reason)}.`;
   const trip = build.request.trips.find((t) => t.id === move.tripId);
-  if (!trip) return `${ref} n'est plus à planifier (annulée entre-temps ?).`;
+  if (!trip) return `${ref} n'est plus à planifier (annulée entre-temps\u202f?).`;
   if (trip.lockedVehicleId !== move.vehicleId) {
-    return `${ref} a été figée sur un autre véhicule entre-temps : réessayez.`;
+    return `${ref} a été figée sur un autre véhicule entre-temps\u00a0: réessayez.`;
   }
   return null;
 }
@@ -120,9 +120,9 @@ export function movePlacementIssue(
   const ref = tripRef(move.tripId);
   if (servedBy) {
     const other = vehicleLabels.get(servedBy) ?? "un autre véhicule";
-    return `${MOVE_REFUSED_PREFIX} : l'optimiseur a placé ${ref} sur ${other} et non sur ${move.vehicleLabel}. ${unchanged}`;
+    return `${MOVE_REFUSED_PREFIX}\u00a0: l'optimiseur a placé ${ref} sur ${other} et non sur ${move.vehicleLabel}. ${unchanged}`;
   }
   const reason = plan.unassigned.find((u) => u.tripId === move.tripId)?.reason;
   const why = reason ? ` (${clause(reason)})` : "";
-  return `${MOVE_REFUSED_PREFIX} : ${move.vehicleLabel} ne peut pas servir ${ref}${why}. ${unchanged}`;
+  return `${MOVE_REFUSED_PREFIX}\u00a0: ${move.vehicleLabel} ne peut pas servir ${ref}${why}. ${unchanged}`;
 }

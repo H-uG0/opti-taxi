@@ -39,9 +39,9 @@ describe("addressSchema", () => {
   });
 
   it("requires a 5-digit postal code", () => {
-    expect(errorsOf({ ...valid, postalCode: "1300" }).postalCode).toBe("Code postal : 5 chiffres");
-    expect(errorsOf({ ...valid, postalCode: "13 001" }).postalCode).toBe("Code postal : 5 chiffres");
-    expect(errorsOf({ ...valid, postalCode: "2A004" }).postalCode).toBe("Code postal : 5 chiffres");
+    expect(errorsOf({ ...valid, postalCode: "1300" }).postalCode).toBe("Code postal\u00a0: 5 chiffres");
+    expect(errorsOf({ ...valid, postalCode: "13 001" }).postalCode).toBe("Code postal\u00a0: 5 chiffres");
+    expect(errorsOf({ ...valid, postalCode: "2A004" }).postalCode).toBe("Code postal\u00a0: 5 chiffres");
   });
 
   it("rejects non-numeric and out-of-France coordinates (e.g. swapped lat/lng)", () => {

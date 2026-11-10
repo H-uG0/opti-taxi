@@ -20,7 +20,7 @@ export default function manifest(): MetadataRoute.Manifest {
     id: "/chauffeur",
     name: "Opti-Taxi — Chauffeur",
     short_name: "Opti-Taxi",
-    description: "Feuille de route du chauffeur : arrêts du jour, itinéraires et statuts des transports.",
+    description: "Feuille de route du chauffeur\u00a0: arrêts du jour, itinéraires et statuts des transports.",
     start_url: "/chauffeur",
     scope: "/",
     display: "standalone",

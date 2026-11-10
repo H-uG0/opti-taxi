@@ -61,7 +61,7 @@ describe("sharedCrewWarning", () => {
   it("names the other vehicle and the role held there", () => {
     // The other vehicle is not left out: it gets a replacement (crews of the day).
     expect(sharedCrewWarning("Anna Roux", [{ vehicleId: "v2", label: "VSL 2", role: "driver" }])).toBe(
-      "Anna Roux est déjà chauffeur par défaut de « VSL 2 » : une personne ne roule que sur un véhicule par jour, l'autre recevra un remplaçant s'il y en a un de libre (page Équipages).",
+      "Anna Roux est déjà chauffeur par défaut de «\u202fVSL 2\u202f»\u00a0: une personne ne roule que sur un véhicule par jour, l'autre recevra un remplaçant s'il y en a un de libre (page Équipages).",
     );
   });
 
@@ -71,7 +71,7 @@ describe("sharedCrewWarning", () => {
       { vehicleId: "a1", label: "Ambulance 1", role: "crewMate" },
     ];
     expect(sharedCrewWarning("Anna Roux", others)).toBe(
-      "Anna Roux est déjà chauffeur par défaut de « VSL 2 » et équipier de « Ambulance 1 » : une personne ne roule que sur un véhicule par jour, les autres recevront un remplaçant s'il y en a un de libre (page Équipages).",
+      "Anna Roux est déjà chauffeur par défaut de «\u202fVSL 2\u202f» et équipier de «\u202fAmbulance 1\u202f»\u00a0: une personne ne roule que sur un véhicule par jour, les autres recevront un remplaçant s'il y en a un de libre (page Équipages).",
     );
   });
 });
@@ -108,7 +108,7 @@ describe("crewQualificationErrors", () => {
   it("refuses an ambulance crew without any DEA, on the crew mate field", () => {
     expect(crewQualificationErrors("AMBULANCE", member("Inès", ["AUXILIARY"]), member("Paul", ["AUXILIARY", "TAXI_CARD"]))).toEqual({
       defaultCrewMateId:
-        "Il faut au moins un ambulancier DE dans l'équipage d'ambulance, au volant ou auprès du patient : ni ROUX Inès ni ROUX Paul ne l'est.",
+        "Il faut au moins un ambulancier DE dans l'équipage d'ambulance, au volant ou auprès du patient\u00a0: ni ROUX Inès ni ROUX Paul ne l'est.",
     });
   });
 
@@ -123,10 +123,10 @@ describe("crewQualificationErrors", () => {
 
 describe("qualificationScope", () => {
   it("says what each qualification allows, the DEA rule included", () => {
-    expect(qualificationScope("TAXI_CARD")).toBe("Conduite : taxi");
+    expect(qualificationScope("TAXI_CARD")).toBe("Conduite\u00a0: taxi");
     expect(qualificationScope("AUXILIARY")).toBe(
-      "Conduite : VSL, ambulance · Équipier : ambulance · En ambulance, avec un ambulancier DE",
+      "Conduite\u00a0: VSL, ambulance · Équipier\u00a0: ambulance · En ambulance, avec un ambulancier DE",
     );
-    expect(qualificationScope("DEA")).toBe("Conduite : VSL, ambulance · Équipier : ambulance · Au moins un dans chaque équipage d'ambulance");
+    expect(qualificationScope("DEA")).toBe("Conduite\u00a0: VSL, ambulance · Équipier\u00a0: ambulance · Au moins un dans chaque équipage d'ambulance");
   });
 });

@@ -74,7 +74,7 @@ describe("ErrorFocus", () => {
   it("moves it to the message when no field is at fault", () => {
     render(
       <form>
-        <FormMessage>Ce véhicule n&apos;existe plus : rechargez la page.</FormMessage>
+        <FormMessage>Ce véhicule n&apos;existe plus&nbsp;: rechargez la page.</FormMessage>
         <Input aria-label="Libellé" />
         <ErrorFocus refusal={2} />
       </form>,

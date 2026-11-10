@@ -32,12 +32,12 @@ afterEach(() => {
 });
 
 describe("driver session renewal", () => {
-  it("signs a token for 12 h", async () => {
+  it("signs a token for 12\u00a0h", async () => {
     await createSession(DRIVER, ACCOUNT);
     expect(await sessionExpiresAt()).toEqual(new Date(SIGN_IN.getTime() + 12 * HOUR));
   });
 
-  it("leaves a session with more than 5 h left as it is", async () => {
+  it("leaves a session with more than 5\u00a0h left as it is", async () => {
     await createSession(DRIVER, ACCOUNT);
     const token = [...jar.values()][0];
     vi.setSystemTime(new Date(SIGN_IN.getTime() + 6 * HOUR));

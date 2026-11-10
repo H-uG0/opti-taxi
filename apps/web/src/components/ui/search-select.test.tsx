@@ -41,7 +41,7 @@ describe("SearchSelect", () => {
     render(<Picker build={build} />);
     expect(build).not.toHaveBeenCalled();
     expect(screen.queryByRole("listbox")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Chauffeur de Taxi 1 : MARTIN Bob" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chauffeur de Taxi 1\u00a0: MARTIN Bob" }));
     expect(build).toHaveBeenCalled();
     const list = screen.getByRole("listbox", { name: "Chauffeur de Taxi 1" });
     expect(within(list).getByRole("group", { name: "Libres — dépôt Gap" })).toBeTruthy();
@@ -61,7 +61,7 @@ describe("SearchSelect", () => {
     fireEvent.keyDown(search, { key: "Enter" });
     expect(onChange).toHaveBeenCalledWith("ana");
     expect(screen.queryByRole("listbox")).toBeNull();
-    const button = screen.getByRole("button", { name: "Chauffeur de Taxi 1 : BÉRARD Anaïs" });
+    const button = screen.getByRole("button", { name: "Chauffeur de Taxi 1\u00a0: BÉRARD Anaïs" });
     expect(document.activeElement).toBe(button);
   });
 

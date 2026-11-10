@@ -48,7 +48,7 @@ describe("communes", () => {
   });
 
   it("parses a list of communes, without duplicates", () => {
-    expect(parseCommuneList("Marseille\nAllauch, Plan-de-Cuques ; marseille\n\n")).toEqual(["Marseille", "Allauch", "Plan-de-Cuques"]);
+    expect(parseCommuneList("Marseille\nAllauch, Plan-de-Cuques\u202f; marseille\n\n")).toEqual(["Marseille", "Allauch", "Plan-de-Cuques"]);
   });
 });
 

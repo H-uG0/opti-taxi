@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import { idSchema, invalidState, messageState, readForm, successState, type FormState } from "@/lib/forms";
 import { TARIFF_AUDIT_FIELDS, tariffSchema } from "./schema";
 
-const GRID_GONE = "Cette grille n'existe plus : rechargez la page.";
+const GRID_GONE = "Cette grille n'existe plus\u00a0: rechargez la page.";
 
 export async function createTariff(_state: FormState, formData: FormData): Promise<FormState> {
   const user = await requireUser("REGULATOR");

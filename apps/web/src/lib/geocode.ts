@@ -259,7 +259,7 @@ export function createThrottle(
 export const GEOCODE_THROTTLE: ThrottleOptions = { perSecond: 5, burst: 10 };
 
 export const GEOCODE_THROTTLED_MESSAGE =
-  "Trop de recherches d'adresse en peu de temps : patientez quelques secondes puis réessayez.";
+  "Trop de recherches d'adresse en peu de temps\u00a0: patientez quelques secondes puis réessayez.";
 
 // One set of buckets for the whole server process, even when this module is
 // evaluated more than once (development reloads, several server bundles).

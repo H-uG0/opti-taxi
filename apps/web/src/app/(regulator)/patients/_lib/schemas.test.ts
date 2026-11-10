@@ -50,7 +50,7 @@ describe("parsePatientForm", () => {
     });
   });
 
-  it("turns empty optional fields into null, and never reads « actif » (only « Désactiver » changes it)", () => {
+  it("turns empty optional fields into null, and never reads «\u202factif\u202f» (only «\u202fDésactiver\u202f» changes it)", () => {
     const fd = form({ ...patient, phone: "", accessNotes: "  " });
     fd.delete("active");
     const result = parsePatientForm(fd);
@@ -70,7 +70,7 @@ describe("parsePatientForm", () => {
     const { fieldErrors, values, message } = result.state;
     expect(message).toMatch(/erreurs/);
     expect(fieldErrors.lastName).toBe("Nom obligatoire");
-    expect(fieldErrors.postalCode).toBe("Code postal : 5 chiffres");
+    expect(fieldErrors.postalCode).toBe("Code postal\u00a0: 5 chiffres");
     expect(fieldErrors.lat).toMatch(/hors de France/);
     expect(fieldErrors.mobility).toBe("Choisissez une mobilité");
     expect(fieldErrors.phone).toMatch(/téléphone invalide/);
@@ -183,7 +183,7 @@ describe("parseRecurrenceForm", () => {
     expect(result.state.fieldErrors.appointmentTime).toMatch(/Heure invalide/);
     expect(result.state.fieldErrors.sessionMinutes).toMatch(/minutes entières/);
     const tooLong = parseRecurrenceForm(form({ ...recurrence, sessionMinutes: "800" }));
-    expect(!tooLong.success && tooLong.state.fieldErrors.sessionMinutes).toMatch(/720 min/);
+    expect(!tooLong.success && tooLong.state.fieldErrors.sessionMinutes).toMatch(/720\u00a0min/);
   });
 
   it("rejects an end date before the start date", () => {

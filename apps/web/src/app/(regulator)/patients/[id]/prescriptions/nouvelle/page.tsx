@@ -31,7 +31,7 @@ export default async function NewPrescriptionPage({ params }: { params: Promise<
       </BackLink>
       <PageHeader
         title="Nouvelle prescription"
-        description="Prescription médicale de transport (PMT) : mode, partage autorisé et période de validité."
+        description="Prescription médicale de transport (PMT)&nbsp;: mode, partage autorisé et période de validité."
       />
       <PrescriptionForm
         action={createPrescription.bind(null, patient.id)}

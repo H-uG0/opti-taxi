@@ -11,7 +11,7 @@ describe("sessionNotice", () => {
     expect(sessionNotice(Date.parse("2026-11-10T04:12:00Z"), NOW, false)).toEqual({ kind: "valid", until: "demain 05:12" });
   });
 
-  it("warns 30 min before the end", () => {
+  it("warns 30\u00a0min before the end", () => {
     expect(SESSION_WARNING_MS).toBe(30 * MIN);
     expect(sessionNotice(NOW + 30 * MIN, NOW, false)).toEqual({ kind: "ending", until: "14:30", minutesLeft: 30 });
     expect(sessionNotice(NOW + 31 * MIN, NOW, false).kind).toBe("valid");

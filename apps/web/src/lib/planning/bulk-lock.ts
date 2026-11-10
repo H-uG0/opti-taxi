@@ -119,14 +119,14 @@ function capitalized(text: string): string {
 function nothingToLock(scope: LockScope, name: string | null): string {
   if (scope.kind === "day") return "Toutes les courses du jour sont déjà figées.";
   const what = scopeText(scope, name);
-  return `Rien à figer dans ${what} : ${scope.kind === "route" ? "ses" : "leurs"} courses sont déjà figées.`;
+  return `Rien à figer dans ${what}\u00a0: ${scope.kind === "route" ? "ses" : "leurs"} courses sont déjà figées.`;
 }
 
 export function lockMessage(scope: LockScope, name: string | null, locked: number, plan: Pick<LockPlan, "lockedElsewhere">): string {
   const what = scopeText(scope, name);
   const parts = [
     locked > 0
-      ? `${capitalized(what)} : ${plural(locked, "course figée", "courses figées")}, ${locked > 1 ? "elles resteront" : "elle restera"} sur ${locked > 1 ? "leur" : "son"} véhicule à la prochaine optimisation.`
+      ? `${capitalized(what)}\u00a0: ${plural(locked, "course figée", "courses figées")}, ${locked > 1 ? "elles resteront" : "elle restera"} sur ${locked > 1 ? "leur" : "son"} véhicule à la prochaine optimisation.`
       : nothingToLock(scope, name),
   ];
   if (plan.lockedElsewhere > 0) {
@@ -141,14 +141,14 @@ export function unlockMessage(scope: LockScope, name: string | null, unlocked: n
   const what = scopeText(scope, name);
   const parts = [
     unlocked > 0
-      ? `${capitalized(what)} : ${plural(unlocked, "course défigée", "courses défigées")}, la prochaine optimisation pourra ${unlocked > 1 ? "les" : "la"} changer de véhicule.`
+      ? `${capitalized(what)}\u00a0: ${plural(unlocked, "course défigée", "courses défigées")}, la prochaine optimisation pourra ${unlocked > 1 ? "les" : "la"} changer de véhicule.`
       : scope.kind === "day"
         ? "Aucune course du jour n'est figée."
         : `Rien à défiger dans ${what}.`,
   ];
   if (plan.keptExceptional > 0) {
     parts.push(
-      `${plural(plan.keptExceptional, "recours exceptionnel", "recours exceptionnels")} à une ambulance ${plan.keptExceptional > 1 ? "restent figés" : "reste figé"} : défigez-${plan.keptExceptional > 1 ? "les" : "le"} depuis la course.`,
+      `${plural(plan.keptExceptional, "recours exceptionnel", "recours exceptionnels")} à une ambulance ${plan.keptExceptional > 1 ? "restent figés" : "reste figé"}\u00a0: défigez-${plan.keptExceptional > 1 ? "les" : "le"} depuis la course.`,
     );
   }
   return parts.join(" ");

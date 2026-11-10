@@ -72,7 +72,7 @@ describe("optimizer client: OPTIMIZER_TOKEN", () => {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error).toMatch(pattern);
     }
-    expect(optimizerHttpErrorMessage(500, "boom")).toBe("Le service d'optimisation a renvoyé une erreur (HTTP 500) : boom");
+    expect(optimizerHttpErrorMessage(500, "boom")).toBe("Le service d'optimisation a renvoyé une erreur (HTTP 500)\u00a0: boom");
   });
 
   it("refuses to send more trips than the contract allows (the optimizer would answer 422)", async () => {
@@ -87,7 +87,7 @@ describe("optimizer client: OPTIMIZER_TOKEN", () => {
       shareable: false,
     };
     const result = await optimize({ ...request, trips: Array.from({ length: MAX_TRIPS + 1 }, () => trip) });
-    expect(result).toEqual({ ok: false, error: expect.stringMatching(/trips : 3000 courses au plus par calcul/) });
+    expect(result).toEqual({ ok: false, error: expect.stringMatching(/trips\u00a0: 3000 courses au plus par calcul/) });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(MAX_VEHICLES).toBe(300);
   });
@@ -138,10 +138,10 @@ describe("token helpers", () => {
 
 describe("unreachableMessage", () => {
   it("tells a developer how to start the service, never a dispatcher", () => {
-    expect(unreachableMessage("http://127.0.0.1:8100", "development")).toContain("Lancez-le avec : cd services/optimizer");
+    expect(unreachableMessage("http://127.0.0.1:8100", "development")).toContain("Lancez-le avec\u00a0: cd services/optimizer");
     const production = unreachableMessage("http://optimizer:8100", "production");
     expect(production).toBe(
-      "Le service d'optimisation ne répond pas. Réessayez dans quelques minutes ; si cela dure, prévenez la personne qui gère l'application.",
+      "Le service d'optimisation ne répond pas. Réessayez dans quelques minutes\u202f; si cela dure, prévenez la personne qui gère l'application.",
     );
     expect(production).not.toContain("optimizer:8100");
   });

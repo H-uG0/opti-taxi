@@ -110,7 +110,7 @@ beforeEach(() => {
 describe("saveDayCrews", () => {
   it("fixes the changed row only, under the lock of the date, with its author and an audit event", async () => {
     const result = await saveDayCrews(IDLE_STATE, shownForm({ "driver:taxiA": "x" }));
-    expect(result).toMatchObject({ status: "success", message: "Équipage fixé pour ce jour ; les autres véhicules gardent la proposition automatique." });
+    expect(result).toMatchObject({ status: "success", message: "Équipage fixé pour ce jour\u202f; les autres véhicules gardent la proposition automatique." });
     expect(fake.$executeRaw).toHaveBeenCalledTimes(1);
     expect(fake.dayCrew.create).toHaveBeenCalledTimes(1);
     expect(fake.dayCrew.create.mock.calls[0]![0].data).toMatchObject({ vehicleId: "taxiA", driverId: "x", crewMateId: null, updatedById: "u1" });
@@ -126,7 +126,7 @@ describe("saveDayCrews", () => {
       shownForm({ "driver:taxiA": "x" }, { "was-driver:taxiA": "y", "version:taxiA": SHOWN }),
     );
     expect(result.status).toBe("error");
-    expect(result.message).toBe("Équipages non enregistrés : un collègue a modifié ces véhicules entre-temps.");
+    expect(result.message).toBe("Équipages non enregistrés\u00a0: un collègue a modifié ces véhicules entre-temps.");
     expect(result.fieldErrors["driver:taxiA"]).toMatch(/^Modifié par Marie Dupont le /);
     expect(fake.dayCrew.updateMany).not.toHaveBeenCalled();
   });
@@ -166,20 +166,20 @@ describe("saveDayCrews", () => {
     expect(result.status).toBe("error");
     expect(result.fieldErrors).toEqual({
       "driver:taxiA":
-        "X x fait déjà partie de l'équipage fixé de Taxi B ce jour : revenez d'abord à la proposition sur Taxi B, ou choisissez quelqu'un d'autre.",
+        "X x fait déjà partie de l'équipage fixé de Taxi B ce jour\u00a0: revenez d'abord à la proposition sur Taxi B, ou choisissez quelqu'un d'autre.",
     });
     expect(fake.dayCrew.create).not.toHaveBeenCalled();
   });
 
-  it("fixes a proposal as it was shown (« Fixer cette proposition »), whatever the selects say", async () => {
+  it("fixes a proposal as it was shown («\u202fFixer cette proposition\u202f»), whatever the selects say", async () => {
     const result = await saveDayCrews(IDLE_STATE, shownForm({ intent: "fix:taxiB", "driver:taxiA": "x" }));
-    expect(result).toMatchObject({ status: "success", message: "Proposition fixée pour ce véhicule : elle ne suit plus les absences." });
+    expect(result).toMatchObject({ status: "success", message: "Proposition fixée pour ce véhicule\u00a0: elle ne suit plus les absences." });
     expect(fake.dayCrew.create).toHaveBeenCalledTimes(1);
     expect(fake.dayCrew.create.mock.calls[0]![0].data).toMatchObject({ vehicleId: "taxiB", driverId: "b" });
   });
 });
 
-describe("« Revenir aux propositions (tout le jour) »", () => {
+describe("«\u202fRevenir aux propositions (tout le jour)\u202f»", () => {
   it("removes only the fixed crews at the version the page showed, and names those kept", async () => {
     fake.dayCrew.deleteMany.mockResolvedValue({ count: 1 });
     // Taxi B was fixed by a colleague after the page was shown: kept.
@@ -190,7 +190,7 @@ describe("« Revenir aux propositions (tout le jour) »", () => {
     });
     expect(result.status).toBe("error");
     expect(result.message).toBe(
-      "1 équipage remis aux propositions automatiques ; 1 équipage fixé gardé : un collègue l'a fixé ou modifié depuis l'affichage de la page.",
+      "1 équipage remis aux propositions automatiques\u202f; 1 équipage fixé gardé\u00a0: un collègue l'a fixé ou modifié depuis l'affichage de la page.",
     );
     expect(result.fieldErrors["driver:taxiB"]).toMatch(/^Modifié par Marie Dupont le /);
   });

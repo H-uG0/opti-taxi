@@ -67,7 +67,7 @@ const idSchema = z.string().trim().min(1).max(64);
 
 const INVALID_DATE: PlanningActionResult = { ok: false, error: "Date invalide." };
 const STALE_PLAN: PlanningActionResult = { ok: false, error: STALE_PLAN_ERROR, stale: true };
-const UNKNOWN_TRIP: PlanningActionResult = { ok: false, error: "Course introuvable (supprimée entre-temps ?)." };
+const UNKNOWN_TRIP: PlanningActionResult = { ok: false, error: "Course introuvable (supprimée entre-temps\u202f?)." };
 
 /** Routes, trips and sharing statuses feed several pages (courses, arrivées partagées, chauffeurs…). */
 function refreshPages() {
@@ -106,7 +106,7 @@ function toResult(outcome: RunOutcome): PlanningActionResult {
 
 /** Locks only matter for the next optimization: none on a past date. */
 function pastDateError(isoDate: string): PlanningActionResult | null {
-  return isoDate < todayIso() ? { ok: false, error: `Le ${formatLongDate(isoDate)} est passé : son planning n'est plus modifiable.` } : null;
+  return isoDate < todayIso() ? { ok: false, error: `Le ${formatLongDate(isoDate)} est passé\u00a0: son planning n'est plus modifiable.` } : null;
 }
 
 /** « Optimiser demain » / « Réoptimiser » : recompute every route of the date, keeping locked trips on their vehicle. */
@@ -167,7 +167,7 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
     });
     if (!trip) return UNKNOWN_TRIP;
     if (trip.status === "CANCELLED" || trip.status === "NO_SHOW") {
-      return { ok: false, error: "Cette course est annulée : elle ne peut pas être déplacée." };
+      return { ok: false, error: "Cette course est annulée\u00a0: elle ne peut pas être déplacée." };
     }
     if (trip.status === "PICKED_UP" || trip.status === "DROPPED_OFF") {
       return { ok: false, error: "Cette course est déjà commencée ou terminée." };
@@ -183,14 +183,14 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
       const skip = skipped.find((s) => s.vehicleId === ids.data.vehicleId);
       return {
         ok: false,
-        error: skip ? `${skip.label} est indisponible ce jour : ${skip.reason}.` : "Véhicule introuvable ou désactivé.",
+        error: skip ? `${skip.label} est indisponible ce jour\u00a0: ${skip.reason}.` : "Véhicule introuvable ou désactivé.",
       };
     }
     if (!trip.allowedVehicleTypes.includes(target.type)) {
       const allowed = trip.allowedVehicleTypes.map((t) => VEHICLE_TYPE_SHORT[t]).join(" ou ");
       return {
         ok: false,
-        error: `Véhicule non autorisé : la prescription impose ${allowed || "un autre type"}, pas ${VEHICLE_TYPE_SHORT[target.type]}.`,
+        error: `Véhicule non autorisé\u00a0: la prescription impose ${allowed || "un autre type"}, pas ${VEHICLE_TYPE_SHORT[target.type]}.`,
       };
     }
 
@@ -232,14 +232,14 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
       return {
         ok: false,
         error:
-          `Déplacement de la course de ${who} vers ${target.label} interrompu (${why}) : elle est peut-être restée figée ` +
+          `Déplacement de la course de ${who} vers ${target.label} interrompu (${why})\u00a0: elle est peut-être restée figée ` +
           `sur ${target.label}. Rechargez la page pour voir l'état réel du planning.`,
         stale: true,
       };
     }
     refreshPages();
     if (!outcome.ok && (outcome.moveRejected || outcome.needsConfirmation)) return toResult(outcome);
-    if (!outcome.ok) return { ok: false, error: `${lockedThere} : ${outcome.error}` };
+    if (!outcome.ok) return { ok: false, error: `${lockedThere}\u00a0: ${outcome.error}` };
     return {
       ok: true,
       message: `Course de ${who} déplacée et figée sur ${target.label}. ${outcome.message}`,
@@ -296,13 +296,13 @@ export async function proposeExceptionalAmbulance(tripId: string, vehicleId: str
     const target = available.find((v) => v.id === ids.data.vehicleId);
     if (!target || target.type !== "AMBULANCE") {
       const skip = skipped.find((s) => s.vehicleId === ids.data.vehicleId);
-      return { ok: false, error: skip ? `${skip.label} est indisponible ce jour : ${skip.reason}.` : "Ambulance introuvable ou indisponible ce jour." };
+      return { ok: false, error: skip ? `${skip.label} est indisponible ce jour\u00a0: ${skip.reason}.` : "Ambulance introuvable ou indisponible ce jour." };
     }
     // Billed at the VSL tariff: without a VSL grid that day, the optimizer would estimate it at the ambulance's.
     if (!(await loadExceptionalAmbulanceGrid(db, isoDate, target))) {
       return {
         ok: false,
-        error: `Aucune grille VSL en vigueur le ${formatLongDate(isoDate)} pour facturer ce recours au tarif VSL : créez-la dans Grilles tarifaires, puis recommencez.`,
+        error: `Aucune grille VSL en vigueur le ${formatLongDate(isoDate)} pour facturer ce recours au tarif VSL\u00a0: créez-la dans Grilles tarifaires, puis recommencez.`,
       };
     }
     if (await optimizationInProgress(isoDate)) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
@@ -325,7 +325,7 @@ export async function proposeExceptionalAmbulance(tripId: string, vehicleId: str
       }
       return count > 0;
     }, PLANNING_TX_OPTIONS);
-    if (!proposed) return { ok: false, error: "Cette course a changé entre-temps : rechargez la page.", stale: true };
+    if (!proposed) return { ok: false, error: "Cette course a changé entre-temps\u00a0: rechargez la page.", stale: true };
 
     // Puts the trip back as it was: its lock (if still the one written above: a refused move already put it
     // back) and its proposal (if still this one). Never once a plan gave the trip a route.
@@ -347,7 +347,7 @@ export async function proposeExceptionalAmbulance(tripId: string, vehicleId: str
         if (count > 0) events.push({ action: "trip.exceptional_ambulance_withdrawn", ...traced });
         if (events.length > 0) await audit(tx, user, events);
       }, PLANNING_TX_OPTIONS);
-    const notKept = `Le recours exceptionnel à ${target.label} est retiré : la course de ${who} reste sans véhicule.`;
+    const notKept = `Le recours exceptionnel à ${target.label} est retiré\u00a0: la course de ${who} reste sans véhicule.`;
 
     let outcome: RunOutcome;
     try {
@@ -376,7 +376,7 @@ export async function proposeExceptionalAmbulance(tripId: string, vehicleId: str
         ok: false,
         error: undone
           ? `Recours à ${target.label} interrompu (${why}). ${notKept} Rechargez la page pour voir l'état réel du planning.`
-          : `Recours à ${target.label} interrompu (${why}) : la course est peut-être restée figée sur l'ambulance. Rechargez la page pour voir l'état réel du planning.`,
+          : `Recours à ${target.label} interrompu (${why})\u00a0: la course est peut-être restée figée sur l'ambulance. Rechargez la page pour voir l'état réel du planning.`,
         stale: true,
       };
     }
@@ -391,7 +391,7 @@ export async function proposeExceptionalAmbulance(tripId: string, vehicleId: str
     if (!outcome.ok) return toResult(outcome);
     return {
       ok: true,
-      message: `Course de ${who} confiée à ${target.label} : recours exceptionnel, facturé au tarif VSL. ${outcome.message}`,
+      message: `Course de ${who} confiée à ${target.label}\u00a0: recours exceptionnel, facturé au tarif VSL. ${outcome.message}`,
       ...(outcome.warning ? { warning: true } : {}),
     };
   });
@@ -406,7 +406,7 @@ export async function confirmPlan(runId: string): Promise<PlanningActionResult> 
   const user = await requireUser("REGULATOR");
   return guarded("confirmPlan", async () => {
     const id = idSchema.safeParse(runId);
-    if (!id.success) return { ok: false, error: "Calcul introuvable : rechargez la page.", stale: true };
+    if (!id.success) return { ok: false, error: "Calcul introuvable\u00a0: rechargez la page.", stale: true };
     const outcome = await confirmPendingRun(id.data, user);
     refreshPages();
     return toResult(outcome);
@@ -418,7 +418,7 @@ export async function discardPlan(runId: string): Promise<PlanningActionResult> 
   const user = await requireUser("REGULATOR");
   return guarded("discardPlan", async () => {
     const id = idSchema.safeParse(runId);
-    if (!id.success) return { ok: false, error: "Calcul introuvable : rechargez la page.", stale: true };
+    if (!id.success) return { ok: false, error: "Calcul introuvable\u00a0: rechargez la page.", stale: true };
     const dropped = await discardPendingRun(id.data, async (tx, isoDate) => {
       await audit(tx, user, { action: "plan.discard", entity: "OptimizationRun", entityId: id.data, serviceDate: isoDate });
       // An exceptional ambulance proposed with that plan is not kept either.
@@ -426,7 +426,7 @@ export async function discardPlan(runId: string): Promise<PlanningActionResult> 
     });
     refreshPages();
     return dropped
-      ? { ok: true, message: "Calcul écarté : le planning en place est conservé." }
+      ? { ok: true, message: "Calcul écarté\u00a0: le planning en place est conservé." }
       : { ok: false, error: NOT_PENDING_ERROR, stale: true };
   });
 }
@@ -474,10 +474,10 @@ export async function lockTrip(tripId: string, shownVehicleId: string): Promise<
     const past = pastDateError(toIsoDate(trip.serviceDate));
     if (past) return past;
     if (trip.status === "CANCELLED" || trip.status === "NO_SHOW") {
-      return { ok: false, error: "Cette course est annulée : rien à figer." };
+      return { ok: false, error: "Cette course est annulée\u00a0: rien à figer." };
     }
     if (!trip.route) {
-      return { ok: false, error: "Cette course n'est sur aucune tournée : utilisez « Déplacer vers… » pour la placer et la figer." };
+      return { ok: false, error: "Cette course n'est sur aucune tournée\u00a0: utilisez «\u202fDéplacer vers…\u202f» pour la placer et la figer." };
     }
     const vehicleId = trip.route.vehicleId;
     if (vehicleId !== shown.data) return STALE_PLAN;
@@ -497,7 +497,7 @@ export async function lockTrip(tripId: string, shownVehicleId: string): Promise<
     }, PLANNING_TX_OPTIONS);
     if (!locked) return STALE_PLAN;
     refreshPages();
-    return { ok: true, message: `Course figée sur ${trip.route.vehicle.label} : elle y restera à la prochaine optimisation.` };
+    return { ok: true, message: `Course figée sur ${trip.route.vehicle.label}\u00a0: elle y restera à la prochaine optimisation.` };
   });
 }
 
@@ -531,8 +531,8 @@ export async function unlockTrip(tripId: string): Promise<PlanningActionResult> 
     return {
       ok: true,
       message: withdrawn
-        ? "Course défigée et recours exceptionnel à l'ambulance retiré : la prochaine optimisation la confiera à un taxi ou un VSL, ou la laissera sans véhicule."
-        : "Course défigée : la prochaine optimisation pourra la changer de véhicule.",
+        ? "Course défigée et recours exceptionnel à l'ambulance retiré\u00a0: la prochaine optimisation la confiera à un taxi ou un VSL, ou la laissera sans véhicule."
+        : "Course défigée\u00a0: la prochaine optimisation pourra la changer de véhicule.",
     };
   });
 }
@@ -629,7 +629,7 @@ export async function lockRoutes(date: string, scope: LockScope, shownVersion: s
   const user = await requireUser("REGULATOR");
   return guarded("lockRoutes", async () => {
     const parsed = z.object({ date: dateSchema, scope: scopeSchema }).safeParse({ date, scope });
-    if (!parsed.success) return { ok: false, error: "Tournées à figer invalides : rechargez la page." };
+    if (!parsed.success) return { ok: false, error: "Tournées à figer invalides\u00a0: rechargez la page." };
     const isoDate = parsed.data.date;
     const past = pastDateError(isoDate);
     if (past) return past;
@@ -675,7 +675,7 @@ export async function unlockRoutes(date: string, scope: LockScope, shownVersion:
   const user = await requireUser("REGULATOR");
   return guarded("unlockRoutes", async () => {
     const parsed = z.object({ date: dateSchema, scope: scopeSchema }).safeParse({ date, scope });
-    if (!parsed.success) return { ok: false, error: "Tournées à défiger invalides : rechargez la page." };
+    if (!parsed.success) return { ok: false, error: "Tournées à défiger invalides\u00a0: rechargez la page." };
     const isoDate = parsed.data.date;
     const past = pastDateError(isoDate);
     if (past) return past;
@@ -738,7 +738,7 @@ export async function validateDay(date: string, confirmed: string | null, shownV
     const serviceDate = fromIsoDate(isoDate);
     // The same view as the page: unassigned trips, violations, trips and routes to review.
     const [routes, view] = await Promise.all([db.route.count({ where: { serviceDate } }), loadPlanningDay(isoDate)]);
-    if (routes === 0) return { ok: false, error: "Aucune tournée à valider : lancez d'abord l'optimisation." };
+    if (routes === 0) return { ok: false, error: "Aucune tournée à valider\u00a0: lancez d'abord l'optimisation." };
 
     const issues = validationIssues(view);
     // Asked again when the issues changed since the question the regulator confirmed (absence, unavailability…).
@@ -789,7 +789,7 @@ export async function reopenDay(date: string): Promise<PlanningActionResult> {
     }, PLANNING_TX_OPTIONS);
     if (count === 0) return { ok: false, error: "Aucune tournée validée à rouvrir ce jour." };
     refreshPages();
-    return { ok: true, message: `Planning du ${formatLongDate(isoDate)} rouvert : vous pouvez l'ajuster et le réoptimiser.` };
+    return { ok: true, message: `Planning du ${formatLongDate(isoDate)} rouvert\u00a0: vous pouvez l'ajuster et le réoptimiser.` };
   });
 }
 
@@ -812,12 +812,12 @@ function routeCrewChangedText(outcome: {
   }
   if (outcome.removed.length > 0) effects.push(`${list(outcome.removed)} n'y ${outcome.removed.length > 1 ? "ont" : "a"} plus accès`);
   const parts = [
-    effects.length > 0 ? `Équipage de ${outcome.label} changé : ${effects.join(", ")}.` : `Équipage de ${outcome.label} changé.`,
+    effects.length > 0 ? `Équipage de ${outcome.label} changé\u00a0: ${effects.join(", ")}.` : `Équipage de ${outcome.label} changé.`,
   ];
   if (outcome.withoutAccount.length > 0) {
     const many = outcome.withoutAccount.length > 1;
     parts.push(
-      `${list(outcome.withoutAccount)} n'${many ? "ont" : "a"} pas de compte actif : transmettez-${many ? "leur" : "lui"} la tournée (Chauffeurs, fiche).`,
+      `${list(outcome.withoutAccount)} n'${many ? "ont" : "a"} pas de compte actif\u00a0: transmettez-${many ? "leur" : "lui"} la tournée (Chauffeurs, fiche).`,
     );
   }
   if (outcome.released.length > 0) {
@@ -855,9 +855,9 @@ export async function changeRouteCrew(
     const args = z
       .object({ routeId: idSchema, driverId: optionalIdSchema, crewMateId: optionalIdSchema })
       .safeParse({ routeId, driverId, crewMateId });
-    if (!args.success) return { ok: false, error: "Équipage invalide : rechargez la page." };
+    if (!args.success) return { ok: false, error: "Équipage invalide\u00a0: rechargez la page." };
     const found = await db.route.findUnique({ where: { id: args.data.routeId }, select: { serviceDate: true } });
-    if (!found) return { ok: false, error: "Tournée introuvable (réoptimisée entre-temps ?).", stale: true };
+    if (!found) return { ok: false, error: "Tournée introuvable (réoptimisée entre-temps\u202f?).", stale: true };
     const isoDate = toIsoDate(found.serviceDate);
     const past = pastDateError(isoDate);
     if (past) return past;
@@ -865,7 +865,7 @@ export async function changeRouteCrew(
     if (!(await replanBlocker(isoDate))) {
       return {
         ok: false,
-        error: "Planning ni validé ni commencé : changez l'équipage sur la page Équipages, puis relancez l'optimisation.",
+        error: "Planning ni validé ni commencé\u00a0: changez l'équipage sur la page Équipages, puis relancez l'optimisation.",
       };
     }
     if (await optimizationInProgress(isoDate)) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };

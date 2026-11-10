@@ -351,13 +351,13 @@ describe("buildRouteView", () => {
   });
 
   it("keeps the home access notes off a private client's free destination", () => {
-    const station = { ...A, payer: "PRIVATE" as const, accessNotes: "Interphone « Martin »" };
+    const station = { ...A, payer: "PRIVATE" as const, accessNotes: "Interphone «\u202fMartin\u202f»" };
     const view = buildRouteView(
       makeRoute([makeStop(0, "trip_a", "PICKUP", station), makeStop(1, "trip_a", "DROPOFF", station)]),
       DRIVER,
       true,
     );
-    expect(view.stops.map((stop) => stop.accessNotes)).toEqual(["Interphone « Martin »", null]);
+    expect(view.stops.map((stop) => stop.accessNotes)).toEqual(["Interphone «\u202fMartin\u202f»", null]);
   });
 
   it("flags the private client's fare to collect on board, not a CPAM trip", () => {
@@ -376,8 +376,8 @@ describe("buildRouteView", () => {
 
   it("carries the depot's access notes, trimmed, for the departure and the return", () => {
     const depot = { name: "Dépôt Gap", address: "5 rue des Alpes, 05000 Gap", lat: 44.55, lng: 6.07 };
-    const withNotes = makeRoute([], { vehicle: { ...makeRoute([]).vehicle, depot: { ...depot, notes: " Badge portail : 0425 \n" } } });
-    expect(buildRouteView(withNotes, DRIVER, true).vehicle.depot.notes).toBe("Badge portail : 0425");
+    const withNotes = makeRoute([], { vehicle: { ...makeRoute([]).vehicle, depot: { ...depot, notes: " Badge portail\u00a0: 0425 \n" } } });
+    expect(buildRouteView(withNotes, DRIVER, true).vehicle.depot.notes).toBe("Badge portail\u00a0: 0425");
     const blank = makeRoute([], { vehicle: { ...makeRoute([]).vehicle, depot: { ...depot, notes: "   " } } });
     expect(buildRouteView(blank, DRIVER, true).vehicle.depot.notes).toBeNull();
   });

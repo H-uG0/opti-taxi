@@ -27,8 +27,8 @@ const STATE_TONES: Record<WorkState, BadgeTone> = { expired: "danger", expiring:
 function stateLabel(item: WorkItem, today: string): string {
   if (item.state === "renewed") {
     return item.renewal && item.renewal.validFrom > today
-      ? `Renouvelée à partir du ${formatShortDate(item.renewal.validFrom)} : à rattacher`
-      : "Renouvelée : à rattacher";
+      ? `Renouvelée à partir du ${formatShortDate(item.renewal.validFrom)}\u00a0: à rattacher`
+      : "Renouvelée\u00a0: à rattacher";
   }
   if (item.state === "expired") return `Expirée le ${formatShortDate(item.prescription.validTo)}`;
   if (item.daysLeft === 0) return "Expire aujourd'hui";
@@ -39,9 +39,9 @@ function consequence(item: WorkItem): string {
   if (item.state === "renewed" && item.renewal) {
     const gap = item.uncovered ? ` ${capitalize(uncoveredText(item.uncovered))}.` : "";
     const which = item.recurrences.length > 1 ? "les récurrences" : "la récurrence";
-    return `Les courses continuent sur le renouvellement (${formatShortDate(item.renewal.validFrom)} → ${formatShortDate(item.renewal.validTo)}) ; rattachez-y ${which}.${gap}`;
+    return `Les courses continuent sur le renouvellement (${formatShortDate(item.renewal.validFrom)} → ${formatShortDate(item.renewal.validTo)})\u202f; rattachez-y ${which}.${gap}`;
   }
-  if (item.state === "expired") return "Plus aucune course n'est créée : saisissez la nouvelle PMT.";
+  if (item.state === "expired") return "Plus aucune course n'est créée\u00a0: saisissez la nouvelle PMT.";
   return `Plus de course après le ${formatShortDate(item.prescription.validTo)} sans nouvelle PMT.`;
 }
 
@@ -53,7 +53,7 @@ function describe(items: readonly WorkItem[]): string {
     counts.expiring > 0 ? `${counts.expiring} expirant sous ${EXPIRY_WARNING_DAYS} jours` : null,
     counts.renewed > 0 ? `${counts.renewed} renouvellement${counts.renewed > 1 ? "s" : ""} à rattacher` : null,
   ].filter(Boolean);
-  return `${items.length} prescription${items.length > 1 ? "s" : ""} à traiter : ${parts.join(", ")}.`;
+  return `${items.length} prescription${items.length > 1 ? "s" : ""} à traiter\u00a0: ${parts.join(", ")}.`;
 }
 
 /**
@@ -75,7 +75,7 @@ export default async function PrescriptionsPage() {
       <PageHeader title="Prescriptions à traiter" description={describe(items)} />
       <p className="mb-4 max-w-3xl text-sm text-slate-600">
         Prescriptions dont dépend une récurrence active et qui expirent sous {EXPIRY_WARNING_DAYS} jours, ou ont expiré,
-        alors que la récurrence continue. Sans PMT valide, un patient régulier n&apos;a plus de course : saisissez le
+        alors que la récurrence continue. Sans PMT valide, un patient régulier n&apos;a plus de course&nbsp;: saisissez le
         renouvellement depuis sa fiche, puis rattachez-y ses récurrences.
       </p>
 
@@ -141,7 +141,7 @@ export default async function PrescriptionsPage() {
                           toPrescriptionId: item.renewal.id,
                         }}
                         confirm={{
-                          question: `Rattacher ${item.recurrences.length > 1 ? "les récurrences" : "la récurrence"} de ${item.patient.name} à la prescription du ${formatShortDate(item.renewal.validFrom)} au ${formatShortDate(item.renewal.validTo)} ?`,
+                          question: `Rattacher ${item.recurrences.length > 1 ? "les récurrences" : "la récurrence"} de ${item.patient.name} à la prescription du ${formatShortDate(item.renewal.validFrom)} au ${formatShortDate(item.renewal.validTo)}\u202f?`,
                           confirmLabel: "Oui, rattacher",
                           tone: "primary",
                         }}

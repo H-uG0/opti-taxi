@@ -18,9 +18,9 @@ export function logoutQuestion(pending: number): string {
   const many = pending > 1;
   return (
     // Non-breaking spaces before « : » and « ? » (French typography).
-    `${pending} statut${many ? "s" : ""} pas encore envoyé${many ? "s" : ""} au serveur : ` +
+    `${pending} statut${many ? "s" : ""} pas encore envoyé${many ? "s" : ""} au serveur\u00a0: ` +
     `${many ? "ils partiront" : "il partira"} seulement à votre prochaine connexion sur ce téléphone, ` +
-    `s'il${many ? "s ont" : " a"} moins de 3 h. Se déconnecter quand même ?`
+    `s'il${many ? "s ont" : " a"} moins de 3\u00a0h. Se déconnecter quand même\u00a0?`
   );
 }
 

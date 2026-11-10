@@ -112,7 +112,7 @@ describe("recurrenceCoverageNotice (patient page)", () => {
   it("warns when the PMT ends soon and the recurrence runs past it", () => {
     expect(recurrenceCoverageNotice({ startDate: "2026-05-01", endDate: null }, endingPmt, TODAY)).toEqual({
       tone: "warning",
-      text: "Expire dans 8 j (10/11/2026) : sans renouvellement, plus de course après cette date.",
+      text: "Expire dans 8 j (10/11/2026)\u00a0: sans renouvellement, plus de course après cette date.",
     });
     expect(
       recurrenceCoverageNotice({ startDate: "2026-05-01", endDate: "2026-11-06" }, endingPmt, TODAY),
@@ -123,7 +123,7 @@ describe("recurrenceCoverageNotice (patient page)", () => {
     const notice = recurrenceCoverageNotice({ startDate: "2026-05-01", endDate: null }, endingPmt, TODAY, renewal);
     expect(notice?.tone).toBe("info");
     expect(notice?.text).toBe(
-      "PMT renouvelée (11/11/2026 → 10/05/2027) : les courses continuent dessus ; rattachez-y la récurrence.",
+      "PMT renouvelée (11/11/2026 → 10/05/2027)\u00a0: les courses continuent dessus\u202f; rattachez-y la récurrence.",
     );
   });
 
@@ -139,7 +139,7 @@ describe("recurrenceCoverageNotice (patient page)", () => {
   it("warns when the PMT only starts later", () => {
     expect(
       recurrenceCoverageNotice({ startDate: "2026-11-02", endDate: null }, { validFrom: "2026-11-16", validTo: "2027-05-15" }, TODAY),
-    ).toEqual({ tone: "warning", text: "La PMT ne commence que le 16/11/2026 : pas de course avant cette date." });
+    ).toEqual({ tone: "warning", text: "La PMT ne commence que le 16/11/2026\u00a0: pas de course avant cette date." });
   });
 
   it("stays silent before a renewal attached early, while the PMT it renews covers the days before", () => {
@@ -150,7 +150,7 @@ describe("recurrenceCoverageNotice (patient page)", () => {
       recurrenceCoverageNotice({ startDate: "2026-05-01", endDate: null }, { ...early, validFrom: "2026-11-13" }, TODAY, null, endingPmt),
     ).toEqual({
       tone: "warning",
-      text: "Courses sur la PMT précédente jusqu'au 10/11/2026, puis aucune PMT du 11/11/2026 au 12/11/2026 : pas de course ces jours-là.",
+      text: "Courses sur la PMT précédente jusqu'au 10/11/2026, puis aucune PMT du 11/11/2026 au 12/11/2026\u00a0: pas de course ces jours-là.",
     });
   });
 
@@ -161,7 +161,7 @@ describe("recurrenceCoverageNotice (patient page)", () => {
     });
     expect(notice).toEqual({
       tone: "warning",
-      text: "PMT renouvelée (14/11/2026 → 13/05/2027) : les courses continuent dessus ; rattachez-y la récurrence. Aucune PMT du 11/11/2026 au 13/11/2026 : pas de course ces jours-là.",
+      text: "PMT renouvelée (14/11/2026 → 13/05/2027)\u00a0: les courses continuent dessus\u202f; rattachez-y la récurrence. Aucune PMT du 11/11/2026 au 13/11/2026\u00a0: pas de course ces jours-là.",
     });
   });
 
@@ -181,7 +181,7 @@ describe("recurrenceFormNotices (recurrence form)", () => {
     expect(recurrenceFormNotices({ startDate: "2026-11-02", endDate: null }, prescription, TODAY)).toEqual([
       {
         tone: "info",
-        text: "Courses générées jusqu'au 28/02/2027 (fin de la prescription) ; pour la suite, saisissez le renouvellement : les courses continueront dessus.",
+        text: "Courses générées jusqu'au 28/02/2027 (fin de la prescription)\u202f; pour la suite, saisissez le renouvellement\u00a0: les courses continueront dessus.",
       },
     ]);
   });
@@ -191,7 +191,7 @@ describe("recurrenceFormNotices (recurrence form)", () => {
     expect(recurrenceFormNotices({ startDate: "2026-11-02", endDate: "2027-01-31" }, upcoming, TODAY)).toEqual([
       {
         tone: "warning",
-        text: "La prescription ne commence que le 20/11/2026 : aucune course ne sera générée avant cette date.",
+        text: "La prescription ne commence que le 20/11/2026\u00a0: aucune course ne sera générée avant cette date.",
       },
     ]);
     expect(recurrenceFormNotices({ startDate: "2026-01-05", endDate: "2027-01-31" }, prescription, TODAY)).toEqual([]);
@@ -214,7 +214,7 @@ describe("recurrenceFormNotices (recurrence form)", () => {
     expect(recurrenceFormNotices({ startDate: "2026-11-02", endDate: null }, expired, TODAY)).toEqual([
       {
         tone: "warning",
-        text: "Cette prescription a expiré le 31/10/2026 ; les courses continuent sur son renouvellement (04/11/2026 → 03/05/2027) ; aucune PMT du 02/11/2026 au 03/11/2026 : pas de course ces jours-là.",
+        text: "Cette prescription a expiré le 31/10/2026\u202f; les courses continuent sur son renouvellement (04/11/2026 → 03/05/2027)\u202f; aucune PMT du 02/11/2026 au 03/11/2026\u00a0: pas de course ces jours-là.",
       },
     ]);
   });
@@ -268,9 +268,9 @@ describe("renewals", () => {
     expect(uncoveredDays("2026-11-01", "2026-11-02", TODAY)).toBeNull();
     expect(uncoveredDays("2026-10-01", "2026-10-05", TODAY)).toBeNull();
     expect(uncoveredText({ from: "2026-11-02", to: "2026-11-04" })).toBe(
-      "aucune PMT du 02/11/2026 au 04/11/2026 : pas de course ces jours-là",
+      "aucune PMT du 02/11/2026 au 04/11/2026\u00a0: pas de course ces jours-là",
     );
-    expect(uncoveredText({ from: "2026-11-04", to: "2026-11-04" })).toBe("aucune PMT le 04/11/2026 : pas de course ce jour-là");
+    expect(uncoveredText({ from: "2026-11-04", to: "2026-11-04" })).toBe("aucune PMT le 04/11/2026\u00a0: pas de course ce jour-là");
   });
 
   it("drops the red badge once renewed", () => {
@@ -285,7 +285,7 @@ describe("recurrence summary", () => {
     expect(formatWeekdays([7, 0, 8])).toBe("Dim");
   });
 
-  it("formats « Lun Mer Ven 07:30 — Dialyse »", () => {
+  it("formats «\u202fLun Mer Ven 07:30 — Dialyse\u202f»", () => {
     expect(formatRecurrenceSummary({ weekdays: [1, 3, 5], appointmentMinute: 450, label: "Dialyse" })).toBe(
       "Lun Mer Ven 07:30 — Dialyse",
     );

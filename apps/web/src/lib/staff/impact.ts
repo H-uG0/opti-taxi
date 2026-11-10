@@ -46,19 +46,19 @@ export function staffImpactNotice(impact: StaffImpact, subject: ImpactSubject): 
   const proposed = dateList(of("proposed"));
   if (proposed.text) {
     parts.push(
-      `Tournées déjà calculées ${withWhom} le${proposed.many ? "s" : ""} ${proposed.text} : relancez l'optimisation de ${proposed.many ? "ces jours" : "ce jour"} depuis le planning.`,
+      `Tournées déjà calculées ${withWhom} le${proposed.many ? "s" : ""} ${proposed.text}\u00a0: relancez l'optimisation de ${proposed.many ? "ces jours" : "ce jour"} depuis le planning.`,
     );
   }
   const validated = dateList(of("validated"));
   if (validated.text) {
     parts.push(
-      `Planning déjà validé le${validated.many ? "s" : ""} ${validated.text} : changez l'équipage de la tournée (planning, panneau du véhicule, « Changer l'équipage ») ou rouvrez le planning puis relancez l'optimisation.`,
+      `Planning déjà validé le${validated.many ? "s" : ""} ${validated.text}\u00a0: changez l'équipage de la tournée (planning, panneau du véhicule, «\u202fChanger l'équipage\u202f») ou rouvrez le planning puis relancez l'optimisation.`,
     );
   }
   const started = dateList(of("started"));
   if (started.text) {
     parts.push(
-      `Journée commencée le${started.many ? "s" : ""} ${started.text} : changez l'équipage de la tournée (planning, panneau du véhicule, « Changer l'équipage »).`,
+      `Journée commencée le${started.many ? "s" : ""} ${started.text}\u00a0: changez l'équipage de la tournée (planning, panneau du véhicule, «\u202fChanger l'équipage\u202f»).`,
     );
   }
   if (impact.fixed.length > 0) {
@@ -67,8 +67,8 @@ export function staffImpactNotice(impact: StaffImpact, subject: ImpactSubject): 
     const many = impact.fixed.length > 1;
     parts.push(
       subject === "pair"
-        ? `Équipage${many ? "s" : ""} fixé${many ? "s" : ""} à revoir sur la page Équipages, ces deux personnes y sont ensemble : ${text}.`
-        : `Équipage${many ? "s" : ""} fixé${many ? "s" : ""} avec cette personne : ${text} ; ${many ? "ses postes sont" : "son poste est"} à remplacer, voir la page Équipages.`,
+        ? `Équipage${many ? "s" : ""} fixé${many ? "s" : ""} à revoir sur la page Équipages, ces deux personnes y sont ensemble\u00a0: ${text}.`
+        : `Équipage${many ? "s" : ""} fixé${many ? "s" : ""} avec cette personne\u00a0: ${text}\u202f; ${many ? "ses postes sont" : "son poste est"} à remplacer, voir la page Équipages.`,
     );
   }
   return parts.length > 0 ? ` ${parts.join(" ")}` : "";

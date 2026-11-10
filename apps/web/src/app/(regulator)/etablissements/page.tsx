@@ -122,7 +122,7 @@ export default async function FacilitiesPage({
         >
           {filtered
             ? "Modifiez la recherche ou les filtres."
-            : "Centres de dialyse, hôpitaux, centres de radiothérapie… : les destinations des courses."}
+            : "Centres de dialyse, hôpitaux, centres de radiothérapie…\u00a0: les destinations des courses."}
         </EmptyState>
       ) : (
         <Table>

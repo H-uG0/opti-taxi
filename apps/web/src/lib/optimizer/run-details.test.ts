@@ -86,14 +86,14 @@ describe("replanning guard details", () => {
   it("keeps the kind, comparison, previous routes, question and lock change through the database", () => {
     const undrivable = { ...comparison, undrivable: { vehicles: ["Taxi 2"], trips: 8 } };
     const details = throughDatabase(
-      runDetailsJson(response, { kind: "move", comparison: undrivable, previous, question: "Remplacer ?", lockChange }),
+      runDetailsJson(response, { kind: "move", comparison: undrivable, previous, question: "Remplacer\u202f?", lockChange }),
     );
     expect(readRunDetails({ id: "run_1", details, kpis: null })).toEqual({
       ...expected,
       kind: "move",
       comparison: undrivable,
       previous,
-      question: "Remplacer ?",
+      question: "Remplacer\u202f?",
       lockChange,
     });
   });

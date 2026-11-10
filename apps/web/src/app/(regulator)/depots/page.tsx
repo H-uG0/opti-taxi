@@ -68,7 +68,7 @@ export default async function DepotsPage({
             </LinkButton>
           }
         >
-          Ajoutez les dépôts de la société : chaque véhicule part de son dépôt et y revient.
+          Ajoutez les dépôts de la société&nbsp;: chaque véhicule part de son dépôt et y revient.
         </EmptyState>
       ) : (
         <Table>

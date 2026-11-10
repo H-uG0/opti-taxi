@@ -45,7 +45,7 @@ import {
 import { SYNC_TX_OPTIONS, syncOpenTrips } from "./_lib/trip-sync-db";
 import { formatPersonName } from "@/lib/names";
 
-const NOT_FOUND = "Fiche introuvable : elle a peut-être été supprimée. Rechargez la page.";
+const NOT_FOUND = "Fiche introuvable\u00a0: elle a peut-être été supprimée. Rechargez la page.";
 
 /** Patient pages are rendered per request; this refreshes the router cache of every /patients page. */
 function revalidatePatients() {
@@ -142,8 +142,8 @@ async function todayStillCancelled(tx: Prisma.TransactionClient, where: Prisma.T
 function todayCancelledNote(count: number): string {
   if (count === 0) return "";
   return count === 1
-    ? " 1 course d'aujourd'hui reste annulée (celles du jour ne reviennent pas d'elles-mêmes) : rétablissez-la dans Courses si le transport a lieu."
-    : ` ${count} courses d'aujourd'hui restent annulées (celles du jour ne reviennent pas d'elles-mêmes) : rétablissez-les dans Courses si les transports ont lieu.`;
+    ? " 1 course d'aujourd'hui reste annulée (celles du jour ne reviennent pas d'elles-mêmes)\u00a0: rétablissez-la dans Courses si le transport a lieu."
+    : ` ${count} courses d'aujourd'hui restent annulées (celles du jour ne reviennent pas d'elles-mêmes)\u00a0: rétablissez-les dans Courses si les transports ont lieu.`;
 }
 
 /** " 3 séances sans prescription valide : voir Prescriptions." when the horizon has sessions no prescription covers. */
@@ -151,8 +151,8 @@ function skippedNote(completion: Completion): string {
   const sessions = completion.skipped.reduce((sum, r) => sum + r.dates.length, 0);
   if (sessions === 0) return "";
   return sessions === 1
-    ? " 1 séance à venir n'a pas de prescription valide : aucune course ce jour-là (voir Prescriptions)."
-    : ` ${sessions} séances à venir n'ont pas de prescription valide : aucune course ces jours-là (voir Prescriptions).`;
+    ? " 1 séance à venir n'a pas de prescription valide\u00a0: aucune course ce jour-là (voir Prescriptions)."
+    : ` ${sessions} séances à venir n'ont pas de prescription valide\u00a0: aucune course ces jours-là (voir Prescriptions).`;
 }
 
 // ---------------------------------------------------------------- patient
@@ -181,8 +181,8 @@ export async function createPatient(_prev: PatientFormState, formData: FormData)
       return {
         ...messageState(
           similar.length === 1
-            ? "Une fiche proche existe déjà : vérifiez qu'il ne s'agit pas du même patient."
-            : `${similar.length} fiches proches existent déjà : vérifiez qu'il ne s'agit pas du même patient.`,
+            ? "Une fiche proche existe déjà\u00a0: vérifiez qu'il ne s'agit pas du même patient."
+            : `${similar.length} fiches proches existent déjà\u00a0: vérifiez qu'il ne s'agit pas du même patient.`,
           readPatientForm(formData).values,
         ),
         similar: similar.slice(0, 10).map(({ patient, reasons }) => ({
@@ -422,12 +422,12 @@ export async function deletePrescription(_prev: ActionResult, formData: FormData
   if (recurrences > 0) {
     return {
       ok: false,
-      message: `Suppression impossible : ${recurrences === 1 ? "1 récurrence utilise" : `${recurrences} récurrences utilisent`} cette prescription. Rattachez-les à une autre prescription ou modifiez les dates de validité.`,
+      message: `Suppression impossible\u00a0: ${recurrences === 1 ? "1 récurrence utilise" : `${recurrences} récurrences utilisent`} cette prescription. Rattachez-les à une autre prescription ou modifiez les dates de validité.`,
     };
   }
   return {
     ok: false,
-    message: `Suppression impossible : ${trips === 1 ? "1 course est rattachée" : `${trips} courses sont rattachées`} à cette prescription (historique). Modifiez plutôt ses dates de validité.`,
+    message: `Suppression impossible\u00a0: ${trips === 1 ? "1 course est rattachée" : `${trips} courses sont rattachées`} à cette prescription (historique). Modifiez plutôt ses dates de validité.`,
   };
 }
 
@@ -463,7 +463,7 @@ export async function attachRecurrencesToRenewal(_prev: ActionResult, formData: 
     return {
       ok: false,
       message:
-        `Cette prescription ne prend pas la suite de l'autre (même mode, commence après elle, finit plus tard et prend le relais au plus tard ${RENEWAL_MAX_GAP_DAYS} jours après sa fin) : modifiez les récurrences une à une.`,
+        `Cette prescription ne prend pas la suite de l'autre (même mode, commence après elle, finit plus tard et prend le relais au plus tard ${RENEWAL_MAX_GAP_DAYS} jours après sa fin)\u00a0: modifiez les récurrences une à une.`,
     };
   }
 
@@ -729,7 +729,7 @@ export async function setRecurrenceActive(_prev: ActionResult, formData: FormDat
   if (active && !recurrence.facility.active) {
     return {
       ok: false,
-      message: `Réactivation impossible : l'établissement « ${recurrence.facility.name} » est désactivé. Modifiez d'abord la récurrence.`,
+      message: `Réactivation impossible\u00a0: l'établissement «\u202f${recurrence.facility.name}\u202f» est désactivé. Modifiez d'abord la récurrence.`,
     };
   }
 

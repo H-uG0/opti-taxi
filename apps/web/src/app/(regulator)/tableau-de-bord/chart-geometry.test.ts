@@ -78,14 +78,14 @@ describe("describeSeries", () => {
       date,
     );
     expect(text).toBe(
-      "Courses, du 11-01 au 11-04 : 3 jours renseignés ; minimum 3.0 le 11-01, maximum 5.0 le 11-02, dernière valeur 4.0 le 11-03.",
+      "Courses, du 11-01 au 11-04\u00a0: 3 jours renseignés\u202f; minimum 3.0 le 11-01, maximum 5.0 le 11-02, dernière valeur 4.0 le 11-03.",
     );
   });
 
   it("says when there is no data", () => {
-    expect(describeSeries("Courses", [], fmt, date)).toBe("Courses : aucune donnée.");
+    expect(describeSeries("Courses", [], fmt, date)).toBe("Courses\u00a0: aucune donnée.");
     expect(describeSeries("Courses", [{ date: "2026-11-01", value: null }], fmt, date)).toBe(
-      "Courses, du 11-01 au 11-01 : aucune donnée.",
+      "Courses, du 11-01 au 11-01\u00a0: aucune donnée.",
     );
   });
 });

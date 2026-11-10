@@ -178,7 +178,7 @@ describe("POST /api/chauffeur/stops/:id/status", () => {
     expect(fake.db.$transaction).not.toHaveBeenCalled();
   });
 
-  it("refuses a status tapped more than 3 h ago, and writes nothing", async () => {
+  it("refuses a status tapped more than 3\u00a0h ago, and writes nothing", async () => {
     stops([pickup()], "s_pick");
     const { status, body } = await answer(
       await post("s_pick", { action: "PICKUP", observedAt: NOW.getTime() - 3 * 60 * MIN - MIN, sentAt: NOW.getTime() }),
@@ -253,7 +253,7 @@ describe("POST /api/chauffeur/stops/:id/status", () => {
     stops([pickup("CANCELLED")], "s_pick");
     const { status, body } = await answer(await post("s_pick", { action: "PICKUP", observedAt: NOW.getTime() }));
     expect(status).toBe(409);
-    expect(body).toMatchObject({ ok: false, code: "refused", error: "Course annulée par la régulation : statut non modifiable." });
+    expect(body).toMatchObject({ ok: false, code: "refused", error: "Course annulée par la régulation\u00a0: statut non modifiable." });
     expect(fake.db.$transaction).not.toHaveBeenCalled();
   });
 

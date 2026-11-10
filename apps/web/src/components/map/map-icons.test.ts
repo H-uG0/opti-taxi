@@ -19,7 +19,7 @@ describe("map marker images", () => {
     expect(pixelAt(icon, 16, 2).slice(0, 3)).toEqual([180, 83, 9]);
   });
 
-  it("draws a warning sign: amber triangle, dark « ! »", () => {
+  it("draws a warning sign: amber triangle, dark «\u202f!\u202f»", () => {
     const icon = warningIcon(36);
     expect(pixelAt(icon, 18, 16).slice(0, 3)).toEqual([15, 23, 42]); // the bar of the « ! »
     expect(pixelAt(icon, 12, 26).slice(0, 3)).toEqual([251, 191, 36]); // amber inside

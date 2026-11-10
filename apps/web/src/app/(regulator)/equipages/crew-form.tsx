@@ -209,7 +209,7 @@ function CrewFormBody({
   const leaveMessage =
     dirty.size === 0
       ? null
-      : `${dirty.size > 1 ? `Les ${dirty.size} modifications` : "La modification"} des équipages du ${formatShortDate(date)} ${dirty.size > 1 ? "ne sont pas enregistrées : elles seront perdues" : "n'est pas enregistrée : elle sera perdue"} si vous quittez la page.`;
+      : `${dirty.size > 1 ? `Les ${dirty.size} modifications` : "La modification"} des équipages du ${formatShortDate(date)} ${dirty.size > 1 ? "ne sont pas enregistrées\u00a0: elles seront perdues" : "n'est pas enregistrée\u00a0: elle sera perdue"} si vous quittez la page.`;
 
   const setSeat = (vehicleId: string, seat: Seat, value: string) =>
     setValues((previous) => {
@@ -348,7 +348,7 @@ function CrewFormBody({
                             ) : null}
                             {row.shift ? (
                               <p className="tabular mt-1 text-xs text-slate-600 min-[1440px]:hidden">
-                                <span className="sr-only">Horaire : </span>
+                                <span className="sr-only">Horaire&nbsp;: </span>
                                 {shiftText(row.shift)}
                               </p>
                             ) : null}
@@ -425,7 +425,7 @@ function CrewFormBody({
                                 className="-ml-2.5 text-xs whitespace-nowrap"
                                 // Submitting it would drop the other rows' changes: save them first (said in the bar).
                                 disabled={dirty.size > 0}
-                                title="Oublier l'équipage fixé de ce véhicule : il reprend la proposition automatique"
+                                title="Oublier l'équipage fixé de ce véhicule&nbsp;: il reprend la proposition automatique"
                               >
                                 <Undo2 aria-hidden className="size-3.5" />
                                 Revenir à la proposition
@@ -465,7 +465,7 @@ function CrewFormBody({
             {message ? <FormMessage tone={message.tone}>{message.text}</FormMessage> : null}
             {errorRows.length > 0 ? (
               <p className="text-sm text-red-800">
-                À corriger :{" "}
+                À corriger&nbsp;:{" "}
                 {errorRows.map((row, i) => (
                   <span key={row.vehicleId}>
                     {i > 0 ? ", " : null}
@@ -488,7 +488,7 @@ function CrewFormBody({
                 }}
               >
                 <p className="mr-auto max-w-3xl text-sm text-slate-800">
-                  Revenir aux propositions automatiques pour tout le {formatShortDate(date)} ?{" "}
+                  Revenir aux propositions automatiques pour tout le {formatShortDate(date)}&#x202F;?{" "}
                   {many ? `Les ${fixedRows.length} équipages fixés` : "L'équipage fixé"}
                   {by} {many ? "seront oubliés" : "sera oublié"}.
                   {dirty.size > 0 ? " Vos modifications non enregistrées seront perdues." : ""} Un équipage qu&apos;un collègue a fixé
@@ -514,12 +514,12 @@ function CrewFormBody({
                     <p className="text-sm font-medium text-amber-800">
                       {dirty.size > 1 ? `${dirty.size} modifications non enregistrées` : "1 modification non enregistrée"}
                       {fixedRows.length > 0 || rows.some(canFix)
-                        ? " : enregistrez-les (ou rechargez la page pour les abandonner) avant « Revenir à la proposition » ou « Fixer cette proposition »."
+                        ? "\u00a0: enregistrez-les (ou rechargez la page pour les abandonner) avant «\u202fRevenir à la proposition\u202f» ou «\u202fFixer cette proposition\u202f»."
                         : "."}
                     </p>
                   ) : (
                     <p>
-                      Seules les lignes modifiées sont enregistrées et deviennent des équipages fixés : l&apos;optimisation les
+                      Seules les lignes modifiées sont enregistrées et deviennent des équipages fixés&nbsp;: l&apos;optimisation les
                       utilise tels quels, et propose un remplaçant si une personne fixée devient absente. Les autres lignes restent
                       des propositions qui suivent les absences.
                     </p>
@@ -610,7 +610,7 @@ function DepotHeader({ summary }: { summary: DepotSummary }) {
         {summary.missing > 0 ? <span className="font-medium text-red-700"> · {summary.missing} manquant{summary.missing > 1 ? "s" : ""}</span> : null}
       </span>
       <span className="ml-2 text-slate-500">
-        · {free.length === 0 ? "aucun libre" : `${free.length} libre${free.length > 1 ? "s" : ""} : `}
+        · {free.length === 0 ? "aucun libre" : `${free.length} libre${free.length > 1 ? "s" : ""}\u00a0: `}
         {free.slice(0, 8).map((p, i) => (
           <span key={p.id}>
             {i > 0 ? ", " : null}

@@ -208,17 +208,17 @@ export type RestoreCheck = {
 
 /** Why a cancelled trip cannot be restored, or null. */
 export function restoreBlocker(trip: RestoreCheck, todayIso: string): string | null {
-  if (trip.serviceDate < todayIso) return "Date passée : une course d'un jour passé ne se rétablit pas.";
+  if (trip.serviceDate < todayIso) return "Date passée\u00a0: une course d'un jour passé ne se rétablit pas.";
   if (!trip.patientActive) {
-    return "Le patient est désactivé : réactivez-le d'abord ; ses courses à partir de demain reviennent alors d'elles-mêmes, celles d'aujourd'hui se rétablissent ici.";
+    return "Le patient est désactivé\u00a0: réactivez-le d'abord\u202f; ses courses à partir de demain reviennent alors d'elles-mêmes, celles d'aujourd'hui se rétablissent ici.";
   }
   if (trip.recurrenceActive === false) {
-    return "La récurrence de cette course est désactivée : réactivez-la d'abord ; ses courses à partir de demain reviennent alors d'elles-mêmes, celles d'aujourd'hui se rétablissent ici.";
+    return "La récurrence de cette course est désactivée\u00a0: réactivez-la d'abord\u202f; ses courses à partir de demain reviennent alors d'elles-mêmes, celles d'aujourd'hui se rétablissent ici.";
   }
   if (trip.payer === "CPAM") {
     const p = trip.prescription;
     if (!p || trip.serviceDate < p.validFrom || trip.serviceDate > p.validTo) {
-      return "Aucune prescription valide à cette date pour cette course CPAM : saisissez ou corrigez la PMT du patient d'abord.";
+      return "Aucune prescription valide à cette date pour cette course CPAM\u00a0: saisissez ou corrigez la PMT du patient d'abord.";
     }
   }
   return null;

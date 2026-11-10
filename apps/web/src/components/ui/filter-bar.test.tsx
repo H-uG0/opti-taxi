@@ -56,7 +56,7 @@ describe("FilterBar (navigate)", () => {
     expect(router.push).toHaveBeenLastCalledWith("/vehicules?date=2026-11-11&type=TAXI&etat=a-traiter", { scroll: false });
   });
 
-  it("applies the search field on « Filtrer » only", () => {
+  it("applies the search field on «\u202fFiltrer\u202f» only", () => {
     render(<Bar />);
     fireEvent.change(screen.getByLabelText("Rechercher"), { target: { value: " taxi 12 " } });
     expect(router.push).not.toHaveBeenCalled();
@@ -64,7 +64,7 @@ describe("FilterBar (navigate)", () => {
     expect(router.push).toHaveBeenLastCalledWith("/vehicules?date=2026-11-11&q=taxi+12", { scroll: false });
   });
 
-  it("offers « Réinitialiser » once filtered, and the fields follow the address", () => {
+  it("offers «\u202fRéinitialiser\u202f» once filtered, and the fields follow the address", () => {
     const { rerender } = render(<Bar />);
     expect(screen.queryByRole("link", { name: "Réinitialiser" })).toBeNull();
     search.params = new URLSearchParams("type=TAXI&statut=tous&q=gap");

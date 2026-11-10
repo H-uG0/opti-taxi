@@ -2,7 +2,7 @@
 
 export const VEHICLE_TYPE_LABELS = {
   TAXI: "Taxi",
-  VSL: "VSL (« ambulance »)",
+  VSL: "VSL («\u202fambulance\u202f»)",
   AMBULANCE: "Ambulance (couché)",
 } as const;
 
@@ -167,7 +167,7 @@ export function formatEuros(value: number | null | undefined): string {
 
 export function formatKm(value: number | null | undefined, digits = 1): string {
   if (value === null || value === undefined) return "—";
-  return `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(value)} km`;
+  return `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(value)}\u00a0km`;
 }
 
 export function formatPercent(value: number | null | undefined, digits = 0): string {

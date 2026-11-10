@@ -59,8 +59,8 @@ describe("tariff gaps", () => {
   ];
 
   it("lists each zone with its vehicles, and a short note for the optimization message", () => {
-    expect(tariffGapList(gaps)).toBe("VSL 04 — VSL 2, VSL 5 ; Taxi 05 — Taxi 9");
-    expect(tariffGapNote(gaps)).toBe("sans grille tarifaire : VSL 04, Taxi 05 (CA estimé à 0 €)");
+    expect(tariffGapList(gaps)).toBe("VSL 04 — VSL 2, VSL 5\u202f; Taxi 05 — Taxi 9");
+    expect(tariffGapNote(gaps)).toBe("sans grille tarifaire\u00a0: VSL 04, Taxi 05 (CA estimé à 0\u00a0€)");
     expect(tariffGapNote([])).toBe("");
   });
 });

@@ -33,7 +33,7 @@ function person(id: string, depotId: string, overrides: Partial<CrewPersonOption
 
 describe("parseCrewFilter", () => {
   const depots = new Set(["gap", "aix"]);
-  it("reads the depot (the first of a planning link) and « à traiter »", () => {
+  it("reads the depot (the first of a planning link) and «\u202fà traiter\u202f»", () => {
     expect(parseCrewFilter(new URLSearchParams("depot=gap&etat=a-traiter"), depots)).toEqual({ depot: "gap", toHandle: true });
     expect(parseCrewFilter({ depot: "aix,gap", etat: "libre,a-traiter" }, depots)).toEqual({ depot: "aix", toHandle: true });
     expect(parseCrewFilter({ depot: "old" }, depots)).toEqual({ depot: null, toHandle: false });

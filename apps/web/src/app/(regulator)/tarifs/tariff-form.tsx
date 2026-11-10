@@ -88,7 +88,7 @@ function Preview({ grid }: { grid: FareGrid | null }) {
   if (!grid) {
     return (
       <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" aria-live="polite">
-        <p className="font-medium text-slate-800">Aperçu pour {PREVIEW_KM} km</p>
+        <p className="font-medium text-slate-800">Aperçu pour {PREVIEW_KM}&nbsp;km</p>
         <p className="mt-1">Renseignez le forfait, le prix au km et les majorations.</p>
       </div>
     );
@@ -100,7 +100,7 @@ function Preview({ grid }: { grid: FareGrid | null }) {
   const shared = Array.from({ length: Math.max(0, Math.min(grid.maxSharedPatients, 4) - 1) }, (_, i) => i + 2);
   return (
     <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" aria-live="polite">
-      <p className="font-medium text-slate-800">Aperçu pour {PREVIEW_KM} km, un mardi</p>
+      <p className="font-medium text-slate-800">Aperçu pour {PREVIEW_KM}&nbsp;km, un mardi</p>
       <dl className="tabular mt-1 grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5">
         <dt>Seul, de jour</dt>
         <dd className="text-right font-medium text-slate-900">{formatEuros(fare(1, 600))}</dd>
@@ -151,7 +151,7 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
           <Field
             label="Département"
             htmlFor="department"
-            hint="Taxi : département de l'ADS. VSL non certifié : celui du siège. * pour toutes les zones."
+            hint="Taxi&nbsp;: département de l'ADS. VSL non certifié&nbsp;: celui du siège. * pour toutes les zones."
             error={errors.department}
           >
             <Input
@@ -188,7 +188,7 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
               ))}
             </Select>
           </Field>
-          <Field label="Zone VSL (facultatif)" htmlFor="zone" hint="A, B, C ou D : pour l'affichage." error={errors.zone}>
+          <Field label="Zone VSL (facultatif)" htmlFor="zone" hint="A, B, C ou D&nbsp;: pour l'affichage." error={errors.zone}>
             <Input
               id="zone"
               name="zone"
@@ -202,7 +202,7 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
           <Field
             label="Libellé (facultatif)"
             htmlFor="label"
-            hint="Ex. « Taxi conventionné — Bouches-du-Rhône »."
+            hint="Ex. «&#x202F;Taxi conventionné — Bouches-du-Rhône&#x202F;»."
             error={errors.label}
             className="sm:col-span-2 lg:col-span-4"
           >
@@ -216,16 +216,16 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
           <Fieldset legend="Forfaits et kilomètres">
             <div className="grid gap-4 sm:grid-cols-3">
               <Amount name="baseFare" label="Forfait départemental" unit="€" values={values} errors={errors} required hint="Facturé une fois par patient et par trajet." />
-              <Amount name="includedKm" label="Km inclus dans le forfait" unit="km" values={values} errors={errors} hint="Taxi : 4 ; VSL et ambulance : 3." />
+              <Amount name="includedKm" label="Km inclus dans le forfait" unit="km" values={values} errors={errors} hint="Taxi&nbsp;: 4&#x202F;; VSL et ambulance&nbsp;: 3." />
               <Amount name="pricePerKm" label="Prix au kilomètre" unit="€/km" values={values} errors={errors} required />
-              <Amount name="bigCityFare" label="Forfait « Grande ville » (facultatif)" unit="€" values={values} errors={errors} hint="Taxi : ajouté au forfait (zones Grande ville)." />
+              <Amount name="bigCityFare" label="Forfait «&#x202F;Grande ville&#x202F;» (facultatif)" unit="€" values={values} errors={errors} hint="Taxi&nbsp;: ajouté au forfait (zones Grande ville)." />
               <Amount
                 name="aggloFare"
                 label="Forfait agglomération (facultatif)"
                 unit="€"
                 values={values}
                 errors={errors}
-                hint="Ambulance : remplace le forfait dans l'agglomération du siège."
+                hint="Ambulance&nbsp;: remplace le forfait dans l'agglomération du siège."
               />
               <Amount name="tpmrFare" label="Supplément TPMR (facultatif)" unit="€" values={values} errors={errors} hint="Patient dans son fauteuil, véhicule équipé." />
             </div>
@@ -235,7 +235,7 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
             <Field
               label="Tranches (facultatif)"
               htmlFor="shortTripBands"
-              hint="Une tranche par ligne (50 au plus), « km au plus : montant », ex. « 7 : 8,54 », jusqu'à 1 000 km et 1 000 €. Ajoutée au forfait selon les km facturés."
+              hint="Une tranche par ligne (50 au plus), «&#x202F;km au plus&nbsp;: montant&#x202F;», ex. «&#x202F;7&nbsp;: 8,54&#x202F;», jusqu'à 1 000&nbsp;km et 1 000&nbsp;€. Ajoutée au forfait selon les km facturés."
               error={errors.shortTripBands}
             >
               <Textarea
@@ -251,7 +251,7 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
 
           <Fieldset legend="Majorations">
             <p className="text-xs text-slate-500">
-              Jamais cumulées : la plus forte s&apos;applique. Nuit : plus de la moitié du temps en charge dans la plage. Week-end : prise
+              Jamais cumulées&nbsp;: la plus forte s&apos;applique. Nuit&nbsp;: plus de la moitié du temps en charge dans la plage. Week-end&nbsp;: prise
               en charge le samedi à partir de l&apos;heure indiquée, le dimanche ou un jour férié.
             </p>
             <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
@@ -268,11 +268,11 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
             />
           </Fieldset>
 
-          <Fieldset legend="Retour à vide (taxi : dialyse, chimiothérapie, radiothérapie)">
+          <Fieldset legend="Retour à vide (taxi&nbsp;: dialyse, chimiothérapie, radiothérapie)">
             <p className="text-xs text-slate-500">
               Majoration du prix au km pour une course vers ou depuis un établissement de dialyse, de chimiothérapie ou de
               radiothérapie, dont l&apos;aller ou le retour du véhicule se fait à vide. Une entrée ou une sortie d&apos;hospitalisation
-              n&apos;est pas reconnue : son motif reste dans votre logiciel de facturation. Laissez vide pour un VSL ou une ambulance.
+              n&apos;est pas reconnue&nbsp;: son motif reste dans votre logiciel de facturation. Laissez vide pour un VSL ou une ambulance.
             </p>
             <div className="grid gap-4 sm:grid-cols-3">
               <Amount name="emptyLegRateShort" label="Sous le seuil" unit="%" values={values} errors={errors} />
@@ -283,7 +283,7 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
 
           <Fieldset legend="Transport partagé">
             <p className="text-xs text-slate-500">
-              Abattement de la facture de chaque patient selon le nombre de patients (23 pour 23 %) ; le dernier taux saisi vaut aussi
+              Abattement de la facture de chaque patient selon le nombre de patients (23 pour 23&nbsp;%)&#x202F;; le dernier taux saisi vaut aussi
               au-delà. Péages et TPMR n&apos;y sont pas soumis.
             </p>
             <div className="grid gap-4 sm:grid-cols-4">
@@ -302,19 +302,19 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
                   aria-invalid={Boolean(errors.maxSharedPatients)}
                 />
               </Field>
-              <Amount name="aloneDiscount" label="Patient seul à bord (facultatif)" unit="%" values={values} errors={errors} hint="Taxi : 5 % au lieu du taux de partage." />
+              <Amount name="aloneDiscount" label="Patient seul à bord (facultatif)" unit="%" values={values} errors={errors} hint="Taxi&nbsp;: 5&nbsp;% au lieu du taux de partage." />
               <Amount
                 name="aloneThresholdKm"
                 label="Seuil du patient seul à bord"
                 unit="km"
                 values={values}
                 errors={errors}
-                hint="Taux ci-contre à partir de cette distance. Seuil local, 30 km au minimum."
+                hint="Taux ci-contre à partir de cette distance. Seuil local, 30&nbsp;km au minimum."
               />
               <Field
                 label="Détours facturables (facultatif)"
                 htmlFor="billableDetourKm"
-                hint="Km par prise en charge ajoutée (7 au plus), ex. « 10 ; 10 » en VSL. Vide : distance directe seulement."
+                hint="Km par prise en charge ajoutée (7 au plus), ex. «&#x202F;10&#x202F;; 10&#x202F;» en VSL. Vide&nbsp;: distance directe seulement."
                 error={errors.billableDetourKm}
                 className="sm:col-span-2"
               >
@@ -341,7 +341,7 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
             label="Vérification"
             htmlFor="verification"
             error={errors.verification}
-            hint="« Officiel » une fois les montants vérifiés sur le texte publié."
+            hint="«&#x202F;Officiel&#x202F;» une fois les montants vérifiés sur le texte publié."
           >
             <Select id="verification" name="verification" defaultValue={valueOf(values, "verification")} aria-invalid={Boolean(errors.verification)}>
               {VERIFICATIONS.map((v) => (
@@ -351,7 +351,7 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
               ))}
             </Select>
           </Field>
-          <Field label="Source (facultatif)" htmlFor="sourceUrl" hint="Adresse du texte : Légifrance, ameli…" error={errors.sourceUrl} className="lg:col-span-3">
+          <Field label="Source (facultatif)" htmlFor="sourceUrl" hint="Adresse du texte&nbsp;: Légifrance, ameli…" error={errors.sourceUrl} className="lg:col-span-3">
             <Input id="sourceUrl" name="sourceUrl" type="url" maxLength={500} defaultValue={valueOf(values, "sourceUrl")} aria-invalid={Boolean(errors.sourceUrl)} />
           </Field>
           <Field label="En vigueur à partir du" htmlFor="validFrom" error={errors.validFrom}>
@@ -365,7 +365,7 @@ function TariffFields({ values, errors }: { values: FormValues; errors: FieldErr
               aria-invalid={Boolean(errors.validFrom)}
             />
           </Field>
-          <Field label="Jusqu'au (facultatif)" htmlFor="validTo" error={errors.validTo} hint="Vide : jusqu'à la grille suivante.">
+          <Field label="Jusqu'au (facultatif)" htmlFor="validTo" error={errors.validTo} hint="Vide&nbsp;: jusqu'à la grille suivante.">
             <Input id="validTo" name="validTo" type="date" className="tabular" defaultValue={valueOf(values, "validTo")} aria-invalid={Boolean(errors.validTo)} />
           </Field>
           <Field label="Notes (facultatif)" htmlFor="notes" hint="Convention, avenant, date de publication, point à vérifier…" error={errors.notes} className="sm:col-span-2">

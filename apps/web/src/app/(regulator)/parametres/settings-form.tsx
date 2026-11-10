@@ -101,8 +101,8 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
     <>
       <Fieldset legend="Attente au lieu de soins">
         <Explanation>
-          Décret 2025-202 (art. R. 322-11-6) : en transport partagé, l&apos;attente du patient au lieu de soins ne
-          dépasse pas {DECREE_LIMITS.maxTotalWaitMin} min au total, avant le rendez-vous et après la séance. Ce budget
+          Décret 2025-202 (art. R. 322-11-6)&nbsp;: en transport partagé, l&apos;attente du patient au lieu de soins ne
+          dépasse pas {DECREE_LIMITS.maxTotalWaitMin}&nbsp;min au total, avant le rendez-vous et après la séance. Ce budget
           est découpé en deux marges dont la somme ne peut pas dépasser l&apos;attente maximale.
         </Explanation>
         <div className="grid gap-4 sm:grid-cols-3">
@@ -110,7 +110,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Marge avant le rendez-vous (min)"
             htmlFor="waitBeforeAppointmentMin"
             error={errors.waitBeforeAppointmentMin}
-            hint="Aller : le patient arrive au plus tôt RDV − marge, au plus tard à l'heure du RDV."
+            hint="Aller&nbsp;: le patient arrive au plus tôt RDV − marge, au plus tard à l'heure du RDV."
           >
             <NumberInput
               name="waitBeforeAppointmentMin"
@@ -126,7 +126,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Marge après la séance (min)"
             htmlFor="waitAfterSessionMin"
             error={errors.waitAfterSessionMin}
-            hint="Retour : prise en charge entre la fin de séance et fin de séance + marge."
+            hint="Retour&nbsp;: prise en charge entre la fin de séance et fin de séance + marge."
           >
             <NumberInput
               name="waitAfterSessionMin"
@@ -142,7 +142,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Attente maximale cumulée (min)"
             htmlFor="maxTotalWaitMin"
             error={errors.maxTotalWaitMin}
-            hint={`Aller + retour d'un même patient dans la journée, attente à bord du véhicule garé comprise. ${DECREE_LIMITS.maxTotalWaitMin} min au plus (décret).`}
+            hint={`Aller + retour d'un même patient dans la journée, attente à bord du véhicule garé comprise. ${DECREE_LIMITS.maxTotalWaitMin}\u00a0min au plus (décret).`}
           >
             <NumberInput
               name="maxTotalWaitMin"
@@ -157,7 +157,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
         </div>
         <Explanation>
           L&apos;attente d&apos;un patient dans le véhicule arrêté devant son lieu de soins (le véhicule attend
-          l&apos;heure d&apos;un autre patient) compte dans son attente au lieu de soins : l&apos;optimiseur ne la
+          l&apos;heure d&apos;un autre patient) compte dans son attente au lieu de soins&nbsp;: l&apos;optimiseur ne la
           laisse pas dépasser la marge avant le rendez-vous (aller) ni la marge après la séance (retour).
         </Explanation>
         {waitsKnown && total !== null ? (
@@ -169,11 +169,11 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             aria-live="polite"
           >
             <p className="tabular font-medium">
-              Marges cumulées : {total} min sur {maxMin} min autorisées
+              Marges cumulées&nbsp;: {total}&nbsp;min sur {maxMin}&nbsp;min autorisées
               {overBudget ? " — à réduire avant d'enregistrer." : "."}
             </p>
             <p className="tabular mt-0.5">
-              Exemple : RDV à {formatMinute(EXAMPLE_APPOINTMENT)} → arrivée entre{" "}
+              Exemple&nbsp;: RDV à {formatMinute(EXAMPLE_APPOINTMENT)} → arrivée entre{" "}
               {formatMinute(EXAMPLE_APPOINTMENT - beforeMin)} et {formatMinute(EXAMPLE_APPOINTMENT)}. Fin de séance à{" "}
               {formatMinute(EXAMPLE_SESSION_END)} → reprise entre {formatMinute(EXAMPLE_SESSION_END)} et{" "}
               {formatMinute(EXAMPLE_SESSION_END + afterMin)}.
@@ -184,16 +184,16 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
 
       <Fieldset legend="Détour en transport partagé">
         <Explanation>
-          Décret 2025-202 (art. R. 322-11-5) : le détour imposé à un patient ne dépasse pas{" "}
-          {DECREE_LIMITS.maxDetourKmPerExtraPatient} km par patient supplémentaire pris en charge, dans la limite de{" "}
-          {DECREE_LIMITS.maxDetourKmTotal} km. Vous pouvez être plus strict que le décret, pas plus souple.
+          Décret 2025-202 (art. R. 322-11-5)&nbsp;: le détour imposé à un patient ne dépasse pas{" "}
+          {DECREE_LIMITS.maxDetourKmPerExtraPatient}&nbsp;km par patient supplémentaire pris en charge, dans la limite de{" "}
+          {DECREE_LIMITS.maxDetourKmTotal}&nbsp;km. Vous pouvez être plus strict que le décret, pas plus souple.
         </Explanation>
         <div className="grid gap-4 sm:grid-cols-3">
           <Field
             label="Détour par patient ajouté (km)"
             htmlFor="maxDetourKmPerExtraPatient"
             error={errors.maxDetourKmPerExtraPatient}
-            hint={`${DECREE_LIMITS.maxDetourKmPerExtraPatient} km au plus.`}
+            hint={`${DECREE_LIMITS.maxDetourKmPerExtraPatient}\u00a0km au plus.`}
           >
             <NumberInput name="maxDetourKmPerExtraPatient" unit="km" values={values} errors={errors} />
           </Field>
@@ -201,7 +201,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Détour total maximal (km)"
             htmlFor="maxDetourKmTotal"
             error={errors.maxDetourKmTotal}
-            hint={`${DECREE_LIMITS.maxDetourKmTotal} km au plus, quel que soit le nombre de co-passagers.`}
+            hint={`${DECREE_LIMITS.maxDetourKmTotal}\u00a0km au plus, quel que soit le nombre de co-passagers.`}
           >
             <NumberInput name="maxDetourKmTotal" unit="km" values={values} errors={errors} />
           </Field>
@@ -209,7 +209,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Temps à bord en plus du trajet direct (min)"
             htmlFor="maxRideExtraMin"
             error={errors.maxRideExtraMin}
-            hint="De la fin de la prise en charge au début de la dépose (attente à bord comprise), un patient ne reste pas à bord plus longtemps que le trajet direct + cette durée, détours et autres arrêts compris. 30 min par défaut : règle de l'entreprise, pas un plafond du décret."
+            hint="De la fin de la prise en charge au début de la dépose (attente à bord comprise), un patient ne reste pas à bord plus longtemps que le trajet direct + cette durée, détours et autres arrêts compris. 30&nbsp;min par défaut&nbsp;: règle de l'entreprise, pas un plafond du décret."
           >
             <NumberInput name="maxRideExtraMin" unit="min" integer values={values} errors={errors} />
           </Field>
@@ -219,8 +219,8 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
       <Fieldset legend="Temps d'arrêt">
         <Explanation>
           Temps passé à chaque arrêt (aide à la montée, installation, accueil) ajouté aux temps de trajet. Une valeur
-          trop faible produit des horaires intenables ; trop forte, elle réduit le nombre de courses par tournée. Les
-          courses assises partent en taxi ou en VSL : elles ont les mêmes temps d&apos;arrêt. Un établissement peut
+          trop faible produit des horaires intenables&#x202F;; trop forte, elle réduit le nombre de courses par tournée. Les
+          courses assises partent en taxi ou en VSL&nbsp;: elles ont les mêmes temps d&apos;arrêt. Un établissement peut
           ajouter son propre temps (fiche de l&apos;établissement) à l&apos;arrêt chez lui.
         </Explanation>
         <div className="grid gap-4 sm:grid-cols-4">
@@ -228,7 +228,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Prise en charge, taxi et VSL (min)"
             htmlFor="pickupServiceMin"
             error={errors.pickupServiceMin}
-            hint="Entre 0 et 60 min."
+            hint="Entre 0 et 60&nbsp;min."
           >
             <NumberInput name="pickupServiceMin" unit="min" integer values={values} errors={errors} />
           </Field>
@@ -236,7 +236,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Dépose, taxi et VSL (min)"
             htmlFor="dropoffServiceMin"
             error={errors.dropoffServiceMin}
-            hint="Entre 0 et 60 min."
+            hint="Entre 0 et 60&nbsp;min."
           >
             <NumberInput name="dropoffServiceMin" unit="min" integer values={values} errors={errors} />
           </Field>
@@ -244,7 +244,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Prise en charge, ambulance (min)"
             htmlFor="ambulancePickupServiceMin"
             error={errors.ambulancePickupServiceMin}
-            hint="Brancard, étages. Vide : comme le taxi et le VSL."
+            hint="Brancard, étages. Vide&nbsp;: comme le taxi et le VSL."
           >
             <NumberInput
               name="ambulancePickupServiceMin"
@@ -260,7 +260,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Dépose, ambulance (min)"
             htmlFor="ambulanceDropoffServiceMin"
             error={errors.ambulanceDropoffServiceMin}
-            hint="Vide : comme le taxi et le VSL."
+            hint="Vide&nbsp;: comme le taxi et le VSL."
           >
             <NumberInput
               name="ambulanceDropoffServiceMin"
@@ -299,7 +299,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Pénalité par course non affectée (€)"
             htmlFor="unassignedPenalty"
             error={errors.unassignedPenalty}
-            hint="Coût fictif ajouté pour chaque course laissée sans véhicule. Il doit dépasser largement la marge d'une course pour que l'optimiseur serve toutes les courses possibles plutôt que d'écarter les moins rentables. 10 000 € par défaut."
+            hint="Coût fictif ajouté pour chaque course laissée sans véhicule. Il doit dépasser largement la marge d'une course pour que l'optimiseur serve toutes les courses possibles plutôt que d'écarter les moins rentables. 10 000&nbsp;€ par défaut."
           >
             <NumberInput name="unassignedPenalty" unit="€" values={values} errors={errors} />
           </Field>
@@ -307,7 +307,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Temps de calcul de base (s)"
             htmlFor="solverTimeLimitSec"
             error={errors.solverTimeLimitSec}
-            hint={`Entre 1 et ${MAX_SOLVER_TIME_LIMIT_SEC} s. Relevé automatiquement à 1 s par tranche de ${TRIPS_PER_SOLVER_SECOND} courses pour les grosses journées (${CONTRACT_MAX_TIME_LIMIT_SEC} s au plus). Plus long : meilleures tournées possibles, mais attente plus longue après « Optimiser demain ».`}
+            hint={`Entre 1 et ${MAX_SOLVER_TIME_LIMIT_SEC}\u00a0s. Relevé automatiquement à 1\u00a0s par tranche de ${TRIPS_PER_SOLVER_SECOND} courses pour les grosses journées (${CONTRACT_MAX_TIME_LIMIT_SEC}\u00a0s au plus). Plus long\u00a0: meilleures tournées possibles, mais attente plus longue après «\u202fOptimiser demain\u202f».`}
           >
             <NumberInput name="solverTimeLimitSec" unit="s" integer values={values} errors={errors} />
           </Field>
@@ -316,9 +316,9 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
 
       <Fieldset legend="Remplacement du planning en place">
         <Explanation>
-          Un nouveau calcul (« Réoptimiser », « Déplacer vers… ») remplace toutes les tournées du jour. Il n&apos;est
+          Un nouveau calcul («&#x202F;Réoptimiser&#x202F;», «&#x202F;Déplacer vers…&#x202F;») remplace toutes les tournées du jour. Il n&apos;est
           enregistré d&apos;office que s&apos;il ne comporte pas plus de violations de contraintes que le planning en
-          place, et dans les limites ci-dessous ; sinon le planning affiche le comparatif et vous choisissez de remplacer
+          place, et dans les limites ci-dessous&#x202F;; sinon le planning affiche le comparatif et vous choisissez de remplacer
           ou de garder les tournées actuelles. Un déplacement qui laisserait d&apos;autres courses sans véhicule
           demande toujours confirmation, en nommant ces courses.
         </Explanation>
@@ -327,7 +327,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Courses servies en moins acceptées"
             htmlFor="replanMaxServedLoss"
             error={errors.replanMaxServedLoss}
-            hint="0 par défaut : un calcul qui sert moins de courses que le planning en place demande toujours votre accord."
+            hint="0 par défaut&nbsp;: un calcul qui sert moins de courses que le planning en place demande toujours votre accord."
           >
             <NumberInput name="replanMaxServedLoss" unit="courses" integer values={values} errors={errors} />
           </Field>
@@ -335,7 +335,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Baisse de marge acceptée (% du CA en place)"
             htmlFor="replanMaxMarginLoss"
             error={errors.replanMaxMarginLoss}
-            hint="10 % par défaut : au-delà, la baisse de marge estimée par rapport au planning en place demande votre accord."
+            hint="10&nbsp;% par défaut&nbsp;: au-delà, la baisse de marge estimée par rapport au planning en place demande votre accord."
           >
             <NumberInput name="replanMaxMarginLoss" unit="%" values={values} errors={errors} />
           </Field>
@@ -344,7 +344,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
 
       <Fieldset legend="Courses">
         <Explanation>
-          Les courses des récurrences sont créées d&apos;office, jamais avant demain : à la création, la modification ou la
+          Les courses des récurrences sont créées d&apos;office, jamais avant demain&nbsp;: à la création, la modification ou la
           réactivation d&apos;une récurrence, d&apos;une prescription ou d&apos;un patient, à l&apos;ouverture du planning ou
           des courses d&apos;une date, et avant chaque optimisation.
         </Explanation>
@@ -353,7 +353,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Horizon des courses régulières (jours)"
             htmlFor="tripHorizonDays"
             error={errors.tripHorizonDays}
-            hint={`14 par défaut : les courses sont créées de demain à J+14. Entre ${TRIP_HORIZON_DAYS.min} et ${TRIP_HORIZON_DAYS.max} jours.`}
+            hint={`14 par défaut\u00a0: les courses sont créées de demain à J+14. Entre ${TRIP_HORIZON_DAYS.min} et ${TRIP_HORIZON_DAYS.max} jours.`}
           >
             <NumberInput name="tripHorizonDays" unit="jours" integer values={values} errors={errors} />
           </Field>
@@ -361,7 +361,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Annulation tardive (h avant la prise en charge)"
             htmlFor="lateCancellationHours"
             error={errors.lateCancellationHours}
-            hint="2 h par défaut : une course annulée moins de 2 h avant sa prise en charge prévue est comptée comme annulation tardive sur la fiche du patient."
+            hint="2&nbsp;h par défaut&nbsp;: une course annulée moins de 2&nbsp;h avant sa prise en charge prévue est comptée comme annulation tardive sur la fiche du patient."
           >
             <NumberInput name="lateCancellationHours" unit="h" integer values={values} errors={errors} />
           </Field>
@@ -371,7 +371,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
       <Fieldset legend="Équipages">
         <Explanation>
           Équipages proposés chaque jour (page Équipages) quand l&apos;équipage attitré d&apos;un véhicule est absent, ou
-          pour un véhicule de réserve : un remplaçant qualifié du même dépôt d&apos;abord, puis du dépôt le plus proche,
+          pour un véhicule de réserve&nbsp;: un remplaçant qualifié du même dépôt d&apos;abord, puis du dépôt le plus proche,
           celui qui couvre l&apos;horaire du titulaire, et la personne la moins polyvalente (les ambulanciers DE restent
           pour les ambulances). Une ambulance part avec au moins un ambulancier DE, au volant ou auprès du patient (art.
           R. 6312-10 du code de la santé publique).
@@ -381,7 +381,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Distance maximale d'un remplaçant (km)"
             htmlFor="crewMaxReplacementKm"
             error={errors.crewMaxReplacementKm}
-            hint="60 km par défaut, à vol d'oiseau entre les dépôts : au-delà, personne d'un autre dépôt n'est proposé."
+            hint="60&nbsp;km par défaut, à vol d'oiseau entre les dépôts&nbsp;: au-delà, personne d'un autre dépôt n'est proposé."
           >
             <NumberInput name="crewMaxReplacementKm" unit="km" values={values} errors={errors} />
           </Field>
@@ -389,7 +389,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Horaire commun d'un équipage d'ambulance (min)"
             htmlFor="crewMinPairOverlapMin"
             error={errors.crewMinPairOverlapMin}
-            hint="240 min (4 h) par défaut : le chauffeur et l'équipier doivent avoir au moins ce temps de service en commun."
+            hint="240&nbsp;min (4&nbsp;h) par défaut&nbsp;: le chauffeur et l'équipier doivent avoir au moins ce temps de service en commun."
           >
             <NumberInput name="crewMinPairOverlapMin" unit="min" integer values={values} errors={errors} />
           </Field>
@@ -397,7 +397,7 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
             label="Réserve par dépôt (personnes)"
             htmlFor="crewReservePerDepot"
             error={errors.crewReservePerDepot}
-            hint="0 par défaut : nombre de personnes de chaque dépôt laissées sans véhicule (imprévus du jour) avant d'équiper un véhicule de réserve."
+            hint="0 par défaut&nbsp;: nombre de personnes de chaque dépôt laissées sans véhicule (imprévus du jour) avant d'équiper un véhicule de réserve."
           >
             <NumberInput name="crewReservePerDepot" unit="pers." integer values={values} errors={errors} />
           </Field>

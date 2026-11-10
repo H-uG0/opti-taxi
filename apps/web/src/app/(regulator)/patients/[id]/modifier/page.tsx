@@ -37,7 +37,7 @@ export default async function EditPatientPage({ params }: { params: Promise<{ id
           openTrips === 1
             ? "Un changement d'adresse s'applique aussi à sa course à venir non commencée (retirée de sa tournée si elle y est déjà)."
             : openTrips > 1
-              ? `Un changement d'adresse s'applique aussi à ses ${openTripsLabel(openTrips)} non commencées (prise en charge à l'aller, dépose au retour) ; celles déjà dans une tournée en sont retirées.`
+              ? `Un changement d'adresse s'applique aussi à ses ${openTripsLabel(openTrips)} non commencées (prise en charge à l'aller, dépose au retour)\u202f; celles déjà dans une tournée en sont retirées.`
               : "Un changement d'adresse s'applique aux courses générées ensuite."
         }
       />

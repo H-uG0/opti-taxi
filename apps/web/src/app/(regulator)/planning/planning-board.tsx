@@ -202,7 +202,7 @@ export function PlanningBoard({
       if (next.target.kind === "trip") selectTrip(next.target.id);
       else showVehicle(next.target.id);
       // Named after the panel's title: « Courses à planifier » before the first optimization.
-      setAnnounce(`${planned ? "À traiter" : "Courses à planifier"}, ${next.index + 1} sur ${issues.length} : ${name}`);
+      setAnnounce(`${planned ? "À traiter" : "Courses à planifier"}, ${next.index + 1} sur ${issues.length}\u00a0: ${name}`);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -343,7 +343,7 @@ export function PlanningBoard({
   // « À traiter » as a state lists vehicles: say where the rest of « À traiter » is when none is left.
   const emptyText =
     filter.states.includes("issue") && unassigned.length > 0
-      ? `Aucun véhicule à traiter avec ces filtres. ${pluralize(unassigned.length, "course sans véhicule reste", "courses sans véhicule restent")} dans « À traiter ».`
+      ? `Aucun véhicule à traiter avec ces filtres. ${pluralize(unassigned.length, "course sans véhicule reste", "courses sans véhicule restent")} dans «\u202fÀ traiter\u202f».`
       : undefined;
 
   return (
@@ -432,7 +432,7 @@ export function PlanningBoard({
           id="planning-panneau"
           tabIndex={-1}
           role="region"
-          aria-label="Détail et « À traiter »"
+          aria-label="Détail et «&#x202F;À traiter&#x202F;»"
           className="flex min-h-0 flex-col gap-3 outline-none"
         >
           <div ref={panelBox} className="min-w-0 space-y-3 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain">
@@ -486,8 +486,8 @@ export function PlanningBoard({
             ) : (
               <p className="flex items-start gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600">
                 <MousePointerClick aria-hidden className="mt-0.5 size-4 shrink-0 text-slate-400" />
-                Cliquez sur une course de la frise ou de la carte pour la voir, la figer ou la déplacer ; sur un véhicule pour
-                suivre sa tournée. « / » pour chercher, « ? » pour les raccourcis, Échap pour désélectionner.
+                Cliquez sur une course de la frise ou de la carte pour la voir, la figer ou la déplacer&#x202F;; sur un véhicule pour
+                suivre sa tournée. «&#x202F;/&#x202F;» pour chercher, «&#x202F;?&#x202F;» pour les raccourcis, Échap pour désélectionner.
               </p>
             )}
             <IssuesPanel

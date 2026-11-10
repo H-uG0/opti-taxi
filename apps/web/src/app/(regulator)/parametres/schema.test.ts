@@ -77,16 +77,16 @@ describe("settingsSchema", () => {
 
   it("enforces waitBefore + waitAfter <= maxTotalWait", () => {
     expect(errorsOf({ ...defaults, waitAfterSessionMin: "20" }).maxTotalWaitMin).toBe(
-      "Marge avant le RDV (30 min) + marge après la séance (20 min) = 50 min : dépasse l'attente maximale de 45 min.",
+      "Marge avant le RDV (30\u00a0min) + marge après la séance (20\u00a0min) = 50\u00a0min\u00a0: dépasse l'attente maximale de 45\u00a0min.",
     );
-    expect(errorsOf({ ...defaults, maxTotalWaitMin: "40" }).maxTotalWaitMin).toMatch(/= 45 min : dépasse l'attente maximale de 40 min/);
+    expect(errorsOf({ ...defaults, maxTotalWaitMin: "40" }).maxTotalWaitMin).toMatch(/= 45\u00a0min\u00a0: dépasse l'attente maximale de 40\u00a0min/);
     expect(settingsSchema.parse({ ...defaults, waitBeforeAppointmentMin: "20", maxTotalWaitMin: "35" }).maxTotalWaitMin).toBe(35);
   });
 
   it("caps the waits and detours at the decree limits", () => {
     expect(errorsOf({ ...defaults, maxTotalWaitMin: "60" }).maxTotalWaitMin).toMatch(/décret 2025-202/);
-    expect(errorsOf({ ...defaults, maxDetourKmPerExtraPatient: "12" }).maxDetourKmPerExtraPatient).toMatch(/10 km maximum/);
-    expect(errorsOf({ ...defaults, maxDetourKmTotal: "35" }).maxDetourKmTotal).toMatch(/30 km maximum/);
+    expect(errorsOf({ ...defaults, maxDetourKmPerExtraPatient: "12" }).maxDetourKmPerExtraPatient).toMatch(/10\u00a0km maximum/);
+    expect(errorsOf({ ...defaults, maxDetourKmTotal: "35" }).maxDetourKmTotal).toMatch(/30\u00a0km maximum/);
     expect(settingsSchema.parse({ ...defaults, maxDetourKmPerExtraPatient: "7,5", maxDetourKmTotal: "20" }).maxDetourKmPerExtraPatient).toBe(7.5);
   });
 
@@ -98,7 +98,7 @@ describe("settingsSchema", () => {
 
   it("bounds the solver time limit and the stop times", () => {
     expect(errorsOf({ ...defaults, solverTimeLimitSec: "0" }).solverTimeLimitSec).toMatch(/Minimum/);
-    expect(errorsOf({ ...defaults, solverTimeLimitSec: "121" }).solverTimeLimitSec).toMatch(/Maximum : 120 s/);
+    expect(errorsOf({ ...defaults, solverTimeLimitSec: "121" }).solverTimeLimitSec).toMatch(/Maximum\u00a0: 120\u00a0s/);
     expect(errorsOf({ ...defaults, solverTimeLimitSec: "2,5" }).solverTimeLimitSec).toBe("Nombre entier attendu.");
     expect(errorsOf({ ...defaults, pickupServiceMin: "61" }).pickupServiceMin).toMatch(/Maximum/);
     expect(errorsOf({ ...defaults, unassignedPenalty: "" }).unassignedPenalty).toBe("Champ obligatoire.");
@@ -133,7 +133,7 @@ describe("regulation phone number", () => {
     "+33 (0)4 65 71 00 00",
     "0033 4 65 71 00 00",
     " 04 65 71 00 00 ",
-    "04 65 71 00 00",
+    "04\u00a065\u00a071\u00a000\u00a000",
   ])("normalizes %j", (input) => {
     expect(normalizeFrenchPhone(input)).toBe("04 65 71 00 00");
     expect(settingsSchema.parse({ ...defaults, regulatorPhone: input }).regulatorPhone).toBe("04 65 71 00 00");
@@ -167,7 +167,7 @@ describe("regulation phone number", () => {
 
   it("explains the 10 digits without contradicting the +33 example", () => {
     expect(PHONE_ERROR).toBe(
-      "Numéro invalide : saisissez un numéro français à 10 chiffres (ex. 04 65 71 00 00), éventuellement au format +33 4 65 71 00 00.",
+      "Numéro invalide\u00a0: saisissez un numéro français à 10 chiffres (ex. 04 65 71 00 00), éventuellement au format +33 4 65 71 00 00.",
     );
     // Both examples of the message are accepted as written.
     expect(normalizeFrenchPhone("04 65 71 00 00")).toBe("04 65 71 00 00");
@@ -176,7 +176,7 @@ describe("regulation phone number", () => {
 });
 
 describe("settingsSavedMessage", () => {
-  const rules = "Paramètres enregistrés : les règles s'appliqueront au prochain calcul des tournées.";
+  const rules = "Paramètres enregistrés\u00a0: les règles s'appliqueront au prochain calcul des tournées.";
 
   it("does not mention the number when it did not change", () => {
     expect(settingsSavedMessage(null, null)).toBe(rules);

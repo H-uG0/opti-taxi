@@ -91,8 +91,8 @@ export function PasswordChange({ forced: forcedOnLoad }: { forced: boolean }) {
       </h1>
       {done ? null : forced ? (
         <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-          Votre mot de passe est provisoire : la régulation vous l&apos;a donné. Choisissez le vôtre pour ouvrir
-          votre feuille de route ; la régulation ne le connaîtra pas.
+          Votre mot de passe est provisoire&nbsp;: la régulation vous l&apos;a donné. Choisissez le vôtre pour ouvrir
+          votre feuille de route&#x202F;; la régulation ne le connaîtra pas.
         </p>
       ) : (
         <p className="text-sm text-slate-600">

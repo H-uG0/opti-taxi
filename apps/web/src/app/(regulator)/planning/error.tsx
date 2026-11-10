@@ -24,10 +24,10 @@ export default function PlanningError({ error, retry }: { error: unknown; retry:
       {digest ? " en lui donnant la référence ci-dessous" : ""}.
       {process.env.NODE_ENV === "development" ? (
         <span className="mt-2 block text-xs text-slate-500">
-          En développement : vérifiez que la base de données est démarrée (port 5433).
+          En développement&nbsp;: vérifiez que la base de données est démarrée (port 5433).
         </span>
       ) : null}
-      {digest ? <span className="mt-1 block text-xs text-slate-500">Référence : {digest}</span> : null}
+      {digest ? <span className="mt-1 block text-xs text-slate-500">Référence&nbsp;: {digest}</span> : null}
     </EmptyState>
   );
 }

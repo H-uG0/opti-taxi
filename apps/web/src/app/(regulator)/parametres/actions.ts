@@ -59,8 +59,8 @@ export async function saveTraffic(_state: FormState, formData: FormData): Promis
   revalidatePath("/parametres");
   return successState(
     update.settings.trafficEnabled
-      ? "Trafic enregistré : il s'appliquera au prochain calcul des tournées. Les plannings déjà calculés ne changent pas."
-      : "Trafic désactivé : le prochain calcul des tournées utilisera les temps à circulation fluide. Les plannings déjà calculés ne changent pas.",
+      ? "Trafic enregistré\u00a0: il s'appliquera au prochain calcul des tournées. Les plannings déjà calculés ne changent pas."
+      : "Trafic désactivé\u00a0: le prochain calcul des tournées utilisera les temps à circulation fluide. Les plannings déjà calculés ne changent pas.",
   );
 }
 
@@ -88,7 +88,7 @@ export async function applyObservedTraffic(): Promise<FormState> {
   });
   revalidatePath("/parametres");
   const when = settings.trafficEnabled ? "elles comptent au prochain calcul des tournées" : "elles compteront une fois le trafic activé";
-  return successState(`Valeurs observées appliquées (${observed.length} ${observed.length > 1 ? "cases" : "case"}) : ${when}.`);
+  return successState(`Valeurs observées appliquées (${observed.length} ${observed.length > 1 ? "cases" : "case"})\u00a0: ${when}.`);
 }
 
 /** Audit details of a traffic update: changed settings, then changed zone values as "<zone>.<field>". */

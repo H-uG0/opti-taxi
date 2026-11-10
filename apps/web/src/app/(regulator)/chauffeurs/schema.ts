@@ -86,7 +86,7 @@ export const driverSchema = driverFields
         ctx.addIssue({
           code: "custom",
           path: ["breakWindowStart"],
-          message: `Pause obligatoire pour un horaire de ${formatDuration(shift)} : au moins ${MIN_LEGAL_BREAK_MIN} min au-delà de 6 h de travail (${WORK_TIME_ARTICLE}).`,
+          message: `Pause obligatoire pour un horaire de ${formatDuration(shift)}\u00a0: au moins ${MIN_LEGAL_BREAK_MIN}\u00a0min au-delà de 6\u00a0h de travail (${WORK_TIME_ARTICLE}).`,
         });
       }
       return;
@@ -128,7 +128,7 @@ export const driverSchema = driverFields
       ctx.addIssue({
         code: "custom",
         path: ["breakMinutes"],
-        message: `Au moins ${MIN_LEGAL_BREAK_MIN} min pour un horaire de ${formatDuration(shift)} (au-delà de 6 h de travail, ${WORK_TIME_ARTICLE}).`,
+        message: `Au moins ${MIN_LEGAL_BREAK_MIN}\u00a0min pour un horaire de ${formatDuration(shift)} (au-delà de 6\u00a0h de travail, ${WORK_TIME_ARTICLE}).`,
       });
     }
   })
@@ -232,12 +232,12 @@ export function assignmentConflicts(
   const conflicts: string[] = [];
   const check = (vehicle: AssignedVehicle, rule: readonly Qualification[] | null, role: string) => {
     if (rule && !hasRequiredQualification(qualifications, rule)) {
-      conflicts.push(`${role} par défaut de « ${vehicle.label} » (requis : ${qualificationRequirement(rule)})`);
+      conflicts.push(`${role} par défaut de «\u202f${vehicle.label}\u202f» (requis\u00a0: ${qualificationRequirement(rule)})`);
       return;
     }
     const oneOf = crewOneOfRequirement(vehicle.type);
     if (oneOf && vehicle.partner && !crewHoldsRequired(vehicle.type, [qualifications, vehicle.partner])) {
-      conflicts.push(`${role} par défaut de « ${vehicle.label} » (l'équipage doit compter un ${qualificationNoun(oneOf)})`);
+      conflicts.push(`${role} par défaut de «\u202f${vehicle.label}\u202f» (l'équipage doit compter un ${qualificationNoun(oneOf)})`);
     }
   };
   for (const vehicle of asDriver) check(vehicle, driverRequirement(vehicle.type), "chauffeur");
@@ -316,7 +316,7 @@ export function accountUpdate(
 
 /** Said when the credentials of a disabled account change: they cannot sign in yet. */
 export const ACCESS_STILL_DISABLED_NOTE =
-  "L'accès reste désactivé : réactivez-le pour que le chauffeur puisse se connecter.";
+  "L'accès reste désactivé\u00a0: réactivez-le pour que le chauffeur puisse se connecter.";
 
 /**
  * Success message after an account change. `accountActive` is the account's
@@ -329,10 +329,10 @@ export function accountUpdateMessage(
 ): string {
   const lead =
     change.emailChanged && change.passwordReset
-      ? "Identifiant modifié et mot de passe provisoire défini : communiquez-les au chauffeur."
+      ? "Identifiant modifié et mot de passe provisoire défini\u00a0: communiquez-les au chauffeur."
       : change.passwordReset
-        ? "Mot de passe provisoire défini : communiquez-le au chauffeur."
-        : "Identifiant modifié : communiquez-le au chauffeur.";
+        ? "Mot de passe provisoire défini\u00a0: communiquez-le au chauffeur."
+        : "Identifiant modifié\u00a0: communiquez-le au chauffeur.";
   if (!accountActive) return `${lead} ${ACCESS_STILL_DISABLED_NOTE}`;
   const detail = change.passwordReset
     ? `L'ancien mot de passe ne permet plus de se connecter. ${PROVISIONAL_PASSWORD_NOTE}`
@@ -345,7 +345,7 @@ export const PROVISIONAL_PASSWORD_NOTE = "Le chauffeur le remplacera par le sien
 
 /** Success message after creating a driver account (its password is provisional). */
 export const ACCOUNT_CREATED_MESSAGE =
-  "Compte créé avec un mot de passe provisoire : communiquez l'identifiant et ce mot de passe au chauffeur. " +
+  "Compte créé avec un mot de passe provisoire\u00a0: communiquez l'identifiant et ce mot de passe au chauffeur. " +
   "Il choisira son propre mot de passe à sa première connexion.";
 
 export const MIN_PASSWORD_LENGTH = 10;

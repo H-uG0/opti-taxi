@@ -11,7 +11,7 @@ describe("break owed after 6 hours of work (art. L. 3121-16)", () => {
     expect(breakInShift({ ...lunch, breakMinutes: 0 }, day)).toBeNull();
   });
 
-  it("accepts a shift of 6 hours or less without a break, and a longer one with a break of 20 min or more", () => {
+  it("accepts a shift of 6 hours or less without a break, and a longer one with a break of 20\u00a0min or more", () => {
     const none: BreakSettings = { breakWindowStartMinute: null, breakWindowEndMinute: null, breakMinutes: 0 };
     expect(workTimeIssue(none, { start: 480, end: 840 }, "Julien Marchetti")).toBeNull();
     expect(workTimeIssue(lunch, day, "Julien Marchetti")).toBeNull();
@@ -21,20 +21,20 @@ describe("break owed after 6 hours of work (art. L. 3121-16)", () => {
   it("explains why a longer shift cannot be worked", () => {
     const none: BreakSettings = { breakWindowStartMinute: null, breakWindowEndMinute: null, breakMinutes: 0 };
     expect(workTimeIssue(none, { start: 480, end: 841 }, "Julien Marchetti")).toBe(
-      "Horaire de 6 h 01 sans pause : au-delà de 6 h de travail, une pause d'au moins 20 min est obligatoire " +
+      "Horaire de 6\u00a0h 01 sans pause\u00a0: au-delà de 6\u00a0h de travail, une pause d'au moins 20\u00a0min est obligatoire " +
         "(Code du travail, art. L. 3121-16). Réglez la pause de Julien Marchetti (fiche du chauffeur) ou raccourcissez son horaire",
     );
-    expect(workTimeIssue({ ...lunch, breakMinutes: 15 }, day, "J")).toContain("avec une pause de 15 min");
-    expect(workTimeIssue(lunch, { start: 860, end: 1240 }, "J")).toContain("fenêtre de pause qui ne laisse pas 45 min dans l'horaire");
+    expect(workTimeIssue({ ...lunch, breakMinutes: 15 }, day, "J")).toContain("avec une pause de 15\u00a0min");
+    expect(workTimeIssue(lunch, { start: 860, end: 1240 }, "J")).toContain("fenêtre de pause qui ne laisse pas 45\u00a0min dans l'horaire");
   });
 
   it("sums the problem up in a few words for the lists", () => {
     const none: BreakSettings = { breakWindowStartMinute: null, breakWindowEndMinute: null, breakMinutes: 0 };
     expect(workTimeSummary(none, { start: 360, end: 1110 })).toBe(
-      "Pause de 20 min requise : horaire de 12 h 30 sans pause (art. L. 3121-16)",
+      "Pause de 20\u00a0min requise\u00a0: horaire de 12\u00a0h 30 sans pause (art. L. 3121-16)",
     );
     expect(workTimeSummary({ ...lunch, breakMinutes: 15 }, day)).toBe(
-      "Pause de 20 min requise : horaire de 13 h 00 avec une pause de 15 min (art. L. 3121-16)",
+      "Pause de 20\u00a0min requise\u00a0: horaire de 13\u00a0h 00 avec une pause de 15\u00a0min (art. L. 3121-16)",
     );
     expect(workTimeSummary(lunch, day)).toBeNull();
     expect(workTimeSummary(none, { start: 480, end: 840 })).toBeNull();

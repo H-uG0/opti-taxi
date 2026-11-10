@@ -14,7 +14,7 @@ describe("planningErrorMessage", () => {
     expect(planningErrorMessage(prismaError("PrismaClientKnownRequestError", "P2025"))).toBe(PLAN_CHANGED_ERROR);
   });
 
-  it("names a database failure (time-out waiting for the row locks, lost connection) instead of « connexion perdue »", () => {
+  it("names a database failure (time-out waiting for the row locks, lost connection) instead of «\u202fconnexion perdue\u202f»", () => {
     expect(planningErrorMessage(prismaError("PrismaClientKnownRequestError", "P2028"))).toBe(DATABASE_ERROR);
     expect(planningErrorMessage(prismaError("PrismaClientInitializationError"))).toBe(DATABASE_ERROR);
     expect(planningErrorMessage(prismaError("PrismaClientUnknownRequestError"))).toBe(DATABASE_ERROR);

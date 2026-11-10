@@ -27,14 +27,14 @@ export const MAX_RIDE_EXTRA_MIN = 180;
 export const CREW_LIMITS = { maxReplacementKm: 400, minPairOverlapMin: 720, reservePerDepot: 50 } as const;
 
 export const PHONE_ERROR =
-  "Numéro invalide : saisissez un numéro français à 10 chiffres (ex. 04 65 71 00 00), éventuellement au format +33 4 65 71 00 00.";
+  "Numéro invalide\u00a0: saisissez un numéro français à 10 chiffres (ex. 04 65 71 00 00), éventuellement au format +33 4 65 71 00 00.";
 
 /**
  * Confirmation after a save. The regulation number is mentioned only when it
  * changed; open roadmaps pick it up at their next refresh.
  */
 export function settingsSavedMessage(previousPhone: string | null, savedPhone: string | null): string {
-  const rules = "Paramètres enregistrés : les règles s'appliqueront au prochain calcul des tournées.";
+  const rules = "Paramètres enregistrés\u00a0: les règles s'appliqueront au prochain calcul des tournées.";
   if (previousPhone === savedPhone) return rules;
   if (!savedPhone) return `${rules} La feuille de route des chauffeurs n'affichera plus de numéro de la régulation.`;
   return `${rules} Les chauffeurs verront le numéro ${savedPhone} dès la prochaine actualisation de leur feuille de route.`;
@@ -64,17 +64,17 @@ export const settingsSchema = z
       integer: true,
       min: 0,
       max: DECREE_LIMITS.maxTotalWaitMin,
-      maxMessage: `${DECREE_LIMITS.maxTotalWaitMin} min maximum : plafond du décret 2025-202 (art. R. 322-11-6).`,
+      maxMessage: `${DECREE_LIMITS.maxTotalWaitMin}\u00a0min maximum\u00a0: plafond du décret 2025-202 (art. R. 322-11-6).`,
     }),
     maxDetourKmPerExtraPatient: numberField({
       min: 0,
       max: DECREE_LIMITS.maxDetourKmPerExtraPatient,
-      maxMessage: `${DECREE_LIMITS.maxDetourKmPerExtraPatient} km maximum : plafond du décret 2025-202 (art. R. 322-11-5).`,
+      maxMessage: `${DECREE_LIMITS.maxDetourKmPerExtraPatient}\u00a0km maximum\u00a0: plafond du décret 2025-202 (art. R. 322-11-5).`,
     }),
     maxDetourKmTotal: numberField({
       min: 0,
       max: DECREE_LIMITS.maxDetourKmTotal,
-      maxMessage: `${DECREE_LIMITS.maxDetourKmTotal} km maximum : plafond du décret 2025-202 (art. R. 322-11-5).`,
+      maxMessage: `${DECREE_LIMITS.maxDetourKmTotal}\u00a0km maximum\u00a0: plafond du décret 2025-202 (art. R. 322-11-5).`,
     }),
     // Time on board above the direct drive (optimizer RIDE_TIME): also bounds the wait in a parked vehicle.
     maxRideExtraMin: numberField({ integer: true, min: 0, max: MAX_RIDE_EXTRA_MIN, unit: "min" }),
@@ -122,7 +122,7 @@ export const settingsSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["maxTotalWaitMin"],
-        message: `Marge avant le RDV (${v.waitBeforeAppointmentMin} min) + marge après la séance (${v.waitAfterSessionMin} min) = ${wait} min : dépasse l'attente maximale de ${v.maxTotalWaitMin} min.`,
+        message: `Marge avant le RDV (${v.waitBeforeAppointmentMin}\u00a0min) + marge après la séance (${v.waitAfterSessionMin}\u00a0min) = ${wait}\u00a0min\u00a0: dépasse l'attente maximale de ${v.maxTotalWaitMin}\u00a0min.`,
       });
     }
     if (v.maxDetourKmPerExtraPatient > v.maxDetourKmTotal) {

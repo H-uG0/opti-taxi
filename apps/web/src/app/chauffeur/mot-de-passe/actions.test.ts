@@ -113,7 +113,7 @@ describe("changeOwnPassword", () => {
   it("is throttled like a sign-in, with a message that sends the driver to the regulation", async () => {
     fake.throttle.mockResolvedValue({ retryInMin: 9 });
     const state = await changeOwnPassword(IDLE_STATE, form("prov-isoire-1"));
-    expect(state.message).toMatch(/9 min ou appelez la régulation/);
+    expect(state.message).toMatch(/9\u00a0min ou appelez la régulation/);
     expect(fake.verify).not.toHaveBeenCalled();
   });
 

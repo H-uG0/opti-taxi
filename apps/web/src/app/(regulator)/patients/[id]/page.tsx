@@ -80,7 +80,7 @@ function cancelledTripsClause(count: number): string {
     count === 1
       ? " et sa course à venir non commencée sera annulée"
       : ` et ses ${openTripsLabel(count)} non commencées seront annulées`;
-  return `${what} (sauf une course d'aujourd'hui déjà dans une tournée : à traiter dans Courses)`;
+  return `${what} (sauf une course d'aujourd'hui déjà dans une tournée\u00a0: à traiter dans Courses)`;
 }
 
 export default async function PatientPage({
@@ -219,7 +219,7 @@ export default async function PatientPage({
                 confirm={
                   patient.active
                     ? {
-                        question: `Désactiver ${fullName} ? Ses récurrences ne généreront plus de courses${cancelledTripsClause(totalOpenTrips)}. L'historique est conservé.`,
+                        question: `Désactiver ${fullName}\u202f? Ses récurrences ne généreront plus de courses${cancelledTripsClause(totalOpenTrips)}. L'historique est conservé.`,
                         confirmLabel: "Oui, désactiver le patient",
                         keepLabel: "Garder le patient actif",
                       }
@@ -237,8 +237,8 @@ export default async function PatientPage({
           {todayCancelledBySync > 0 ? (
             <Notice size="sm">
               {todayCancelledBySync === 1
-                ? "1 course d'aujourd'hui, annulée par la synchronisation du référentiel, reste annulée : les courses du jour ne reviennent pas d'elles-mêmes. Rétablissez-la si le transport a lieu."
-                : `${todayCancelledBySync} courses d'aujourd'hui, annulées par la synchronisation du référentiel, restent annulées : les courses du jour ne reviennent pas d'elles-mêmes. Rétablissez-les si les transports ont lieu.`}{" "}
+                ? "1 course d'aujourd'hui, annulée par la synchronisation du référentiel, reste annulée\u00a0: les courses du jour ne reviennent pas d'elles-mêmes. Rétablissez-la si le transport a lieu."
+                : `${todayCancelledBySync} courses d'aujourd'hui, annulées par la synchronisation du référentiel, restent annulées\u00a0: les courses du jour ne reviennent pas d'elles-mêmes. Rétablissez-les si les transports ont lieu.`}{" "}
               <Link href={`/courses?date=${today}&statut=CANCELLED`} className="font-medium underline underline-offset-2">
                 Voir les courses annulées du jour
               </Link>
@@ -246,7 +246,7 @@ export default async function PatientPage({
           ) : null}
           {!patient.active ? (
             <Notice size="sm" tone="info">
-              Patient désactivé : ses récurrences ne génèrent plus de courses. Sa fiche et son historique sont conservés.
+              Patient désactivé&nbsp;: ses récurrences ne génèrent plus de courses. Sa fiche et son historique sont conservés.
             </Notice>
           ) : null}
         </div>
@@ -300,7 +300,7 @@ export default async function PatientPage({
               </span>
               <span className="mt-0.5 block text-xs text-slate-500">
                 Annulations demandées pour le patient (hors séance annulée par l&apos;établissement, course confiée à un
-                confrère ou décision de la régulation) ; tardive : moins de {lateHours} h avant la prise en charge prévue.
+                confrère ou décision de la régulation)&#x202F;; tardive&nbsp;: moins de {lateHours}&nbsp;h avant la prise en charge prévue.
               </span>
             </Item>
             <Item label="Notes d'accès" className="sm:col-span-2 lg:col-span-4">
@@ -328,7 +328,7 @@ export default async function PatientPage({
         {prescriptions.length === 0 ? (
           <CardBody>
             <p className="text-sm text-slate-600">
-              Aucune prescription : saisissez la PMT du patient avant de créer ses récurrences.
+              Aucune prescription&nbsp;: saisissez la PMT du patient avant de créer ses récurrences.
             </p>
           </CardBody>
         ) : (
@@ -339,14 +339,14 @@ export default async function PatientPage({
               <div className="space-y-2 border-b border-slate-200 px-4 py-3">
                 {!hasValidToday && activeRecurrences.length > 0 ? (
                   <Notice size="sm" tone="danger">
-                    Aucune prescription valide aujourd&apos;hui : les récurrences de ce patient ne génèrent pas de courses.
+                    Aucune prescription valide aujourd&apos;hui&nbsp;: les récurrences de ce patient ne génèrent pas de courses.
                   </Notice>
                 ) : null}
                 {prescriptions
                   .filter((p) => p.mismatch)
                   .map((p) => (
                     <Notice size="sm" key={p.id}>
-                      Prescription du {formatShortDate(p.dates.validFrom)} au {formatShortDate(p.dates.validTo)} : {p.mismatch}
+                      Prescription du {formatShortDate(p.dates.validFrom)} au {formatShortDate(p.dates.validTo)}&nbsp;: {p.mismatch}
                     </Notice>
                   ))}
                 {toReattach.map((p) =>
@@ -360,15 +360,15 @@ export default async function PatientPage({
                           p._count.recurrences === 1
                             ? "1 récurrence y est encore rattachée"
                             : `${p._count.recurrences} récurrences y sont encore rattachées`
-                        } : les courses continuent sur le renouvellement ; ${
+                        }\u00a0: les courses continuent sur le renouvellement\u202f; ${
                           p._count.recurrences === 1 ? "rattachez-y la récurrence" : "rattachez-y les récurrences"
-                        } pour que la fiche reste à jour.${p.uncovered ? ` Attention : ${uncoveredText(p.uncovered)}.` : ""}`}
+                        } pour que la fiche reste à jour.${p.uncovered ? ` Attention\u00a0: ${uncoveredText(p.uncovered)}.` : ""}`}
                       </p>
                       <ActionButton
                         action={attachRecurrencesToRenewal}
                         fields={{ patientId: patient.id, fromPrescriptionId: p.id, toPrescriptionId: p.renewal.id }}
                         confirm={{
-                          question: `Rattacher ${p._count.recurrences === 1 ? "la récurrence" : `les ${p._count.recurrences} récurrences`} à la prescription du ${formatShortDate(p.renewal.validFrom)} au ${formatShortDate(p.renewal.validTo)} ? Les courses jusqu'au ${formatShortDate(p.dates.validTo)} restent sur la prescription actuelle.`,
+                          question: `Rattacher ${p._count.recurrences === 1 ? "la récurrence" : `les ${p._count.recurrences} récurrences`} à la prescription du ${formatShortDate(p.renewal.validFrom)} au ${formatShortDate(p.renewal.validTo)}\u202f? Les courses jusqu'au ${formatShortDate(p.dates.validTo)} restent sur la prescription actuelle.`,
                           confirmLabel: "Oui, rattacher",
                           tone: "primary",
                         }}
@@ -433,7 +433,7 @@ export default async function PatientPage({
                               {activeRecurrences.some((r) => r.prescriptionId === p.id) ? ", à rattacher" : ""}
                             </Badge>
                             <span className="tabular mt-0.5 block text-xs whitespace-nowrap text-slate-500">
-                              suite : {formatShortDate(p.renewal.validFrom)} → {formatShortDate(p.renewal.validTo)}
+                              suite&nbsp;: {formatShortDate(p.renewal.validFrom)} → {formatShortDate(p.renewal.validTo)}
                             </span>
                           </>
                         ) : (
@@ -465,7 +465,7 @@ export default async function PatientPage({
                             action={deletePrescription}
                             fields={{ patientId: patient.id, prescriptionId: p.id }}
                             confirm={{
-                              question: `Supprimer définitivement la prescription du ${formatShortDate(p.dates.validFrom)} au ${formatShortDate(p.dates.validTo)} ?`,
+                              question: `Supprimer définitivement la prescription du ${formatShortDate(p.dates.validFrom)} au ${formatShortDate(p.dates.validTo)}\u202f?`,
                               confirmLabel: "Oui, supprimer la prescription",
                               keepLabel: "Garder la prescription",
                             }}
@@ -502,8 +502,8 @@ export default async function PatientPage({
           <CardBody>
             <p className="text-sm text-slate-600">
               {prescriptions.length === 0
-                ? "Ajoutez d'abord une prescription : chaque récurrence s'appuie sur une prescription."
-                : "Aucune récurrence. Exemple : dialyse lundi, mercredi, vendredi, RDV 07:30, séance de 4 h."}
+                ? "Ajoutez d'abord une prescription\u00a0: chaque récurrence s'appuie sur une prescription."
+                : "Aucune récurrence. Exemple\u00a0: dialyse lundi, mercredi, vendredi, RDV 07:30, séance de 4\u00a0h."}
             </p>
           </CardBody>
         ) : (
@@ -542,7 +542,7 @@ export default async function PatientPage({
                     );
                     if (coverage) warnings.push(coverage);
                     if (!r.facility.active) {
-                      warnings.push({ tone: "warning", text: `L'établissement « ${r.facility.name} » est désactivé.` });
+                      warnings.push({ tone: "warning", text: `L'établissement «\u202f${r.facility.name}\u202f» est désactivé.` });
                     }
                     if (end !== null && end < today) {
                       warnings.push({ tone: "warning", text: `Récurrence terminée le ${formatShortDate(end)}.` });
@@ -552,7 +552,7 @@ export default async function PatientPage({
                       if (!other) continue;
                       warnings.push({
                         tone: "warning",
-                        text: `Chevauche la récurrence ${formatWeekdays(other.weekdays)} ${formatMinute(other.appointmentMinute)}${other.label ? ` (${other.label})` : ""} : mêmes jours et même créneau. Doublon ? Désactivez l'une des deux.`,
+                        text: `Chevauche la récurrence ${formatWeekdays(other.weekdays)} ${formatMinute(other.appointmentMinute)}${other.label ? ` (${other.label})` : ""}\u00a0: mêmes jours et même créneau. Doublon\u202f? Désactivez l'une des deux.`,
                       });
                     }
                   }
@@ -616,7 +616,7 @@ export default async function PatientPage({
                             confirm={
                               r.active
                                 ? {
-                                    question: `Désactiver cette récurrence ? Elle ne générera plus de courses${cancelledTripsClause(openTrips.get(r.id) ?? 0)}.`,
+                                    question: `Désactiver cette récurrence\u202f? Elle ne générera plus de courses${cancelledTripsClause(openTrips.get(r.id) ?? 0)}.`,
                                     confirmLabel: "Oui, désactiver la récurrence",
                                     keepLabel: "Garder la récurrence active",
                                   }

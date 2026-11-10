@@ -159,7 +159,7 @@ export function SearchSelect({
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`${label} : ${selectedLabel}`}
+        aria-label={`${label}\u00a0: ${selectedLabel}`}
         aria-describedby={describedBy}
         disabled={disabled}
         title={selectedLabel}

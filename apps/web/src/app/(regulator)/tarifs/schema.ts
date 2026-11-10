@@ -76,7 +76,7 @@ export function parseShortTripBands(text: string): ShortTripBand[] | null {
 }
 
 export function formatShortTripBands(bands: readonly ShortTripBand[]): string {
-  return bands.map((b) => `${formatNumber(b.upToKm)} : ${formatDecimalInput(b.amount)}`).join("\n");
+  return bands.map((b) => `${formatNumber(b.upToKm)}\u00a0: ${formatDecimalInput(b.amount)}`).join("\n");
 }
 
 /** "10 ; 10" -> [10, 10]; null for anything else than numbers. */
@@ -157,7 +157,7 @@ export const tariffSchema = tariffFields
     const bands = v.shortTripBands ? parseShortTripBands(v.shortTripBands) : [];
     const bandIssue =
       bands === null
-        ? "Une tranche par ligne : « km : montant », ex. « 7 : 8,54 »."
+        ? "Une tranche par ligne\u00a0: «\u202fkm\u00a0: montant\u202f», ex. «\u202f7\u00a0: 8,54\u202f»."
         : new Set(bands.map((b) => b.upToKm)).size !== bands.length
           ? "Deux tranches ont la même distance."
           : bands.length > MAX_SHORT_TRIP_BANDS
@@ -169,11 +169,11 @@ export const tariffSchema = tariffFields
     const detours = v.billableDetourKm ? parseKmList(v.billableDetourKm) : [];
     const detourIssue =
       detours === null
-        ? "Des km séparés par « ; », ex. « 10 ; 10 »."
+        ? "Des km séparés par «\u202f;\u202f», ex. «\u202f10\u202f; 10\u202f»."
         : detours.length > MAX_BILLABLE_DETOURS
           ? `${MAX_BILLABLE_DETOURS} détours au plus (un par patient ajouté).`
           : detours.some((km) => km > MAX_LIST_VALUE)
-            ? "1 000 km au plus par détour."
+            ? "1 000\u00a0km au plus par détour."
             : null;
     if (detourIssue) ctx.addIssue({ code: "custom", path: ["billableDetourKm"], message: detourIssue });
     if (v.validTo !== null && v.validTo < v.validFrom) {
@@ -294,7 +294,7 @@ export function tariffFormValues(grid?: TariffRecord, overrides: Partial<Record<
         maxSharedPatients: String(grid.maxSharedPatients),
         aloneDiscount: grid.aloneDiscount ? pct(grid.aloneDiscount) : "",
         aloneThresholdKm: formatDecimalInput(grid.aloneThresholdKm),
-        billableDetourKm: grid.billableDetourKm.map(formatDecimalInput).join(" ; "),
+        billableDetourKm: grid.billableDetourKm.map(formatDecimalInput).join("\u202f; "),
         tpmrFare: grid.tpmrFare ? formatDecimalInput(grid.tpmrFare) : "",
         verification: grid.verification,
         sourceUrl: grid.sourceUrl ?? "",
@@ -356,7 +356,7 @@ export function duplicateOverrides(source: Pick<TariffGrid, "label" | "validFrom
     validTo: "",
     verification: "UNVERIFIED",
     sourceUrl: "",
-    notes: `Reprise de la grille${source.label ? ` « ${source.label} »` : ""} en vigueur depuis le ${from}.`.slice(0, 500),
+    notes: `Reprise de la grille${source.label ? ` «\u202f${source.label}\u202f»` : ""} en vigueur depuis le ${from}.`.slice(0, 500),
   };
 }
 

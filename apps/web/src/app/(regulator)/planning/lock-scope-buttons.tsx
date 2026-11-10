@@ -31,7 +31,7 @@ type Props = {
  * Unlocking a depot or the day asks first: the locks a regulator set one by
  * one would be lost.
  */
-const RUNNING = "Une optimisation de cette date est en cours : attendez la fin du calcul.";
+const RUNNING = "Une optimisation de cette date est en cours\u00a0: attendez la fin du calcul.";
 
 export function LockScopeButtons({ date, version, scope, name, lockable, locked, blocked: blockedBy, variant = "panel" }: Props) {
   const { busy, run, remoteRunning } = usePlanningActivity();
@@ -55,18 +55,18 @@ export function LockScopeButtons({ date, version, scope, name, lockable, locked,
   const unlockTitle =
     blocked ??
     (locked > 0
-      ? pluralize(locked, "course figée : l'optimisation pourra de nouveau la déplacer", "courses figées : l'optimisation pourra de nouveau les déplacer")
+      ? pluralize(locked, "course figée\u00a0: l'optimisation pourra de nouveau la déplacer", "courses figées\u00a0: l'optimisation pourra de nouveau les déplacer")
       : "Aucune course figée");
 
   if (confirming) {
     return (
       <span
         role="group"
-        aria-label={`Confirmer : ${unlockLabel}`}
+        aria-label={`Confirmer\u00a0: ${unlockLabel}`}
         className={cn("inline-flex flex-wrap items-center gap-1.5", variant === "panel" ? "text-sm" : "text-xs")}
       >
         <span className="text-slate-700">
-          Défiger {pluralize(locked, "course", "courses")} ?
+          Défiger {pluralize(locked, "course", "courses")}&#x202F;?
         </span>
         <Button size="sm" variant="secondary" className={variant === "icons" ? "h-6 px-1.5 text-xs" : undefined} onClick={unlock} disabled={busy} autoFocus>
           <Check aria-hidden className="size-3.5" />

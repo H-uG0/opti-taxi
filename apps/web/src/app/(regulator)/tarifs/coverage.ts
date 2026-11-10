@@ -13,7 +13,7 @@ export const COVERAGE_DAYS = 7;
 /** "VSL 04", "Taxi toutes zones", plus the grid's own label. */
 function gridName(alert: Pick<TariffCoverageAlert, "vehicleType">, grid: NonNullable<TariffCoverageAlert["expiring"]>): string {
   const zone = grid.department === ALL_ZONES ? "toutes zones" : grid.department;
-  return `${VEHICLE_TYPE_SHORT[alert.vehicleType]} ${zone}${grid.label ? ` « ${grid.label} »` : ""}`;
+  return `${VEHICLE_TYPE_SHORT[alert.vehicleType]} ${zone}${grid.label ? ` «\u202f${grid.label}\u202f»` : ""}`;
 }
 
 /**
@@ -24,8 +24,8 @@ export function coverageAlertText(alert: TariffCoverageAlert): string {
   const resumes = alert.resumesOn ? `la prochaine ne commence que le ${formatShortDate(alert.resumesOn)}` : null;
   if (alert.kind === "expires" && alert.expiring) {
     const ends = `La grille ${gridName(alert, alert.expiring)} expire le ${formatShortDate(alert.expiring.validTo)}`;
-    return resumes ? `${ends} et ${resumes}.` : `${ends} : aucune ne prend le relais.`;
+    return resumes ? `${ends} et ${resumes}.` : `${ends}\u00a0: aucune ne prend le relais.`;
   }
   const missing = `Aucune grille en vigueur le ${formatShortDate(alert.uncoveredFrom)}`;
-  return resumes ? `${missing} ; ${resumes}.` : `${missing}.`;
+  return resumes ? `${missing}\u202f; ${resumes}.` : `${missing}.`;
 }

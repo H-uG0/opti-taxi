@@ -92,10 +92,10 @@ function VehicleFields({
 
   const selectedDepot = depots.find((d) => d.id === depotId);
   let depotHint: ReactNode = selectedDepot
-    ? `Départ et retour des tournées : ${selectedDepot.address}.`
+    ? `Départ et retour des tournées\u00a0: ${selectedDepot.address}.`
     : "Départ et retour des tournées. Les dépôts se gèrent dans la page Dépôts.";
   if (selectedDepot && !selectedDepot.active) {
-    depotHint = <InlineWarning>Dépôt désactivé : choisissez-en un autre si le véhicule change de dépôt.</InlineWarning>;
+    depotHint = <InlineWarning>Dépôt désactivé&nbsp;: choisissez-en un autre si le véhicule change de dépôt.</InlineWarning>;
   }
 
   const driverRule = driverRequirement(type);
@@ -106,7 +106,7 @@ function VehicleFields({
 
   // Most important message first: a missing qualification blocks the save,
   // a person shared with another vehicle only warns.
-  const driverRequired = `Requis pour conduire ${VEHICLE_TYPE_WITH_ARTICLE[type]} : ${qualificationRequirement(driverRule)}${crewRuleSuffix(type)}.`;
+  const driverRequired = `Requis pour conduire ${VEHICLE_TYPE_WITH_ARTICLE[type]}\u00a0: ${qualificationRequirement(driverRule)}${crewRuleSuffix(type)}.`;
   const oneOf = crewOneOfRequirement(type);
   /** The person chosen on one seat lacks the DEA the pair needs: the other seat must bring it. */
   const lacksOneOf = (person: DriverOption | undefined) =>
@@ -118,7 +118,7 @@ function VehicleFields({
   if (selectedDriver && !hasRequiredQualification(selectedDriver.qualifications, driverRule)) {
     driverHint = (
       <InlineWarning>
-        {selectedDriver.name} n&apos;a pas la qualification requise ({qualificationRequirement(driverRule)}) :
+        {selectedDriver.name} n&apos;a pas la qualification requise ({qualificationRequirement(driverRule)})&nbsp;:
         l&apos;enregistrement sera refusé.
       </InlineWarning>
     );
@@ -136,18 +136,18 @@ function VehicleFields({
     } else if (selectedCrewMate && !hasRequiredQualification(selectedCrewMate.qualifications, crewRule)) {
       crewMateHint = (
         <InlineWarning>
-          {selectedCrewMate.name} n&apos;a pas la qualification requise ({qualificationRequirement(crewRule)}) :
+          {selectedCrewMate.name} n&apos;a pas la qualification requise ({qualificationRequirement(crewRule)})&nbsp;:
           l&apos;enregistrement sera refusé.
         </InlineWarning>
       );
     } else if (composition) {
-      crewMateHint = <InlineWarning>{composition} L&apos;enregistrement sera refusé.</InlineWarning>;
+      crewMateHint = <InlineWarning>{composition}&nbsp;L&apos;enregistrement sera refusé.</InlineWarning>;
     } else if (crewMateShared) {
       crewMateHint = <InlineWarning>{crewMateShared}</InlineWarning>;
     } else if (crewMateId === "") {
-      crewMateHint = `Une ambulance part à deux : sans équipier par défaut, elle n'est planifiée que si un équipier qualifié reste libre ce jour-là (page Équipages). Requis : ${qualificationRequirement(crewRule)}${lacksOneOf(selectedDriver) ? `, et ${qualificationNoun(oneOf ?? [])} puisque le chauffeur ne l'est pas` : ""}.`;
+      crewMateHint = `Une ambulance part à deux\u00a0: sans équipier par défaut, elle n'est planifiée que si un équipier qualifié reste libre ce jour-là (page Équipages). Requis\u00a0: ${qualificationRequirement(crewRule)}${lacksOneOf(selectedDriver) ? `, et ${qualificationNoun(oneOf ?? [])} puisque le chauffeur ne l'est pas` : ""}.`;
     } else {
-      crewMateHint = `Une ambulance part à deux, avec au moins un ${qualificationNoun(oneOf ?? [])} au volant ou auprès du patient. Requis : ${qualificationRequirement(crewRule)}.`;
+      crewMateHint = `Une ambulance part à deux, avec au moins un ${qualificationNoun(oneOf ?? [])} au volant ou auprès du patient. Requis\u00a0: ${qualificationRequirement(crewRule)}.`;
     }
   }
 
@@ -155,7 +155,7 @@ function VehicleFields({
     <>
       <Fieldset legend="Identification">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="Libellé" htmlFor="label" hint="Nom usuel, ex. « Taxi 3 Manosque »." error={errors.label} className="lg:col-span-2">
+          <Field label="Libellé" htmlFor="label" hint="Nom usuel, ex. «&#x202F;Taxi 3 Manosque&#x202F;»." error={errors.label} className="lg:col-span-2">
             <Input
               id="label"
               name="label"
@@ -205,7 +205,7 @@ function VehicleFields({
             <Field
               label="Capacité (patients)"
               htmlFor="capacity"
-              hint="Ambulance : 1 patient allongé, jamais de transport partagé."
+              hint="Ambulance&nbsp;: 1 patient allongé, jamais de transport partagé."
               className="lg:col-span-2"
             >
               <UnitInput id="capacity" name="capacity" value="1" readOnly unit="patient" className="bg-slate-50" />
@@ -214,7 +214,7 @@ function VehicleFields({
             <Field
               label="Capacité (patients simultanés)"
               htmlFor="capacity"
-              hint="Règle de V : 2 patients. Les textes VSL (avenant 11) autorisent jusqu'à 3."
+              hint="Règle de V&nbsp;: 2 patients. Les textes VSL (avenant 11) autorisent jusqu'à 3."
               error={errors.capacity}
               className="lg:col-span-2"
             >
@@ -262,7 +262,7 @@ function VehicleFields({
           <Field
             label="Département de rattachement"
             htmlFor="department"
-            hint="Taxi : département de l'ADS, qui choisit sa grille tarifaire (ex. 13, 04, 05, 38)."
+            hint="Taxi&nbsp;: département de l'ADS, qui choisit sa grille tarifaire (ex. 13, 04, 05, 38)."
             error={errors.department}
             className="lg:col-span-2"
           >
@@ -343,7 +343,7 @@ function VehicleFields({
             </Field>
           ) : (
             <p className="self-end pb-2 text-xs text-slate-500">
-              Taxi et VSL : un seul chauffeur. L&apos;équipier ne concerne que les ambulances.
+              Taxi et VSL&nbsp;: un seul chauffeur. L&apos;équipier ne concerne que les ambulances.
             </p>
           )}
         </div>
@@ -371,7 +371,7 @@ function VehicleFields({
             label="Coût kilométrique (€/km)"
             htmlFor="costPerKm"
             error={errors.costPerKm}
-            hint="Carburant, entretien, usure : utilisé par l'optimiseur pour calculer la marge."
+            hint="Carburant, entretien, usure&nbsp;: utilisé par l'optimiseur pour calculer la marge."
             className="sm:col-span-2"
           >
             <UnitInput

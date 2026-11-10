@@ -49,12 +49,12 @@ export default async function EditRecurrencePage({
           <>
             {openTripsLabel(openTrips)} de cette récurrence {openTrips === 1 ? "suivra" : "suivront"} la modification
             (horaire, établissement, prescription). Une course qui ne tombe plus un jour, un trajet ou une période prévus
-            sera annulée ; une course dont l&apos;horaire a été changé à la main garde son horaire.
+            sera annulée&#x202F;; une course dont l&apos;horaire a été changé à la main garde son horaire.
           </>
         ) : (
           "Les modifications s'appliquent aux courses générées ensuite."
         )}
-        {recurrence.active ? null : " Cette récurrence est désactivée : réactivez-la depuis la fiche patient."}
+        {recurrence.active ? null : " Cette récurrence est désactivée\u00a0: réactivez-la depuis la fiche patient."}
       </Notice>
       <RecurrenceForm
         action={updateRecurrence.bind(null, patient.id, recurrence.id)}

@@ -74,7 +74,7 @@ function refuse(reason: RefusalReason, error: string): StopDecision {
   return { type: "refuse", reason, error };
 }
 
-const CANCELLED_ERROR = "Course annulée par la régulation : statut non modifiable.";
+const CANCELLED_ERROR = "Course annulée par la régulation\u00a0: statut non modifiable.";
 
 export function decideStopAction(action: StopAction, stop: StopSnapshot, now: Date): StopDecision {
   const { kind, completedAt, tripStatus } = stop;
@@ -83,7 +83,7 @@ export function decideStopAction(action: StopAction, stop: StopSnapshot, now: Da
     case "PICKUP": {
       if (kind !== "PICKUP") return refuse("WRONG_KIND", "Cet arrêt n'est pas une prise en charge.");
       if (tripStatus === "CANCELLED") return refuse("CANCELLED", CANCELLED_ERROR);
-      if (tripStatus === "NO_SHOW") return refuse("NO_SHOW", "Patient déclaré absent : annulez l'absence d'abord.");
+      if (tripStatus === "NO_SHOW") return refuse("NO_SHOW", "Patient déclaré absent\u00a0: annulez l'absence d'abord.");
       if (ON_BOARD_OR_LATER.includes(tripStatus)) {
         if (completedAt) return { type: "noop", message: "Prise en charge déjà enregistrée." };
         // Trip already on board but the stop has no time yet: record the missing time only.
@@ -95,7 +95,7 @@ export function decideStopAction(action: StopAction, stop: StopSnapshot, now: Da
     case "DROPOFF": {
       if (kind !== "DROPOFF") return refuse("WRONG_KIND", "Cet arrêt n'est pas une dépose.");
       if (tripStatus === "CANCELLED") return refuse("CANCELLED", CANCELLED_ERROR);
-      if (tripStatus === "NO_SHOW") return refuse("NO_SHOW", "Patient déclaré absent : pas de dépose.");
+      if (tripStatus === "NO_SHOW") return refuse("NO_SHOW", "Patient déclaré absent\u00a0: pas de dépose.");
       if (tripStatus === "DROPPED_OFF") {
         if (completedAt) return { type: "noop", message: "Dépose déjà enregistrée." };
         return { type: "apply", completedAt: now, tripStatus, message: "Dépose enregistrée." };
@@ -114,7 +114,7 @@ export function decideStopAction(action: StopAction, stop: StopSnapshot, now: Da
         return { type: "apply", completedAt: now, tripStatus, message: "Absence enregistrée." };
       }
       if (!OPEN.includes(tripStatus)) {
-        return refuse("ALREADY_PICKED_UP", "Patient déjà pris en charge : annulez la prise en charge d'abord.");
+        return refuse("ALREADY_PICKED_UP", "Patient déjà pris en charge\u00a0: annulez la prise en charge d'abord.");
       }
       return { type: "apply", completedAt: completedAt ?? now, tripStatus: "NO_SHOW", message: "Absence enregistrée." };
     }
@@ -188,7 +188,7 @@ export function stopControls(stop: StopSnapshot, editable: boolean): StopControl
   const dropoff = decideStopAction("DROPOFF", stop, now);
   if (dropoff.type === "apply") return { ...NO_CONTROLS, primary: "DROPOFF" };
   if (dropoff.type === "refuse" && dropoff.reason === "NOT_PICKED_UP") {
-    return { ...NO_CONTROLS, primary: "DROPOFF", blockedReason: "Prise en charge non saisie : enregistrez-la d'abord." };
+    return { ...NO_CONTROLS, primary: "DROPOFF", blockedReason: "Prise en charge non saisie\u00a0: enregistrez-la d'abord." };
   }
   return NO_CONTROLS;
 }

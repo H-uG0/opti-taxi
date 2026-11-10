@@ -32,7 +32,7 @@ describe("boundObservedAt", () => {
     expect(result).toEqual({ ok: true, at: RECEIVED, deferred: false });
   });
 
-  it("refuses a status more than 3 h old, accepts one just inside", () => {
+  it("refuses a status more than 3\u00a0h old, accepts one just inside", () => {
     expect(MAX_STATUS_AGE_MS).toBe(3 * 60 * MIN);
     expect(boundObservedAt({ observedAt: at(-MAX_STATUS_AGE_MS - MIN), sentAt: at(0), receivedAt: RECEIVED, previousAt: null })).toEqual({
       ok: false,

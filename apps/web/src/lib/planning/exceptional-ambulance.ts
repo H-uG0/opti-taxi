@@ -24,7 +24,7 @@ export type ExceptionalCandidate = {
 };
 
 export const OPTIMIZE_FIRST_ISSUE =
-  "Optimisez d'abord la journée : le recours exceptionnel ne se propose que pour une course que le dernier calcul n'a pu confier à aucun taxi ni VSL.";
+  "Optimisez d'abord la journée\u00a0: le recours exceptionnel ne se propose que pour une course que le dernier calcul n'a pu confier à aucun taxi ni VSL.";
 
 /** Why this trip cannot get an exceptional ambulance, or null when it can. */
 export function exceptionalAmbulanceIssue(trip: ExceptionalCandidate): string | null {
@@ -33,7 +33,7 @@ export function exceptionalAmbulanceIssue(trip: ExceptionalCandidate): string | 
   if (trip.allowedVehicleTypes.includes("AMBULANCE")) return "Cette course est déjà prescrite en ambulance.";
   if (!isSeatedOnly(trip.allowedVehicleTypes)) return "Cette course n'est pas un transport assis.";
   if (trip.payer !== "CPAM") return "Le recours à une ambulance au tarif VSL ne concerne que les transports pris en charge par l'Assurance maladie.";
-  if (trip.assigned) return "Cette course a déjà un véhicule : le recours exceptionnel ne concerne qu'une course non affectée.";
+  if (trip.assigned) return "Cette course a déjà un véhicule\u00a0: le recours exceptionnel ne concerne qu'une course non affectée.";
   if (!trip.leftByOptimizer) return OPTIMIZE_FIRST_ISSUE;
   return null;
 }

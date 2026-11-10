@@ -11,7 +11,7 @@ import { errorState, idSchema, invalidState, messageState, readForm, successStat
 import { fromIsoDate, isIsoDate, toIsoDate } from "@/lib/time";
 import { AREA_AUDIT_FIELDS, areaSchema, billingSettingsSchema, certificationSchema, holidaySchema } from "./schema";
 
-const GONE = "Cet élément n'existe plus : rechargez la page.";
+const GONE = "Cet élément n'existe plus\u00a0: rechargez la page.";
 
 /** Billing rules feed the tariffs page, the planning (grid of each vehicle) and every optimization. */
 function refresh() {

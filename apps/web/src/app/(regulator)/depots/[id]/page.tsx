@@ -73,7 +73,7 @@ export default async function EditDepotPage({
             <div>
               <h3 className="mb-2 font-medium text-slate-900">Véhicules ({depot.vehicles.length})</h3>
               {depot.vehicles.length === 0 ? (
-                <p className="text-slate-500">Aucun véhicule : choisissez ce dépôt dans la fiche d&apos;un véhicule.</p>
+                <p className="text-slate-500">Aucun véhicule&nbsp;: choisissez ce dépôt dans la fiche d&apos;un véhicule.</p>
               ) : (
                 <ul className="space-y-1">
                   {/* Active first, then the order of every list: type, then number (« Taxi 2 » before « Taxi 10 »). */}
@@ -92,7 +92,7 @@ export default async function EditDepotPage({
             <div>
               <h3 className="mb-2 font-medium text-slate-900">Personnel ({depot.drivers.length})</h3>
               {depot.drivers.length === 0 ? (
-                <p className="text-slate-500">Personne : choisissez ce dépôt dans la fiche d&apos;un chauffeur.</p>
+                <p className="text-slate-500">Personne&nbsp;: choisissez ce dépôt dans la fiche d&apos;un chauffeur.</p>
               ) : (
                 <ul className="space-y-1">
                   {depot.drivers.map((d) => (

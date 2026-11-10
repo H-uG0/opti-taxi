@@ -506,8 +506,8 @@ export function refreshNotice(outcome: RefreshOutcome): string {
   if (refreshed > 0) {
     const what = refreshed === 1 && kept === 0 ? "de la tournée" : `de ${refreshed} tournée${refreshed > 1 ? "s" : ""}`;
     let rules = "";
-    if (violations === 1) rules = " ; 1 contrainte n'est pas respectée";
-    else if (violations > 1) rules = ` ; ${violations} contraintes ne sont pas respectées`;
+    if (violations === 1) rules = "\u202f; 1 contrainte n'est pas respectée";
+    else if (violations > 1) rules = `\u202f; ${violations} contraintes ne sont pas respectées`;
     sentences.push(`Horaires et totaux ${what} recalculés${rules}.`);
   }
   if (kept > 0) {
@@ -517,14 +517,14 @@ export function refreshNotice(outcome: RefreshOutcome): string {
     if (outcome.dayStarted) {
       const why = outcome.unavailable ? " (service d'optimisation indisponible)" : "";
       sentences.push(
-        `Les horaires et totaux ${what} n'ont pas pu être recalculés${why} : ils restent ceux du dernier calcul, la journée ayant commencé.`,
+        `Les horaires et totaux ${what} n'ont pas pu être recalculés${why}\u00a0: ils restent ceux du dernier calcul, la journée ayant commencé.`,
       );
     } else if (outcome.unavailable) {
       sentences.push(
         `Les horaires et totaux ${what} seront mis à jour à la prochaine optimisation (service d'optimisation indisponible).`,
       );
     } else if (outcome.failed) {
-      sentences.push(`Les horaires et totaux ${what} n'ont pas pu être recalculés : ils seront mis à jour à la prochaine optimisation.`);
+      sentences.push(`Les horaires et totaux ${what} n'ont pas pu être recalculés\u00a0: ils seront mis à jour à la prochaine optimisation.`);
     } else {
       sentences.push(`Les horaires et totaux ${what} seront mis à jour à la prochaine optimisation.`);
     }

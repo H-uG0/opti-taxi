@@ -164,7 +164,7 @@ export function undrivableNote(comparison: Pick<PlanComparison, "undrivable">): 
       : `La tournée de ${vehicles} ne peut plus être assurée`;
   if (undrivable.trips === 0) return `${routes}.`;
   const trips = plural(undrivable.trips, "course n'est pas comptée comme servie", "courses ne sont pas comptées comme servies");
-  return `${routes} : ${trips} dans le planning actuel.`;
+  return `${routes}\u00a0: ${trips} dans le planning actuel.`;
 }
 
 /**
@@ -192,7 +192,7 @@ export function comparisonQuestion(
     parts.push(`dégage une marge de ${euros.format(next.margin)} contre ${euros.format(current.margin)}`);
   }
   const what = parts.length > 0 ? `${subject} ${parts.join(", ")}` : `${subject} est moins bon que le planning actuel`;
-  const question = current ? `${what} : remplacer quand même ?` : `${what} : l'enregistrer quand même ?`;
+  const question = current ? `${what}\u00a0: remplacer quand même\u202f?` : `${what}\u00a0: l'enregistrer quand même\u202f?`;
   const note = undrivableNote(comparison);
   return note ? `${note} ${question}` : question;
 }
@@ -204,7 +204,7 @@ export function figuresLine(figures: PlanFigures): string {
     plural(figures.served, "course servie", "courses servies"),
     violationsText(figures.violations),
     `marge ${euros.format(figures.margin)}`,
-    `${km} km`,
+    `${km}\u00a0km`,
   ].join(" · ");
 }
 

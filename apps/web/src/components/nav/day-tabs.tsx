@@ -4,9 +4,9 @@ import { cn } from "@/components/ui/cn";
 /** The four screens of a day, in the order of the dispatcher's work. */
 export const DAY_TABS = [
   { href: "/planning", label: "Planning", title: "Tournées du jour" },
-  { href: "/courses", label: "Courses", title: "Courses du jour : horaires, annulations, partage" },
-  { href: "/equipages", label: "Équipages", title: "Équipages du jour : absences, remplaçants" },
-  { href: "/arrivees-partagees", label: "Accueils", title: "Transports partagés : fiches à envoyer aux accueils des établissements" },
+  { href: "/courses", label: "Courses", title: "Courses du jour\u00a0: horaires, annulations, partage" },
+  { href: "/equipages", label: "Équipages", title: "Équipages du jour\u00a0: absences, remplaçants" },
+  { href: "/arrivees-partagees", label: "Accueils", title: "Transports partagés\u00a0: fiches à envoyer aux accueils des établissements" },
 ] as const;
 
 export type DayTab = (typeof DAY_TABS)[number]["href"];

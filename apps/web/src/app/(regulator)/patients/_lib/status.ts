@@ -67,8 +67,8 @@ export function uncoveredDays(endOfPrevious: string, startOfNext: string, todayI
 /** "aucune PMT du 02/11/2026 au 04/11/2026 : pas de course ces jours-là". */
 export function uncoveredText(days: { from: string; to: string }): string {
   return days.from === days.to
-    ? `aucune PMT le ${formatShortDate(days.from)} : pas de course ce jour-là`
-    : `aucune PMT du ${formatShortDate(days.from)} au ${formatShortDate(days.to)} : pas de course ces jours-là`;
+    ? `aucune PMT le ${formatShortDate(days.from)}\u00a0: pas de course ce jour-là`
+    : `aucune PMT du ${formatShortDate(days.from)} au ${formatShortDate(days.to)}\u00a0: pas de course ces jours-là`;
 }
 
 function capitalize(text: string): string {
@@ -103,10 +103,10 @@ export function pickCurrentPrescription<T extends { validFrom: Date; validTo: Da
 /** The prescribed mode must match the patient's mobility (lying -> ambulance, seated -> TAP). */
 export function mobilityModeWarning(mobility: Mobility, mode: PrescribedMode): string | null {
   if (mobility === "LYING" && mode === "TAP") {
-    return "Patient allongé avec une prescription en transport assis : vérifiez la mobilité ou la prescription.";
+    return "Patient allongé avec une prescription en transport assis\u00a0: vérifiez la mobilité ou la prescription.";
   }
   if (mobility === "SEATED" && mode === "AMBULANCE") {
-    return "Patient assis avec une prescription en ambulance : vérifiez la mobilité ou la prescription.";
+    return "Patient assis avec une prescription en ambulance\u00a0: vérifiez la mobilité ou la prescription.";
   }
   return null;
 }
@@ -146,20 +146,20 @@ export function recurrenceCoverageNotice(
   const end = formatShortDate(prescription.validTo);
   const gap = renewal ? uncoveredDays(prescription.validTo, renewal.validFrom, todayIso) : null;
   const renewed = renewal
-    ? `PMT renouvelée (${formatShortDate(renewal.validFrom)} → ${formatShortDate(renewal.validTo)}) : les courses continuent dessus ; rattachez-y la récurrence${gap ? `. ${capitalize(uncoveredText(gap))}` : ""}`
+    ? `PMT renouvelée (${formatShortDate(renewal.validFrom)} → ${formatShortDate(renewal.validTo)})\u00a0: les courses continuent dessus\u202f; rattachez-y la récurrence${gap ? `. ${capitalize(uncoveredText(gap))}` : ""}`
     : null;
 
   if (validity.state === "expired") {
     return renewed
       ? { tone: "warning", text: `PMT expirée le ${end}. ${renewed}.` }
-      : { tone: "danger", text: `Prescription expirée le ${end} : plus aucune course générée.` };
+      : { tone: "danger", text: `Prescription expirée le ${end}\u00a0: plus aucune course générée.` };
   }
   if (validity.state === "expiring" && outlives(recurrence, prescription)) {
     return renewed
       ? { tone: gap ? "warning" : "info", text: `${renewed}.` }
       : {
           tone: "warning",
-          text: `${validityLabel(prescription, todayIso)} (${end}) : sans renouvellement, plus de course après cette date.`,
+          text: `${validityLabel(prescription, todayIso)} (${end})\u00a0: sans renouvellement, plus de course après cette date.`,
         };
   }
   const first = firstDayToCome(recurrence, todayIso);
@@ -175,7 +175,7 @@ export function recurrenceCoverageNotice(
     }
     return {
       tone: "warning",
-      text: `La PMT ne commence que le ${formatShortDate(prescription.validFrom)} : pas de course avant cette date.`,
+      text: `La PMT ne commence que le ${formatShortDate(prescription.validFrom)}\u00a0: pas de course avant cette date.`,
     };
   }
   return null;
@@ -198,12 +198,12 @@ export function recurrenceFormNotices(recurrence: Period, prescription: FormPres
       const before = uncoveredDays(previous.validTo, prescription.validFrom, todayIso);
       notices.push({
         tone: before ? "warning" : "info",
-        text: `Avant le ${formatShortDate(prescription.validFrom)}, les courses restent sur la prescription précédente (jusqu'au ${formatShortDate(previous.validTo)})${before ? ` ; ${uncoveredText(before)}` : ""}.`,
+        text: `Avant le ${formatShortDate(prescription.validFrom)}, les courses restent sur la prescription précédente (jusqu'au ${formatShortDate(previous.validTo)})${before ? `\u202f; ${uncoveredText(before)}` : ""}.`,
       });
     } else {
       notices.push({
         tone: "warning",
-        text: `La prescription ne commence que le ${formatShortDate(prescription.validFrom)} : aucune course ne sera générée avant cette date.`,
+        text: `La prescription ne commence que le ${formatShortDate(prescription.validFrom)}\u00a0: aucune course ne sera générée avant cette date.`,
       });
     }
   }
@@ -214,15 +214,15 @@ export function recurrenceFormNotices(recurrence: Period, prescription: FormPres
       const gap = uncoveredDays(prescription.validTo, next.validFrom, todayIso);
       notices.push({
         tone: gap ? "warning" : "info",
-        text: `${prescription.validTo < todayIso ? `Cette prescription a expiré le ${end} ; les courses continuent` : `Courses générées sur cette prescription jusqu'au ${end}, puis`} sur son renouvellement (${formatShortDate(next.validFrom)} → ${formatShortDate(next.validTo)})${gap ? ` ; ${uncoveredText(gap)}` : ""}.`,
+        text: `${prescription.validTo < todayIso ? `Cette prescription a expiré le ${end}\u202f; les courses continuent` : `Courses générées sur cette prescription jusqu'au ${end}, puis`} sur son renouvellement (${formatShortDate(next.validFrom)} → ${formatShortDate(next.validTo)})${gap ? `\u202f; ${uncoveredText(gap)}` : ""}.`,
       });
     } else {
       notices.push(
         prescription.validTo < todayIso
-          ? { tone: "danger", text: `Cette prescription a expiré le ${end} : aucune course ne sera générée.` }
+          ? { tone: "danger", text: `Cette prescription a expiré le ${end}\u00a0: aucune course ne sera générée.` }
           : {
               tone: "info",
-              text: `Courses générées jusqu'au ${end} (fin de la prescription) ; pour la suite, saisissez le renouvellement : les courses continueront dessus.`,
+              text: `Courses générées jusqu'au ${end} (fin de la prescription)\u202f; pour la suite, saisissez le renouvellement\u00a0: les courses continueront dessus.`,
             },
       );
     }

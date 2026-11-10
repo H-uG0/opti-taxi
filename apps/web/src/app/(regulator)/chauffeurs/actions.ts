@@ -33,7 +33,7 @@ import {
   OPEN_SESSION_NOTE,
 } from "./schema";
 
-const DRIVER_GONE = "Ce chauffeur n'existe plus : rechargez la page.";
+const DRIVER_GONE = "Ce chauffeur n'existe plus\u00a0: rechargez la page.";
 
 function revalidateDriver(driverId?: string) {
   revalidatePath("/chauffeurs");
@@ -103,7 +103,7 @@ export async function updateDriver(driverId: string, _state: FormState, formData
   if (conflicts.length > 0) {
     return errorState(
       {
-        qualifications: `Qualification encore nécessaire : ${conflicts.join(" ; ")}. Changez d'abord l'équipage de ce véhicule.`,
+        qualifications: `Qualification encore nécessaire\u00a0: ${conflicts.join("\u202f; ")}. Changez d'abord l'équipage de ce véhicule.`,
       },
       values,
     );
@@ -151,7 +151,7 @@ export async function setDriverActive(driverId: string, active: boolean): Promis
     revalidateDriver(driver.id);
     if (!reactivated) return successState("Ce chauffeur est déjà actif.");
     return successState(
-      "Chauffeur réactivé. Affectez-le à un véhicule et réactivez son accès si besoin : ils n'ont pas été restaurés.",
+      "Chauffeur réactivé. Affectez-le à un véhicule et réactivez son accès si besoin\u00a0: ils n'ont pas été restaurés.",
     );
   }
 
@@ -183,7 +183,7 @@ export async function setDriverActive(driverId: string, active: boolean): Promis
   const { detached, accountDisabled } = result;
   const parts = ["Chauffeur désactivé."];
   if (detached > 0) parts.push(`Retiré de l'équipage par défaut de ${detached} véhicule${detached > 1 ? "s" : ""}.`);
-  if (accountDisabled) parts.push(`Son compte d'accès est désactivé : il ne peut plus se connecter. ${OPEN_SESSION_NOTE}`);
+  if (accountDisabled) parts.push(`Son compte d'accès est désactivé\u00a0: il ne peut plus se connecter. ${OPEN_SESSION_NOTE}`);
   // Planned routes keep their crew (said only when there are some); fixed crews have the seat to replace.
   const impact = await loadStaffImpact(db, [driver.id], todayIso(), null);
   const notice = staffImpactNotice(impact, "person");
@@ -211,7 +211,7 @@ export async function saveDriverAccount(driverId: string, _state: FormState, for
     },
   });
   if (!driver) return messageState(DRIVER_GONE);
-  if (!driver.active) return messageState("Chauffeur désactivé : réactivez-le avant de gérer son accès.");
+  if (!driver.active) return messageState("Chauffeur désactivé\u00a0: réactivez-le avant de gérer son accès.");
   const account = driver.user;
   if (account && account.role !== "DRIVER") return messageState("Ce compte n'est pas un compte chauffeur.");
 
@@ -260,7 +260,7 @@ export async function saveDriverAccount(driverId: string, _state: FormState, for
     if (isUniqueViolation(error, "email")) {
       return errorState({ email: "Cette adresse est déjà utilisée par un autre compte." }, safeValues);
     }
-    if (isUniqueViolation(error, "driverId")) return messageState("Ce chauffeur a déjà un compte : rechargez la page.");
+    if (isUniqueViolation(error, "driverId")) return messageState("Ce chauffeur a déjà un compte\u00a0: rechargez la page.");
     throw error;
   }
 
@@ -307,7 +307,7 @@ export async function setDriverAccountActive(driverId: string, active: boolean):
   if (!changed) return successState(target ? "Cet accès est déjà actif." : "Cet accès est déjà désactivé.");
   return successState(
     target
-      ? "Accès réactivé : le chauffeur se reconnecte avec son identifiant et son mot de passe actuels."
-      : `Accès désactivé : le chauffeur ne peut plus se connecter. ${OPEN_SESSION_NOTE}`,
+      ? "Accès réactivé\u00a0: le chauffeur se reconnecte avec son identifiant et son mot de passe actuels."
+      : `Accès désactivé\u00a0: le chauffeur ne peut plus se connecter. ${OPEN_SESSION_NOTE}`,
   );
 }

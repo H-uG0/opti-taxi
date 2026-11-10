@@ -36,11 +36,11 @@ export default async function NewTariffPage({
         <Notice className="mb-6">
           <p>
             Valeurs reprises de la grille {VEHICLE_TYPE_SHORT[source.vehicleType]} · {departmentLabel(source.department)}
-            {source.label ? ` « ${source.label} »` : ""}. Ajustez les montants et la date d&apos;effet : à partir de
+            {source.label ? ` «\u202f${source.label}\u202f»` : ""}. Ajustez les montants et la date d&apos;effet&nbsp;: à partir de
             cette date, la nouvelle grille remplacera l&apos;ancienne, qui reste dans l&apos;historique.
           </p>
           <p>
-            La vérification repart à « Non vérifié » et la source est vide : indiquez le nouveau texte, puis « Officiel » une
+            La vérification repart à «&#x202F;Non vérifié&#x202F;» et la source est vide&nbsp;: indiquez le nouveau texte, puis «&#x202F;Officiel&#x202F;» une
             fois les montants vérifiés.
           </p>
         </Notice>

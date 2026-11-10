@@ -89,7 +89,7 @@ export function FareSimulator({
         </Select>
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Distance par patient" htmlFor="simulator-km" error={km === null ? "Distance entre 0 et 1 000 km." : null}>
+        <Field label="Distance par patient" htmlFor="simulator-km" error={km === null ? "Distance entre 0 et 1 000\u00a0km." : null}>
           <UnitInput
             id="simulator-km"
             inputMode="decimal"
@@ -131,7 +131,7 @@ export function FareSimulator({
       {grid && km !== null ? (
         <div className="space-y-3" aria-live="polite">
           <table className="tabular w-full text-sm">
-            <caption className="sr-only">Tarif estimé pour {kmFormat.format(km)} km</caption>
+            <caption className="sr-only">Tarif estimé pour {kmFormat.format(km)}&nbsp;km</caption>
             <thead>
               <tr className="border-b border-slate-200 text-xs text-slate-500">
                 <th scope="col" className="py-1.5 text-left font-medium">
@@ -169,8 +169,8 @@ export function FareSimulator({
                 {two >= solo ? "+" : ""}
                 {formatPercent(two / solo - 1)}
               </strong>{" "}
-              par rapport à un trajet seul, sans compter les kilomètres et le temps chauffeur économisés. Hypothèse : chaque patient
-              parcourt {kmFormat.format(km)} km, sans détour.
+              par rapport à un trajet seul, sans compter les kilomètres et le temps chauffeur économisés. Hypothèse&nbsp;: chaque patient
+              parcourt {kmFormat.format(km)}&nbsp;km, sans détour.
             </p>
           ) : null}
         </div>

@@ -35,8 +35,8 @@ export function parseMinute(value: string): number | null {
 export function formatDuration(minutes: number): string {
   const sign = minutes < 0 ? "-" : "";
   const abs = Math.abs(Math.round(minutes));
-  if (abs < 60) return `${sign}${abs} min`;
-  return `${sign}${Math.floor(abs / 60)} h ${String(abs % 60).padStart(2, "0")}`;
+  if (abs < 60) return `${sign}${abs}\u00a0min`;
+  return `${sign}${Math.floor(abs / 60)}\u00a0h ${String(abs % 60).padStart(2, "0")}`;
 }
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;

@@ -77,7 +77,7 @@ describe("TripPanel (panneau course)", () => {
     await waitFor(() => expect(actions.unlockTrip).toHaveBeenCalledWith("trip-a"));
     cleanup();
 
-    renderPanel(planningFixture().trips["trip-a"]!, { lockBlocked: "Date passée : rien ne peut plus changer." });
+    renderPanel(planningFixture().trips["trip-a"]!, { lockBlocked: "Date passée\u00a0: rien ne peut plus changer." });
     expect((screen.getByRole("button", { name: /Figer/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -121,7 +121,7 @@ describe("TripPanel (panneau course)", () => {
     expect(screen.getByText(/^Optimisez d'abord la journée/)).toBeTruthy();
   });
 
-  it("warns that « Défiger » ends the exceptional measure", () => {
+  it("warns that «\u202fDéfiger\u202f» ends the exceptional measure", () => {
     renderPanel({ ...planningFixture().trips["trip-a"]!, vehicleId: "amb-1", lockedVehicleId: "amb-1", exceptionalAmbulance: true });
     expect(screen.getByText("« Défiger » retire le recours exceptionnel à l'ambulance.")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Défiger/ }).getAttribute("title")).toMatch(/^Retire le recours exceptionnel/);
@@ -141,7 +141,7 @@ describe("TripPanel (panneau course)", () => {
       notes: "Prévoir la rampe",
       facilityPhone: "04 91 22 33 44",
     });
-    const call = screen.getByRole("link", { name: "Appeler Monique Aubert : 04 91 00 00 01" });
+    const call = screen.getByRole("link", { name: "Appeler Monique Aubert\u00a0: 04 91 00 00 01" });
     expect(call.getAttribute("href")).toBe("tel:0491000001");
     expect(screen.getByRole("link", { name: /^Appeler Centre de dialyse des Oliviers/ }).getAttribute("href")).toBe("tel:0491223344");
     expect(screen.getByText("Fauteuil roulant")).toBeTruthy();
@@ -181,7 +181,7 @@ describe("TripPanel (panneau course)", () => {
     expect(screen.getByText("Dépose 5 min après le RDV")).toBeTruthy();
   });
 
-  it("freezes with « F » and goes to « Déplacer vers… » with « D », not while typing", async () => {
+  it("freezes with «\u202fF\u202f» and goes to «\u202fDéplacer vers…\u202f» with «\u202fD\u202f», not while typing", async () => {
     renderPanel(planningFixture().trips["trip-a"]!);
     fireEvent.keyDown(document.body, { key: "d" });
     expect(document.activeElement).toBe(moveSelect());
@@ -193,7 +193,7 @@ describe("TripPanel (panneau course)", () => {
     expect(screen.getByRole("button", { name: /Figer/ }).getAttribute("aria-keyshortcuts")).toBe("F");
   });
 
-  it("acts once for « F » held down (its repeats are ignored)", async () => {
+  it("acts once for «\u202fF\u202f» held down (its repeats are ignored)", async () => {
     renderPanel(planningFixture().trips["trip-a"]!);
     fireEvent.keyDown(document.body, { key: "f" });
     fireEvent.keyDown(document.body, { key: "f", repeat: true });
@@ -202,14 +202,14 @@ describe("TripPanel (panneau course)", () => {
     expect(actions.unlockTrip).not.toHaveBeenCalled();
   });
 
-  it("never withdraws an exceptional ambulance with « F »: the key only goes to « Défiger », next to its warning", () => {
+  it("never withdraws an exceptional ambulance with «\u202fF\u202f»: the key only goes to «\u202fDéfiger\u202f», next to its warning", () => {
     renderPanel({ ...planningFixture().trips["trip-a"]!, vehicleId: "amb-1", lockedVehicleId: "amb-1", exceptionalAmbulance: true });
     fireEvent.keyDown(document.body, { key: "f" });
     expect(actions.unlockTrip).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: /Défiger/ }));
   });
 
-  it("does nothing with « F » while the keyboard is on another trip of the timeline", async () => {
+  it("does nothing with «\u202fF\u202f» while the keyboard is on another trip of the timeline", async () => {
     renderPanel(planningFixture().trips["trip-a"]!);
     const other = document.createElement("button");
     other.dataset.tripIds = "trip-b";

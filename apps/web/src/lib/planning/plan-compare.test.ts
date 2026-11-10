@@ -28,7 +28,7 @@ function compare(next: Partial<PlanFigures>, current: PlanFigures | null = inPla
   );
 }
 
-describe("replaceConcerns (default thresholds: no trip lost, no new violation, 10 % of the revenue)", () => {
+describe("replaceConcerns (default thresholds: no trip lost, no new violation, 10\u00a0% of the revenue)", () => {
   it("lets an equal or better plan replace the routes in place", () => {
     expect(replaceConcerns(compare({}), DEFAULTS)).toEqual([]);
     expect(replaceConcerns(compare({ served: 302, margin: 5_000, km: 1_700 }), DEFAULTS)).toEqual([]);
@@ -63,7 +63,7 @@ describe("comparisonQuestion", () => {
   it("names the concerns, as the regulator reads them", () => {
     const comparison = compare({ served: 280, violations: 2 });
     expect(comparisonQuestion(comparison, replaceConcerns(comparison, DEFAULTS))).toBe(
-      "Ce calcul sert 280 courses contre 300 dans le planning actuel, avec 2 violations de contraintes (aucune actuellement) : remplacer quand même ?",
+      "Ce calcul sert 280 courses contre 300 dans le planning actuel, avec 2 violations de contraintes (aucune actuellement)\u00a0: remplacer quand même\u202f?",
     );
     const margin = compare({ margin: 3_000 });
     expect(plain(comparisonQuestion(margin, ["margin"]))).toBe(
@@ -73,7 +73,7 @@ describe("comparisonQuestion", () => {
 
   it("asks to save a first computation that breaks rules", () => {
     const first = compare({ violations: 1 }, null);
-    expect(comparisonQuestion(first, ["violations"])).toBe("Ce calcul comporte 1 violation de contrainte : l'enregistrer quand même ?");
+    expect(comparisonQuestion(first, ["violations"])).toBe("Ce calcul comporte 1 violation de contrainte\u00a0: l'enregistrer quand même\u202f?");
   });
 
   it("says first which routes in place can no longer be driven, and that they are not counted", () => {
@@ -83,11 +83,11 @@ describe("comparisonQuestion", () => {
     );
     expect(comparison.undrivable).toEqual({ vehicles: ["Taxi 2", "VSL 2"], trips: 8 });
     expect(comparisonQuestion(comparison, ["served"])).toBe(
-      "Les tournées de Taxi 2 et VSL 2 ne peuvent plus être assurées : 8 courses ne sont pas comptées comme servies dans le planning actuel. " +
-        "Ce calcul sert 299 courses contre 300 dans le planning actuel : remplacer quand même ?",
+      "Les tournées de Taxi 2 et VSL 2 ne peuvent plus être assurées\u00a0: 8 courses ne sont pas comptées comme servies dans le planning actuel. " +
+        "Ce calcul sert 299 courses contre 300 dans le planning actuel\u00a0: remplacer quand même\u202f?",
     );
     expect(undrivableNote({ undrivable: { vehicles: ["VSL 2 (Manosque)"], trips: 1 } })).toBe(
-      "La tournée de VSL 2 (Manosque) ne peut plus être assurée : 1 course n'est pas comptée comme servie dans le planning actuel.",
+      "La tournée de VSL 2 (Manosque) ne peut plus être assurée\u00a0: 1 course n'est pas comptée comme servie dans le planning actuel.",
     );
     // Nothing to say when every route can be driven.
     const none = comparePlans(

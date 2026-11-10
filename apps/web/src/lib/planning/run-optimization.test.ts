@@ -282,7 +282,7 @@ describe("the routes in place as the optimizer's start", () => {
     const outcome = await runOptimization(DATE, REGULATOR);
     expect(outcome).toMatchObject({
       ok: true,
-      message: expect.stringMatching(/^Planning en place conservé, aucun meilleur trouvé : 1\/2 courses servies · 1 tournée · calcul/),
+      message: expect.stringMatching(/^Planning en place conservé, aucun meilleur trouvé\u00a0: 1\/2 courses servies · 1 tournée · calcul/),
     });
   });
 
@@ -298,7 +298,7 @@ describe("the routes in place as the optimizer's start", () => {
     fake.db.route.findMany.mockResolvedValue([{ vehicleId: "taxi_mrs", stops: stops("t1") }]);
     fake.savePlan.mockResolvedValue({ routes: 2, served: 2, unassigned: 0 });
     const changed = await runOptimization(DATE, REGULATOR);
-    expect(changed).toMatchObject({ ok: true, message: expect.stringMatching(/^Planning optimisé : 2\/2 courses servies · 2 tournées dont 1 modifiée · calcul/) });
+    expect(changed).toMatchObject({ ok: true, message: expect.stringMatching(/^Planning optimisé\u00a0: 2\/2 courses servies · 2 tournées dont 1 modifiée · calcul/) });
 
     fake.optimize.mockResolvedValue({ ok: true, data: { ...planIgnoringTheMove(), routes: [route("taxi_mrs", "t1")] } });
     fake.db.route.findMany.mockResolvedValue([
@@ -309,7 +309,7 @@ describe("the routes in place as the optimizer's start", () => {
     const removed = await runOptimization(DATE, REGULATOR);
     expect(removed).toMatchObject({
       ok: true,
-      message: expect.stringMatching(/^Planning optimisé : 1\/2 courses servies · 1 tournée inchangée · 1 tournée retirée · calcul/),
+      message: expect.stringMatching(/^Planning optimisé\u00a0: 1\/2 courses servies · 1 tournée inchangée · 1 tournée retirée · calcul/),
     });
   });
 });
@@ -376,7 +376,7 @@ describe("never replacing the routes in place silently with a worse plan", () =>
 
     expect(outcome).toMatchObject({ ok: false, needsConfirmation: true });
     expect((outcome as { error: string }).error).toBe(
-      "Ce calcul sert 1 course contre 2 dans le planning actuel, avec 2 violations de contraintes (aucune actuellement) : remplacer quand même ?",
+      "Ce calcul sert 1 course contre 2 dans le planning actuel, avec 2 violations de contraintes (aucune actuellement)\u00a0: remplacer quand même\u202f?",
     );
     const stored = fake.db.optimizationRun.update.mock.calls.at(-1)![0] as {
       data: { status: string; details: { pending: { requestHash: string; basedOnVersion: string; lockChange: unknown }; question: string } };
@@ -430,7 +430,7 @@ describe("never replacing the routes in place silently with a worse plan", () =>
     const outcome = await runOptimization(DATE, REGULATOR, { move: MOVE });
     expect(outcome).toMatchObject({ ok: false, needsConfirmation: true });
     expect((outcome as { error: string }).error).toBe(
-      `Déplacement de la course de ${PATIENT} vers VSL Grenoble : ce calcul sert 1 course contre 2 dans le planning actuel : remplacer quand même ?`,
+      `Déplacement de la course de ${PATIENT} vers VSL Grenoble\u00a0: ce calcul sert 1 course contre 2 dans le planning actuel\u00a0: remplacer quand même\u202f?`,
     );
   });
 });
@@ -521,7 +521,7 @@ describe("a move whose plan waits for confirmation", () => {
   });
 });
 
-describe("« Revenir au planning précédent » after a move", () => {
+describe("«\u202fRevenir au planning précédent\u202f» after a move", () => {
   it("puts the lock the move had replaced back, with the routes, in the same transaction", async () => {
     const snapshot = {
       runId: "run-0",
@@ -580,7 +580,7 @@ describe("a plan waiting for confirmation", () => {
     },
   });
 
-  it("is saved by « Remplacer quand même » when neither the data nor the plan changed", async () => {
+  it("is saved by «\u202fRemplacer quand même\u202f» when neither the data nor the plan changed", async () => {
     fake.db.optimizationRun.findUnique.mockImplementation(async (args: { select: { serviceDate?: boolean } }) =>
       args.select.serviceDate ? pendingRun() : { status: "AWAITING_CONFIRMATION" },
     );
@@ -664,7 +664,7 @@ describe("withdrawLapsedProposals (recours exceptionnel)", () => {
   });
 });
 
-describe("« Placer les non affectées » (runOptimization placeOnly)", () => {
+describe("«\u202fPlacer les non affectées\u202f» (runOptimization placeOnly)", () => {
   /** The request as the day's input builds it: its trips with their locks (pins included). */
   const buildFromInput = (day: { trips: Array<{ id: string; lockedVehicleId: string | null }> }) => ({
     ...build(),
@@ -715,7 +715,7 @@ describe("« Placer les non affectées » (runOptimization placeOnly)", () => {
     );
     expect(outcome).toMatchObject({
       ok: true,
-      message: expect.stringMatching(/^1 course placée sur 1 non affectée, les autres courses restent sur leur véhicule : /),
+      message: expect.stringMatching(/^1 course placée sur 1 non affectée, les autres courses restent sur leur véhicule\u00a0: /),
     });
   });
 
@@ -743,7 +743,7 @@ describe("« Placer les non affectées » (runOptimization placeOnly)", () => {
     }));
     const incomplete = await runOptimization(DATE, REGULATOR, { placeOnly: true });
     expect(incomplete).toEqual({ ok: false, error: incompleteOnlyError(1) });
-    expect((incomplete as { error: string }).error).toMatch(/est incomplète \(voir « À traiter »\)/);
+    expect((incomplete as { error: string }).error).toMatch(/est incomplète \(voir «\u202fÀ traiter\u202f»\)/);
     expect(fake.db.optimizationRun.create).not.toHaveBeenCalled();
     expect(fake.optimize).not.toHaveBeenCalled();
   });
@@ -765,13 +765,13 @@ describe("« Placer les non affectées » (runOptimization placeOnly)", () => {
     expect(outcome).toEqual({
       ok: false,
       error:
-        "Planning inchangé : ce placement aurait retiré 1 course déjà placée de son véhicule (le retour de DURAND Paul). " +
-        "Placez les courses non affectées une à une avec « Déplacer vers… », ou réoptimisez la journée.",
+        "Planning inchangé\u00a0: ce placement aurait retiré 1 course déjà placée de son véhicule (le retour de DURAND Paul). " +
+        "Placez les courses non affectées une à une avec «\u202fDéplacer vers…\u202f», ou réoptimisez la journée.",
     });
     // Not offered for confirmation either: the run is closed as not kept, with the trip by id only.
     const stored = fake.db.optimizationRun.update.mock.calls.at(-1)![0] as { data: { status: string; error: string; details: { kind: string } } };
     expect(stored.data.status).toBe("FAILED");
-    expect(stored.data.error).toMatch(/^Calcul non retenu : ce placement aurait retiré 1 course déjà placée/);
+    expect(stored.data.error).toMatch(/^Calcul non retenu\u00a0: ce placement aurait retiré 1 course déjà placée/);
     // Its kind is kept: the page says « Placement des non affectées … non retenu ».
     expect(stored.data.details.kind).toBe("place");
     expect(stored.data.error).toContain(tripRef("t2"));
@@ -800,7 +800,7 @@ describe("« Placer les non affectées » (runOptimization placeOnly)", () => {
       ok: true,
       warning: true,
       message: expect.stringMatching(
-        /^La course non affectée n'a pas trouvé de place, 1 course déjà placée change de véhicule \(figée ailleurs ou véhicule indisponible\) : /,
+        /^La course non affectée n'a pas trouvé de place, 1 course déjà placée change de véhicule \(figée ailleurs ou véhicule indisponible\)\u00a0: /,
       ),
     });
   });
@@ -846,7 +846,7 @@ describe("« Placer les non affectées » (runOptimization placeOnly)", () => {
     expect(confirmed).toMatchObject({
       ok: true,
       warning: true,
-      message: expect.stringMatching(/^La course non affectée n'a pas trouvé de place, les autres courses restent sur leur véhicule : /),
+      message: expect.stringMatching(/^La course non affectée n'a pas trouvé de place, les autres courses restent sur leur véhicule\u00a0: /),
     });
     expect(fake.savePlan.mock.calls.at(-1)![1]).toMatchObject({ kind: "place", lockedCount: 0 });
     expect(fake.audit).toHaveBeenLastCalledWith(
@@ -859,7 +859,7 @@ describe("« Placer les non affectées » (runOptimization placeOnly)", () => {
     fake.savePlan.mockClear();
     savePlanComparing({ current: figures(2), next: figures(1), lostTripIds: ["t2"] });
     const refused = await confirmPendingRun("run-1", REGULATOR);
-    expect(refused).toMatchObject({ ok: false, error: expect.stringMatching(/^Calcul non retenu : ce placement aurait retiré 1 course déjà placée/) });
+    expect(refused).toMatchObject({ ok: false, error: expect.stringMatching(/^Calcul non retenu\u00a0: ce placement aurait retiré 1 course déjà placée/) });
     expect(fake.db.optimizationRun.updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({ where: { id: "run-1", status: "AWAITING_CONFIRMATION" }, data: expect.objectContaining({ status: "FAILED" }) }),
     );

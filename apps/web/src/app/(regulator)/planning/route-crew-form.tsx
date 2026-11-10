@@ -173,7 +173,7 @@ export function RouteCrewChange({
   if (mode === "equipages") {
     return (
       <p className="border-t border-slate-100 px-4 py-2.5 text-xs text-slate-600">
-        Planning proposé : l&apos;équipage se change sur la page{" "}
+        Planning proposé&nbsp;: l&apos;équipage se change sur la page{" "}
         <Link href={`/equipages?date=${date}`} className="font-medium text-brand-700 underline-offset-2 hover:underline">
           Équipages
         </Link>
@@ -183,7 +183,7 @@ export function RouteCrewChange({
   }
 
   const finished = route.remaining === null;
-  const reason = finished ? "Tournée terminée : son équipage ne se change plus." : blocked;
+  const reason = finished ? "Tournée terminée\u00a0: son équipage ne se change plus." : blocked;
   const ambulance = vehicle.type === "AMBULANCE";
   const unchanged = driverId === (route.driverId ?? "") && (!ambulance || crewMateId === (route.crewMateId ?? ""));
   const incomplete = driverId === "" || (ambulance && crewMateId === "");
@@ -257,7 +257,7 @@ export function RouteCrewChange({
         />
       ) : null}
       <p className="text-xs text-slate-500">
-        {route.remaining ? `Suite de la tournée : ${shiftText(route.remaining)}. ` : ""}
+        {route.remaining ? `Suite de la tournée\u00a0: ${shiftText(route.remaining)}. ` : ""}
         Les arrêts et les horaires ne changent pas. La tournée apparaît aussitôt sur la feuille de route du remplaçant (s&apos;il
         a un compte actif) et disparaît de celle de la personne remplacée.
         {ambulance ? " Une ambulance part avec au moins un ambulancier DE, au volant ou auprès du patient." : ""}

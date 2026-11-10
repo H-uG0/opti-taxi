@@ -28,9 +28,9 @@ export function chosenNotice(suggestion: Pick<GeocodeSuggestion, "label" | "scor
   return suggestion.score < LOW_GEOCODE_SCORE
     ? {
         tone: "warning",
-        text: `Correspondance faible (${score}) pour « ${suggestion.label} » : vérifiez l'adresse et les coordonnées avant d'enregistrer.`,
+        text: `Correspondance faible (${score}) pour «\u202f${suggestion.label}\u202f»\u00a0: vérifiez l'adresse et les coordonnées avant d'enregistrer.`,
       }
-    : { tone: "info", text: `Coordonnées reprises de « ${suggestion.label} » (confiance ${score}).` };
+    : { tone: "info", text: `Coordonnées reprises de «\u202f${suggestion.label}\u202f» (confiance ${score}).` };
 }
 
 /**
@@ -126,7 +126,7 @@ export function AddressLookup({
           <NoticeLine
             notice={{
               tone: "warning",
-              text: "L'adresse a changé depuis la localisation : relancez la recherche ou vérifiez les coordonnées.",
+              text: "L'adresse a changé depuis la localisation\u00a0: relancez la recherche ou vérifiez les coordonnées.",
             }}
           />
         ) : null}

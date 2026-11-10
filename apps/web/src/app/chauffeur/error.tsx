@@ -15,7 +15,7 @@ export default function DriverRoadmapError({ error, retry }: { error: unknown; r
       <div>
         <p className="text-lg font-semibold text-slate-900">Feuille de route indisponible</p>
         <p className="mt-1 text-sm text-slate-600">
-          Le serveur ne répond pas ou le réseau est coupé. Réessayez dans un instant ; si le problème continue, appelez la régulation.
+          Le serveur ne répond pas ou le réseau est coupé. Réessayez dans un instant&#x202F;; si le problème continue, appelez la régulation.
         </p>
       </div>
       <button

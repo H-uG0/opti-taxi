@@ -130,7 +130,7 @@ export const recurrenceSchema = z
           .number()
           .int()
           .min(0, "Durée positive attendue")
-          .max(MAX_SESSION_MINUTES, `Durée de séance : ${MAX_SESSION_MINUTES} min au plus`),
+          .max(MAX_SESSION_MINUTES, `Durée de séance\u00a0: ${MAX_SESSION_MINUTES}\u00a0min au plus`),
       ),
     legs: z.enum(RECURRENCE_LEGS, { error: "Choisissez les trajets" }),
     startDate: requiredDate("Date de début"),
@@ -149,7 +149,7 @@ export const recurrenceSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["sessionMinutes"],
-        message: "La fin de séance dépasse minuit : le retour ne peut pas être planifié",
+        message: "La fin de séance dépasse minuit\u00a0: le retour ne peut pas être planifié",
       });
     }
   })

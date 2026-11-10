@@ -57,7 +57,7 @@ describe("planning map layers", () => {
     });
     const depots = depotsCollection(vehicles);
     expect(depots.features).toHaveLength(1);
-    expect(depots.features[0]?.properties.title).toBe("Dépôt Marseille : Taxi 1, Taxi 2");
+    expect(depots.features[0]?.properties.title).toBe("Dépôt Marseille\u00a0: Taxi 1, Taxi 2");
   });
 
   it("draws a trip without a vehicle from its pick-up to its drop-off, unlike a route's stops", () => {
@@ -74,7 +74,7 @@ describe("planning map layers", () => {
     expect(unassigned.features[1]?.properties.title).toBe("Prise en charge · B (à placer)");
   });
 
-  it("draws the trips of a day not optimized yet as plain pick-ups « à planifier », not as trips left without a vehicle", () => {
+  it("draws the trips of a day not optimized yet as plain pick-ups «\u202fà planifier\u202f», not as trips left without a vehicle", () => {
     const pending = unassignedCollection(trips, false);
     expect(pending.features.map((f) => [f.properties.tripId, f.properties.role, f.geometry.type])).toEqual([["b", "pending", "Point"]]);
     expect(pending.features[0]?.properties.title).toBe("Prise en charge · B (à planifier)");

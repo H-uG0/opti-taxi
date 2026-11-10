@@ -73,9 +73,9 @@ describe("staff actions: audit trail", () => {
       .mockResolvedValueOnce([{ serviceDate: new Date("2099-01-07T00:00:00Z") }]);
     const result = await addAbsence(DRIVER, IDLE_STATE, absenceForm());
     expect(result.message).toBe(
-      "Absence enregistrée. Tournées déjà calculées avec cette personne le 05/01/2099 : relancez l'optimisation de ce jour depuis le planning." +
-        " Planning déjà validé le 07/01/2099 : changez l'équipage de la tournée (planning, panneau du véhicule, « Changer l'équipage ») ou rouvrez le planning puis relancez l'optimisation." +
-        " Équipage fixé avec cette personne : VSL 2 le 06/01/2099 ; son poste est à remplacer, voir la page Équipages.",
+      "Absence enregistrée. Tournées déjà calculées avec cette personne le 05/01/2099\u00a0: relancez l'optimisation de ce jour depuis le planning." +
+        " Planning déjà validé le 07/01/2099\u00a0: changez l'équipage de la tournée (planning, panneau du véhicule, «\u202fChanger l'équipage\u202f») ou rouvrez le planning puis relancez l'optimisation." +
+        " Équipage fixé avec cette personne\u00a0: VSL 2 le 06/01/2099\u202f; son poste est à remplacer, voir la page Équipages.",
     );
   });
 

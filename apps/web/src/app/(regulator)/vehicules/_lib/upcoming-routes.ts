@@ -47,5 +47,5 @@ export function upcomingRoutesNotice(routes: readonly UpcomingRoute[], subject: 
   const verb =
     subject === "vehicle" ? `${many ? "utilisent" : "utilise"} ce véhicule` : `${many ? "lui sont attribuées" : "lui est attribuée"}`;
   const days = dates.length > 1 ? "ces jours" : "ce jour";
-  return `${head} ${verb}. La désactivation ne ${many ? "les" : "la"} modifie pas : relancez l'optimisation de ${days} depuis le planning.`;
+  return `${head} ${verb}. La désactivation ne ${many ? "les" : "la"} modifie pas\u00a0: relancez l'optimisation de ${days} depuis le planning.`;
 }

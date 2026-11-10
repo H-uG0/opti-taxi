@@ -64,7 +64,7 @@ describe("patient list filters", () => {
   });
 });
 
-describe("awaitingRenewal (the red « Expire dans N j » badge)", () => {
+describe("awaitingRenewal (the red «\u202fExpire dans N j\u202f» badge)", () => {
   const pmt = (id: string, mode: "TAP" | "AMBULANCE", from: string, to: string, facilities: string[] = []) => ({
     id,
     mode,

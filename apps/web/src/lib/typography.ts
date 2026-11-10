@@ -34,9 +34,26 @@ export function frenchSpacing(text: string): string {
 
 export type TypographyIssue = { kind: "colon" | "mark" | "quote" | "unit"; excerpt: string };
 
-/** What frenchSpacing would change in a text shown to users, with a short excerpt of each. */
-export function typographyIssues(text: string): TypographyIssue[] {
+const LEADING_COLON = /^ :(?=\s|$)/g;
+const LEADING_MARK = /^ [;!?](?=\s|$)/g;
+const LEADING_UNIT = new RegExp(`^ (${UNITS})(?![\\p{L}\\p{N}'’])`, "gu");
+
+/**
+ * What frenchSpacing would change in a text shown to users, with a short excerpt of each.
+ * `continuation`: the text follows something else (a template part after an expression, a join
+ * separator such as " ; "), so a leading « : », « ; » or unit counts too.
+ */
+export function typographyIssues(text: string, { continuation = false }: { continuation?: boolean } = {}): TypographyIssue[] {
   const issues: TypographyIssue[] = [];
+  if (continuation) {
+    for (const [pattern, kind] of [
+      [LEADING_COLON, "colon"],
+      [LEADING_MARK, "mark"],
+      [LEADING_UNIT, "unit"],
+    ] as const) {
+      if (new RegExp(pattern.source, pattern.flags).test(text)) issues.push({ kind, excerpt: text.slice(0, 24) });
+    }
+  }
   const excerpt = (index: number) => text.slice(Math.max(0, index - 20), index + 12);
   for (const [pattern, kind] of [
     [SPACE_BEFORE_COLON, "colon"],

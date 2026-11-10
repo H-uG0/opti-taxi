@@ -174,10 +174,10 @@ export function TripRow({
               </span>
             ) : null}
             {trip.conflicts.length > 0 ? (
-              <span title={trip.conflicts.join(" ; ")}>
+              <span title={trip.conflicts.join("\u202f; ")}>
                 <Badge tone="warning" className="whitespace-nowrap">
                   <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
-                  Doublon ?
+                  Doublon&#x202F;?
                 </Badge>
               </span>
             ) : null}
@@ -253,7 +253,7 @@ export function TripRow({
           {conflict ? (
             <span className="mt-1 flex items-center gap-1 text-xs font-medium text-red-700">
               <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
-              Encore partagée : à réoptimiser
+              Encore partagée&nbsp;: à réoptimiser
             </span>
           ) : null}
           {trip.shared ? (
@@ -299,8 +299,8 @@ function TripDetails({ trip }: { trip: TripRowData }) {
         >
           <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
           <span>
-            <span className="font-semibold">Doublon possible.</span> {trip.conflicts.join(" ; ")}. Vérifiez qu&apos;un seul
-            véhicule ira chercher le patient ; sinon, annulez l&apos;une des courses.
+            <span className="font-semibold">Doublon possible.</span> {trip.conflicts.join("\u202f; ")}. Vérifiez qu&apos;un seul
+            véhicule ira chercher le patient&#x202F;; sinon, annulez l&apos;une des courses.
           </span>
         </p>
       ) : null}
@@ -332,7 +332,7 @@ function TripDetails({ trip }: { trip: TripRowData }) {
           <Detail label="Payeur">{PAYER_LABELS[trip.payer]}</Detail>
           <Detail label="Véhicules possibles">{trip.allowedVehicleTypes.map((type) => VEHICLE_TYPE_SHORT[type]).join(", ")}</Detail>
           <Detail label="Prescription">{trip.prescriptionLabel}</Detail>
-          <Detail label="Origine">{trip.origin ? `Récurrence « ${trip.origin} »` : "Course ponctuelle"}</Detail>
+          <Detail label="Origine">{trip.origin ? `Récurrence «\u202f${trip.origin}\u202f»` : "Course ponctuelle"}</Detail>
           {trip.statusTraces.length > 0 ? (
             <Detail label="Suivi">
               <ul className="space-y-0.5">
@@ -358,7 +358,7 @@ function TripDetails({ trip }: { trip: TripRowData }) {
           {trip.lockedVehicleLabel ? <Detail label="Figée">Sur {trip.lockedVehicleLabel}</Detail> : null}
           {trip.exceptionalAmbulance ? (
             <Detail label="Recours exceptionnel">
-              {EXCEPTIONAL_AMBULANCE_REASON} : ambulance facturée au tarif VSL.
+              {EXCEPTIONAL_AMBULANCE_REASON}&nbsp;: ambulance facturée au tarif VSL.
               <span className="block text-xs text-slate-500">{trip.exceptionalAmbulance.full}.</span>
             </Detail>
           ) : null}
@@ -422,8 +422,8 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
 export function cancelConfirmMessage(trip: Pick<TripRowData, "pairedReturn" | "patientName" | "direction" | "vehicleLabel" | "shared">, withReturn: boolean): string {
   const back = trip.pairedReturn;
   const what = withReturn && back
-    ? `Annuler la course de ${trip.patientName} (aller) et son retour${back.keyMinute !== null ? ` (fin de séance ${formatMinute(back.keyMinute)})` : ""} ?`
-    : `Annuler la course de ${trip.patientName} (${DIRECTION_LABELS[trip.direction].toLowerCase()}) ?`;
+    ? `Annuler la course de ${trip.patientName} (aller) et son retour${back.keyMinute !== null ? ` (fin de séance ${formatMinute(back.keyMinute)})` : ""}\u202f?`
+    : `Annuler la course de ${trip.patientName} (${DIRECTION_LABELS[trip.direction].toLowerCase()})\u202f?`;
   return `${what}${trip.vehicleLabel ? " Elle sera retirée de sa tournée." : ""}${
     trip.shared ? " Ses co-passagers restés seuls ne seront plus en transport partagé." : ""
   }`;
@@ -444,7 +444,7 @@ function LifecycleForm({ trip }: { trip: TripRowData }) {
   if (!restorable && !canCancel(trip.status)) {
     return (
       <p className="border-t border-slate-100 pt-3 text-xs text-slate-500">
-        Cette course ne peut plus être annulée (statut : {TRIP_STATUS_LABELS[trip.status].toLowerCase()}).
+        Cette course ne peut plus être annulée (statut&nbsp;: {TRIP_STATUS_LABELS[trip.status].toLowerCase()}).
       </p>
     );
   }
@@ -522,7 +522,7 @@ function CancelFields({
           <label htmlFor={noteId} className="block text-sm font-medium text-slate-700">
             Précision{" "}
             <span className="font-normal text-slate-500">
-              (obligatoire pour « {CANCELLATION_REASON_LABELS.OTHER} »)
+              (obligatoire pour «&#x202F;{CANCELLATION_REASON_LABELS.OTHER}&#x202F;»)
             </span>
           </label>
           <Input
@@ -535,7 +535,7 @@ function CancelFields({
             aria-describedby={`${noteId}-hint`}
           />
           <p id={`${noteId}-hint`} className="text-xs text-slate-500">
-            Aucune information médicale : le motif choisi suffit.
+            Aucune information médicale&nbsp;: le motif choisi suffit.
           </p>
         </div>
       </div>
@@ -608,7 +608,7 @@ function TollForm({ trip }: { trip: TripRowData }) {
           Enregistrer le péage
         </SubmitButton>
       </div>
-      <p className="text-xs text-slate-500">Part de ce patient, sur justificatif : ajoutée à sa facture, hors majorations et abattements.</p>
+      <p className="text-xs text-slate-500">Part de ce patient, sur justificatif&nbsp;: ajoutée à sa facture, hors majorations et abattements.</p>
     </ActionForm>
   );
 }
@@ -619,9 +619,9 @@ function ScheduleForm({ trip }: { trip: TripRowData }) {
     return (
       <div className="space-y-1 text-sm">
         <p className="text-slate-700">
-          {timeFieldLabel(trip.direction)} : <span className="tabular font-medium">{formatMinute(trip.keyMinute)}</span>
+          {timeFieldLabel(trip.direction)}&nbsp;: <span className="tabular font-medium">{formatMinute(trip.keyMinute)}</span>
         </p>
-        <p className="text-xs text-slate-500">Horaire non modifiable : la course est commencée, terminée ou annulée.</p>
+        <p className="text-xs text-slate-500">Horaire non modifiable&nbsp;: la course est commencée, terminée ou annulée.</p>
       </div>
     );
   }
@@ -647,7 +647,7 @@ function ScheduleForm({ trip }: { trip: TripRowData }) {
       </div>
       <p className="text-xs text-slate-500">
         {trip.vehicleLabel
-          ? "Si l'horaire prévu dans la tournée ne respecte plus le nouvel horaire, la course en est retirée : réoptimisez alors le planning pour la replacer."
+          ? "Si l'horaire prévu dans la tournée ne respecte plus le nouvel horaire, la course en est retirée\u00a0: réoptimisez alors le planning pour la replacer."
           : "Pris en compte à la prochaine optimisation."}
       </p>
     </ActionForm>
@@ -664,7 +664,7 @@ function SharingPanel({ trip }: { trip: TripRowData }) {
         <p role="note" className="flex items-start gap-1.5 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-800">
           <TriangleAlert aria-hidden className="mt-px size-3.5 shrink-0" />
           <span>
-            Le planning actuel transporte encore ce patient avec un autre malgré son refus : réoptimisez le planning pour
+            Le planning actuel transporte encore ce patient avec un autre malgré son refus&nbsp;: réoptimisez le planning pour
             qu&apos;il voyage seul avant de prévenir l&apos;accueil.
           </span>
         </p>
@@ -694,11 +694,11 @@ function SharingPanel({ trip }: { trip: TripRowData }) {
         <ActionForm action={recordSharingDecision} hidden={{ tripId: trip.id }} className="border-t border-slate-100 pt-3">
           <p className="text-xs text-slate-500">
             Réponse du patient au transport partagé. La proposition est horodatée par l&apos;optimisation quand elle
-            regroupe la course ; une réponse corrigée garde la trace de la précédente dans la note.
+            regroupe la course&#x202F;; une réponse corrigée garde la trace de la précédente dans la note.
           </p>
           <div className="space-y-1">
             <label htmlFor={noteId} className="block text-sm font-medium text-slate-700">
-              Note <span className="font-normal text-slate-500">(facultatif : motif du refus, canal…)</span>
+              Note <span className="font-normal text-slate-500">(facultatif&nbsp;: motif du refus, canal…)</span>
             </label>
             <Textarea
               id={noteId}
@@ -710,7 +710,7 @@ function SharingPanel({ trip }: { trip: TripRowData }) {
             />
             {/* A refusal is often explained by the patient's health: the reason stays non-medical. */}
             <p id={`${noteId}-hint`} className="text-xs text-slate-500">
-              Aucune information médicale (diagnostic, traitement) : « préfère voyager seul » suffit.
+              Aucune information médicale (diagnostic, traitement)&nbsp;: «&#x202F;préfère voyager seul&#x202F;» suffit.
             </p>
           </div>
           <DecisionButtons decisions={decisions} />
@@ -718,12 +718,12 @@ function SharingPanel({ trip }: { trip: TripRowData }) {
       ) : (
         <p className="border-t border-slate-100 pt-3 text-xs text-slate-500">
           {trip.status === "CANCELLED"
-            ? "Course annulée : pas de décision de partage."
-            : "La prescription n'autorise pas le transport partagé sur ce trajet : aucune décision à tracer."}
+            ? "Course annulée\u00a0: pas de décision de partage."
+            : "La prescription n'autorise pas le transport partagé sur ce trajet\u00a0: aucune décision à tracer."}
         </p>
       )}
       <p className="text-xs text-slate-500">
-        Un refus est mentionné sur la facture ; le patient avance alors les frais (décret 2025-202, art. R. 322-11-4).
+        Un refus est mentionné sur la facture&#x202F;; le patient avance alors les frais (décret 2025-202, art. R. 322-11-4).
       </p>
     </div>
   );

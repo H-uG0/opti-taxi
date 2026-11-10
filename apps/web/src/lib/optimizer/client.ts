@@ -53,19 +53,19 @@ export function optimizerUrl(): string {
 export function unreachableMessage(url: string, environment: string | undefined = process.env.NODE_ENV): string {
   if (environment === "development") {
     return (
-      `Le service d'optimisation ne répond pas (${url}). Lancez-le avec : ` +
+      `Le service d'optimisation ne répond pas (${url}). Lancez-le avec\u00a0: ` +
       "cd services/optimizer && .venv/Scripts/python.exe -m uvicorn app.main:app --port 8100 " +
-      "(ou : docker compose up -d optimizer)."
+      "(ou\u00a0: docker compose up -d optimizer)."
     );
   }
-  return "Le service d'optimisation ne répond pas. Réessayez dans quelques minutes ; si cela dure, prévenez la personne qui gère l'application.";
+  return "Le service d'optimisation ne répond pas. Réessayez dans quelques minutes\u202f; si cela dure, prévenez la personne qui gère l'application.";
 }
 
 function formatIssues(error: z.ZodError): string {
   return error.issues
     .slice(0, 3)
-    .map((issue) => `${issue.path.join(".") || "(racine)"} : ${issue.message}`)
-    .join(" ; ");
+    .map((issue) => `${issue.path.join(".") || "(racine)"}\u00a0: ${issue.message}`)
+    .join("\u202f; ");
 }
 
 async function readErrorDetail(response: Response): Promise<string> {
@@ -106,7 +106,7 @@ async function call<S extends z.ZodType>(
     if (error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError")) {
       return {
         ok: false,
-        error: `Le service d'optimisation n'a pas répondu en ${Math.round(init.timeoutMs / 1000)} s (${base}). Réessayez ou réduisez le temps de calcul dans les paramètres.`,
+        error: `Le service d'optimisation n'a pas répondu en ${Math.round(init.timeoutMs / 1000)}\u00a0s (${base}). Réessayez ou réduisez le temps de calcul dans les paramètres.`,
         reason: "timeout",
       };
     }
@@ -128,7 +128,7 @@ async function call<S extends z.ZodType>(
   if (!parsed.success) {
     return {
       ok: false,
-      error: `Réponse inattendue du service d'optimisation (contrat non respecté) : ${formatIssues(parsed.error)}`,
+      error: `Réponse inattendue du service d'optimisation (contrat non respecté)\u00a0: ${formatIssues(parsed.error)}`,
       reason: "error",
     };
   }
@@ -148,7 +148,7 @@ function timeoutFor(timeLimitSec: number): number {
 export async function optimize(request: OptimizeRequest): Promise<OptimizerResult<PlanResponse>> {
   const body = optimizeRequestSchema.safeParse(request);
   if (!body.success) {
-    return { ok: false, error: `Requête d'optimisation invalide : ${formatIssues(body.error)}` };
+    return { ok: false, error: `Requête d'optimisation invalide\u00a0: ${formatIssues(body.error)}` };
   }
   const timeoutMs = timeoutFor(body.data.settings.timeLimitSec);
   const result = await call("/optimize", planResponseSchema, { method: "POST", body: body.data, timeoutMs });
@@ -164,7 +164,7 @@ export async function optimize(request: OptimizeRequest): Promise<OptimizerResul
 export async function evaluate(request: EvaluateRequest): Promise<OptimizerResult<PlanResponse>> {
   const body = evaluateRequestSchema.safeParse(request);
   if (!body.success) {
-    return { ok: false, error: `Requête d'évaluation invalide : ${formatIssues(body.error)}`, reason: "error" };
+    return { ok: false, error: `Requête d'évaluation invalide\u00a0: ${formatIssues(body.error)}`, reason: "error" };
   }
   return call("/evaluate", planResponseSchema, {
     method: "POST",

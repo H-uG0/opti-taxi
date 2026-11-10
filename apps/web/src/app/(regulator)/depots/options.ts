@@ -19,7 +19,7 @@ export async function loadDepotOptions(keepId: string | null = null): Promise<De
 export async function depotChoiceError(depotId: string | null, currentId: string | null): Promise<string | null> {
   if (depotId === null) return null;
   const depot = await db.depot.findUnique({ where: { id: depotId }, select: { name: true, active: true } });
-  if (!depot) return "Dépôt introuvable : rechargez la page.";
+  if (!depot) return "Dépôt introuvable\u00a0: rechargez la page.";
   if (!depot.active && depotId !== currentId) return `Le dépôt ${depot.name} est désactivé.`;
   return null;
 }

@@ -32,13 +32,13 @@ export const CHART_SPECS: readonly ChartSpec[] = [
     id: "trips-per-vehicle",
     title: "Courses facturées par véhicule et par jour",
     method:
-      "Courses servies (dans une tournée : planifiées, prises en charge ou déposées) ÷ véhicules dont la tournée du jour compte encore au moins un arrêt (comme le planning). Réalisé : courses déposées ÷ véhicules dont l'équipage a saisi au moins un statut ce jour (« — » si aucun) ; sur la période, la journée en cours n'est pas comptée. Courses annulées, absentes ou non affectées exclues.",
+      "Courses servies (dans une tournée\u00a0: planifiées, prises en charge ou déposées) ÷ véhicules dont la tournée du jour compte encore au moins un arrêt (comme le planning). Réalisé\u00a0: courses déposées ÷ véhicules dont l'équipage a saisi au moins un statut ce jour («\u202f—\u202f» si aucun)\u202f; sur la période, la journée en cours n'est pas comptée. Courses annulées, absentes ou non affectées exclues.",
     value: (d) => d.tripsPerVehiclePlanned,
     format: (v) => formatDecimal(v),
     primaryLabel: "Prévu",
     secondary: { label: "Réalisé", value: (d) => d.tripsPerVehicleRealized },
     period: (p) =>
-      `Sur la période : ${formatDecimal(p.tripsPerVehiclePlanned)} prévu · ${formatDecimal(p.tripsPerVehicleRealized)} réalisé${p.inProgressDate ? " hors journée en cours" : ""} (${plural(p.servedTrips, "course")}, ${plural(p.vehicles, "journée-véhicule", "journées-véhicules")})`,
+      `Sur la période\u00a0: ${formatDecimal(p.tripsPerVehiclePlanned)} prévu · ${formatDecimal(p.tripsPerVehicleRealized)} réalisé${p.inProgressDate ? " hors journée en cours" : ""} (${plural(p.servedTrips, "course")}, ${plural(p.vehicles, "journée-véhicule", "journées-véhicules")})`,
   },
   {
     id: "empty-km",
@@ -48,7 +48,7 @@ export const CHART_SPECS: readonly ChartSpec[] = [
     value: (d) => d.emptyKmShare,
     format: percent,
     period: (p) =>
-      `Sur la période : ${formatPercent(p.emptyKmShare, 1)} (${formatKm(p.emptyKm, 0)} à vide sur ${formatKm(p.distanceKm, 0)})`,
+      `Sur la période\u00a0: ${formatPercent(p.emptyKmShare, 1)} (${formatKm(p.emptyKm, 0)} à vide sur ${formatKm(p.distanceKm, 0)})`,
   },
   {
     id: "shared",
@@ -57,27 +57,27 @@ export const CHART_SPECS: readonly ChartSpec[] = [
       "Courses servies effectuées avec au moins un autre patient à bord ÷ courses servies (même périmètre que l'indicateur courses par véhicule).",
     value: (d) => d.sharedRate,
     format: percent,
-    period: (p) => `Sur la période : ${formatPercent(p.sharedRate, 1)} (${p.sharedTrips} sur ${p.servedTrips} courses)`,
+    period: (p) => `Sur la période\u00a0: ${formatPercent(p.sharedRate, 1)} (${p.sharedTrips} sur ${p.servedTrips} courses)`,
   },
   {
     id: "late",
     title: "Patients arrivés après l'heure du RDV",
     method:
-      "Allers déposés dont l'heure de dépose saisie par le chauffeur (heure de Paris, à la minute près) dépasse l'heure du RDV, parmi les allers déposés avec une heure saisie. Retard prévu : dépose planifiée après le RDV, doit rester à 0.",
+      "Allers déposés dont l'heure de dépose saisie par le chauffeur (heure de Paris, à la minute près) dépasse l'heure du RDV, parmi les allers déposés avec une heure saisie. Retard prévu\u00a0: dépose planifiée après le RDV, doit rester à 0.",
     value: measuredLateArrivals,
     format: count,
     period: (p) =>
-      `Sur la période : ${p.lateArrivals} sur ${plural(p.measuredOutbound, "aller mesuré", "allers mesurés")} (${formatPercent(p.lateRate, 1)}) · prévus en retard : ${p.plannedLateArrivals}`,
+      `Sur la période\u00a0: ${p.lateArrivals} sur ${plural(p.measuredOutbound, "aller mesuré", "allers mesurés")} (${formatPercent(p.lateRate, 1)}) · prévus en retard\u00a0: ${p.plannedLateArrivals}`,
   },
   {
     id: "planning-time",
     title: "Temps passé à construire le planning",
     method:
-      "Du lancement de la première optimisation de la date à la validation des tournées (la plus tardive). « Non validé » tant que toutes les tournées du jour ne sont pas validées.",
+      "Du lancement de la première optimisation de la date à la validation des tournées (la plus tardive). «\u202fNon validé\u202f» tant que toutes les tournées du jour ne sont pas validées.",
     value: (d) => d.planningMinutes,
     format: (v) => formatDuration(v),
     period: (p) =>
-      `Moyenne : ${p.averagePlanningMinutes === null ? "—" : formatDuration(p.averagePlanningMinutes)} sur ${plural(p.measuredPlanningDays, "jour validé", "jours validés")} · ${plural(p.optimizationRuns, "optimisation lancée", "optimisations lancées")}`,
+      `Moyenne\u00a0: ${p.averagePlanningMinutes === null ? "—" : formatDuration(p.averagePlanningMinutes)} sur ${plural(p.measuredPlanningDays, "jour validé", "jours validés")} · ${plural(p.optimizationRuns, "optimisation lancée", "optimisations lancées")}`,
   },
   {
     id: "margin",
@@ -87,7 +87,7 @@ export const CHART_SPECS: readonly ChartSpec[] = [
     value: plannedMargin,
     format: (v) => formatEurosRounded(v),
     period: (p) =>
-      `Sur la période : ${formatEurosRounded(p.margin)} (CA ${formatEurosRounded(p.revenue)}, coût ${formatEurosRounded(p.cost)})`,
+      `Sur la période\u00a0: ${formatEurosRounded(p.margin)} (CA ${formatEurosRounded(p.revenue)}, coût ${formatEurosRounded(p.cost)})`,
   },
 ];
 
@@ -139,7 +139,7 @@ export function KpiCharts({
             <div className="mt-auto space-y-1 border-t border-slate-100 px-4 py-3 text-xs">
               <p className="tabular font-medium text-slate-700">{spec.period(period)}</p>
               <p className="text-slate-500">
-                <span className="font-medium text-slate-600">Calcul : </span>
+                <span className="font-medium text-slate-600">Calcul&nbsp;: </span>
                 {spec.method}
               </p>
             </div>

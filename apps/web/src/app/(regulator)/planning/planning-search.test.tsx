@@ -20,8 +20,8 @@ function renderSearch() {
   return { input, onSelectTrip, onShowVehicle };
 }
 
-describe("PlanningSearch (« / »)", () => {
-  it("takes the focus on « / » from the page, never while typing elsewhere", () => {
+describe("PlanningSearch («\u202f/\u202f»)", () => {
+  it("takes the focus on «\u202f/\u202f» from the page, never while typing elsewhere", () => {
     const { input } = renderSearch();
     fireEvent.keyDown(document.body, { key: "/" });
     expect(document.activeElement).toBe(input);

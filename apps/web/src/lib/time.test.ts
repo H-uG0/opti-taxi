@@ -36,7 +36,7 @@ describe("formatMinute", () => {
     expect(formatMinute(1439)).toBe("23:59");
   });
 
-  it("wraps past 24 h into the next days", () => {
+  it("wraps past 24\u00a0h into the next days", () => {
     expect(formatMinute(1440)).toBe("00:00 (+1)");
     expect(formatMinute(1510)).toBe("01:10 (+1)");
     expect(formatMinute(2 * 1440 + 5)).toBe("00:05 (+2)");
@@ -91,17 +91,17 @@ describe("parseMinute", () => {
 
 describe("formatDuration", () => {
   it("uses minutes below one hour and hours above", () => {
-    expect(formatDuration(0)).toBe("0 min");
-    expect(formatDuration(45)).toBe("45 min");
-    expect(formatDuration(60)).toBe("1 h 00");
-    expect(formatDuration(65)).toBe("1 h 05");
-    expect(formatDuration(245)).toBe("4 h 05");
+    expect(formatDuration(0)).toBe("0\u00a0min");
+    expect(formatDuration(45)).toBe("45\u00a0min");
+    expect(formatDuration(60)).toBe("1\u00a0h 00");
+    expect(formatDuration(65)).toBe("1\u00a0h 05");
+    expect(formatDuration(245)).toBe("4\u00a0h 05");
   });
 
   it("keeps the sign and rounds", () => {
-    expect(formatDuration(-30)).toBe("-30 min");
-    expect(formatDuration(-90)).toBe("-1 h 30");
-    expect(formatDuration(59.6)).toBe("1 h 00");
+    expect(formatDuration(-30)).toBe("-30\u00a0min");
+    expect(formatDuration(-90)).toBe("-1\u00a0h 30");
+    expect(formatDuration(59.6)).toBe("1\u00a0h 00");
   });
 });
 
@@ -269,7 +269,7 @@ describe("date labels", () => {
 describe("formatDateTime, formatTimeOn and formatDayDate: the one way to write an instant or a day", () => {
   const NOW = new Date("2026-11-10T12:00:00Z");
 
-  it("writes « 02/11 à 18:40 » in Europe/Paris, with the year only outside the current one", () => {
+  it("writes «\u202f02/11 à 18:40\u202f» in Europe/Paris, with the year only outside the current one", () => {
     expect(formatDateTime(new Date("2026-11-03T07:12:00Z"), NOW)).toBe("03/11 à 08:12");
     expect(formatDateTime("2026-07-14T21:30:00Z", NOW)).toBe("14/07 à 23:30"); // summer time
     expect(formatDateTime(new Date("2026-11-03T23:05:00Z"), NOW)).toBe("04/11 à 00:05"); // next day in Paris, 00 not 24
@@ -283,7 +283,7 @@ describe("formatDateTime, formatTimeOn and formatDayDate: the one way to write a
     expect(formatTimeOn("2026-11-03T23:10:00.000Z", "2026-11-03", NOW)).toBe("04/11 à 00:10");
   });
 
-  it("writes a day as « 12/11 », with the year outside the current one", () => {
+  it("writes a day as «\u202f12/11\u202f», with the year outside the current one", () => {
     expect(formatDayDate("2026-11-12", NOW)).toBe("12/11");
     expect(formatDayDate("2027-01-04", NOW)).toBe("04/01/2027");
   });

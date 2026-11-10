@@ -33,13 +33,13 @@ describe("upcomingRoutesNotice", () => {
 
   it("describes a single proposed route on a vehicle", () => {
     expect(upcomingRoutesNotice([proposed("2026-11-03")], "vehicle")).toBe(
-      "1 tournée à venir (03/11/2026) utilise ce véhicule. La désactivation ne la modifie pas : relancez l'optimisation de ce jour depuis le planning.",
+      "1 tournée à venir (03/11/2026) utilise ce véhicule. La désactivation ne la modifie pas\u00a0: relancez l'optimisation de ce jour depuis le planning.",
     );
   });
 
   it("counts validated routes and agrees in number for a driver", () => {
     expect(upcomingRoutesNotice([proposed("2026-11-03"), validated("2026-11-04")], "driver")).toBe(
-      "2 tournées à venir (03/11/2026, 04/11/2026), dont 1 validée, lui sont attribuées. La désactivation ne les modifie pas : relancez l'optimisation de ces jours depuis le planning.",
+      "2 tournées à venir (03/11/2026, 04/11/2026), dont 1 validée, lui sont attribuées. La désactivation ne les modifie pas\u00a0: relancez l'optimisation de ces jours depuis le planning.",
     );
   });
 

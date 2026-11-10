@@ -8,13 +8,13 @@ import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@/app/(regulator)/chau
 
 export const WRONG_CURRENT_PASSWORD = "Mot de passe actuel incorrect.";
 /** Same check while the password is still the one the regulation gave. */
-export const WRONG_PROVISIONAL_PASSWORD = "Mot de passe provisoire incorrect : reprenez celui que la régulation vous a donné.";
+export const WRONG_PROVISIONAL_PASSWORD = "Mot de passe provisoire incorrect\u00a0: reprenez celui que la régulation vous a donné.";
 
 /** First choice of a password (it was provisional): the driver has no other session to hear about. */
-export const PASSWORD_SET = "Mot de passe enregistré : utilisez-le désormais pour vous connecter.";
+export const PASSWORD_SET = "Mot de passe enregistré\u00a0: utilisez-le désormais pour vous connecter.";
 
 export const PASSWORD_CHANGED =
-  "Mot de passe changé : utilisez-le désormais pour vous connecter. " +
+  "Mot de passe changé\u00a0: utilisez-le désormais pour vous connecter. " +
   "Vos sessions ouvertes sur d'autres appareils sont fermées.";
 
 /**
@@ -24,7 +24,7 @@ export const PASSWORD_CHANGED =
  */
 export function tooManyPasswordAttempts(retryInMin: number): string {
   return (
-    `Trop d'essais : réessayez dans ${retryInMin} min ou appelez la régulation. ` +
+    `Trop d'essais\u00a0: réessayez dans ${retryInMin}\u00a0min ou appelez la régulation. ` +
     "D'ici là, vous ne pourrez pas non plus vous reconnecter."
   );
 }

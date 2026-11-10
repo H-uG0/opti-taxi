@@ -47,7 +47,7 @@ describe("DayNav", () => {
     expect(screen.queryByRole("link", { name: "Demain" })).toBeNull();
   });
 
-  it("never navigates while the date is typed: on Entrée (« Afficher ») or when the field is left", async () => {
+  it("never navigates while the date is typed: on Entrée («\u202fAfficher\u202f») or when the field is left", async () => {
     render(<DayNav basePath="/courses" date="2026-11-10" tomorrow="2026-11-11" params={{ statut: "annulee" }} fieldLabel="Date des courses" />);
     const field = screen.getByLabelText("Date des courses") as HTMLInputElement;
     // A day typed digit by digit goes through other valid dates: nothing happens on change.
@@ -74,7 +74,7 @@ describe("DayNav", () => {
     expect(router.push).toHaveBeenLastCalledWith("/equipages?date=2026-11-14");
   });
 
-  it("goes to the previous and next day with « [ » and « ] », keeping the filters but not the trip", async () => {
+  it("goes to the previous and next day with «\u202f[\u202f» and «\u202f]\u202f», keeping the filters but not the trip", async () => {
     render(<DayNav basePath="/planning" date="2026-11-10" tomorrow="2026-11-11" keepParams={["depot", "zoom"]} shortcuts />);
     fireEvent.keyDown(document.body, { key: "[" });
     await settle();
@@ -101,7 +101,7 @@ describe("DayNav", () => {
   it("asks before leaving unsaved changes, in the app's dialog, and stays on the date when told", async () => {
     render(
       <>
-        <LeaveGuard message="La modification des équipages du 10/11/2026 n'est pas enregistrée : elle sera perdue si vous quittez la page." />
+        <LeaveGuard message="La modification des équipages du 10/11/2026 n'est pas enregistrée&nbsp;: elle sera perdue si vous quittez la page." />
         <DayNav basePath="/equipages" date="2026-11-10" tomorrow="2026-11-11" />
       </>,
     );

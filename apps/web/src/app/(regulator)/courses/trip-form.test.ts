@@ -99,11 +99,11 @@ describe("parseNewTrip", { timeout: 30_000 }, () => {
 
     // Same ranges as the address forms: a point outside metropolitan France is refused.
     const abroad = parseNewTrip({ ...privateValues, destinationLat: "48.85", destinationLng: "-61.5" }, TODAY);
-    expect(!abroad.ok && abroad.errors.destinationLng).toEqual(["Longitude invalide : hors de France métropolitaine (entre -5,5 et 10)."]);
+    expect(!abroad.ok && abroad.errors.destinationLng).toEqual(["Longitude invalide\u00a0: hors de France métropolitaine (entre -5,5 et 10)."]);
     expect(!abroad.ok && abroad.errors.destinationLat).toBeUndefined();
 
     const notANumber = parseNewTrip({ ...privateValues, destinationLat: "nord" }, TODAY);
-    expect(!notANumber.ok && notANumber.errors.destinationLat).toEqual(["Latitude invalide : nombre décimal attendu (ex. 43,2965)."]);
+    expect(!notANumber.ok && notANumber.errors.destinationLat).toEqual(["Latitude invalide\u00a0: nombre décimal attendu (ex. 43,2965)."]);
 
     // Latitude and longitude typed the wrong way round: one message that says so.
     const swapped = parseNewTrip({ ...privateValues, destinationLat: "5,3806", destinationLng: "43.3027" }, TODAY);
@@ -226,7 +226,7 @@ describe("row action schemas", () => {
     expect(sharingDecisionSchema.safeParse({ tripId: "t1", decision: "PROPOSED" }).success).toBe(false);
   });
 
-  it("requires a reason to cancel a trip, and a note with « Autre motif »", () => {
+  it("requires a reason to cancel a trip, and a note with «\u202fAutre motif\u202f»", () => {
     expect(cancelTripSchema.parse({ tripId: "t1", reason: "HOSPITALIZATION", note: " ", returnTripId: "" })).toEqual({
       tripId: "t1",
       reason: "HOSPITALIZATION",

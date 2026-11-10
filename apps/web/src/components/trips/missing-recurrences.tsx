@@ -27,14 +27,14 @@ export function generationStateOf(date: string, today: string, completing: boole
 }
 
 function notGeneratedAdvice(state: GenerationState, onCourses: boolean): string {
-  const generate = `« Générer les courses de la semaine »${onCourses ? "" : " dans Courses"}`;
+  const generate = `«\u202fGénérer les courses de la semaine\u202f»${onCourses ? "" : " dans Courses"}`;
   switch (state) {
     case "pending":
       return "Création en cours…";
     case "failed":
-      return `La création a échoué : rechargez la page, ou utilisez ${generate}.`;
+      return `La création a échoué\u00a0: rechargez la page, ou utilisez ${generate}.`;
     case "today":
-      return `Les courses du jour ne sont pas créées automatiquement : saisissez-les (« Nouvelle course »${onCourses ? "" : " dans Courses"}).`;
+      return `Les courses du jour ne sont pas créées automatiquement\u00a0: saisissez-les («\u202fNouvelle course\u202f»${onCourses ? "" : " dans Courses"}).`;
     case "done":
     case "later":
       return `Utilisez ${generate}, ou saisissez-les.`;
@@ -75,7 +75,7 @@ export function MissingRecurrencesNote({
         </p>
         {withoutPrescription.length > 0 ? (
           <p>
-            Sans prescription valide à cette date : {names(withoutPrescription)}.{" "}
+            Sans prescription valide à cette date&nbsp;: {names(withoutPrescription)}.{" "}
             <Link href="/prescriptions" className="font-medium underline underline-offset-2">
               Voir les prescriptions à traiter
             </Link>
@@ -83,7 +83,7 @@ export function MissingRecurrencesNote({
         ) : null}
         {notGenerated.length > 0 ? (
           <p>
-            Courses pas encore générées : {names(notGenerated)}. {notGeneratedAdvice(state, onCourses)}
+            Courses pas encore générées&nbsp;: {names(notGenerated)}. {notGeneratedAdvice(state, onCourses)}
           </p>
         ) : null}
       </div>

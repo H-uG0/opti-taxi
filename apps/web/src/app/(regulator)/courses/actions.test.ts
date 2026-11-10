@@ -167,12 +167,12 @@ describe("cancelTrip", () => {
 
     const result = await cancelTrip(INITIAL_ACTION_RESULT, form({ tripId: "t1", reason: "PATIENT" }));
 
-    expect(result).toEqual({ ok: false, message: "La course a changé entre-temps : rechargez la page." });
+    expect(result).toEqual({ ok: false, message: "La course a changé entre-temps\u00a0: rechargez la page." });
     expect(recorded()).toEqual([]);
   });
 });
 
-describe("cancelTrips (« Annuler la sélection »)", () => {
+describe("cancelTrips («\u202fAnnuler la sélection\u202f»)", () => {
   function bulk(ids: string[], entries: Record<string, string>): FormData {
     const fd = form(entries);
     for (const id of ids) fd.append("tripId", id);
@@ -220,7 +220,7 @@ describe("cancelTrips (« Annuler la sélection »)", () => {
     expect(details).toEqual([{ bulk: true }, { bulk: true }]);
     expect(result.ok).toBe(true);
     expect(result.message).toMatch(
-      /^2 courses annulées \(séance annulée ou déplacée par l'établissement\), dont 1 retirée de sa tournée\. 2 courses non annulées : déjà commencées, terminées ou modifiées entre-temps\./,
+      /^2 courses annulées \(séance annulée ou déplacée par l'établissement\), dont 1 retirée de sa tournée\. 2 courses non annulées\u00a0: déjà commencées, terminées ou modifiées entre-temps\./,
     );
   });
 
@@ -268,7 +268,7 @@ describe("cancelTrips (« Annuler la sélection »)", () => {
   it("says so when nothing could be cancelled", async () => {
     fake.trip.findMany.mockResolvedValueOnce([tripRow("t3", "OUTBOUND", { status: "DROPPED_OFF" })]);
     const result = await cancelTrips(INITIAL_ACTION_RESULT, bulk(["t3"], { reason: "PATIENT" }));
-    expect(result).toEqual({ ok: false, message: "Aucune course annulée. 1 course non annulée : déjà commencée, terminée ou modifiée entre-temps." });
+    expect(result).toEqual({ ok: false, message: "Aucune course annulée. 1 course non annulée\u00a0: déjà commencée, terminée ou modifiée entre-temps." });
     expect(recorded()).toEqual([]);
   });
 });
@@ -383,6 +383,6 @@ describe("restoreTrip", () => {
     });
     expect(recorded()).toEqual([{ action: "trip.restore", entityId: "t1" }]);
     expect(result.ok).toBe(true);
-    expect(result.message).toMatch(/Attention : Le patient a déjà un aller ce jour \(RDV 07:35\)\. Vérifiez/);
+    expect(result.message).toMatch(/Attention\u00a0: Le patient a déjà un aller ce jour \(RDV 07:35\)\. Vérifiez/);
   });
 });

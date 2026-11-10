@@ -43,7 +43,7 @@ export function GenerateTripsForm({
         </WeekButton>
       </div>
       <p className="text-xs text-slate-500 sm:text-right">
-        Les courses régulières sont créées d&apos;office jusqu&apos;au {formatShortDate(horizonEnd)} ; sans doublon, jamais
+        Les courses régulières sont créées d&apos;office jusqu&apos;au {formatShortDate(horizonEnd)}&#x202F;; sans doublon, jamais
         avant demain.
       </p>
       {state.message ? (
@@ -72,8 +72,8 @@ function SkippedList({ skipped }: { skipped: GenerationResult["skipped"] }) {
     <div className="mt-1">
       <p className="font-medium">
         {skipped.length > 1
-          ? `${skipped.length} récurrences sans prescription valide (aucune course créée) :`
-          : "1 récurrence sans prescription valide (aucune course créée) :"}
+          ? `${skipped.length} récurrences sans prescription valide (aucune course créée)\u00a0:`
+          : "1 récurrence sans prescription valide (aucune course créée)\u00a0:"}
       </p>
       <ul className="mt-0.5 list-disc space-y-0.5 pl-5">
         {skipped.map((r) => (
@@ -81,7 +81,7 @@ function SkippedList({ skipped }: { skipped: GenerationResult["skipped"] }) {
             <Link href={`/patients/${r.patientId}#prescriptions`} className="font-medium underline underline-offset-2">
               {r.patientName}
             </Link>{" "}
-            — {r.label} :{" "}
+            — {r.label}&nbsp;:{" "}
             <span className="tabular">{r.dates.map((d) => formatShortDate(d).slice(0, 5)).join(", ")}</span>
           </li>
         ))}

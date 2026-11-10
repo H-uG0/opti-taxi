@@ -172,7 +172,7 @@ describe("stop durations per trip", () => {
 });
 
 describe("solver budget", () => {
-  it("keeps the configured limit for a small day and gives 1 s per 8 trips to a large one", () => {
+  it("keeps the configured limit for a small day and gives 1\u00a0s per 8 trips to a large one", () => {
     expect(effectiveTimeLimitSec(10, 0)).toBe(10);
     expect(effectiveTimeLimitSec(10, 80)).toBe(10);
     expect(effectiveTimeLimitSec(10, 81)).toBe(11);
@@ -291,8 +291,8 @@ describe("vehicle availability", () => {
   });
 
   it("gives a vehicle left out for the work-time rule its short reason", () => {
-    const long = "Horaire de 12 h 30 sans pause : au-delà de 6 h de travail… Réglez la pause de Julien Marchetti";
-    const short = "Pause de 20 min requise : horaire de 12 h 30 sans pause (art. L. 3121-16)";
+    const long = "Horaire de 12\u00a0h 30 sans pause\u00a0: au-delà de 6\u00a0h de travail… Réglez la pause de Julien Marchetti";
+    const short = "Pause de 20\u00a0min requise\u00a0: horaire de 12\u00a0h 30 sans pause (art. L. 3121-16)";
     const [taxi] = applyDayCrewPlan(
       [vehicle("t")],
       {
@@ -342,7 +342,7 @@ describe("vehicle availability", () => {
     expect(available.map((v) => v.break)).toEqual([null, null]);
   });
 
-  it("leaves out a vehicle whose shift is over 6 hours without a break of 20 min (art. L. 3121-16)", () => {
+  it("leaves out a vehicle whose shift is over 6 hours without a break of 20\u00a0min (art. L. 3121-16)", () => {
     const { available, skipped } = resolveVehicleAvailability(
       [
         vehicle("v1", { label: "Taxi 1", defaultDriver: driver("d1", { breakMinutes: 0 }) }),
@@ -355,9 +355,9 @@ describe("vehicle availability", () => {
     expect(available.map((v) => v.id)).toEqual(["v4"]);
     expect(skipped.map((s) => s.reason)).toEqual([
       // In a few words: the list of vehicles left out has little room, Équipages gives the remedy.
-      "Pause de 20 min requise : horaire de 13 h 00 sans pause (art. L. 3121-16)",
-      expect.stringContaining("avec une pause de 15 min"),
-      expect.stringContaining("fenêtre de pause qui ne laisse pas 45 min dans l'horaire"),
+      "Pause de 20\u00a0min requise\u00a0: horaire de 13\u00a0h 00 sans pause (art. L. 3121-16)",
+      expect.stringContaining("avec une pause de 15\u00a0min"),
+      expect.stringContaining("fenêtre de pause qui ne laisse pas 45\u00a0min dans l'horaire"),
     ]);
   });
 
@@ -568,7 +568,7 @@ describe("tariffs", () => {
     }
   });
 
-  it("flags the available vehicles no grid covers on the date (their revenue would be 0 €)", () => {
+  it("flags the available vehicles no grid covers on the date (their revenue would be 0\u00a0€)", () => {
     const vsl = vehicle("vsl", { type: "VSL", label: "VSL 2", department: "04" });
     const off = vehicle("off", { type: "VSL", label: "VSL 9", department: "04", defaultDriver: driver("d9", { workDays: [6] }) });
     expect(buildOptimizeRequest(input({ vehicles: [vehicle("v1"), vsl, off] })).tariffGaps).toEqual([
@@ -643,7 +643,7 @@ describe("billing flags of the trips", () => {
   ];
   const billing: BillingInput = { ...NO_BILLING, company: { ...NO_BILLING.company, hqCity: "Marseille" }, areas };
 
-  it("flags « Grande ville », agglomeration, hospital-linked care, wheelchair and tolls", () => {
+  it("flags «\u202fGrande ville\u202f», agglomeration, hospital-linked care, wheelchair and tolls", () => {
     const local = trip("t1", {
       pickupAddress: "3 chemin des Pins, 13190 Allauch",
       dropoffAddress: "264 rue Saint-Pierre, 13005 Marseille",
@@ -715,7 +715,7 @@ describe("exceptional ambulance for a seated trip (TAR-03)", () => {
     const seated = trip("t1", { lockedVehicleId: "amb", exceptionalAmbulanceAt: proposed });
     const { request, notes } = buildOptimizeRequest(input({ vehicles: [vehicle("v1"), amb], trips: [seated], tariffs: [ambGrid] }));
     expect(request.trips[0]).toMatchObject({ lockedVehicleId: "amb", tariffId: null });
-    expect(notes).toEqual([expect.stringMatching(/^Véhicule amb : recours exceptionnel sans grille VSL en vigueur ce jour/)]);
+    expect(notes).toEqual([expect.stringMatching(/^Véhicule amb\u00a0: recours exceptionnel sans grille VSL en vigueur ce jour/)]);
     const covered = buildOptimizeRequest(input({ vehicles: [vehicle("v1"), amb], trips: [seated], tariffs: [vslGrid, ambGrid] }));
     expect(covered.notes).toEqual([]);
   });

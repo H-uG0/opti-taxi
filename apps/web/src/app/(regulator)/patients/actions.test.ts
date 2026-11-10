@@ -105,7 +105,7 @@ describe("reactivation", () => {
     expect(fake.completeTrips.mock.calls[0]![3]).toEqual({ patientId: "p1" });
     expect(fake.reviveOneOffTrips.mock.calls[0]![2]).toEqual({ patientId: "p1" });
     expect(recorded()).toEqual([{ action: "patient.reactivate", entityId: "p1" }]);
-    expect(result).toEqual({ ok: true, message: "Patient réactivé. Courses à venir : 4 créées, 7 rétablies." });
+    expect(result).toEqual({ ok: true, message: "Patient réactivé. Courses à venir\u00a0: 4 créées, 7 rétablies." });
   });
 
   it("says which trips of today stay cancelled: the completion never writes a day already begun", async () => {
@@ -120,7 +120,7 @@ describe("reactivation", () => {
       { OR: [{ recurrenceId: null }, { recurrence: { active: true } }] },
     ]);
     expect(result.message).toBe(
-      "Patient réactivé. 2 courses d'aujourd'hui restent annulées (celles du jour ne reviennent pas d'elles-mêmes) : rétablissez-les dans Courses si les transports ont lieu.",
+      "Patient réactivé. 2 courses d'aujourd'hui restent annulées (celles du jour ne reviennent pas d'elles-mêmes)\u00a0: rétablissez-les dans Courses si les transports ont lieu.",
     );
   });
 
@@ -138,7 +138,7 @@ describe("reactivation", () => {
 
     expect(fake.completeTrips.mock.calls[0]![3]).toEqual({ id: "r1" });
     expect(result.message).toBe(
-      "Récurrence réactivée. Courses à venir : 2 créées. 2 séances à venir n'ont pas de prescription valide : aucune course ces jours-là (voir Prescriptions).",
+      "Récurrence réactivée. Courses à venir\u00a0: 2 créées. 2 séances à venir n'ont pas de prescription valide\u00a0: aucune course ces jours-là (voir Prescriptions).",
     );
   });
 });
@@ -181,7 +181,7 @@ describe("setPatientActive", () => {
 
     expect(recorded()).toEqual([]);
     expect(fake.trip.findMany).not.toHaveBeenCalled();
-    expect(result).toEqual({ ok: true, message: "Ce patient était déjà désactivé : rien n'a été modifié." });
+    expect(result).toEqual({ ok: true, message: "Ce patient était déjà désactivé\u00a0: rien n'a été modifié." });
   });
 
   it("reports a patient that no longer exists", async () => {
@@ -214,7 +214,7 @@ describe("setRecurrenceActive", () => {
     expect(result).toEqual({ ok: true, message: "Récurrence désactivée." });
   });
 
-  it("writes and traces nothing when it was already active (double click on « Réactiver »)", async () => {
+  it("writes and traces nothing when it was already active (double click on «\u202fRéactiver\u202f»)", async () => {
     fake.recurrence.updateMany.mockResolvedValue({ count: 0 });
     fake.recurrence.findUnique.mockResolvedValue({ id: "rc1" });
 
@@ -224,7 +224,7 @@ describe("setRecurrenceActive", () => {
     );
 
     expect(recorded()).toEqual([]);
-    expect(result).toEqual({ ok: true, message: "Cette récurrence était déjà active : rien n'a été modifié." });
+    expect(result).toEqual({ ok: true, message: "Cette récurrence était déjà active\u00a0: rien n'a été modifié." });
   });
 });
 
@@ -249,7 +249,7 @@ describe("updatePatient", () => {
     fake.patient.update.mockResolvedValue({});
   });
 
-  it("saves the record without touching « actif », and leaves the trips alone when the home did not move", async () => {
+  it("saves the record without touching «\u202factif\u202f», and leaves the trips alone when the home did not move", async () => {
     await updatePatient("p1", INITIAL_FORM_STATE, form({ ...fields, active: "" }));
 
     expect(fake.patient.updateMany).not.toHaveBeenCalled();
@@ -298,7 +298,7 @@ describe("createPatient", () => {
     expect(recorded()).toEqual([{ action: "patient_list.view", entityId: null }]);
   });
 
-  it("creates the patient once « Créer quand même » confirms, or when no record is close", async () => {
+  it("creates the patient once «\u202fCréer quand même\u202f» confirms, or when no record is close", async () => {
     fake.patient.findMany.mockResolvedValue([existing]);
     await createPatient(INITIAL_FORM_STATE, form({ ...fields, confirmSimilar: "1" }));
     expect(fake.patient.findMany).not.toHaveBeenCalled();

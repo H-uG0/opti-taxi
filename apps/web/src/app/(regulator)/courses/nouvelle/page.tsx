@@ -84,7 +84,7 @@ export default async function NewTripPage({
     <div className="max-w-3xl">
       <PageHeader
         title="Nouvelle course"
-        description="Course ponctuelle, hors récurrence : elle sera placée dans une tournée à la prochaine optimisation."
+        description="Course ponctuelle, hors récurrence&nbsp;: elle sera placée dans une tournée à la prochaine optimisation."
         actions={
           <LinkButton href={`/courses?date=${initialDate}`} variant="ghost">
             <ArrowLeft aria-hidden className="size-4" />

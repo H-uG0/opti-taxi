@@ -47,7 +47,7 @@ describe("depotSchema", () => {
 describe("parseCoordinatePair", () => {
   it("splits a pair pasted from a map", () => {
     expect(parseCoordinatePair("43.29651, 5.36978")).toEqual({ lat: "43.29651", lng: "5.36978" });
-    expect(parseCoordinatePair("43,2965 ; 5,3698")).toEqual({ lat: "43,2965", lng: "5,3698" });
+    expect(parseCoordinatePair("43,2965\u202f; 5,3698")).toEqual({ lat: "43,2965", lng: "5,3698" });
     expect(parseCoordinatePair("43.2965 5.3698")).toEqual({ lat: "43.2965", lng: "5.3698" });
   });
 
@@ -72,7 +72,7 @@ describe("a moved depot", () => {
         { date: "2026-11-10", status: "VALIDATED" },
       ]),
     ).toBe(
-      "Dépôt enregistré. 2 tournées à venir (09/11/2026, 10/11/2026) partent encore de l'ancienne position du dépôt : " +
+      "Dépôt enregistré. 2 tournées à venir (09/11/2026, 10/11/2026) partent encore de l'ancienne position du dépôt\u00a0: " +
         "relancez l'optimisation de ces jours depuis le planning.",
     );
     expect(movedDepotNotice([{ date: "2026-11-09", status: "PROPOSED" }])).toMatch(/1 tournée à venir \(09\/11\/2026\) part encore .* de ce jour/);

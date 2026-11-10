@@ -35,7 +35,7 @@ describe("parseDecimal", () => {
     expect(parseDecimal(undefined)).toBeUndefined();
     expect(parseDecimal("abc")).toBeNaN();
     expect(parseDecimal("1.250,5")).toBeNaN();
-    expect(parseDecimal("12 €")).toBeNaN();
+    expect(parseDecimal("12\u00a0€")).toBeNaN();
   });
 });
 
@@ -44,8 +44,8 @@ describe("number fields", () => {
 
   it("parses and checks the range", () => {
     expect(field.parse("0,32")).toBe(0.32);
-    expect(field.safeParse("11").error?.issues[0]?.message).toBe("Maximum : 10 €/km.");
-    expect(field.safeParse("-1").error?.issues[0]?.message).toBe("Minimum : 0 €/km.");
+    expect(field.safeParse("11").error?.issues[0]?.message).toBe("Maximum\u00a0: 10\u00a0€/km.");
+    expect(field.safeParse("-1").error?.issues[0]?.message).toBe("Minimum\u00a0: 0\u00a0€/km.");
   });
 
   it("distinguishes a missing value from an invalid one", () => {

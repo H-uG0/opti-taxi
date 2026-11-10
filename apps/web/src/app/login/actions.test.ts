@@ -117,7 +117,7 @@ describe("login: audit trail of failures", () => {
   it("answers a throttled attempt without looking the account up (the throttle traces it)", async () => {
     fake.throttle.mockResolvedValue({ retryInMin: 12 });
     const state = await login({ error: null, email: "" }, credentials());
-    expect(state.error).toMatch(/12 min/);
+    expect(state.error).toMatch(/12\u00a0min/);
     expect(fake.user.findUnique).not.toHaveBeenCalled();
   });
 });

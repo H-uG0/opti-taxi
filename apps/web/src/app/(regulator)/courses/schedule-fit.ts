@@ -54,7 +54,7 @@ function windowProblem(trip: PatientDayTrip, pairs: readonly Pair[], s: WaitSett
       return `dépose prévue à ${formatMinute(dropoff)}, après le rendez-vous de ${formatMinute(appointment)}`;
     }
     if (appointment - dropoff > budget.before) {
-      return `dépose prévue à ${formatMinute(dropoff)}, soit ${appointment - dropoff} min d'attente avant le rendez-vous (${budget.before} min au plus)`;
+      return `dépose prévue à ${formatMinute(dropoff)}, soit ${appointment - dropoff}\u00a0min d'attente avant le rendez-vous (${budget.before}\u00a0min au plus)`;
     }
     return null;
   }
@@ -65,7 +65,7 @@ function windowProblem(trip: PatientDayTrip, pairs: readonly Pair[], s: WaitSett
     return `prise en charge prévue à ${formatMinute(pickup)}, avant la fin de séance de ${formatMinute(ready)}`;
   }
   if (pickup - ready > budget.after) {
-    return `prise en charge prévue à ${formatMinute(pickup)}, soit ${pickup - ready} min d'attente après la séance (${budget.after} min au plus)`;
+    return `prise en charge prévue à ${formatMinute(pickup)}, soit ${pickup - ready}\u00a0min d'attente après la séance (${budget.after}\u00a0min au plus)`;
   }
   return null;
 }
@@ -100,7 +100,7 @@ export function checkScheduleFit(
   const partner = pair.outbound.id === tripId ? pair.ret : pair.outbound;
   const partnerProblem = windowProblem(partner, pairs, settings);
   if (partnerProblem) {
-    return { fits: false, reason: `${partner.direction === "OUTBOUND" ? "aller" : "retour"} du même jour : ${partnerProblem}` };
+    return { fits: false, reason: `${partner.direction === "OUTBOUND" ? "aller" : "retour"} du même jour\u00a0: ${partnerProblem}` };
   }
 
   const { outbound, ret } = pair;
@@ -118,7 +118,7 @@ export function checkScheduleFit(
   if (total > settings.maxTotalWaitMin) {
     return {
       fits: false,
-      reason: `attente cumulée aller + retour de ${total} min au lieu de soins (${settings.maxTotalWaitMin} min au plus)`,
+      reason: `attente cumulée aller + retour de ${total}\u00a0min au lieu de soins (${settings.maxTotalWaitMin}\u00a0min au plus)`,
     };
   }
   return { fits: true };

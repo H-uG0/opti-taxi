@@ -16,11 +16,11 @@ export async function OptimizerStatus() {
   }
   return (
     <div role="alert" className="flex basis-full items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-900">
-      <OptimizerOfflineSignal reason="Optimiseur hors ligne : le calcul des tournées est indisponible pour le moment." />
+      <OptimizerOfflineSignal reason="Optimiseur hors ligne&nbsp;: le calcul des tournées est indisponible pour le moment." />
       <WifiOff aria-hidden className="mt-0.5 size-4 shrink-0" />
       <p className="min-w-0 break-words">
         <span className="font-semibold">Optimiseur hors ligne.</span> {result.error} Le planning enregistré reste consultable
-        et modifiable (courses figées, validation) ; « Optimiser », « Déplacer » et « Revenir au planning précédent » attendent son
+        et modifiable (courses figées, validation)&#x202F;; «&#x202F;Optimiser&#x202F;», «&#x202F;Déplacer&#x202F;» et «&#x202F;Revenir au planning précédent&#x202F;» attendent son
         retour.
       </p>
     </div>

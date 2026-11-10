@@ -43,6 +43,6 @@ export function emptyPlanIssue(plan: Pick<PlanResponse, "kpis" | "unassigned">):
   let main: [string, number] | null = null;
   for (const entry of counts) if (!main || entry[1] > main[1]) main = entry;
   const total = plan.kpis.tripsTotal;
-  const why = main ? ` Motif le plus fréquent (${main[1]} sur ${total}) : ${clause(main[0])}.` : "";
-  return `L'optimisation n'a placé aucune des ${total} courses : le planning actuel est conservé.${why}`;
+  const why = main ? ` Motif le plus fréquent (${main[1]} sur ${total})\u00a0: ${clause(main[0])}.` : "";
+  return `L'optimisation n'a placé aucune des ${total} courses\u00a0: le planning actuel est conservé.${why}`;
 }

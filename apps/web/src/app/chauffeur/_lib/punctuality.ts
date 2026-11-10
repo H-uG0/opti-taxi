@@ -69,10 +69,10 @@ export function nextStopTimingText(timing: NextStopTiming): string {
   switch (timing.status) {
     case "late":
       return timing.reference === "appointment"
-        ? `En retard sur le RDV : environ ${duration}`
-        : `En retard sur le planning : environ ${duration}`;
+        ? `En retard sur le RDV\u00a0: environ ${duration}`
+        : `En retard sur le planning\u00a0: environ ${duration}`;
     case "early":
-      return `En avance sur le planning : environ ${duration}`;
+      return `En avance sur le planning\u00a0: environ ${duration}`;
     case "on_time":
       return timing.reference === "appointment" ? "À l'heure pour le RDV" : "À l'heure";
   }

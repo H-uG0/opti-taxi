@@ -205,9 +205,9 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       allowedVehicleTypes: trip.allowedVehicleTypes,
       prescriptionLabel:
         trip.payer === "PRIVATE"
-          ? "Client privé : sans prescription"
+          ? "Client privé\u00a0: sans prescription"
           : trip.prescription
-            ? `${PRESCRIBED_MODE_LABELS[trip.prescription.mode]} · partage : ${SHARING_SCOPE_LABELS[trip.prescription.sharing].toLowerCase()}`
+            ? `${PRESCRIBED_MODE_LABELS[trip.prescription.mode]} · partage\u00a0: ${SHARING_SCOPE_LABELS[trip.prescription.sharing].toLowerCase()}`
             : "Aucune prescription liée",
       origin: trip.recurrenceId ? (trip.recurrence?.label ?? "sans libellé") : null,
       vehicleLabel: trip.route?.vehicle.label ?? null,
@@ -274,8 +274,8 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
             <p role="note" className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
               <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-amber-700" />
               <span>
-                Attention : {createdConflicts.join(" ; ")}. Vérifiez qu&apos;il ne s&apos;agit pas d&apos;un doublon (deux
-                véhicules pour un même patient) ; sinon, annulez l&apos;une des deux courses.
+                Attention&nbsp;: {createdConflicts.join("\u202f; ")}. Vérifiez qu&apos;il ne s&apos;agit pas d&apos;un doublon (deux
+                véhicules pour un même patient)&#x202F;; sinon, annulez l&apos;une des deux courses.
               </span>
             </p>
           ) : null}
@@ -328,7 +328,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
           tone={summary.sharingConflicts > 0 ? "bad" : summary.sharingRefused > 0 ? "warn" : "default"}
           hint={
             summary.sharingConflicts > 0
-              ? `dont ${summary.sharingConflicts} encore ${summary.sharingConflicts > 1 ? "partagées" : "partagée"} : à réoptimiser`
+              ? `dont ${summary.sharingConflicts} encore ${summary.sharingConflicts > 1 ? "partagées" : "partagée"}\u00a0: à réoptimiser`
               : `${plural(summary.sharingAccepted, "accepté", "acceptés")} · ${plural(summary.sharingPending, "sans réponse", "sans réponse")}`
           }
         />
@@ -344,8 +344,8 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
           <span>
             <span className="font-semibold">
               {summary.returnsToCheck > 1
-                ? `${summary.returnsToCheck} retours à vérifier : l'aller a été déclaré « patient absent ».`
-                : "Un retour à vérifier : l'aller a été déclaré « patient absent »."}
+                ? `${summary.returnsToCheck} retours à vérifier\u00a0: l'aller a été déclaré «\u202fpatient absent\u202f».`
+                : "Un retour à vérifier\u00a0: l'aller a été déclaré «\u202fpatient absent\u202f»."}
             </span>{" "}
             {OUTBOUND_NO_SHOW_ADVICE}{" "}
             <Link
@@ -392,8 +392,8 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       <p className="mb-3 flex items-start gap-2 text-xs text-slate-600">
         <Info aria-hidden className="mt-px size-4 shrink-0 text-sky-700" />
         <span>
-          Transport partagé : la proposition (horodatée par l&apos;optimisation) et la réponse du patient sont tracées sur
-          chaque course (bouton « Détails »). Un refus est mentionné sur la facture ; le patient avance alors les frais
+          Transport partagé&nbsp;: la proposition (horodatée par l&apos;optimisation) et la réponse du patient sont tracées sur
+          chaque course (bouton «&#x202F;Détails&#x202F;»). Un refus est mentionné sur la facture&#x202F;; le patient avance alors les frais
           (décret 2025-202, art. R. 322-11-4). Un patient qui refuse n&apos;est plus regroupé à la prochaine optimisation.
         </span>
       </p>
@@ -409,7 +409,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
           }
         >
           Les courses régulières sont créées d&apos;office jusqu&apos;au {formatShortDate(horizon.to)} à partir des
-          récurrences ; au-delà, générez-les pour la semaine, ou créez une course ponctuelle.
+          récurrences&#x202F;; au-delà, générez-les pour la semaine, ou créez une course ponctuelle.
         </EmptyState>
       ) : rows.length === 0 ? (
         <EmptyState

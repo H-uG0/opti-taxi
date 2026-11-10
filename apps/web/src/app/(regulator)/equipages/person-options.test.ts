@@ -65,7 +65,7 @@ describe("seatOptions", () => {
     const items = seatOptions(PEOPLE, TAXI_SEAT, new Map([["busy", { vehicleId: "t9", label: "Taxi 9 (Gap)" }]]), DEPOTS, []);
     const all = items.flatMap((i) => ("options" in i ? i.options : [i]));
     const hint = (id: string) => all.find((o) => o.value === id);
-    expect(hint("near")?.hint).toBe("Sisteron, 40 km · Carte taxi");
+    expect(hint("near")?.hint).toBe("Sisteron, 40\u00a0km · Carte taxi");
     expect(hint("rest")?.hint).toBe("Carte taxi · hors de ses jours habituels");
     expect(hint("busy")?.hint).toBe("sur Taxi 9 (Gap) · Gap");
     expect(hint("sick")).toMatchObject({ disabled: true, hint: "absence du 10/11/2026 au 12/11/2026" });

@@ -65,13 +65,13 @@ const optionalCoordinate = (label: string, range: Range, example: string) =>
       if (!value) return undefined;
       const n = coordinateValue(value);
       if (n === null) {
-        ctx.addIssue({ code: "custom", message: `${label} invalide : nombre décimal attendu (ex. ${example}).` });
+        ctx.addIssue({ code: "custom", message: `${label} invalide\u00a0: nombre décimal attendu (ex. ${example}).` });
         return z.NEVER;
       }
       if (!inRange(n, range)) {
         ctx.addIssue({
           code: "custom",
-          message: `${label} invalide : hors de France métropolitaine (entre ${formatBound(range.min)} et ${formatBound(range.max)}).`,
+          message: `${label} invalide\u00a0: hors de France métropolitaine (entre ${formatBound(range.min)} et ${formatBound(range.max)}).`,
         });
         return z.NEVER;
       }
@@ -80,7 +80,7 @@ const optionalCoordinate = (label: string, range: Range, example: string) =>
 
 /** Most common typing mistake on a coordinate pair, shown instead of the two range errors. */
 export const SWAPPED_COORDINATES_MESSAGE =
-  "Latitude et longitude semblent inversées (Marseille : latitude 43,30 ; longitude 5,37).";
+  "Latitude et longitude semblent inversées (Marseille\u00a0: latitude 43,30\u202f; longitude 5,37).";
 
 /** Latitude typed as longitude and the reverse: the pair is outside France, the swapped pair inside. */
 function looksSwapped(rawLat: string | undefined, rawLng: string | undefined): boolean {
@@ -276,7 +276,7 @@ export const tollSchema = z.object({
     .string()
     .trim()
     .transform((raw) => (raw === "" ? null : Number(raw.replace(/\s/g, "").replace(",", "."))))
-    .refine((value) => value === null || (Number.isFinite(value) && value >= 0 && value <= 1000), "Péage entre 0 et 1 000 €.")
+    .refine((value) => value === null || (Number.isFinite(value) && value >= 0 && value <= 1000), "Péage entre 0 et 1 000\u00a0€.")
     .transform((value) => (value === null || value === 0 ? null : Math.round(value * 100) / 100)),
 });
 

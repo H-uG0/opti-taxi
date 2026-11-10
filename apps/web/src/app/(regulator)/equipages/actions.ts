@@ -44,8 +44,8 @@ function refreshPages() {
   revalidatePath("/planning");
 }
 
-const REPLAN_NOTICE = " Des tournées sont déjà calculées pour ce jour : relancez l'optimisation depuis le planning pour les appliquer.";
-const CONCURRENT_MESSAGE = "Équipages non enregistrés : un collègue a modifié ces véhicules entre-temps.";
+const REPLAN_NOTICE = " Des tournées sont déjà calculées pour ce jour\u00a0: relancez l'optimisation depuis le planning pour les appliquer.";
+const CONCURRENT_MESSAGE = "Équipages non enregistrés\u00a0: un collègue a modifié ces véhicules entre-temps.";
 
 /** A fixed crew changed by a colleague between the checks and the write: nothing is written. */
 class ConcurrentCrewChange extends Error {
@@ -72,9 +72,9 @@ export async function saveDayCrews(_state: FormState, formData: FormData): Promi
   const user = await requireUser("REGULATOR");
   const values = readForm(formData);
   const date = valueOf(values, "date");
-  if (!isIsoDate(date)) return messageState("Date invalide : rechargez la page.");
+  if (!isIsoDate(date)) return messageState("Date invalide\u00a0: rechargez la page.");
   const blocker = await replanBlocker(date);
-  if (blocker) return messageState(`Équipages non modifiables : ${blocker}`, values);
+  if (blocker) return messageState(`Équipages non modifiables\u00a0: ${blocker}`, values);
   const routes = await db.route.count({ where: { serviceDate: fromIsoDate(date) } });
   const intent = valueOf(values, "intent");
 
@@ -82,7 +82,7 @@ export async function saveDayCrews(_state: FormState, formData: FormData): Promi
   const unfixed = unfixIntentVehicle(intent);
   if (unfixed) return unfixDayCrew(user, date, unfixed, valueOf(values, versionField(unfixed)), routes > 0);
   const fixed = fixIntentVehicle(intent);
-  if (intent !== "save" && !fixed) return messageState("Demande invalide : rechargez la page.");
+  if (intent !== "save" && !fixed) return messageState("Demande invalide\u00a0: rechargez la page.");
 
   const context = await loadDayCrewContext(db, date);
   const vehicles = context.input.vehicles.filter((v) => v.active);
@@ -91,15 +91,15 @@ export async function saveDayCrews(_state: FormState, formData: FormData): Promi
   let changed: CrewFormRow[];
   if (fixed) {
     const row = rows.find((r) => r.vehicleId === fixed);
-    if (!row) return messageState("Véhicule introuvable : rechargez la page.");
+    if (!row) return messageState("Véhicule introuvable\u00a0: rechargez la page.");
     changed = [asShown(row)];
   } else {
     changed = changedRows(rows);
-    if (changed.length === 0) return successState("Aucun équipage modifié : les propositions et les équipages fixés restent tels quels.");
+    if (changed.length === 0) return successState("Aucun équipage modifié\u00a0: les propositions et les équipages fixés restent tels quels.");
   }
   for (const crew of changed) {
     for (const id of [crew.driverId, crew.crewMateId]) {
-      if (id !== null && !context.people.has(id)) return messageState("Une personne choisie n'existe plus : rechargez la page.", values);
+      if (id !== null && !context.people.has(id)) return messageState("Une personne choisie n'existe plus\u00a0: rechargez la page.", values);
     }
   }
 
@@ -160,10 +160,10 @@ export async function saveDayCrews(_state: FormState, formData: FormData): Promi
   }
   refreshPages();
   const replan = routes > 0 ? REPLAN_NOTICE : "";
-  if (fixed) return successState(`Proposition fixée pour ce véhicule : elle ne suit plus les absences.${replan}`);
+  if (fixed) return successState(`Proposition fixée pour ce véhicule\u00a0: elle ne suit plus les absences.${replan}`);
   const count = written.length;
   return successState(
-    `${count > 1 ? `${count} équipages fixés` : "Équipage fixé"} pour ce jour ; les autres véhicules gardent la proposition automatique.${replan}`,
+    `${count > 1 ? `${count} équipages fixés` : "Équipage fixé"} pour ce jour\u202f; les autres véhicules gardent la proposition automatique.${replan}`,
   );
 }
 
@@ -194,12 +194,12 @@ function refusal(context: DayCrewContext, changed: readonly CrewFormRow[], date:
     // Last: the clearest message, the same whatever the display order.
     ...takenFromFixedErrors(changed, context.plan, context.people, labels),
   };
-  if (Object.keys(errors).length > 0) return errorState(errors, values, "Équipages non enregistrés : corrigez les postes signalés.");
+  if (Object.keys(errors).length > 0) return errorState(errors, values, "Équipages non enregistrés\u00a0: corrigez les postes signalés.");
   // Any other problem the change would cause on a fixed crew left as it is.
   const broken = brokenFixedCrews(context.plan, after, ids);
   if (broken.length > 0) {
-    const list = broken.map((b) => `${labels.get(b.vehicleId) ?? "?"} : ${b.message}`).join(" ; ");
-    return messageState(`Équipages non enregistrés : ce changement bloquerait un équipage fixé que vous n'avez pas modifié (${list}).`, values);
+    const list = broken.map((b) => `${labels.get(b.vehicleId) ?? "?"}\u00a0: ${b.message}`).join("\u202f; ");
+    return messageState(`Équipages non enregistrés\u00a0: ce changement bloquerait un équipage fixé que vous n'avez pas modifié (${list}).`, values);
   }
   return null;
 }
@@ -233,13 +233,13 @@ async function resetDayCrews(user: SessionUser, date: string, values: FormValues
     const errors = Object.fromEntries(
       kept.map((row) => [driverField(row.vehicleId), changedMeanwhileText({ updatedAt: row.updatedAt, updatedBy: row.updatedBy?.name ?? null })]),
     );
-    const done = removed > 0 ? `${removed > 1 ? `${removed} équipages remis` : "1 équipage remis"} aux propositions automatiques ; ` : "";
+    const done = removed > 0 ? `${removed > 1 ? `${removed} équipages remis` : "1 équipage remis"} aux propositions automatiques\u202f; ` : "";
     return errorState(
       errors,
       null,
       kept.length > 1
-        ? `${done}${kept.length} équipages fixés gardés : un collègue les a fixés ou modifiés depuis l'affichage de la page.`
-        : `${done}1 équipage fixé gardé : un collègue l'a fixé ou modifié depuis l'affichage de la page.`,
+        ? `${done}${kept.length} équipages fixés gardés\u00a0: un collègue les a fixés ou modifiés depuis l'affichage de la page.`
+        : `${done}1 équipage fixé gardé\u00a0: un collègue l'a fixé ou modifié depuis l'affichage de la page.`,
     );
   }
   if (removed === 0) return successState("Les équipages de ce jour étaient déjà ceux proposés automatiquement.");
@@ -256,7 +256,7 @@ async function unfixDayCrew(
 ): Promise<FormState> {
   const serviceDate = fromIsoDate(date);
   const shown = new Date(version);
-  if (version === "" || Number.isNaN(shown.getTime())) return messageState("Page périmée : rechargez la page.");
+  if (version === "" || Number.isNaN(shown.getTime())) return messageState("Page périmée\u00a0: rechargez la page.");
   const removed = await db.$transaction(async (tx) => {
     await lockPlanningDay(tx, date);
     const row = await tx.dayCrew.findUnique({ where: { serviceDate_vehicleId: { serviceDate, vehicleId } }, select: { id: true } });

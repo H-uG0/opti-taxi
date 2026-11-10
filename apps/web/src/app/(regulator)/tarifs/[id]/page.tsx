@@ -90,7 +90,7 @@ export default async function EditTariffPage({
           <CardHeader title="Supprimer la grille" />
           <CardBody className="space-y-3 text-sm text-slate-700">
             <p>
-              Supprimez une grille saisie par erreur. Pour un changement de tarif, préférez une nouvelle version datée :
+              Supprimez une grille saisie par erreur. Pour un changement de tarif, préférez une nouvelle version datée&nbsp;:
               les chiffres d&apos;affaires déjà calculés ne sont pas modifiés, mais l&apos;historique des tarifs serait
               perdu.
             </p>

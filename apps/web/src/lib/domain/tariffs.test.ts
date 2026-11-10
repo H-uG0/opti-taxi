@@ -267,7 +267,7 @@ describe("tariff gaps of a planned day", () => {
     ]);
   });
 
-  it("counts the « * » catch-all of the type as coverage", () => {
+  it("counts the «\u202f*\u202f» catch-all of the type as coverage", () => {
     const inForce = [grid({ from: "2026-01-01", vehicleType: "TAXI", department: "*" })];
     expect(tariffGaps(vehicles, inForce, NOT_CERTIFIED).map((g) => g.vehicleType)).toEqual(["VSL"]);
   });
@@ -337,7 +337,7 @@ describe("tariffCoverageAlerts (tomorrow and the 7 following days)", () => {
     expect(alert).toMatchObject({ uncoveredFrom: "2026-11-13", resumesOn: null });
   });
 
-  it("the « * » catch-all takes over an expiring department grid", () => {
+  it("the «\u202f*\u202f» catch-all takes over an expiring department grid", () => {
     const grids = [vslGrid("2026-01-01", "2026-11-11"), grid({ from: "2026-01-01", vehicleType: "VSL", department: "*" })];
     expect(tariffCoverageAlerts(vsl, grids, "2026-11-10", 7)).toEqual([]);
   });

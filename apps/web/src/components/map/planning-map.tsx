@@ -397,7 +397,7 @@ export function PlanningMap({
               onSelectionOnlyChange === null
                 ? "Sélectionnez une course ou un véhicule pour ne voir qu'elle ou que lui"
                 : selectionOnlyWaiting
-                  ? "S'appliquera à la prochaine sélection ; cliquez pour revenir aux tournées de la frise"
+                  ? "S'appliquera à la prochaine sélection\u202f; cliquez pour revenir aux tournées de la frise"
                   : selectionOnly
                     ? "Revenir aux tournées de la frise"
                     : "N'afficher que la course ou le véhicule sélectionné"
@@ -417,7 +417,7 @@ export function PlanningMap({
         <div className="absolute inset-0 grid place-items-center rounded-lg bg-slate-50 px-6 text-center text-sm text-slate-500">
           {webglAvailable
             ? "Chargement de la carte…"
-            : "Carte indisponible : ce navigateur n'affiche pas les cartes (accélération graphique désactivée). La frise et les listes restent utilisables."}
+            : "Carte indisponible\u00a0: ce navigateur n'affiche pas les cartes (accélération graphique désactivée). La frise et les listes restent utilisables."}
         </div>
       ) : null}
     </div>
@@ -469,13 +469,13 @@ function MapLegend({ planned }: { planned: boolean }) {
             <span aria-hidden className={swatch}>
               <StopSwatch shape="TAXI" />
             </span>
-            Prise en charge : pleine, couleur du véhicule
+            Prise en charge&nbsp;: pleine, couleur du véhicule
           </li>
           <li className={item}>
             <span aria-hidden className={swatch}>
               <StopSwatch shape="TAXI" hollow />
             </span>
-            Dépose : creuse
+            Dépose&nbsp;: creuse
           </li>
           <li className={item}>
             <span aria-hidden className={swatch}>
@@ -495,7 +495,7 @@ function MapLegend({ planned }: { planned: boolean }) {
                 <span className="size-2 rotate-45 border border-slate-900" style={{ background: UNASSIGNED_COLOR }} />
                 <span className="h-0 w-2 border-t-2 border-dashed" style={{ borderColor: UNASSIGNED_COLOR }} />
               </span>
-              À placer : prise en charge → dépose (losanges)
+              À placer&nbsp;: prise en charge → dépose (losanges)
             </li>
           ) : (
             <li className={item}>
@@ -518,9 +518,9 @@ function MapLegend({ planned }: { planned: boolean }) {
             <span aria-hidden className={swatch}>
               <span className="size-4 rounded-full border-[3px] border-slate-900" />
             </span>
-            Course sélectionnée (trait : prise en charge → dépose)
+            Course sélectionnée (trait&nbsp;: prise en charge → dépose)
           </li>
-          <li className="pt-0.5 text-slate-500">Une couleur par véhicule, la même que dans la frise ; la forme dit son type.</li>
+          <li className="pt-0.5 text-slate-500">Une couleur par véhicule, la même que dans la frise&#x202F;; la forme dit son type.</li>
         </ul>
       ) : null}
       <button

@@ -82,7 +82,7 @@ export function tripTitle(
   if (trip.status === "CANCELLED") lines.push("Course annulée");
   if (trip.status === "NO_SHOW") lines.push("Patient absent");
   if (trip.outboundNoShow) lines.push(OUTBOUND_NO_SHOW_LABEL);
-  if (violations.length > 0) lines.push(`Violation : ${violationLabels(violations)}`);
+  if (violations.length > 0) lines.push(`Violation\u00a0: ${violationLabels(violations)}`);
   return lines.join("\n");
 }
 
@@ -98,7 +98,7 @@ function clusterTitle(
   const to = Math.max(...target.tripIds.map((id) => blocks.get(id)?.to ?? -Infinity));
   const names = target.tripIds.map((id) => trips[id]?.patientName ?? "?").join(", ");
   const violating = target.tripIds.filter((id) => violatingTripIds.has(id)).length;
-  const parts = [`${target.tripIds.length} courses de ${formatMinute(from)} à ${formatMinute(to)} : ${names}`];
+  const parts = [`${target.tripIds.length} courses de ${formatMinute(from)} à ${formatMinute(to)}\u00a0: ${names}`];
   if (violating > 0) parts.push(`dont ${violating} avec violation`);
   if (selectedTripId && target.tripIds.includes(selectedTripId)) parts.push("dont la course sélectionnée");
   return `${parts.join(", ")}. Ouvrir la liste`;

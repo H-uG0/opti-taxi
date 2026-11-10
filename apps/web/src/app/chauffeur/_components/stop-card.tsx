@@ -80,7 +80,7 @@ function Instructions({ label, children }: { label: string; children: ReactNode 
     <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-950">
       <Info aria-hidden className="mt-0.5 size-5 shrink-0" />
       <p className="text-base whitespace-pre-line">
-        <span className="font-semibold">{label} : </span>
+        <span className="font-semibold">{label}&nbsp;: </span>
         {children}
       </p>
     </div>
@@ -115,7 +115,7 @@ function StopDetails({ stop }: { stop: StopView }) {
       {stop.tripNotes ? (
         <Line icon={<MessageSquareText className="size-5 text-slate-500" />}>
           <p className="text-sm text-slate-800">
-            <span className="font-semibold">Note de la régulation : </span>
+            <span className="font-semibold">Note de la régulation&nbsp;: </span>
             {stop.tripNotes}
           </p>
         </Line>
@@ -151,7 +151,7 @@ function OutboundNoShowWarning({ regulator }: { regulator: RegulatorContact | nu
       <p className="flex items-start gap-2 text-base">
         <TriangleAlert aria-hidden className="mt-0.5 size-5 shrink-0 text-red-700" />
         <span>
-          <span className="font-bold">Aller : patient absent.</span> Appelez la régulation avant d&apos;aller le chercher.
+          <span className="font-bold">Aller&nbsp;: patient absent.</span> Appelez la régulation avant d&apos;aller le chercher.
         </span>
       </p>
       <RegulatorCallBlock regulator={regulator} />
@@ -206,7 +206,7 @@ function OpenStopCard({ stop, total, regulator }: { stop: StopView; total: numbe
           {stop.payOnBoard ? (
             <Pill className="bg-emerald-50 text-emerald-900 ring-emerald-200">
               <Euro aria-hidden className="size-4" />
-              Client privé : règlement à bord
+              Client privé&nbsp;: règlement à bord
             </Pill>
           ) : null}
         </div>
@@ -253,7 +253,7 @@ function ClosedIcon({ state }: { state: StopView["state"] }) {
 function Lateness({ lateness }: { lateness: RecordedLateness | null }) {
   if (!lateness || !latenessShown(lateness)) return null;
   const { minutes, reference } = lateness;
-  const text = minutes > 0 ? `+${minutes} min` : `−${-minutes} min`;
+  const text = minutes > 0 ? `+${minutes}\u00a0min` : `−${-minutes}\u00a0min`;
   return (
     <span
       className={cn(
@@ -315,7 +315,7 @@ function ClosedStopCard({ stop, routeStopIds }: { stop: StopView; routeStopIds: 
         </div>
       </details>
       {stop.controls.undo ? (
-        <UndoStatus key={`${stop.id}-${stop.state}`} stopId={stop.id} label={`Annuler « ${label} »`} routeStopIds={routeStopIds} />
+        <UndoStatus key={`${stop.id}-${stop.state}`} stopId={stop.id} label={`Annuler «\u202f${label}\u202f»`} routeStopIds={routeStopIds} />
       ) : null}
     </li>
   );

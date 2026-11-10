@@ -15,7 +15,7 @@ export default async function NewAreaPage() {
       <BackLink href="/tarifs/regles">Règles de facturation</BackLink>
       <PageHeader
         title="Nouvelle zone tarifaire"
-        description="Communes au forfait « Grande ville » (taxi) ou au forfait agglomération (ambulance)."
+        description="Communes au forfait «&#x202F;Grande ville&#x202F;» (taxi) ou au forfait agglomération (ambulance)."
       />
       <AreaForm action={createArea} initial={areaFormValues()} submitLabel="Créer la zone" />
     </div>

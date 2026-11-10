@@ -48,7 +48,7 @@ describe("checkScheduleFit", () => {
 
   it("rejects an appointment moved too far after the planned dropoff (wait too long)", () => {
     expect(reason(checkScheduleFit("out", 540, [outbound()], settings))).toBe(
-      "dépose prévue à 08:20, soit 40 min d'attente avant le rendez-vous (30 min au plus)",
+      "dépose prévue à 08:20, soit 40\u00a0min d'attente avant le rendez-vous (30\u00a0min au plus)",
     );
   });
 
@@ -58,7 +58,7 @@ describe("checkScheduleFit", () => {
       "prise en charge prévue à 11:40, avant la fin de séance de 11:50",
     );
     expect(reason(checkScheduleFit("ret", 680, [ret()], settings))).toBe(
-      "prise en charge prévue à 11:40, soit 20 min d'attente après la séance (15 min au plus)",
+      "prise en charge prévue à 11:40, soit 20\u00a0min d'attente après la séance (15\u00a0min au plus)",
     );
   });
 
@@ -67,7 +67,7 @@ describe("checkScheduleFit", () => {
     // Alone, a return may wait 30 min; paired with the morning outbound, 45 - 30 = 15 min.
     expect(checkScheduleFit("ret", 675, [ret()], wide)).toEqual({ fits: true });
     expect(reason(checkScheduleFit("ret", 675, [outbound(), ret()], wide))).toBe(
-      "prise en charge prévue à 11:40, soit 25 min d'attente après la séance (15 min au plus)",
+      "prise en charge prévue à 11:40, soit 25\u00a0min d'attente après la séance (15\u00a0min au plus)",
     );
   });
 
@@ -79,7 +79,7 @@ describe("checkScheduleFit", () => {
     // Moved to 08:30 (dropoff planned at 08:20): now paired, the return's budget drops to 45 - 30 = 15 min.
     const morning = [outbound({ appointmentMinute: 720, plannedDropoffMinute: 500 }), ret({ readyMinute: 675 })];
     expect(reason(checkScheduleFit("out", 510, morning, wide))).toBe(
-      "retour du même jour : prise en charge prévue à 11:40, soit 25 min d'attente après la séance (15 min au plus)",
+      "retour du même jour\u00a0: prise en charge prévue à 11:40, soit 25\u00a0min d'attente après la séance (15\u00a0min au plus)",
     );
   });
 

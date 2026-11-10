@@ -56,7 +56,7 @@ describe("tariff areas", () => {
   it("stores the communes as a list, without duplicates", () => {
     expect(areaSchema.parse(valid)).toMatchObject({ communes: ["Sorgues", "Les Angles (30)"], hubCommune: "Avignon", validFrom: null });
   });
-  it("needs communes, and a centre for the « vers la commune centre » rule", () => {
+  it("needs communes, and a centre for the «\u202fvers la commune centre\u202f» rule", () => {
     expect(errorsOf(areaSchema, { ...valid, communes: " \n " }).communes).toMatch(/commune/);
     expect(errorsOf(areaSchema, { ...valid, hubCommune: "" }).hubCommune).toMatch(/commune centre/);
     expect(areaSchema.parse({ ...valid, rule: "ANY_END" }).hubCommune).toBeNull();

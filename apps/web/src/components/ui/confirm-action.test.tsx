@@ -30,13 +30,13 @@ describe("ConfirmAction", () => {
 
   it("gives the focus back to the first button when the question is kept, or with Échap", () => {
     render(
-      <ConfirmAction action={vi.fn()} label="Supprimer" confirmLabel="Oui, supprimer le plein" keepLabel="Garder le plein" question="Supprimer ce plein ?" />,
+      <ConfirmAction action={vi.fn()} label="Supprimer" confirmLabel="Oui, supprimer le plein" keepLabel="Garder le plein" question="Supprimer ce plein&#x202F;?" />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Supprimer" }));
     fireEvent.click(screen.getByRole("button", { name: "Garder le plein" }));
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Supprimer" }));
     fireEvent.click(screen.getByRole("button", { name: "Supprimer" }));
-    fireEvent.keyDown(screen.getByRole("group", { name: "Supprimer ce plein ?" }), { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("group", { name: "Supprimer ce plein\u202f?" }), { key: "Escape" });
     expect(screen.queryByRole("group")).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Supprimer" }));
   });
@@ -49,7 +49,7 @@ describe("ActionButton", () => {
       <ActionButton
         action={action}
         fields={{ patientId: "p1", active: "false" }}
-        confirm={{ question: "Désactiver DURAND Marie ?", confirmLabel: "Oui, désactiver le patient", keepLabel: "Garder le patient actif" }}
+        confirm={{ question: "Désactiver DURAND Marie\u202f?", confirmLabel: "Oui, désactiver le patient", keepLabel: "Garder le patient actif" }}
       >
         Désactiver
       </ActionButton>,

@@ -125,7 +125,7 @@ export default async function EditVehiclePage({
             <CardHeader title="Indisponibilités" />
             <CardBody className="space-y-4 text-sm text-slate-700">
               <p className="text-xs text-slate-500">
-                Entretien, réparation, contrôle, garde : le véhicule n&apos;est pas planifié ces jours-là et son équipage
+                Entretien, réparation, contrôle, garde&nbsp;: le véhicule n&apos;est pas planifié ces jours-là et son équipage
                 attitré est proposé ailleurs (page Équipages).
               </p>
               {outages.length === 0 ? (
@@ -145,11 +145,11 @@ export default async function EditVehiclePage({
                         <ConfirmAction
                           action={deleteUnavailability.bind(null, vehicle.id, o.id)}
                           label="Supprimer"
-                          ariaLabel={`Supprimer « ${text} »`}
+                          ariaLabel={`Supprimer «\u202f${text}\u202f»`}
                           confirmLabel="Oui, supprimer l'indisponibilité"
                           keepLabel="Garder l'indisponibilité"
                           triggerVariant="ghost"
-                          question={<p>Supprimer « {text} » ? Le véhicule redevient planifiable ces jours-là.</p>}
+                          question={<p>Supprimer «&#x202F;{text}&#x202F;»&#x202F;? Le véhicule redevient planifiable ces jours-là.</p>}
                         />
                       </li>
                     );
@@ -166,7 +166,7 @@ export default async function EditVehiclePage({
             <CardHeader title="Entretien et échéances" />
             <CardBody className="space-y-4 text-sm text-slate-700">
               {deadlineRows.length === 0 ? (
-                <p className="text-slate-500">Aucune échéance enregistrée : ajoutez le prochain contrôle technique, la révision…</p>
+                <p className="text-slate-500">Aucune échéance enregistrée&nbsp;: ajoutez le prochain contrôle technique, la révision…</p>
               ) : (
                 <ul className="divide-y divide-slate-100">
                   {deadlineRows.map((d) => (
@@ -186,8 +186,8 @@ export default async function EditVehiclePage({
                             tone="primary"
                             question={
                               <p>
-                                « {deadlineName(d)} » faite aujourd&apos;hui
-                                {stats.odometerKm !== null ? `, à ${nf.format(stats.odometerKm)} km (dernier relevé)` : ""} ?
+                                «&#x202F;{deadlineName(d)}&#x202F;» faite aujourd&apos;hui
+                                {stats.odometerKm !== null ? `, à ${nf.format(stats.odometerKm)}\u00a0km (dernier relevé)` : ""}&#x202F;?
                               </p>
                             }
                           />
@@ -195,11 +195,11 @@ export default async function EditVehiclePage({
                         <ConfirmAction
                           action={deleteDeadline.bind(null, vehicle.id, d.id)}
                           label="Supprimer"
-                          ariaLabel={`Supprimer l'échéance « ${deadlineName(d)} »`}
+                          ariaLabel={`Supprimer l'échéance «\u202f${deadlineName(d)}\u202f»`}
                           confirmLabel="Oui, supprimer l'échéance"
                           keepLabel="Garder l'échéance"
                           triggerVariant="ghost"
-                          question={<p>Supprimer l&apos;échéance « {deadlineName(d)} » ?</p>}
+                          question={<p>Supprimer l&apos;échéance «&#x202F;{deadlineName(d)}&#x202F;»&#x202F;?</p>}
                         />
                       </div>
                     </li>
@@ -220,7 +220,7 @@ export default async function EditVehiclePage({
                   <dt className="text-xs text-slate-500">Dernier relevé du compteur</dt>
                   <dd className="tabular font-medium">
                     {stats.odometerKm !== null && stats.odometerDate
-                      ? `${nf.format(stats.odometerKm)} km (${formatShortDate(stats.odometerDate)})`
+                      ? `${nf.format(stats.odometerKm)}\u00a0km (${formatShortDate(stats.odometerDate)})`
                       : "—"}
                   </dd>
                 </div>
@@ -228,7 +228,7 @@ export default async function EditVehiclePage({
                   <dt className="text-xs text-slate-500">Consommation mesurée</dt>
                   <dd className="tabular font-medium">
                     {stats.per100Km !== null
-                      ? `${nf.format(stats.per100Km)} ${unit}/100 km sur ${nf.format(stats.measuredKm)} km`
+                      ? `${nf.format(stats.per100Km)} ${unit}/100\u00a0km sur ${nf.format(stats.measuredKm)}\u00a0km`
                       : "Il faut deux pleins complets"}
                   </dd>
                 </div>
@@ -237,7 +237,7 @@ export default async function EditVehiclePage({
                   <dd className="tabular font-medium">
                     {stats.costPerKm !== null ? `${formatEuros(stats.costPerKm)}/km` : "—"}
                     <span className="block text-xs font-normal text-slate-500">
-                      Coût au km utilisé par l&apos;optimiseur : {formatEuros(vehicle.costPerKm)}/km (énergie, entretien, usure).
+                      Coût au km utilisé par l&apos;optimiseur&nbsp;: {formatEuros(vehicle.costPerKm)}/km (énergie, entretien, usure).
                     </span>
                   </dd>
                 </div>
@@ -247,7 +247,7 @@ export default async function EditVehiclePage({
                   {fuel.slice(0, 8).map((f) => (
                     <li key={f.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
                       <span className="tabular">
-                        {formatShortDate(toIsoDate(f.date))} · {nf.format(f.odometerKm)} km · {nf.format(f.quantity)} {unit} ·{" "}
+                        {formatShortDate(toIsoDate(f.date))} · {nf.format(f.odometerKm)}&nbsp;km · {nf.format(f.quantity)} {unit} ·{" "}
                         {formatEuros(f.cost)}
                         {f.fullTank ? "" : " · partiel"}
                       </span>
@@ -257,7 +257,7 @@ export default async function EditVehiclePage({
                         confirmLabel="Oui, supprimer le plein"
                         keepLabel="Garder le plein"
                         triggerVariant="ghost"
-                        question={<p>Supprimer ce plein ?</p>}
+                        question={<p>Supprimer ce plein&#x202F;?</p>}
                       />
                     </li>
                   ))}
@@ -277,7 +277,7 @@ export default async function EditVehiclePage({
               <>
                 <p>
                   Le véhicule est <strong>actif</strong> : il est proposé à l&apos;optimisation des tournées. Pour une
-                  panne ou une sortie de flotte, désactivez-le plutôt que de le supprimer : son historique (
+                  panne ou une sortie de flotte, désactivez-le plutôt que de le supprimer&nbsp;: son historique (
                   {routesCount} tournée{routesCount > 1 ? "s" : ""}) est conservé.
                 </p>
                 <ConfirmAction

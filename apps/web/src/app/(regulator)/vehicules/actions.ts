@@ -25,7 +25,7 @@ import { toUpcomingRoutes, upcomingRoutesNotice } from "./_lib/upcoming-routes";
 import { vehicleSchema, type VehicleInput } from "./schema";
 
 const REGISTRATION_TAKEN = "Cette immatriculation est déjà enregistrée pour un autre véhicule.";
-const VEHICLE_GONE = "Ce véhicule n'existe plus : rechargez la page.";
+const VEHICLE_GONE = "Ce véhicule n'existe plus\u00a0: rechargez la page.";
 
 function revalidateFleet(vehicleId?: string) {
   revalidatePath("/vehicules");
@@ -159,14 +159,14 @@ export async function setVehicleActive(vehicleId: string, active: boolean): Prom
       crewQualificationErrors(vehicle.type, vehicle.defaultDriver, vehicle.type === "AMBULANCE" ? vehicle.defaultCrewMate : null),
     );
     if (problems.length > 0) {
-      return messageState(`Réactivation impossible : ${problems.join(" ")} Modifiez d'abord l'équipage par défaut.`);
+      return messageState(`Réactivation impossible\u00a0: ${problems.join(" ")} Modifiez d'abord l'équipage par défaut.`);
     }
     await db.$transaction(async (tx) => {
       await tx.vehicle.update({ where: { id: vehicle.id }, data: { active: true } });
       await audit(tx, user, { action: "vehicle.reactivate", entity: "Vehicle", entityId: vehicle.id });
     });
     revalidateFleet(vehicle.id);
-    return successState("Véhicule réactivé : il est de nouveau proposé à l'optimisation.");
+    return successState("Véhicule réactivé\u00a0: il est de nouveau proposé à l'optimisation.");
   }
 
   if (!vehicle.active) return successState("Ce véhicule est déjà désactivé.");
@@ -199,7 +199,7 @@ export async function setVehicleActive(vehicleId: string, active: boolean): Prom
   revalidatePath("/planning");
   revalidatePath("/courses");
 
-  const parts = ["Véhicule désactivé : il n'est plus proposé à l'optimisation."];
+  const parts = ["Véhicule désactivé\u00a0: il n'est plus proposé à l'optimisation."];
   if (released.length > 0) {
     const many = released.length > 1;
     parts.push(

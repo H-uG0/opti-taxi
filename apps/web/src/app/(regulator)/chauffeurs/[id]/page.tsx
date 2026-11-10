@@ -162,7 +162,7 @@ export default async function EditDriverPage({
               ) : (
                 <p>
                   Le chauffeur n&apos;a pas encore de compte. Avec un identifiant et un mot de passe, il consulte sa
-                  feuille de route du jour sur son téléphone et indique « pris en charge / déposé ».
+                  feuille de route du jour sur son téléphone et indique «&#x202F;pris en charge / déposé&#x202F;».
                 </p>
               )}
 
@@ -206,9 +206,9 @@ export default async function EditDriverPage({
             <CardHeader title="Absences et gardes" />
             <CardBody className="space-y-4 text-sm text-slate-700">
               <p className="text-xs text-slate-500">
-                Congé, arrêt, formation ou garde : la personne n&apos;est pas proposée dans les équipages de ces jours,
+                Congé, arrêt, formation ou garde&nbsp;: la personne n&apos;est pas proposée dans les équipages de ces jours,
                 et un remplaçant l&apos;est à sa place (page Équipages). Le motif n&apos;apparaît que sur cette
-                fiche : les équipages et le planning indiquent seulement « absence ».
+                fiche&nbsp;: les équipages et le planning indiquent seulement «&#x202F;absence&#x202F;».
               </p>
               {absences.length === 0 ? (
                 <p className="text-slate-500">Aucune absence récente ou à venir.</p>
@@ -227,11 +227,11 @@ export default async function EditDriverPage({
                         <ConfirmAction
                           action={deleteAbsence.bind(null, driver.id, a.id)}
                           label="Supprimer"
-                          ariaLabel={`Supprimer « ${text} »`}
+                          ariaLabel={`Supprimer «\u202f${text}\u202f»`}
                           confirmLabel="Oui, supprimer l'absence"
                           keepLabel="Garder l'absence"
                           triggerVariant="ghost"
-                          question={<p>Supprimer « {text} » ?</p>}
+                          question={<p>Supprimer «&#x202F;{text}&#x202F;»&#x202F;?</p>}
                         />
                       </li>
                     );
@@ -248,7 +248,7 @@ export default async function EditDriverPage({
             <CardHeader title="Incompatibilités d'équipage" />
             <CardBody className="space-y-4 text-sm text-slate-700">
               <p className="text-xs text-slate-500">
-                Personnes avec qui ne pas former d&apos;équipage : elles ne sont jamais proposées ensemble, et un
+                Personnes avec qui ne pas former d&apos;équipage&nbsp;: elles ne sont jamais proposées ensemble, et un
                 équipage fixé avec elles est refusé.
               </p>
               {pairs.length === 0 ? (
@@ -291,7 +291,7 @@ export default async function EditDriverPage({
             <CardBody className="text-sm">
               {driver.active && plannedSeats > 1 ? (
                 <Notice tone="warning" className="mb-3">
-                  Dans l&apos;équipage par défaut de {plannedSeats} véhicules actifs : une personne ne roule que sur un
+                  Dans l&apos;équipage par défaut de {plannedSeats} véhicules actifs&nbsp;: une personne ne roule que sur un
                   véhicule par jour, les autres reçoivent un remplaçant s&apos;il y en a un de libre (page Équipages), sinon
                   restent au dépôt. Affectez une autre personne aux autres véhicules.
                 </Notice>
@@ -336,13 +336,13 @@ export default async function EditDriverPage({
             <CardBody className="space-y-3 text-sm text-slate-700">
               {driver.active ? (
                 <p>
-                  Pour un départ ou un arrêt longue durée, désactivez le chauffeur plutôt que de le supprimer : son
+                  Pour un départ ou un arrêt longue durée, désactivez le chauffeur plutôt que de le supprimer&nbsp;: son
                   historique de tournées est conservé.
                 </p>
               ) : (
                 <>
                   <p>
-                    Le chauffeur est désactivé : il n&apos;est plus proposé à l&apos;optimisation. Son historique est
+                    Le chauffeur est désactivé&nbsp;: il n&apos;est plus proposé à l&apos;optimisation. Son historique est
                     conservé.
                   </p>
                   <UpcomingRoutesCallout routes={upcomingRoutes} subject="driver" />
@@ -362,7 +362,7 @@ export default async function EditDriverPage({
                           ? `Il sera retiré de l'équipage par défaut de ${assignments.length} véhicule${assignments.length > 1 ? "s" : ""}. `
                           : ""}
                         {account?.active
-                          ? `Son compte d'accès sera désactivé : il ne pourra plus se connecter. ${OPEN_SESSION_NOTE} `
+                          ? `Son compte d'accès sera désactivé\u00a0: il ne pourra plus se connecter. ${OPEN_SESSION_NOTE} `
                           : ""}
                         L&apos;historique est conservé.
                       </p>
@@ -372,7 +372,7 @@ export default async function EditDriverPage({
                     <p>
                       Le chauffeur pourra de nouveau être affecté à un véhicule.
                       {account && !account.active
-                        ? " Son compte d'accès reste désactivé : réactivez-le ensuite si besoin."
+                        ? " Son compte d'accès reste désactivé\u00a0: réactivez-le ensuite si besoin."
                         : ""}
                     </p>
                   )

@@ -11,7 +11,7 @@ import { fromIsoDate, todayIso } from "@/lib/time";
 import { toUpcomingRoutes } from "@/app/(regulator)/vehicules/_lib/upcoming-routes";
 import { depotMoved, depotSchema, movedDepotNotice } from "./schema";
 
-const DEPOT_GONE = "Ce dépôt n'existe plus : rechargez la page.";
+const DEPOT_GONE = "Ce dépôt n'existe plus\u00a0: rechargez la page.";
 
 /** Depot names and places show on the vehicle, driver, planning and driver roadmap pages. */
 function revalidateDepots() {
@@ -91,7 +91,7 @@ export async function setDepotActive(depotId: string, active: boolean): Promise<
       await audit(tx, user, { action: "depot.reactivate", entity: "Depot", entityId: depot.id });
     });
     revalidateDepots();
-    return successState("Dépôt réactivé : il est de nouveau proposé dans les fiches véhicule et chauffeur.");
+    return successState("Dépôt réactivé\u00a0: il est de nouveau proposé dans les fiches véhicule et chauffeur.");
   }
 
   if (!depot.active) return successState("Ce dépôt est déjà désactivé.");
@@ -106,12 +106,12 @@ export async function setDepotActive(depotId: string, active: boolean): Promise<
   });
   if (updated.count === 0) {
     const n = await db.vehicle.count({ where: { depotId: depot.id, active: true } });
-    if (n === 0) return messageState("Le dépôt vient d'être modifié depuis un autre poste : rechargez la page.");
+    if (n === 0) return messageState("Le dépôt vient d'être modifié depuis un autre poste\u00a0: rechargez la page.");
     return messageState(
-      `Désactivation impossible : ${n === 1 ? "1 véhicule actif part" : `${n} véhicules actifs partent`} de ce dépôt. ` +
+      `Désactivation impossible\u00a0: ${n === 1 ? "1 véhicule actif part" : `${n} véhicules actifs partent`} de ce dépôt. ` +
         "Rattachez-les à un autre dépôt ou désactivez-les d'abord.",
     );
   }
   revalidateDepots();
-  return successState("Dépôt désactivé : il n'est plus proposé dans les fiches véhicule et chauffeur.");
+  return successState("Dépôt désactivé\u00a0: il n'est plus proposé dans les fiches véhicule et chauffeur.");
 }

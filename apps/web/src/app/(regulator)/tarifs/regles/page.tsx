@@ -66,7 +66,7 @@ export default async function BillingRulesPage() {
             <p>
               Une entreprise est certifiée quand tous ses véhicules ont une géolocalisation certifiée par l&apos;Assurance maladie et
               qu&apos;elle facture par SEFi. Ses VSL et ses ambulances relèvent alors des grilles majorées (forfaits plus élevés et,
-              en VSL, abattements de partage plus faibles : montants dans{" "}
+              en VSL, abattements de partage plus faibles&nbsp;: montants dans{" "}
               <Link href="/tarifs" className="font-medium text-brand-700 underline underline-offset-2">
                 Grilles tarifaires
               </Link>
@@ -103,7 +103,7 @@ export default async function BillingRulesPage() {
                 </TBody>
               </Table>
             ) : (
-              <p className="text-slate-500">Aucune période : l&apos;entreprise est considérée comme non certifiée.</p>
+              <p className="text-slate-500">Aucune période&nbsp;: l&apos;entreprise est considérée comme non certifiée.</p>
             )}
             <AddRowForm
               action={addCertification}
@@ -151,7 +151,7 @@ export default async function BillingRulesPage() {
           />
           <CardBody className="space-y-3 text-sm text-slate-700">
             <p>
-              Taxi : forfait « Grande ville » quand le patient est pris en charge ou déposé dans la zone. Ambulance : forfait
+              Taxi&nbsp;: forfait «&#x202F;Grande ville&#x202F;» quand le patient est pris en charge ou déposé dans la zone. Ambulance&nbsp;: forfait
               agglomération pour un transport dans l&apos;agglomération où l&apos;entreprise a son siège. La commune d&apos;une course est
               lue dans son adresse.
             </p>
@@ -193,7 +193,7 @@ export default async function BillingRulesPage() {
           <CardHeader title="Jours fériés" />
           <CardBody className="space-y-4 text-sm text-slate-700">
             <p>
-              Majoration « dimanche et jour férié » : aucune convention ne fixe la liste. Par défaut, les 11 jours fériés légaux ;
+              Majoration «&#x202F;dimanche et jour férié&#x202F;»&nbsp;: aucune convention ne fixe la liste. Par défaut, les 11 jours fériés légaux&#x202F;;
               ajoutez ceux que votre CPAM retiendrait en plus.
             </p>
             <div className="flex flex-wrap gap-2">
@@ -217,7 +217,7 @@ export default async function BillingRulesPage() {
                         ariaLabel={`Retirer le ${formatLongDate(iso)} des jours fériés`}
                         confirmLabel="Oui, retirer le jour"
                         keepLabel="Garder le jour férié"
-                        question={<p>La majoration « dimanche et jour férié » ne s&apos;appliquera plus ce jour-là aux prochains calculs.</p>}
+                        question={<p>La majoration «&#x202F;dimanche et jour férié&#x202F;» ne s&apos;appliquera plus ce jour-là aux prochains calculs.</p>}
                       />
                     </li>
                   );

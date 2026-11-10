@@ -34,7 +34,7 @@ export function RefreshControl({ renderedAt }: { renderedAt: string }) {
       const reachable = await serverReachable();
       setChecking(false);
       if (!reachable) {
-        if (manual) setMessage("Pas de réseau : la feuille affichée est celle du dernier chargement.");
+        if (manual) setMessage("Pas de réseau\u00a0: la feuille affichée est celle du dernier chargement.");
         return;
       }
       lastRefresh.current = Date.now();

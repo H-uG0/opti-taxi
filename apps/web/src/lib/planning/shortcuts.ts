@@ -11,9 +11,9 @@ export const PLANNING_SHORTCUTS: readonly ShortcutHelp[] = [
   { keys: ["/"], label: "Chercher un patient, un véhicule, un chauffeur" },
   { keys: ["["], label: "Jour précédent" },
   { keys: ["]"], label: "Jour suivant" },
-  { keys: ["F"], label: "Figer ou défiger la course sélectionnée (recours exceptionnel : va au bouton « Défiger » sans l'activer)" },
-  { keys: ["D"], label: "Aller à « Déplacer vers… » de la course sélectionnée" },
-  { keys: ["N"], label: "Problème suivant de « À traiter »" },
+  { keys: ["F"], label: "Figer ou défiger la course sélectionnée (recours exceptionnel\u00a0: va au bouton «\u202fDéfiger\u202f» sans l'activer)" },
+  { keys: ["D"], label: "Aller à «\u00a0Déplacer vers…\u00a0» de la course sélectionnée" },
+  { keys: ["N"], label: "Problème suivant de «\u00a0À traiter\u00a0»" },
   { keys: ["Échap"], label: "Désélectionner, fermer une liste" },
   { keys: ["?"], label: "Afficher ou masquer cette aide" },
 ];
@@ -24,7 +24,7 @@ export const TIMELINE_KEYS: readonly ShortcutHelp[] = [
   { keys: ["←", "→"], label: "Course précédente, suivante sur la ligne" },
   { keys: ["Début", "Fin"], label: "Première, dernière course de la ligne" },
   { keys: ["Page préc.", "Page suiv."], label: "Dix lignes plus haut, plus bas" },
-  { keys: ["Entrée"], label: "Sélectionner (une pastille « +3 » ouvre sa liste)" },
+  { keys: ["Entrée"], label: "Sélectionner (une pastille «\u00a0+3\u00a0» ouvre sa liste)" },
 ];
 
 type TargetLike = { closest?: (selector: string) => unknown; isContentEditable?: boolean } | null;

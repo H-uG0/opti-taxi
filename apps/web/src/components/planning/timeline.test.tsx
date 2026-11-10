@@ -45,11 +45,11 @@ describe("Timeline (frise)", () => {
     const taxi = rowOf("taxi-1");
     expect(within(taxi).getByRole("button", { name: /Taxi 1 \(Marseille\)/ })).toBeTruthy();
     expect(taxi.textContent).toContain("Julien Marchetti · 2 courses");
-    expect(taxi.textContent).toContain("18 km");
+    expect(taxi.textContent).toContain("18\u00a0km");
     expect(taxi.textContent).toContain("Proposée");
     expect(rowOf("vsl-1").textContent).toContain("Disponible — aucune course");
     expect(rowOf("amb-1").textContent).toContain("+ Laurent Giraud");
-    expect(rowOf("vsl-2").textContent).toContain("Indisponible : révision au garage");
+    expect(rowOf("vsl-2").textContent).toContain("Indisponible\u00a0: révision au garage");
   });
 
   it("groups the vehicles by depot, alphabetically, each with its subtotals", () => {
@@ -92,7 +92,7 @@ describe("Timeline (frise)", () => {
     // The locked trip's block has the dark left edge.
     expect(document.querySelector("[data-trip-block='trip-a']")?.className).toContain("border-slate-900");
     // One band of 24 px: the shared pair on board together becomes one target listing both.
-    expect(screen.getByRole("button", { name: /^2 courses de 06:50 à 07:21 : Monique Aubert, Gérard Blanc/ }).textContent).toBe("+2");
+    expect(screen.getByRole("button", { name: /^2 courses de 06:50 à 07:21\u00a0: Monique Aubert, Gérard Blanc/ }).textContent).toBe("+2");
   });
 
   it("marks a negative margin in red", () => {
@@ -147,12 +147,12 @@ describe("Timeline (frise)", () => {
     const tight = { ...trips, "trip-a": { ...trips["trip-a"]!, plannedDropoffMinute: 447 } };
     renderTimeline({ selectedTripId: "trip-a", selectedVehicleId: "taxi-1" }, { trips: tight, vehicles });
     const mark = rowOf("taxi-1").querySelector("[data-appointment-mark]")!;
-    expect(mark.textContent).toBe("RDV 07:30 · marge 3 min");
+    expect(mark.textContent).toBe("RDV 07:30 · marge 3\u00a0min");
     expect(mark.className).toContain("border-dashed");
     expect(mark.querySelector("svg")).toBeTruthy();
   });
 
-  it("merges trips too close to click apart into one « +3 » target that lists them", () => {
+  it("merges trips too close to click apart into one «\u202f+3\u202f» target that lists them", () => {
     const stop = (id: string, tripId: string, kind: "PICKUP" | "DROPOFF", sequence: number, minute: number) => ({
       id,
       sequence,
@@ -185,7 +185,7 @@ describe("Timeline (frise)", () => {
       }),
     ];
     const { onSelectTrip } = renderTimeline({}, { trips, vehicles });
-    const cluster = screen.getByRole("button", { name: /^3 courses de 10:00 à 10:32 : Monique Aubert, Gérard Blanc, Colette Imbert/ });
+    const cluster = screen.getByRole("button", { name: /^3 courses de 10:00 à 10:32\u00a0: Monique Aubert, Gérard Blanc, Colette Imbert/ });
     expect(cluster.textContent).toBe("+3");
     expect(cluster.getAttribute("aria-haspopup")).toBe("dialog");
     fireEvent.click(cluster);
@@ -197,7 +197,7 @@ describe("Timeline (frise)", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("pins the trips without a vehicle on an « À placer » row, on the window where they must be served", () => {
+  it("pins the trips without a vehicle on an «\u202fÀ placer\u202f» row, on the window where they must be served", () => {
     const { onSelectTrip } = renderTimeline({ unassignedTripIds: ["trip-c"], waitWindows: { beforeAppointmentMin: 30, afterSessionMin: 15 } });
     const pinned = document.querySelector<HTMLElement>("[data-pinned-row]")!;
     expect(pinned.textContent).toContain("À placer");
@@ -222,17 +222,17 @@ describe("Timeline (frise)", () => {
     renderTimeline({ violations: indexViolations(violations, trips) }, { trips, vehicles });
     const taxi = rowOf("taxi-1");
     expect(within(taxi).getByRole("button", { name: /Taxi 1 \(Marseille\)/ }).textContent).toContain(
-      "2 violations : Hors fenêtre horaire, Hors horaires du chauffeur",
+      "2 violations\u00a0: Hors fenêtre horaire, Hors horaires du chauffeur",
     );
-    expect(screen.getByRole("button", { name: /Monique Aubert.*Violation : Hors fenêtre horaire/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Monique Aubert.*Violation\u00a0: Hors fenêtre horaire/ })).toBeTruthy();
     expect(document.querySelector("[data-trip-block='trip-a']")?.className).toContain("outline-dashed");
     expect(rowOf("vsl-1").textContent).not.toContain("violation");
   });
 
-  it("shows the free slots of 30 min or more, and names them for screen readers", () => {
+  it("shows the free slots of 30\u00a0min or more, and names them for screen readers", () => {
     renderTimeline();
     // Shift 06:00 – 18:30, route 06:40 – 07:50.
-    expect(rowOf("taxi-1").textContent).toContain("Créneaux libres : 06:00 – 06:40, 07:50 – 18:30.");
+    expect(rowOf("taxi-1").textContent).toContain("Créneaux libres\u00a0: 06:00 – 06:40, 07:50 – 18:30.");
     expect(rowOf("taxi-1").querySelectorAll("[title^='Libre de']")).toHaveLength(2);
   });
 
@@ -241,8 +241,8 @@ describe("Timeline (frise)", () => {
     renderTimeline({ zoom: "4h", onZoomChange });
     const grid = screen.getByRole("grid");
     expect(grid.style.getPropertyValue("--track-w")).toBe("calc((100cqw - 14rem) * 3.25)");
-    expect(within(screen.getByRole("group", { name: "Zoom de la frise" })).getByRole("radio", { name: "4 h à l'écran" })).toHaveProperty("checked", true);
-    fireEvent.click(screen.getByRole("radio", { name: "2 h à l'écran" }));
+    expect(within(screen.getByRole("group", { name: "Zoom de la frise" })).getByRole("radio", { name: "4\u00a0h à l'écran" })).toHaveProperty("checked", true);
+    fireEvent.click(screen.getByRole("radio", { name: "2\u00a0h à l'écran" }));
     expect(onZoomChange).toHaveBeenCalledWith("2h");
     // Hourly labels, no figure columns.
     expect(screen.getAllByRole("columnheader").filter((h) => h.className.includes("hidden"))).toHaveLength(5);
@@ -342,7 +342,7 @@ describe("Timeline: the selected trip's appointment", () => {
     const late = { ...trips, "trip-a": { ...trips["trip-a"]!, plannedDropoffMinute: 455 } };
     render(timelineElement({ selectedTripId: "trip-a", selectedVehicleId: "taxi-1" }, { trips: late, vehicles }));
     const mark = rowOf("taxi-1").querySelector<HTMLElement>("[data-appointment-mark]")!;
-    expect(mark.textContent).toBe("RDV 07:30 · 5 min de retard");
+    expect(mark.textContent).toBe("RDV 07:30 · 5\u00a0min de retard");
     // Its track is a stacking context of its own: the line (z-index inside the track) never paints over the
     // sticky axis (z-30), « À placer » (27), the depot headers (25) or the vehicle column (22).
     const track = mark.closest<HTMLElement>("[role='gridcell']")!;
@@ -401,7 +401,7 @@ describe("Timeline zoom", () => {
   });
 });
 
-describe("Timeline: the list of a « +3 »", () => {
+describe("Timeline: the list of a «\u202f+3\u202f»", () => {
   it("keeps the focus inside until a choice or Escape, which gives it back to its target", () => {
     render(timelineElement({ onZoomChange: vi.fn() }, closeTrips()));
     const cluster = screen.getByRole("button", { name: /^3 courses de 10:00/ });
@@ -420,7 +420,7 @@ describe("Timeline: the list of a « +3 »", () => {
     expect(document.activeElement).toBe(cluster);
   });
 
-  it("« Zoomer sur ce créneau » zooms in and gives the focus to the first trip's target, not to the page", () => {
+  it("«\u202fZoomer sur ce créneau\u202f» zooms in and gives the focus to the first trip's target, not to the page", () => {
     const onZoomChange = vi.fn();
     const data = closeTrips();
     const { rerender } = render(timelineElement({ onZoomChange }, data));

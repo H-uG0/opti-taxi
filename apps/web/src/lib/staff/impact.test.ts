@@ -20,9 +20,9 @@ describe("staffImpactNotice", () => {
       "person",
     );
     expect(notice).toBe(
-      " Tournées déjà calculées avec cette personne les 10/11/2026, 12/11/2026 : relancez l'optimisation de ces jours depuis le planning." +
-        " Planning déjà validé le 11/11/2026 : changez l'équipage de la tournée (planning, panneau du véhicule, « Changer l'équipage ») ou rouvrez le planning puis relancez l'optimisation." +
-        " Journée commencée le 09/11/2026 : changez l'équipage de la tournée (planning, panneau du véhicule, « Changer l'équipage »).",
+      " Tournées déjà calculées avec cette personne les 10/11/2026, 12/11/2026\u00a0: relancez l'optimisation de ces jours depuis le planning." +
+        " Planning déjà validé le 11/11/2026\u00a0: changez l'équipage de la tournée (planning, panneau du véhicule, «\u202fChanger l'équipage\u202f») ou rouvrez le planning puis relancez l'optimisation." +
+        " Journée commencée le 09/11/2026\u00a0: changez l'équipage de la tournée (planning, panneau du véhicule, «\u202fChanger l'équipage\u202f»).",
     );
   });
 
@@ -32,17 +32,17 @@ describe("staffImpactNotice", () => {
       { date: "2026-11-12", vehicleLabel: "Ambulance 1" },
     ];
     expect(staffImpactNotice({ days: [], fixed }, "person")).toBe(
-      " Équipages fixés avec cette personne : VSL 2 le 10/11/2026, Ambulance 1 le 12/11/2026 ; ses postes sont à remplacer, voir la page Équipages.",
+      " Équipages fixés avec cette personne\u00a0: VSL 2 le 10/11/2026, Ambulance 1 le 12/11/2026\u202f; ses postes sont à remplacer, voir la page Équipages.",
     );
     expect(staffImpactNotice({ days: [{ date: "2026-11-12", state: "proposed" }], fixed: fixed.slice(1) }, "pair")).toBe(
-      " Tournées déjà calculées avec ces deux personnes ensemble le 12/11/2026 : relancez l'optimisation de ce jour depuis le planning." +
-        " Équipage fixé à revoir sur la page Équipages, ces deux personnes y sont ensemble : Ambulance 1 le 12/11/2026.",
+      " Tournées déjà calculées avec ces deux personnes ensemble le 12/11/2026\u00a0: relancez l'optimisation de ce jour depuis le planning." +
+        " Équipage fixé à revoir sur la page Équipages, ces deux personnes y sont ensemble\u00a0: Ambulance 1 le 12/11/2026.",
     );
   });
 
   it("cuts long lists", () => {
     const days = Array.from({ length: 7 }, (_, i) => ({ date: `2026-11-1${i}`, state: "proposed" as const }));
-    expect(staffImpactNotice({ days, fixed: [] }, "person")).toMatch(/14\/11\/2026… : relancez/);
+    expect(staffImpactNotice({ days, fixed: [] }, "person")).toMatch(/14\/11\/2026…\u00a0: relancez/);
   });
 });
 

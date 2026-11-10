@@ -51,6 +51,7 @@ import type {
   VehicleRowView,
   ViolationView,
 } from "./types";
+import { frenchSpacing } from "@/lib/typography";
 
 type Person = { firstName: string; lastName: string };
 
@@ -282,7 +283,7 @@ function runView(
     lockedCount: run.lockedCount,
     unassignedCount: run.unassignedCount,
     requestedBy: run.requestedBy?.name ?? null,
-    warnings: details.get(run.id)?.warnings ?? null,
+    warnings: details.get(run.id)?.warnings?.map(frenchSpacing) ?? null,
     timeLimitSec: effectiveTimeLimitSec(configuredSec, run.tripsCount),
     // Same rule as the stale-run cleanup of runOptimization (run-optimization.ts).
     interrupted: run.status === "RUNNING" && isStaleRun(run, configuredSec, now),
@@ -478,7 +479,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
       driverName: driver ? personName(driver) : null,
       crewMateName: mate ? personName(mate) : null,
       available: available !== undefined,
-      unavailableReason: available ? null : (skippedById.get(vehicle.id)?.reason ?? (vehicle.active ? null : "Véhicule inactif")),
+      unavailableReason: available ? null : (skippedById.get(vehicle.id)?.reason ?? (vehicle.active ? null : "Véhicule désactivé")),
       shift: available ? { start: available.shiftStartMin, end: available.shiftEndMin } : null,
       breakWindow: available?.break
         ? { start: available.break.windowStartMin, end: available.break.windowEndMin, duration: available.break.durationMin }
@@ -500,7 +501,8 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
   const fieldRecords = fieldRecordsByTrip(input.routes);
 
   const planDetails = input.planRun ? (input.details.get(input.planRun.id) ?? null) : null;
-  const optimizerReasons = new Map(planDetails?.unassigned.map((u) => [u.tripId, u.reason]) ?? []);
+  // Stored with the run: a run computed before the optimizer wrote French spacing gets it here.
+  const optimizerReasons = new Map(planDetails?.unassigned.map((u) => [u.tripId, frenchSpacing(u.reason)]) ?? []);
 
   const trips: TripView[] = input.trips
     .filter((t) => isActiveTrip(t.status) || vehicleOfTrip(t) !== null)
@@ -557,7 +559,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     .map((t) => {
       const excluded = excludedById.get(t.id);
       let reason: string;
-      if (excluded) reason = `Non envoyée à l'optimiseur : ${excluded}`;
+      if (excluded) reason = `Non envoyée à l'optimiseur\u00a0: ${excluded}`;
       else if (optimizerReasons.has(t.id)) reason = optimizerReasons.get(t.id) ?? "";
       else if (!input.planRun) reason = "Pas encore optimisée";
       else if ((rawById.get(t.id)?.createdAt ?? new Date(0)) > input.planRun.startedAt) reason = "Ajoutée après la dernière optimisation";
@@ -569,12 +571,12 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
   const staleTrips: UnassignedView[] = [];
   for (const t of trips) {
     if (t.vehicleId && t.status === "CANCELLED") {
-      staleTrips.push({ tripId: t.id, reason: "Course annulée après l'optimisation : réoptimisez pour libérer le créneau" });
+      staleTrips.push({ tripId: t.id, reason: "Course annulée après l'optimisation\u00a0: réoptimisez pour libérer le créneau" });
     } else if (t.vehicleId && t.status === "NO_SHOW") {
-      staleTrips.push({ tripId: t.id, reason: "Patient absent : la course reste dans la tournée" });
+      staleTrips.push({ tripId: t.id, reason: "Patient absent\u00a0: la course reste dans la tournée" });
     } else if (t.lockedVehicleId && t.vehicleId && t.lockedVehicleId !== t.vehicleId && isActiveTrip(t.status)) {
       const label = vehicleById.get(t.lockedVehicleId)?.label ?? "un autre véhicule";
-      staleTrips.push({ tripId: t.id, reason: `Figée sur ${label} mais planifiée ailleurs : réoptimisez` });
+      staleTrips.push({ tripId: t.id, reason: `Figée sur ${label} mais planifiée ailleurs\u00a0: réoptimisez` });
     }
   }
 

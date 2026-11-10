@@ -81,7 +81,7 @@ export function PlanningSearch({
       }}
     >
       <label htmlFor={inputId} className="sr-only">
-        Rechercher un patient, un véhicule, un chauffeur ou un établissement (raccourci : barre oblique)
+        Rechercher un patient, un véhicule, un chauffeur ou un établissement (raccourci&nbsp;: barre oblique)
       </label>
       <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
       <input

@@ -30,7 +30,7 @@ function sourcesCell(sources: readonly string[]): { tone: Tone; text: string; ti
     tone: mixed ? "warn" : "default",
     // Short under the date (the column must not widen); the title says what it is.
     text: mixed && sources.length > 1 ? "sources mélangées" : text,
-    title: `Temps et distances : ${sources.map((source) => MATRIX_SOURCE_LABELS[source] ?? source).join(", ")}`,
+    title: `Temps et distances\u00a0: ${sources.map((source) => MATRIX_SOURCE_LABELS[source] ?? source).join(", ")}`,
   };
 }
 
@@ -207,7 +207,7 @@ export function KpiTable({
               {day.simulated ? (
                 <span
                   className="ml-1.5 rounded-sm bg-violet-100 px-1 py-px text-[11px] font-semibold text-violet-800"
-                  title="Journée simulée pour la démonstration : retards et temps de planification sont des paramètres de la simulation, pas des mesures"
+                  title="Journée simulée pour la démonstration&nbsp;: retards et temps de planification sont des paramètres de la simulation, pas des mesures"
                 >
                   simulé
                 </span>
@@ -259,7 +259,7 @@ export function KpiTable({
               <Num
                 divider
                 tone={late.tone}
-                title={day.maxDelayMinutes !== null ? `Retard maximal : ${formatDuration(day.maxDelayMinutes)}` : undefined}
+                title={day.maxDelayMinutes !== null ? `Retard maximal\u00a0: ${formatDuration(day.maxDelayMinutes)}` : undefined}
               >
                 {late.text}
               </Num>
@@ -269,7 +269,7 @@ export function KpiTable({
                 tone={planningTone(day)}
                 title={
                   day.planningStatus === "VALIDATED" && day.planningMinutes === null
-                    ? "Validé sans optimisation enregistrée : durée non mesurable"
+                    ? "Validé sans optimisation enregistrée\u00a0: durée non mesurable"
                     : undefined
                 }
               >
@@ -312,7 +312,7 @@ export function KpiTable({
             tone="strong"
             title={
               period.inProgressDate
-                ? "Jours terminés uniquement : la journée en cours n'est pas comptée"
+                ? "Jours terminés uniquement\u00a0: la journée en cours n'est pas comptée"
                 : "Courses déposées ÷ véhicules dont l'équipage a saisi un statut"
             }
           >

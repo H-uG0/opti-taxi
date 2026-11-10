@@ -51,7 +51,7 @@ function DayNotice({ date, today }: { date: string; today: string }) {
   if (date === today) return null;
   return (
     <p className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-950">
-      Aperçu : les statuts « pris en charge » et « déposé » se saisissent le jour de la tournée.
+      Aperçu&nbsp;: les statuts «&#x202F;pris en charge&#x202F;» et «&#x202F;déposé&#x202F;» se saisissent le jour de la tournée.
     </p>
   );
 }

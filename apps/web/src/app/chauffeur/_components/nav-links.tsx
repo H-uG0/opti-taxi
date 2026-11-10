@@ -59,7 +59,7 @@ export function NavLinks({ lat, lng, destination }: { lat: number; lng: number; 
   const apple = useSyncExternalStore(noSubscription, applePhone, () => false);
   const links = navigationLinks({ lat, lng });
   if (!links) {
-    return <p className="text-sm font-medium text-amber-800">Coordonnées GPS absentes : suivez l&apos;adresse.</p>;
+    return <p className="text-sm font-medium text-amber-800">Coordonnées GPS absentes&nbsp;: suivez l&apos;adresse.</p>;
   }
   return (
     <div role="group" aria-label={`Itinéraire vers ${destination}`}>

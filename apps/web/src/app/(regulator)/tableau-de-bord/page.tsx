@@ -59,12 +59,12 @@ export default async function DashboardPage({
             {period.simulatedDays >= period.plannedDays
               ? "Toute la période est simulée"
               : `${plural(period.simulatedDays, "jour simulé", "jours simulés")} sur la période`}{" "}
-            (marqués « simulé » dans le détail par jour)
+            (marqués «&#x202F;simulé&#x202F;» dans le détail par jour)
           </p>
           <p className="mt-1">
             Ces journées ont été simulées pour la démonstration, avec le vrai optimiseur. Les retards (incidents de
-            circulation tirés au hasard), le temps de planification (validation 15 à 60 min après le premier calcul),
-            les absences, les annulations et la part d&apos;équipages qui saisissent leurs statuts (environ 85 %) sont
+            circulation tirés au hasard), le temps de planification (validation 15 à 60&nbsp;min après le premier calcul),
+            les absences, les annulations et la part d&apos;équipages qui saisissent leurs statuts (environ 85&nbsp;%) sont
             des paramètres de la simulation, pas des mesures. Les kilomètres, le partage et la marge viennent du
             calcul des tournées sur ces données fictives.
           </p>
@@ -80,7 +80,7 @@ export default async function DashboardPage({
             </LinkButton>
           }
         >
-          Les indicateurs se calculent à partir des tournées : lancez « Optimiser demain » depuis le planning, ou
+          Les indicateurs se calculent à partir des tournées&nbsp;: lancez «&#x202F;Optimiser demain&#x202F;» depuis le planning, ou
           choisissez une autre période.
         </EmptyState>
       ) : (
@@ -96,7 +96,7 @@ export default async function DashboardPage({
             }
           >
             <span className="font-medium">Recours exceptionnel à une ambulance pour un transport assis</span> (facturé au tarif VSL,
-            protocole du 24 septembre 2025) :{" "}
+            protocole du 24 septembre 2025)&nbsp;:{" "}
             {period.exceptionalAmbulanceTrips > 0
               ? `${plural(period.exceptionalAmbulanceTrips, "course servie", "courses servies")} sur la période, à garder exceptionnel.`
               : "aucun sur la période."}
@@ -110,7 +110,7 @@ export default async function DashboardPage({
             {mixedDistanceSources(period) ? (
               <p role="note" className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                 Cette période mélange des tournées calculées avec les distances routières et avec l&apos;estimation à
-                vol d&apos;oiseau (indiqué sous chaque jour du détail) : leurs kilomètres, durées et retards prévus ne se
+                vol d&apos;oiseau (indiqué sous chaque jour du détail)&nbsp;: leurs kilomètres, durées et retards prévus ne se
                 comparent pas d&apos;un jour à l&apos;autre.
               </p>
             ) : null}
@@ -136,17 +136,17 @@ export default async function DashboardPage({
             Les indicateurs portent sur les tournées enregistrées pour chaque date (proposées ou validées) qui
             comptent encore au moins un arrêt, comme sur le planning. Une{" "}
             <strong className="font-medium text-slate-900">course servie</strong> est une course placée dans une tournée
-            et ni annulée ni absente ; elle est <strong className="font-medium text-slate-900">réalisée</strong> quand le
-            chauffeur l&apos;a marquée « déposé ». Les taux d&apos;une période sont recalculés à partir des totaux (et
+            et ni annulée ni absente&#x202F;; elle est <strong className="font-medium text-slate-900">réalisée</strong> quand le
+            chauffeur l&apos;a marquée «&#x202F;déposé&#x202F;». Les taux d&apos;une période sont recalculés à partir des totaux (et
             non en moyennant les taux journaliers).
           </p>
           <p>
-            Km, CA estimé, coût et marge sont ceux calculés par l&apos;optimiseur pour chaque tournée : les distances
+            Km, CA estimé, coût et marge sont ceux calculés par l&apos;optimiseur pour chaque tournée&nbsp;: les distances
             sont les distances routières, ou une estimation à vol d&apos;oiseau quand le calcul routier n&apos;est pas disponible. Les
             heures réelles (dépose, validation) sont converties à l&apos;heure de Paris.
           </p>
           <p>
-            Le détail du calcul de chaque indicateur figure sous son graphique. « — » signale une valeur non
+            Le détail du calcul de chaque indicateur figure sous son graphique. «&#x202F;—&#x202F;» signale une valeur non
             mesurable (aucune tournée, aucune course réalisée, jour à venir…). Le jour mis en avant est comparé au
             dernier jour planifié qui le précède.
           </p>

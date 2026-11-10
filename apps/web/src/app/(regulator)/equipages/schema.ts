@@ -87,7 +87,7 @@ export function readCrewForm(
     const raw = valueOf(values, field).trim();
     if (raw === "") return null;
     if (!ID.test(raw)) {
-      errors[reportOn] = "Personne inconnue : rechargez la page.";
+      errors[reportOn] = "Personne inconnue\u00a0: rechargez la page.";
       return null;
     }
     return raw;
@@ -105,7 +105,7 @@ export function readCrewForm(
       park: shownPark,
     };
     const version = valueOf(values, versionField(vehicle.id)).trim();
-    if (version !== "" && !VERSION.test(version)) errors[driverField(vehicle.id)] = "Page périmée : rechargez la page.";
+    if (version !== "" && !VERSION.test(version)) errors[driverField(vehicle.id)] = "Page périmée\u00a0: rechargez la page.";
     rows.push({ vehicleId: vehicle.id, driverId, crewMateId, park, shown, version });
   }
   return { rows, errors };
@@ -136,9 +136,9 @@ export type CurrentCrew = { updatedAt: Date; updatedBy: string | null };
 
 /** "Modifié par Marie Dupont le 09/11 à 14:32 entre-temps" (or without the name when unknown). */
 export function changedMeanwhileText(current: CurrentCrew | undefined): string {
-  if (!current) return "Remis à la proposition automatique par un collègue entre-temps : rechargez la page.";
+  if (!current) return "Remis à la proposition automatique par un collègue entre-temps\u00a0: rechargez la page.";
   const by = current.updatedBy ? ` par ${current.updatedBy}` : "";
-  return `Modifié${by} le ${formatDateTime(current.updatedAt.toISOString())} entre-temps : rechargez la page pour voir son choix.`;
+  return `Modifié${by} le ${formatDateTime(current.updatedAt.toISOString())} entre-temps\u00a0: rechargez la page pour voir son choix.`;
 }
 
 /**
@@ -179,7 +179,7 @@ export function unavailableChoiceErrors(
       if (!id || !person) continue;
       const absence = absenceOn(id, date, absences);
       if (!person.active) errors[field] = `${staffName(person)} est désactivé`;
-      else if (absence) errors[field] = `${staffName(person)} : ${planningAbsenceText(absence).toLowerCase()}`;
+      else if (absence) errors[field] = `${staffName(person)}\u00a0: ${planningAbsenceText(absence).toLowerCase()}`;
     }
   }
   return errors;
@@ -253,7 +253,7 @@ export function takenFromFixedErrors(
       const person = people.get(id);
       const label = labels.get(vehicleId) ?? "un autre véhicule";
       errors[field] =
-        `${person ? staffName(person) : "Cette personne"} fait déjà partie de l'équipage fixé de ${label} ce jour : revenez d'abord à la proposition sur ${label}, ou choisissez quelqu'un d'autre.`;
+        `${person ? staffName(person) : "Cette personne"} fait déjà partie de l'équipage fixé de ${label} ce jour\u00a0: revenez d'abord à la proposition sur ${label}, ou choisissez quelqu'un d'autre.`;
     }
   }
   return errors;

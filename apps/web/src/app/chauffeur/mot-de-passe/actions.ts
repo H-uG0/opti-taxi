@@ -34,7 +34,7 @@ export async function changeOwnPassword(_state: FormState, formData: FormData): 
   if (!parsed.success) return invalidState(parsed.error, null);
 
   const account = await db.user.findUnique({ where: { id: user.id }, select: { email: true, passwordHash: true } });
-  if (!account) return messageState("Compte introuvable : reconnectez-vous.");
+  if (!account) return messageState("Compte introuvable\u00a0: reconnectez-vous.");
   // Same gate as the sign-in: guessing the current password from an open session is throttled too.
   const throttled = await throttleLogin(account.email);
   if (throttled) return messageState(tooManyPasswordAttempts(throttled.retryInMin));

@@ -648,9 +648,9 @@ describe("refreshNotice and refreshAdvice", () => {
 
   it("report the rules the recomputed routes break without blaming the change for them", () => {
     const broken = outcome({ refreshed: 1, violations: 1 });
-    expect(refreshNotice(broken)).toBe("Horaires et totaux de la tournée recalculés ; 1 contrainte n'est pas respectée.");
+    expect(refreshNotice(broken)).toBe("Horaires et totaux de la tournée recalculés\u202f; 1 contrainte n'est pas respectée.");
     expect(refreshNotice({ ...broken, refreshed: 2, violations: 3 })).toBe(
-      "Horaires et totaux de 2 tournées recalculés ; 3 contraintes ne sont pas respectées.",
+      "Horaires et totaux de 2 tournées recalculés\u202f; 3 contraintes ne sont pas respectées.",
     );
     expect(refreshAdvice(broken)).toBe("Réoptimisez le planning.");
     expect(refreshCallsForReoptimization(broken)).toBe(true);
@@ -665,7 +665,7 @@ describe("refreshNotice and refreshAdvice", () => {
       "Les horaires et totaux des 3 tournées concernées seront mis à jour à la prochaine optimisation (service d'optimisation indisponible).",
     );
     expect(refreshNotice(outcome({ kept: 1, failed: true }))).toBe(
-      "Les horaires et totaux de la tournée n'ont pas pu être recalculés : ils seront mis à jour à la prochaine optimisation.",
+      "Les horaires et totaux de la tournée n'ont pas pu être recalculés\u00a0: ils seront mis à jour à la prochaine optimisation.",
     );
     expect(refreshAdvice(down)).toBe("Réoptimisez le planning.");
     expect(refreshCallsForReoptimization(down)).toBe(true);
@@ -680,10 +680,10 @@ describe("refreshNotice and refreshAdvice", () => {
   it("promise no re-optimization on a day under way", () => {
     const kept = outcome({ kept: 1, dayStarted: true });
     expect(refreshNotice(kept)).toBe(
-      "Les horaires et totaux de la tournée n'ont pas pu être recalculés : ils restent ceux du dernier calcul, la journée ayant commencé.",
+      "Les horaires et totaux de la tournée n'ont pas pu être recalculés\u00a0: ils restent ceux du dernier calcul, la journée ayant commencé.",
     );
     expect(refreshNotice({ ...kept, unavailable: true })).toBe(
-      "Les horaires et totaux de la tournée n'ont pas pu être recalculés (service d'optimisation indisponible) : ils restent ceux du dernier calcul, la journée ayant commencé.",
+      "Les horaires et totaux de la tournée n'ont pas pu être recalculés (service d'optimisation indisponible)\u00a0: ils restent ceux du dernier calcul, la journée ayant commencé.",
     );
     expect(refreshAdvice(kept)).toBe("Prévenez le chauffeur.");
     expect(refreshCallsForReoptimization(kept)).toBe(false);
@@ -871,7 +871,7 @@ describe("refreshRoutes", () => {
     const { prisma, writes } = fakePrisma([r1, r3], []);
     let calls = 0;
     // FastAPI's 422 detail quotes the rejected input: trip and patient ids, coordinates.
-    const detail = 'HTTP 422 : [{"input":{"id":"B","patientId":"pat_42","pickup":{"lat":43.2965,"lng":5.3698}}}]';
+    const detail = 'HTTP 422\u00a0: [{"input":{"id":"B","patientId":"pat_42","pickup":{"lat":43.2965,"lng":5.3698}}}]';
     const evaluate = async (): Promise<EvaluateResult> => {
       calls += 1;
       return { ok: false, error: detail, reason: "error" };

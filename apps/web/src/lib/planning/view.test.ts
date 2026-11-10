@@ -213,7 +213,7 @@ describe("buildPlanningView", () => {
     const details: RunDetails = {
       runId: "run1",
       solverStatus: "ROUTING_SUCCESS",
-      violations: [{ code: "TIME_WINDOW", message: "Retard de 5 min", tripId: "a", vehicleId: "v1" }],
+      violations: [{ code: "TIME_WINDOW", message: "Retard de 5\u00a0min", tripId: "a", vehicleId: "v1" }],
       warnings: ["Pas de grille"],
       unassigned: [{ tripId: "c", reason: "Aucun véhicule compatible disponible" }],
     };
@@ -223,7 +223,7 @@ describe("buildPlanningView", () => {
       { tripId: "d", reason: "Ajoutée après la dernière optimisation" },
     ]);
     expect(view.violations).toEqual([
-      { code: "TIME_WINDOW", label: "Hors fenêtre horaire", message: "Retard de 5 min", tripId: "a", vehicleId: "v1" },
+      { code: "TIME_WINDOW", label: "Hors fenêtre horaire", message: "Retard de 5\u00a0min", tripId: "a", vehicleId: "v1" },
     ]);
     expect(view.violationsKnown).toBe(true);
     expect(view.kpis.violations).toBe(1);
@@ -267,7 +267,7 @@ describe("buildPlanningView", () => {
           unassigned: [],
           kind: "move",
           comparison,
-          question: "Déplacement de {course:a} vers Taxi 2 : ce calcul sert 1 course contre 2 dans le planning actuel : remplacer quand même ?",
+          question: "Déplacement de {course:a} vers Taxi 2\u00a0: ce calcul sert 1 course contre 2 dans le planning actuel\u00a0: remplacer quand même\u202f?",
         },
       ],
       [
@@ -285,7 +285,7 @@ describe("buildPlanningView", () => {
     ]);
     const view = buildPlanningView(input({ lastRun: pendingRun, details }));
     expect(view.lastRun?.pending).toEqual({
-      question: expect.stringMatching(/^Déplacement de l'aller de A Patient vers Taxi 2 : ce calcul sert 1 course contre 2/),
+      question: expect.stringMatching(/^Déplacement de l'aller de A Patient vers Taxi 2\u00a0: ce calcul sert 1 course contre 2/),
       comparison,
       // Named, with the leg and time, as the page shows them; the violation's raw message is not shown.
       lostTrips: ["B Patient (aller, RDV 08:00)"],
@@ -317,7 +317,7 @@ describe("buildPlanningView", () => {
     expect(started.dayStarted).toBe(true);
   });
 
-  it("widens the time range to the window of a trip without a vehicle no shift covers (the « À placer » row draws it)", () => {
+  it("widens the time range to the window of a trip without a vehicle no shift covers (the «\u202fÀ placer\u202f» row draws it)", () => {
     const late = trip("late", { direction: "RETURN", appointmentMinute: null, readyMinute: 1230 });
     const view = buildPlanningView(input({ trips: [...input().trips, late] }));
     // Session ending at 20:30, picked up until 20:45 (+ 15 min): the range ends at 21:00, not at 19:00.
@@ -341,11 +341,11 @@ describe("buildPlanningView", () => {
   it("shows a refused move with the patient's name, which the stored error does not hold", () => {
     const failed = run({
       status: "FAILED",
-      error: "Déplacement refusé : l'optimiseur a placé {course:c} sur Taxi 2 et non sur Taxi 1. Le planning n'a pas été modifié.",
+      error: "Déplacement refusé\u00a0: l'optimiseur a placé {course:c} sur Taxi 2 et non sur Taxi 1. Le planning n'a pas été modifié.",
     });
     const view = buildPlanningView(input({ lastRun: failed }));
     expect(view.lastRun?.error).toBe(
-      "Déplacement refusé : l'optimiseur a placé l'aller de C Patient sur Taxi 2 et non sur Taxi 1. Le planning n'a pas été modifié.",
+      "Déplacement refusé\u00a0: l'optimiseur a placé l'aller de C Patient sur Taxi 2 et non sur Taxi 1. Le planning n'a pas été modifié.",
     );
   });
 

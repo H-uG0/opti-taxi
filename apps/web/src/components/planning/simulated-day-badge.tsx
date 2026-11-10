@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 export function SimulatedDayBadge() {
   return (
     <Badge tone="simulated">
-      <span title="Journée simulée pour la démonstration : données fictives, statuts, réponses et retards simulés">Journée simulée</span>
+      <span title="Journée simulée pour la démonstration&nbsp;: données fictives, statuts, réponses et retards simulés">Journée simulée</span>
     </Badge>
   );
 }

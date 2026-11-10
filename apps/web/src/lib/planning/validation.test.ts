@@ -23,7 +23,7 @@ describe("validationIssues", () => {
       ...clean,
       vehicleIssues: [
         { vehicleId: "v1", label: "Taxi 1", hasRoute: true, changes: ["Véhicule indisponible (entretien le 10/11/2026)"], compliance: [] },
-        { vehicleId: "v2", label: "Taxi 2", hasRoute: true, changes: [], compliance: ["Assurance : échéance dépassée (01/11/2026)"] },
+        { vehicleId: "v2", label: "Taxi 2", hasRoute: true, changes: [], compliance: ["Assurance\u00a0: échéance dépassée (01/11/2026)"] },
       ],
       unassigned: [{ tripId: "c", reason: "" }],
       violations: [violation, violation],
@@ -41,7 +41,7 @@ describe("validationIssues", () => {
   });
 
   it("does not ask about an overdue vehicle that has no route that day", () => {
-    const idle = { vehicleId: "v3", label: "Taxi 3", hasRoute: false, changes: [], compliance: ["Assurance : échéance dépassée (01/11/2026)"] };
+    const idle = { vehicleId: "v3", label: "Taxi 3", hasRoute: false, changes: [], compliance: ["Assurance\u00a0: échéance dépassée (01/11/2026)"] };
     expect(validationIssues({ ...clean, vehicleIssues: [idle] })).toEqual([]);
   });
 
@@ -52,7 +52,7 @@ describe("validationIssues", () => {
 
 describe("validationQuestion", () => {
   it("joins the issues as a French sentence", () => {
-    expect(validationQuestion(["2 courses non affectées"])).toBe("Le planning comporte 2 courses non affectées. Valider quand même ?");
-    expect(validationQuestion(["a", "b", "c"])).toBe("Le planning comporte a, b et c. Valider quand même ?");
+    expect(validationQuestion(["2 courses non affectées"])).toBe("Le planning comporte 2 courses non affectées. Valider quand même\u202f?");
+    expect(validationQuestion(["a", "b", "c"])).toBe("Le planning comporte a, b et c. Valider quand même\u202f?");
   });
 });

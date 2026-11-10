@@ -102,9 +102,9 @@ export function BarChart({
           const point = points[i];
           const value = point?.value ?? null;
           const secondary = point?.secondary ?? null;
-          let tooltip = `${formatDayShort(shape.date)} : ${value === null ? "pas de donnée" : format(value)}`;
+          let tooltip = `${formatDayShort(shape.date)}\u00a0: ${value === null ? "pas de donnée" : format(value)}`;
           if (hasSecondary && secondaryLabel) {
-            tooltip = `${formatDayShort(shape.date)} : ${primaryLabel ?? title} ${value === null ? "—" : format(value)} · ${secondaryLabel} ${secondary === null ? "—" : format(secondary)}`;
+            tooltip = `${formatDayShort(shape.date)}\u00a0: ${primaryLabel ?? title} ${value === null ? "—" : format(value)} · ${secondaryLabel} ${secondary === null ? "—" : format(secondary)}`;
           }
           return (
             <rect

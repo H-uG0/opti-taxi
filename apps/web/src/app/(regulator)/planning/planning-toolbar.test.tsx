@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PlanningActivityBanner, PlanningActivityProvider } from "./planning-activity";
 import { PlanningToolbar, type ToolbarProps } from "./planning-toolbar";
 
-const CONFIRM = "2 tournées ont un véhicule à revoir (Taxi 1 : contrôle technique dépassé). Valider quand même ?";
+const CONFIRM = "2 tournées ont un véhicule à revoir (Taxi 1\u00a0: contrôle technique dépassé). Valider quand même\u202f?";
 
 const actions = vi.hoisted(() => ({
   optimizeDay: vi.fn(async () => ({ ok: true, message: "10 tournées enregistrées." })),
@@ -54,7 +54,7 @@ describe("PlanningToolbar (barre d'outils)", () => {
     expect(await screen.findByText("2 courses placées sur 3 non affectées.")).toBeTruthy();
     cleanup();
 
-    renderToolbar({ unassignedCount: 3, optimizeBlocked: "Planning validé : rouvrez-le pour le modifier." });
+    renderToolbar({ unassignedCount: 3, optimizeBlocked: "Planning validé\u00a0: rouvrez-le pour le modifier." });
     expect((screen.getByRole("button", { name: /Placer les non affectées/ }) as HTMLButtonElement).disabled).toBe(true);
     cleanup();
 
@@ -69,7 +69,7 @@ describe("PlanningToolbar (barre d'outils)", () => {
   });
 
   it("disables the buttons with the reason while a computation runs elsewhere", () => {
-    renderToolbar({ runningReason: "Une optimisation de cette date est en cours : attendez la fin du calcul." });
+    renderToolbar({ runningReason: "Une optimisation de cette date est en cours\u00a0: attendez la fin du calcul." });
     const optimize = screen.getByRole("button", { name: /Optimiser demain/ }) as HTMLButtonElement;
     expect(optimize.disabled).toBe(true);
     expect(optimize.title).toContain("en cours");
@@ -80,7 +80,7 @@ describe("PlanningToolbar (barre d'outils)", () => {
     renderToolbar();
     fireEvent.click(screen.getByRole("button", { name: /Valider le planning/ }));
     const dialog = await screen.findByRole("group", { name: CONFIRM });
-    expect(dialog.textContent).toContain("Valider quand même ?");
+    expect(dialog.textContent).toContain("Valider quand même\u202f?");
     expect(actions.validateDay).toHaveBeenLastCalledWith("2026-11-10", null, "v-1");
     // The confirmation takes the focus.
     await waitFor(() => expect(document.activeElement?.textContent).toBe("Oui, valider quand même"));
@@ -89,7 +89,7 @@ describe("PlanningToolbar (barre d'outils)", () => {
     await waitFor(() => expect(screen.queryByRole("group", { name: CONFIRM })).toBeNull());
   });
 
-  it("closes the question with « Revoir le planning » or Escape without validating, the focus back on « Valider le planning »", async () => {
+  it("closes the question with «\u202fRevoir le planning\u202f» or Escape without validating, the focus back on «\u202fValider le planning\u202f»", async () => {
     renderToolbar();
     const validateButton = screen.getByRole("button", { name: /Valider le planning/ });
     fireEvent.click(validateButton);
@@ -133,7 +133,7 @@ describe("PlanningToolbar (barre d'outils)", () => {
     await waitFor(() => expect(screen.queryByText("Planning rouvert.")).toBeNull());
   });
 
-  it("offers « Rouvrir » on a validated day instead of « Valider »", async () => {
+  it("offers «\u202fRouvrir\u202f» on a validated day instead of «\u202fValider\u202f»", async () => {
     renderToolbar({ canValidate: false, canReopen: true });
     expect(screen.queryByRole("button", { name: /Valider le planning/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Rouvrir/ }));

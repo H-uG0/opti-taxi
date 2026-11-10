@@ -19,7 +19,7 @@ function coordinate(label: string, range: { min: number; max: number }) {
     .transform((value, ctx) => {
       const n = Number(value.replace(",", "."));
       if (!Number.isFinite(n)) {
-        ctx.addIssue({ code: "custom", message: `${label} : nombre décimal attendu (ex. 43,2965)` });
+        ctx.addIssue({ code: "custom", message: `${label}\u00a0: nombre décimal attendu (ex. 43,2965)` });
         return z.NEVER;
       }
       return n;
@@ -32,7 +32,7 @@ export const addressShape = {
   postalCode: z
     .string()
     .trim()
-    .regex(/^\d{5}$/, "Code postal : 5 chiffres"),
+    .regex(/^\d{5}$/, "Code postal\u00a0: 5 chiffres"),
   city: z.string().trim().min(1, "Ville obligatoire").max(100, "Ville trop longue (100 caractères max.)"),
   lat: coordinate("Latitude", LAT_RANGE),
   lng: coordinate("Longitude", LNG_RANGE),

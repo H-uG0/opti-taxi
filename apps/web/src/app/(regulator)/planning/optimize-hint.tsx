@@ -8,6 +8,6 @@ import { usePlanningActivity } from "./planning-activity";
  */
 export function OptimizeHint({ label }: { label: string }) {
   const { optimizerOffline } = usePlanningActivity();
-  if (optimizerOffline) return <>{optimizerOffline} Lancez « {label} » dès qu&apos;il répondra.</>;
-  return <>Lancez « {label} » pour obtenir les tournées.</>;
+  if (optimizerOffline) return <>{optimizerOffline} Lancez «&#x202F;{label}&#x202F;» dès qu&apos;il répondra.</>;
+  return <>Lancez «&#x202F;{label}&#x202F;» pour obtenir les tournées.</>;
 }

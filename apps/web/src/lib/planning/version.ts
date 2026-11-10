@@ -39,7 +39,7 @@ export type DayVersion = {
   running: boolean;
 };
 
-export const STALE_PLAN_ERROR = "Le planning a changé depuis l'affichage : rechargez la page.";
+export const STALE_PLAN_ERROR = "Le planning a changé depuis l'affichage\u00a0: rechargez la page.";
 
 function token(text: string): string {
   return createHash("sha256").update(text).digest("base64url").slice(0, 16);

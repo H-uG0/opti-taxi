@@ -75,15 +75,15 @@ function seatMessages(
   }
   const name = nameOf(routePersonId);
   // Who takes the seat in the crew of the day, when someone does.
-  const replacement = dayPersonId !== null && dayPersonId !== routePersonId ? ` ; équipage du jour : ${nameOf(dayPersonId)}` : "";
+  const replacement = dayPersonId !== null && dayPersonId !== routePersonId ? `\u202f; équipage du jour\u00a0: ${nameOf(dayPersonId)}` : "";
   const absence = absenceOn(routePersonId, input.date, input.absences);
-  if (absence) return [`${name} (${SEAT_NOUN[seat]}) : ${planningAbsenceText(absence).toLowerCase()}${replacement}`];
+  if (absence) return [`${name} (${SEAT_NOUN[seat]})\u00a0: ${planningAbsenceText(absence).toLowerCase()}${replacement}`];
   if (input.people.get(routePersonId)?.active === false) {
-    return [`${name} (${SEAT_NOUN[seat]}) : désactivé depuis le calcul${replacement}`];
+    return [`${name} (${SEAT_NOUN[seat]})\u00a0: désactivé depuis le calcul${replacement}`];
   }
   if (routePersonId !== dayPersonId) {
     const day = dayPersonId === null ? "personne" : nameOf(dayPersonId);
-    return [`${seat === "driver" ? "Chauffeur" : "Équipier"} changé : ${name} sur la tournée, ${day} dans l'équipage du jour`];
+    return [`${seat === "driver" ? "Chauffeur" : "Équipier"} changé\u00a0: ${name} sur la tournée, ${day} dans l'équipage du jour`];
   }
   return [];
 }
@@ -108,7 +108,7 @@ export function vehicleIssues(input: VehicleIssuesInput): VehicleIssue[] {
         changes.push(crew.blocked ?? "Véhicule indisponible");
       } else {
         // The work-time rule is about the hours, not a seat: its short form (remedy on /equipages).
-        if (crew.blocked) changes.push(workTimeBlock(crew) ?? `Équipage du jour bloqué : ${crew.blocked}`);
+        if (crew.blocked) changes.push(workTimeBlock(crew) ?? `Équipage du jour bloqué\u00a0: ${crew.blocked}`);
         changes.push(...seatMessages("driver", route.driverId, crew.driverId, input));
         if (vehicleById.get(crew.vehicleId)?.type === "AMBULANCE") {
           changes.push(...seatMessages("crewMate", route.crewMateId, crew.crewMateId, input));
