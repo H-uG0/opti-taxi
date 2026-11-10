@@ -817,7 +817,7 @@ function routeCrewChangedText(outcome: {
   if (outcome.withoutAccount.length > 0) {
     const many = outcome.withoutAccount.length > 1;
     parts.push(
-      `${list(outcome.withoutAccount)} n'${many ? "ont" : "a"} pas de compte actif\u00a0: transmettez-${many ? "leur" : "lui"} la tournée (Chauffeurs, fiche).`,
+      `${list(outcome.withoutAccount)} n'${many ? "ont" : "a"} pas de compte actif\u00a0: transmettez-${many ? "leur" : "lui"} la tournée (Personnel, fiche de la personne).`,
     );
   }
   if (outcome.released.length > 0) {

@@ -20,7 +20,12 @@ const SPACE_BEFORE_COLON = /(?<=\S) :(?=\s|$|["'`)])/g;
 const SPACE_BEFORE_MARK = /(?<=\S) ([;!?])(?=\s|$|["'`)])/g;
 const AFTER_OPENING_QUOTE = /« /g;
 const BEFORE_CLOSING_QUOTE = / »/g;
-const NUMBER_UNIT = new RegExp(`(\\d) (${UNITS})(?![\\p{L}\\p{N}'’])`, "gu");
+/**
+ * A unit is a whole word: not « 3 minutes » nor « 3 s'est », and not a class name either
+ * (« my-1.5 h-12 », « z-30 h-8 », « h-9 min-w-14 »: a unit followed by « - » or « : »).
+ */
+const NOT_A_UNIT_END = "(?![\\p{L}\\p{N}'’:-])";
+const NUMBER_UNIT = new RegExp(`(\\d) (${UNITS})${NOT_A_UNIT_END}`, "gu");
 
 /** The text with French spacing (idempotent). */
 export function frenchSpacing(text: string): string {
@@ -36,7 +41,7 @@ export type TypographyIssue = { kind: "colon" | "mark" | "quote" | "unit"; excer
 
 const LEADING_COLON = /^ :(?=\s|$)/g;
 const LEADING_MARK = /^ [;!?](?=\s|$)/g;
-const LEADING_UNIT = new RegExp(`^ (${UNITS})(?![\\p{L}\\p{N}'’])`, "gu");
+const LEADING_UNIT = new RegExp(`^ (${UNITS})${NOT_A_UNIT_END}`, "gu");
 
 /**
  * What frenchSpacing would change in a text shown to users, with a short excerpt of each.

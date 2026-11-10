@@ -55,7 +55,8 @@ def test_optimize_falls_back_when_osrm_is_down(monkeypatch: pytest.MonkeyPatch) 
     assert response.status_code == 200
     meta = response.json()["meta"]
     assert meta["matrixSource"] == "haversine"
-    assert any("OSRM indisponible" in warning for warning in meta["warnings"])
+    assert any("Distances routières indisponibles" in warning for warning in meta["warnings"])
+    assert not any("OSRM" in warning for warning in meta["warnings"])
 
 
 def test_invalid_request_is_rejected_with_422() -> None:

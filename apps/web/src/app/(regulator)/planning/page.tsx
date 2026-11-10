@@ -154,7 +154,16 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
           titleAside={<DayTabs current="/planning" date={date} />}
           actions={
             <>
-              <DayNav basePath="/planning" date={date} tomorrow={tomorrow} keepParams={FILTER_PARAMS} shortcuts fieldLabel="Date du planning" />
+              {/* The title's badge already says « J+1 »: no second marker next to the date. */}
+              <DayNav
+                basePath="/planning"
+                date={date}
+                tomorrow={tomorrow}
+                keepParams={FILTER_PARAMS}
+                shortcuts
+                fieldLabel="Date du planning"
+                tomorrowMarker={false}
+              />
               <PlanningToolbar
                 date={date}
                 version={shownVersion.version}

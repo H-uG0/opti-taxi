@@ -17,6 +17,7 @@ how those tables were filled.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 from collections.abc import Iterable, Sequence
@@ -32,6 +33,8 @@ URBAN_SPEED_KMH = 30.0
 ROAD_SPEED_KMH = 85.0
 EARTH_RADIUS_KM = 6371.0
 COORD_DECIMALS = 6
+
+logger = logging.getLogger("optimizer.matrix")
 
 OSRM_TIMEOUT_SEC = 10.0
 OSRM_CHUNK = 100
@@ -182,6 +185,15 @@ def haversine_matrix(keys: Sequence[PointKey]) -> TravelMatrix:
     return TravelMatrix(tuple(keys), tuple(minute_rows), tuple(km_rows), "haversine")
 
 
+def _error_summary(error: Exception) -> str:
+    """The error for the logs, without a request URL (an HTTP error's message carries it)."""
+    if isinstance(error, httpx.HTTPStatusError):
+        return f"HTTPStatusError {error.response.status_code}"
+    if isinstance(error, httpx.HTTPError):
+        return type(error).__name__
+    return f"{type(error).__name__}: {error}"
+
+
 class OsrmError(RuntimeError):
     """OSRM answered, but not with a usable table."""
 
@@ -274,7 +286,9 @@ def build_matrix(
 ) -> tuple[TravelMatrix, list[str]]:
     """Matrix over the distinct points, from OSRM when configured, else straight-line.
 
-    Returns the matrix and French warnings for the regulator (OSRM down, unroutable pairs).
+    Returns the matrix and French warnings for the regulator (road distances unavailable, pairs
+    without a road route). They name neither the routing tool nor the error: the error goes to the
+    logs only, without the request URL (it holds the stops' coordinates, patients' homes).
     """
     keys = distinct_points(points)
     warnings: list[str] = []
@@ -285,13 +299,11 @@ def build_matrix(
         try:
             matrix, unrouted = osrm_matrix(keys, osrm_url, transport=transport)
         except (httpx.HTTPError, OsrmError, ValueError, TypeError, KeyError) as error:
-            warnings.append(
-                f"OSRM indisponible ({type(error).__name__}: {error})\u00a0: temps et distances estimés à vol d'oiseau"
-            )
+            logger.warning("OSRM unavailable, straight-line estimate used: %s", _error_summary(error))
+            warnings.append("Distances routières indisponibles\u00a0: temps et distances estimés à vol d'oiseau")
         else:
             if unrouted:
-                warnings.append(
-                    f"{unrouted} trajet(s) introuvable(s) dans OSRM\u00a0: estimation à vol d'oiseau pour ces trajets"
-                )
+                logger.info("OSRM found no route for %d pair(s): straight-line estimate for them", unrouted)
+                warnings.append(f"{unrouted} trajet(s) sans itinéraire routier\u00a0: estimés à vol d'oiseau")
             return matrix, warnings
     return haversine_matrix(keys), warnings

@@ -21,9 +21,12 @@ import {
 } from "../schema";
 import { TariffForm } from "../tariff-form";
 import { BackLink } from "@/components/ui/back-link";
+import { DropNoticeParams } from "@/components/ui/notice-params";
 
 /** The tab names the record (never a patient: titles stay in the browser history). */
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  // Metadata resolves alongside the layout: it checks the role itself before reading the record (its name is the title).
+  await requireUser("REGULATOR");
   const { id } = await params;
   const record = await db.tariffGrid.findUnique({ where: { id }, select: { label: true } });
   return { title: record?.label ?? "Grille tarifaire" };
@@ -80,6 +83,7 @@ export default async function EditTariffPage({
       {cree === "1" ? (
         <div className="mb-6">
           <FormMessage tone="success">Grille créée. Elle s&apos;applique aux calculs des dates qu&apos;elle couvre.</FormMessage>
+          <DropNoticeParams />
         </div>
       ) : null}
 

@@ -329,7 +329,7 @@ const TimelineRow = memo(function TimelineRow({
         role="gridcell"
         aria-label={route ? `Tournée de ${label}\u00a0: ${pluralize(route.tripCount, "course")}` : `${label}\u00a0: aucune course`}
         // isolate: what the track draws (blocks, targets, the appointment line) stays under the pinned axis, rows and column.
-        className={cn("relative isolate self-center overflow-hidden rounded", compact ? "my-0.5\u00a0h-6" : "my-1.5\u00a0h-12")}
+        className={cn("relative isolate self-center overflow-hidden rounded", compact ? "my-0.5 h-6" : "my-1.5 h-12")}
         style={row.shift || off ? OFF_SHIFT_STYLE : undefined}
       >
         {row.shift ? (
@@ -582,7 +582,7 @@ function ZoomChoice({ zoom, onChange }: { zoom: ZoomLevel; onChange: (zoom: Zoom
           <span
             aria-hidden
             className={cn(
-              "flex h-6\u00a0min-w-6 items-center justify-center rounded-[5px] px-1.5 text-xs font-medium",
+              "flex h-6 min-w-6 items-center justify-center rounded-[5px] px-1.5 text-xs font-medium",
               "peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-brand-600",
               zoom === level ? "bg-brand-700 text-white" : "text-slate-600 peer-hover:bg-slate-100",
             )}
@@ -818,7 +818,7 @@ export function Timeline({
         <div
           role="row"
           data-timeline-axis
-          className={cn(ROW, "sticky top-0 z-30\u00a0h-8 border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600")}
+          className={cn(ROW, "sticky top-0 z-30 h-8 border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600")}
         >
           <div role="columnheader" className="sticky left-0 z-[22] flex items-center gap-2 bg-slate-50 pr-1 pl-3 uppercase tracking-wide">
             <span>Véhicule</span>

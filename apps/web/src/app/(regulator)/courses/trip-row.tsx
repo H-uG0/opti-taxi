@@ -450,6 +450,12 @@ function LifecycleForm({ trip }: { trip: TripRowData }) {
   }
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
+    if (!restorable && !step.open) {
+      // Entrée in « Précision » submits the form (implicit submission): it asks first, as the button does.
+      event.preventDefault();
+      if (event.currentTarget.reportValidity()) step.ask();
+      return;
+    }
     // The panel closes with the submission; the focus goes back to « Annuler la course », which shows the progress.
     if (step.open) step.close();
     submitWithoutReset(formAction)(event);
@@ -529,6 +535,7 @@ function CancelFields({
             id={noteId}
             name="note"
             maxLength={CANCELLATION_NOTE_MAX}
+            required={reason === "OTHER"}
             placeholder="Ex. prévenu par sa fille"
             value={note}
             onChange={(e) => setNote(e.target.value)}

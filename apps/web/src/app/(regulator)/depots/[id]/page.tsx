@@ -14,9 +14,12 @@ import { DepotForm } from "../depot-form";
 import { depotFormValues } from "../schema";
 import { BackLink } from "@/components/ui/back-link";
 import { formatPersonName } from "@/lib/names";
+import { DropNoticeParams } from "@/components/ui/notice-params";
 
 /** The tab names the record (never a patient: titles stay in the browser history). */
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  // Metadata resolves alongside the layout: it checks the role itself before reading the record (its name is the title).
+  await requireUser("REGULATOR");
   const { id } = await params;
   const record = await db.depot.findUnique({ where: { id }, select: { name: true } });
   return { title: record?.name ?? "Dépôt" };
@@ -61,6 +64,7 @@ export default async function EditDepotPage({
       {cree === "1" ? (
         <div className="mb-6">
           <FormMessage tone="success">Dépôt créé. Rattachez-lui maintenant ses véhicules et son personnel depuis leurs fiches.</FormMessage>
+          <DropNoticeParams />
         </div>
       ) : null}
 

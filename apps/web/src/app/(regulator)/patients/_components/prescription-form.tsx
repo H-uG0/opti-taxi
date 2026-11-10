@@ -77,6 +77,8 @@ export function PrescriptionForm({
               ))}
             </Select>
           </Field>
+          {/* Outside the Field: its only child is the Select, which it links to the hint and the error. */}
+          {isAmbulance ? <input type="hidden" name="sharing" value="NONE" /> : null}
           <Field
             label="Transport partagé autorisé"
             htmlFor="sharing"
@@ -87,7 +89,6 @@ export function PrescriptionForm({
                 : "Ce que la prescription autorise (décret 2025-202)"
             }
           >
-            {isAmbulance ? <input type="hidden" name="sharing" value="NONE" /> : null}
             <Select
               id="sharing"
               name={isAmbulance ? undefined : "sharing"}

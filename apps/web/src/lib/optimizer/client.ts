@@ -61,6 +61,12 @@ export function unreachableMessage(url: string, environment: string | undefined 
   return "Le service d'optimisation ne répond pas. Réessayez dans quelques minutes\u202f; si cela dure, prévenez la personne qui gère l'application.";
 }
 
+/** Said when the service took too long; its address (with its port) only in development, like unreachableMessage. */
+export function timeoutMessage(timeoutMs: number, url: string, environment: string | undefined = process.env.NODE_ENV): string {
+  const where = environment === "development" ? ` (${url})` : "";
+  return `Le service d'optimisation n'a pas répondu en ${Math.round(timeoutMs / 1000)}\u00a0s${where}. Réessayez ou réduisez le temps de calcul dans les paramètres.`;
+}
+
 function formatIssues(error: z.ZodError): string {
   return error.issues
     .slice(0, 3)
@@ -106,7 +112,7 @@ async function call<S extends z.ZodType>(
     if (error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError")) {
       return {
         ok: false,
-        error: `Le service d'optimisation n'a pas répondu en ${Math.round(init.timeoutMs / 1000)}\u00a0s (${base}). Réessayez ou réduisez le temps de calcul dans les paramètres.`,
+        error: timeoutMessage(init.timeoutMs, base),
         reason: "timeout",
       };
     }

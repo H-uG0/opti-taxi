@@ -143,7 +143,7 @@ export function RecurrenceForm({
                   key={day}
                   title={WEEKDAY_LABELS[day]}
                   className={cn(
-                    "inline-flex h-9\u00a0min-w-14 cursor-pointer items-center justify-center gap-1.5 rounded-md border px-2.5 text-sm font-medium transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-brand-600",
+                    "inline-flex h-9 min-w-14 cursor-pointer items-center justify-center gap-1.5 rounded-md border px-2.5 text-sm font-medium transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-brand-600",
                     checked
                       ? "border-brand-600 bg-brand-50 text-brand-800"
                       : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",

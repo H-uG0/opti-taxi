@@ -31,16 +31,21 @@ export function logoutQuestion(pending: number): string {
 export function LogoutButton({ stacked }: { stacked: boolean }) {
   const { pending } = useQueueSnapshot();
   const [asking, setAsking] = useState(false);
+  // The queue emptied while asking: nothing is left to lose, the question goes. Reset, so the
+  // next status queued offline does not bring it back over the roadmap by itself.
+  if (asking && pending === 0) setAsking(false);
+  const open = asking && pending > 0;
   const trigger = useRef<HTMLButtonElement>(null);
   const stay = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
   const questionId = useId();
+  // Open: the focus goes to « Rester connecté »; closed (kept, or the queue emptied): back to « Déconnexion ».
   useEffect(() => {
-    if (asking) stay.current?.focus();
-  }, [asking]);
-  const keep = () => {
-    setAsking(false);
-    trigger.current?.focus();
-  };
+    if (open) stay.current?.focus();
+    else if (wasOpen.current) trigger.current?.focus();
+    wasOpen.current = open;
+  }, [open]);
+  const keep = () => setAsking(false);
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") keep();
   };
@@ -60,7 +65,7 @@ export function LogoutButton({ stacked }: { stacked: boolean }) {
         <LogOut aria-hidden className="size-4" />
         Déconnexion
       </button>
-      {asking && pending > 0 ? (
+      {open ? (
         // Over the roadmap, thumb-sized buttons; staying is the first choice.
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div

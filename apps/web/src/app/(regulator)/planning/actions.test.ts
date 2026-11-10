@@ -143,7 +143,7 @@ describe("changeRouteCrew", () => {
     expect(result).toEqual({
       ok: true,
       message:
-        "Équipage de Ambulance 1 changé\u00a0: SICK sick n'y a plus accès. DEA dea n'a pas de compte actif\u00a0: transmettez-lui la tournée (Chauffeurs, fiche)." +
+        "Équipage de Ambulance 1 changé\u00a0: SICK sick n'y a plus accès. DEA dea n'a pas de compte actif\u00a0: transmettez-lui la tournée (Personnel, fiche de la personne)." +
         " L'équipage fixé de VSL 2 revient à la proposition automatique (page Équipages).",
     });
     expect(fake.dayCrew.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["dc_vsl"] } } });

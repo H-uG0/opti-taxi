@@ -104,7 +104,9 @@ def test_osrm_failure_falls_back_to_straight_line_with_warning() -> None:
 
     matrix, warnings = build_matrix([MRS, AIX_P], "http://osrm.test", transport=httpx.MockTransport(broken))
     assert matrix.source == "haversine"
-    assert len(warnings) == 1 and "OSRM indisponible" in warnings[0]
+    assert warnings == ["Distances routières indisponibles\u00a0: temps et distances estimés à vol d'oiseau"]
+    # Shown to the regulator: neither the routing tool, nor the error, nor the request URL (stops' coordinates).
+    assert not any(word in warnings[0] for word in ("OSRM", "HTTPStatusError", "osrm.test", "5.369800"))
 
 
 def test_osrm_unreachable_server_falls_back() -> None:
@@ -123,4 +125,4 @@ def test_osrm_unroutable_pairs_use_straight_line() -> None:
     assert matrix.source == "osrm"
     assert matrix.km(AIX_P, MRS) == pytest.approx(9.0) and matrix.minutes(AIX_P, MRS) == 10
     assert matrix.km(MRS, AIX_P) == pytest.approx(straight_line_road_km(MARSEILLE, AIX))
-    assert any("introuvable" in w for w in warnings)
+    assert warnings == ["1 trajet(s) sans itinéraire routier\u00a0: estimés à vol d'oiseau"]

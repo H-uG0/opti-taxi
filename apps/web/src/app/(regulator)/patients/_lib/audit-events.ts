@@ -23,18 +23,6 @@ export function activationEvent(kind: ActivatedKind, id: string, active: boolean
 }
 
 /**
- * A patient form save: the update, plus the (de)activation when this save
- * actually switched « actif » (`switched`: the write guarded on the opposite
- * state applied). A stale form that repeats a state set meanwhile by someone
- * else traces the update only.
- */
-export function patientUpdateEvents(patientId: string, active: { value: boolean; switched: boolean }): AuditEntry[] {
-  const events: AuditEntry[] = [{ action: "patient.update", entity: "Patient", entityId: patientId }];
-  if (active.switched) events.push(activationEvent("patient", patientId, active.value));
-  return events;
-}
-
-/**
  * Message of a (de)activation that changed nothing because the record was
  * already in the requested state (stale page, double click, two regulators):
  * nothing is written and nothing is traced.

@@ -208,7 +208,7 @@ function VehicleFields({
               hint="Ambulance&nbsp;: 1 patient allongé, jamais de transport partagé."
               className="lg:col-span-2"
             >
-              <UnitInput id="capacity" name="capacity" value="1" readOnly unit="patient" className="bg-slate-50" />
+              <UnitInput id="capacity" name="capacity" value="1" readOnly unit="patient" inputClassName="read-only:bg-slate-50" />
             </Field>
           ) : (
             <Field

@@ -157,26 +157,34 @@ export default async function SharedArrivalsPage({
         }
         titleAside={facilityFilter ? undefined : <DayTabs current="/arrivees-partagees" date={date} />}
         actions={
-          facilityFilter || facilities.length > 0 ? (
-            <>
-              {facilityFilter ? (
-                <LinkButton href={sharedArrivalsHref(date)} variant="ghost" className="print:hidden">
-                  <ArrowLeft aria-hidden className="size-4" />
-                  Tous les établissements
-                </LinkButton>
-              ) : null}
-              {facilities.length > 0 ? (
-                facilityFilter ? (
-                  <PrintButton label="Imprimer la fiche" title="Fiche à transmettre à l'accueil de cet établissement" />
-                ) : (
-                  <PrintButton
-                    label="Imprimer la liste interne"
-                    title="Document interne&nbsp;: il contient les patients de tous les établissements. Pour un accueil, imprimez sa fiche."
-                  />
-                )
-              ) : null}
-            </>
-          ) : null
+          // The date first, in the header as on Planning and Équipages: it stays put from one tab to the next.
+          <>
+            <DayNav
+              key={date}
+              basePath="/arrivees-partagees"
+              date={date}
+              tomorrow={tomorrowIso()}
+              fieldLabel="Date des transports partagés"
+              params={facilityFilter ? { etablissement: facilityFilter } : {}}
+              className="print:hidden"
+            />
+            {facilityFilter ? (
+              <LinkButton href={sharedArrivalsHref(date)} variant="ghost" className="print:hidden">
+                <ArrowLeft aria-hidden className="size-4" />
+                Tous les établissements
+              </LinkButton>
+            ) : null}
+            {facilities.length > 0 ? (
+              facilityFilter ? (
+                <PrintButton label="Imprimer la fiche" title="Fiche à transmettre à l'accueil de cet établissement" />
+              ) : (
+                <PrintButton
+                  label="Imprimer la liste interne"
+                  title="Document interne&nbsp;: il contient les patients de tous les établissements. Pour un accueil, imprimez sa fiche."
+                />
+              )
+            ) : null}
+          </>
         }
       />
 
@@ -200,16 +208,6 @@ export default async function SharedArrivalsPage({
           )}
         </span>
       </p>
-
-      <DayNav
-        key={date}
-        basePath="/arrivees-partagees"
-        date={date}
-        tomorrow={tomorrowIso()}
-        fieldLabel="Date des transports partagés"
-        params={facilityFilter ? { etablissement: facilityFilter } : {}}
-        className="mb-5 print:hidden"
-      />
 
       {facilities.length === 0 ? (
         facilityFilter ? (

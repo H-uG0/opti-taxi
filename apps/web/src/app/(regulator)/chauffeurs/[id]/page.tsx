@@ -23,9 +23,12 @@ import { AbsenceForm, IncompatibilityForm } from "./staff-cards";
 import { BackLink } from "@/components/ui/back-link";
 import { Notice } from "@/components/ui/notice";
 import { formatPersonName } from "@/lib/names";
+import { DropNoticeParams } from "@/components/ui/notice-params";
 
 /** The tab names the person (« MARTIN Jean »). */
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  // Metadata resolves alongside the layout: it checks the role itself before reading the record (its name is the title).
+  await requireUser("REGULATOR");
   const { id } = await params;
   const person = await db.driver.findUnique({ where: { id }, select: { firstName: true, lastName: true } });
   return { title: person ? formatPersonName(person) : "Fiche personnel" };
@@ -116,6 +119,7 @@ export default async function EditDriverPage({
         }
       />
 
+      {cree === "1" ? <DropNoticeParams /> : null}
       {cree === "1" && !account ? (
         <div className="mb-6">
           <FormMessage tone="success">
@@ -336,21 +340,21 @@ export default async function EditDriverPage({
             <CardBody className="space-y-3 text-sm text-slate-700">
               {driver.active ? (
                 <p>
-                  Pour un départ ou un arrêt longue durée, désactivez le chauffeur plutôt que de le supprimer&nbsp;: son
-                  historique de tournées est conservé.
+                  Pour un départ ou un arrêt longue durée, désactivez la personne plutôt que de supprimer sa fiche&nbsp;:
+                  son historique de tournées est conservé.
                 </p>
               ) : (
                 <>
                   <p>
-                    Le chauffeur est désactivé&nbsp;: il n&apos;est plus proposé à l&apos;optimisation. Son historique est
-                    conservé.
+                    La personne est désactivée&nbsp;: elle n&apos;est plus proposée à l&apos;optimisation. Son historique
+                    est conservé.
                   </p>
                   <UpcomingRoutesCallout routes={upcomingRoutes} subject="driver" />
                 </>
               )}
               <ConfirmAction
                 action={setDriverActive.bind(null, driver.id, !driver.active)}
-                label={driver.active ? "Désactiver le chauffeur" : "Réactiver le chauffeur"}
+                label={driver.active ? "Désactiver la personne" : "Réactiver la personne"}
                 confirmLabel={driver.active ? "Oui, désactiver la fiche" : "Oui, réactiver la fiche"}
                 keepLabel={driver.active ? "Garder la fiche active" : "Retour"}
                 tone={driver.active ? "danger" : "primary"}
@@ -359,10 +363,10 @@ export default async function EditDriverPage({
                     <div className="space-y-2">
                       <p>
                         {assignments.length > 0
-                          ? `Il sera retiré de l'équipage par défaut de ${assignments.length} véhicule${assignments.length > 1 ? "s" : ""}. `
+                          ? `Elle sera retirée de l'équipage par défaut de ${assignments.length} véhicule${assignments.length > 1 ? "s" : ""}. `
                           : ""}
                         {account?.active
-                          ? `Son compte d'accès sera désactivé\u00a0: il ne pourra plus se connecter. ${OPEN_SESSION_NOTE} `
+                          ? `Son compte d'accès sera désactivé\u00a0: elle ne pourra plus se connecter. ${OPEN_SESSION_NOTE} `
                           : ""}
                         L&apos;historique est conservé.
                       </p>
@@ -370,7 +374,7 @@ export default async function EditDriverPage({
                     </div>
                   ) : (
                     <p>
-                      Le chauffeur pourra de nouveau être affecté à un véhicule.
+                      La personne pourra de nouveau être affectée à un véhicule.
                       {account && !account.active
                         ? " Son compte d'accès reste désactivé\u00a0: réactivez-le ensuite si besoin."
                         : ""}

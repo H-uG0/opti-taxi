@@ -40,7 +40,8 @@ function LinkLabel({ children }: { children: ReactNode }) {
 
 /**
  * The day picker of every day screen (Planning, Courses, Équipages, Transports partagés): previous
- * and next day (the date in their name), a date field and « Demain », or a « J+1 » marker on J+1.
+ * and next day (the date in their name), a date field and « Demain », or a « J+1 » marker on J+1
+ * (`tomorrowMarker={false}` when the page title already says it, as the planning's badge).
  * The date field never navigates while it is being typed: the date is taken on Entrée, when the
  * field loses the focus, or with « Afficher ». A GET form underneath: it works without JavaScript.
  * Unsaved changes of the page (LeaveGuard) are asked about before another day is shown.
@@ -56,6 +57,7 @@ export function DayNav({
   params = {},
   shortcuts = false,
   fieldLabel = "Date",
+  tomorrowMarker = true,
   className,
 }: {
   basePath: string;
@@ -66,6 +68,8 @@ export function DayNav({
   /** « [ » and « ] » go to the previous and next day (the planning). */
   shortcuts?: boolean;
   fieldLabel?: string;
+  /** The « J+1 » marker on J+1 (instead of « Demain »). */
+  tomorrowMarker?: boolean;
   className?: string;
 }) {
   const router = useRouter();
@@ -181,9 +185,9 @@ export function DayNav({
         <Link href={dayHref(basePath, tomorrow, kept)} className={buttonClasses("ghost")}>
           <LinkLabel>Demain</LinkLabel>
         </Link>
-      ) : (
+      ) : tomorrowMarker ? (
         <span className="px-2 text-sm font-medium text-brand-700">J+1</span>
-      )}
+      ) : null}
     </nav>
   );
 }

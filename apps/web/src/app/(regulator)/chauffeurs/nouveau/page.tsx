@@ -24,7 +24,7 @@ export default async function NewDriverPage() {
         action={createDriver}
         initial={driverFormValues()}
         depots={depots}
-        submitLabel="Créer le chauffeur" cancelHref="/chauffeurs" />
+        submitLabel="Créer la fiche" cancelHref="/chauffeurs" />
     </div>
   );
 }

@@ -53,6 +53,7 @@ import { openTripsLabel } from "../_lib/trip-sync";
 import { BackLink } from "@/components/ui/back-link";
 import { Notice } from "@/components/ui/notice";
 import { formatPersonName } from "@/lib/names";
+import { DropNoticeParams } from "@/components/ui/notice-params";
 
 export const metadata: Metadata = { title: "Fiche patient" };
 
@@ -236,6 +237,7 @@ export default async function PatientPage({
         <div className="space-y-2">
           {query.cree === "1" ? <FormMessage tone="success">Patient créé. Saisissez maintenant sa prescription, puis ses récurrences.</FormMessage> : null}
           {query.enregistre === "1" ? <FormMessage tone="success">Modifications enregistrées.</FormMessage> : null}
+          {query.cree === "1" || query.enregistre === "1" ? <DropNoticeParams /> : null}
           <SyncNotice query={query} />
           {todayCancelledBySync > 0 ? (
             <Notice size="sm">

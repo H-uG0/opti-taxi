@@ -30,9 +30,12 @@ import { toUpcomingRoutes, upcomingRoutesNotice } from "../_lib/upcoming-routes"
 import { vehicleFormValues } from "../schema";
 import { VehicleForm } from "../vehicle-form";
 import { BackLink } from "@/components/ui/back-link";
+import { DropNoticeParams } from "@/components/ui/notice-params";
 
 /** The tab names the record (never a patient: titles stay in the browser history). */
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  // Metadata resolves alongside the layout: it checks the role itself before reading the record (its name is the title).
+  await requireUser("REGULATOR");
   const { id } = await params;
   const record = await db.vehicle.findUnique({ where: { id }, select: { label: true } });
   return { title: record?.label ?? "Véhicule" };
@@ -108,6 +111,7 @@ export default async function EditVehiclePage({
       {cree === "1" ? (
         <div className="mb-6">
           <FormMessage tone="success">Véhicule créé. Saisissez ici ses indisponibilités, ses échéances et ses pleins.</FormMessage>
+          <DropNoticeParams />
         </div>
       ) : null}
 

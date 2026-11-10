@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { Eye, EyeOff, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Field, FormMessage, Input } from "@/components/ui/form";
+import { ErrorFocus } from "@/components/ui/error-focus";
+import { Field, fieldIds, FormMessage, Input } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { IDLE_STATE, type FormState } from "@/lib/forms";
+import { IDLE_STATE, refusalKey, type FormState } from "@/lib/forms";
 import { generatePassword, MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "../schema";
 
 type Action = (state: FormState, formData: FormData) => Promise<FormState>;
@@ -35,6 +36,8 @@ export function AccountForm({
   const [visible, setVisible] = useState(false);
   const [generated, setGenerated] = useState(false);
   const errors = state.status === "error" ? state.fieldErrors : {};
+  // The password input sits in a wrapper with its « Afficher » button: Field cannot link it, fieldIds does.
+  const passwordIds = fieldIds("account-password");
 
   async function submit(formData: FormData) {
     const result = await action(state, formData);
@@ -57,6 +60,7 @@ export function AccountForm({
 
   return (
     <form action={submit} className="space-y-3">
+      <ErrorFocus refusal={refusalKey(state)} />
       {state.message ? (
         <FormMessage tone={state.status === "error" ? "error" : "success"}>{state.message}</FormMessage>
       ) : null}
@@ -107,6 +111,7 @@ export function AccountForm({
               setGenerated(false);
             }}
             aria-invalid={Boolean(errors.password)}
+            aria-describedby={errors.password ? passwordIds.error : passwordIds.hint}
           />
           <Button
             variant="secondary"

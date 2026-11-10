@@ -20,9 +20,12 @@ import { formatWeekdays } from "@/app/(regulator)/patients/_lib/status";
 import { setFacilityActive } from "../actions";
 import { BackLink } from "@/components/ui/back-link";
 import { Notice } from "@/components/ui/notice";
+import { DropNoticeParams } from "@/components/ui/notice-params";
 
 /** The tab names the record (never a patient: titles stay in the browser history). */
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  // Metadata resolves alongside the layout: it checks the role itself before reading the record (its name is the title).
+  await requireUser("REGULATOR");
   const { id } = await params;
   const record = await db.facility.findUnique({ where: { id }, select: { name: true } });
   return { title: record?.name ?? "Établissement" };
@@ -103,6 +106,7 @@ export default async function FacilityPage({
         <div className="space-y-2">
           {query.cree === "1" ? <FormMessage tone="success">Établissement créé.</FormMessage> : null}
           {query.enregistre === "1" ? <FormMessage tone="success">Modifications enregistrées.</FormMessage> : null}
+          {query.cree === "1" || query.enregistre === "1" ? <DropNoticeParams /> : null}
           <SyncNotice query={query} />
           {!facility.active ? (
             <Notice size="sm" tone="info">

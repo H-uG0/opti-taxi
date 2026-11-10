@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   activationEvent,
   alreadyInStateMessage,
-  patientUpdateEvents,
   renewalEvents,
   tripCancelEvents,
   tripDetachEvents,
@@ -17,27 +16,6 @@ describe("activationEvent", () => {
       entityId: "r1",
     });
     expect(activationEvent("facility", "f1", false)).toEqual({ action: "facility.deactivate", entity: "Facility", entityId: "f1" });
-  });
-});
-
-describe("patientUpdateEvents", () => {
-  const update = { action: "patient.update", entity: "Patient", entityId: "p1" };
-
-  it("records the update alone when this save did not switch «\u202factif\u202f»", () => {
-    expect(patientUpdateEvents("p1", { value: true, switched: false })).toEqual([update]);
-    // A stale form repeating a deactivation done meanwhile by someone else.
-    expect(patientUpdateEvents("p1", { value: false, switched: false })).toEqual([update]);
-  });
-
-  it("adds the (de)activation this save applied", () => {
-    expect(patientUpdateEvents("p1", { value: false, switched: true })).toEqual([
-      update,
-      { action: "patient.deactivate", entity: "Patient", entityId: "p1" },
-    ]);
-    expect(patientUpdateEvents("p1", { value: true, switched: true })).toEqual([
-      update,
-      { action: "patient.reactivate", entity: "Patient", entityId: "p1" },
-    ]);
   });
 });
 

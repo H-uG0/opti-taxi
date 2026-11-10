@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ErrorFocus } from "@/components/ui/error-focus";
 import { Field, FormMessage, Input } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { IDLE_STATE, SAVING_LABEL } from "@/lib/forms";
+import { IDLE_STATE, refusalKey, SAVING_LABEL } from "@/lib/forms";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@/app/(regulator)/chauffeurs/schema";
 import { fieldsToClear } from "../_lib/password";
 import { changeOwnPassword } from "./actions";
@@ -109,6 +110,7 @@ export function PasswordChange({ forced: forcedOnLoad }: { forced: boolean }) {
           </div>
         ) : (
           <form action={action} className="space-y-4">
+            <ErrorFocus refusal={refusalKey(state)} />
             {state.message && Object.keys(errors).length === 0 ? <FormMessage>{state.message}</FormMessage> : null}
             <Field
               label={forced ? "Mot de passe provisoire (donné par la régulation)" : "Mot de passe actuel"}

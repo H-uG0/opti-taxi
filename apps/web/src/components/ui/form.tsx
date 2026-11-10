@@ -30,14 +30,21 @@ function unitPadding(unit: string): string {
 /**
  * Numeric input with its unit shown inside, right-aligned. The unit is also read with the field
  * (an sr-only description), so a label without its unit is never ambiguous for a screen reader.
+ * `className` sizes the wrapper (width, span); `inputClassName` styles the field itself.
  */
-export function UnitInput({ unit, className, id, ...props }: ComponentProps<"input"> & { unit: string }) {
+export function UnitInput({
+  unit,
+  className,
+  inputClassName,
+  id,
+  ...props
+}: ComponentProps<"input"> & { unit: string; inputClassName?: string }) {
   const unitId = id ? `${id}-unit` : undefined;
   const describedBy = [props["aria-describedby"], unitId].filter(Boolean).join(" ") || undefined;
   return (
     // The width classes go on the wrapper: the unit stays inside the field however narrow it is.
     <div className={cn("relative", className)}>
-      <Input id={id} className={cn("tabular text-right", unitPadding(unit))} {...props} aria-describedby={describedBy} />
+      <Input id={id} className={cn("tabular text-right", unitPadding(unit), inputClassName)} {...props} aria-describedby={describedBy} />
       <span aria-hidden className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-slate-600">
         {unit}
       </span>
