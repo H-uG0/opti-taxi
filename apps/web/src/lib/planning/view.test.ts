@@ -306,12 +306,13 @@ describe("buildPlanningView", () => {
     expect(buildPlanningView(input({ tariffs: [ended] })).tariffGaps).toHaveLength(1);
   });
 
-  it("reports the day status, the start of the day and a fitted time range", () => {
+  it("reports the day status, the start of the day, a fitted time range and the optimizer's time windows", () => {
     expect(buildPlanningView(input({ routes: [], trips: [] })).dayStatus).toBe("EMPTY");
     const view = buildPlanningView(input());
     expect(view.dayStatus).toBe("PROPOSED");
     expect(view.dayStarted).toBe(false);
     expect(view.timeRange).toEqual({ start: 360, end: 1140 });
+    expect(view.waitWindows).toEqual({ beforeAppointmentMin: 30, afterSessionMin: settings.waitAfterSessionMin });
     const started = buildPlanningView(input({ trips: [trip("a", { routeId: "r1", status: "PICKED_UP" })] }));
     expect(started.dayStarted).toBe(true);
   });

@@ -607,6 +607,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     lastRun: runView(input.lastRun, input.details, input.settings.solverTimeLimitSec, now, naming),
     planRun: runView(input.planRun, input.details, input.settings.solverTimeLimitSec, now, naming),
     timeRange: computeTimeRange(rows),
+    waitWindows: { beforeAppointmentMin: input.settings.waitBeforeAppointmentMin, afterSessionMin: input.settings.waitAfterSessionMin },
     dayStarted:
       input.trips.some((t) => FIELD_STATUSES.includes(t.status)) ||
       input.routes.some((r) => r.stops.some((s) => s.completedAt !== null)),

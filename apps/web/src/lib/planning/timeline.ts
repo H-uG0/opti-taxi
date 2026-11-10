@@ -1,13 +1,10 @@
 /**
  * Pure geometry of the planning timeline ("frise"): visible time range,
- * segments of a route colored by the number of patients on board, and
- * co-passengers derived from the stop sequence.
+ * positions, and co-passengers derived from the stop sequence. What a row
+ * draws (blocks, targets, free slots) is in timeline-layout.ts.
  */
 
 export type TimeRange = { start: number; end: number };
-
-export type SegmentKind = "drive" | "wait" | "service";
-export type TimelineSegment = { from: number; to: number; load: number; kind: SegmentKind };
 
 type StopLike = {
   sequence: number;
@@ -55,39 +52,6 @@ export function percentOf(minute: number, range: TimeRange): number {
   const span = range.end - range.start;
   if (span <= 0) return 0;
   return Math.min(100, Math.max(0, ((minute - range.start) / span) * 100));
-}
-
-/** Hour marks inside the range (every hour, or every 2 h for long days). */
-export function hourTicks(range: TimeRange): number[] {
-  const step = range.end - range.start > 14 * 60 ? 120 : 60;
-  const ticks: number[] = [];
-  for (let m = Math.ceil(range.start / step) * step; m <= range.end; m += step) ticks.push(m);
-  return ticks;
-}
-
-/**
- * Successive pieces of a route: driving between stops (with the load on
- * board), waiting for a time window, and service at a stop.
- */
-export function routeSegments(route: RouteLike): TimelineSegment[] {
-  const segments: TimelineSegment[] = [];
-  const stops = [...route.stops].sort((a, b) => a.sequence - b.sequence);
-  let cursor = route.startMinute;
-  let load = 0;
-  for (const stop of stops) {
-    if (stop.arrivalMinute > cursor) segments.push({ from: cursor, to: stop.arrivalMinute, load, kind: "drive" });
-    const serviceFrom = Math.max(cursor, stop.startMinute);
-    if (stop.startMinute > stop.arrivalMinute) {
-      segments.push({ from: Math.max(cursor, stop.arrivalMinute), to: stop.startMinute, load, kind: "wait" });
-    }
-    if (stop.departureMinute > serviceFrom) {
-      segments.push({ from: serviceFrom, to: stop.departureMinute, load: Math.max(load, stop.loadAfter), kind: "service" });
-    }
-    load = stop.loadAfter;
-    cursor = Math.max(cursor, stop.departureMinute);
-  }
-  if (route.endMinute > cursor) segments.push({ from: cursor, to: route.endMinute, load, kind: "drive" });
-  return segments;
 }
 
 /** Trips on board at the same time as each trip of the route. */

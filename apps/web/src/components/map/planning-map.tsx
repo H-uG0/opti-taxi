@@ -3,7 +3,9 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
 import { LngLatBounds, MapLibreMap, NavigationControl, Popup, type GeoJSONSource, type MapLayerMouseEvent } from "maplibre-gl";
-import { Maximize2 } from "lucide-react";
+import { Focus, Maximize2, Map as MapIcon } from "lucide-react";
+import { cn } from "@/components/ui/cn";
+import { diamondIcon, warningIcon } from "./map-icons";
 import { AXIS_CENTER, AXIS_ZOOM, configuredStyleUrl, OSM_RASTER_STYLE } from "./map-style";
 import {
   allPoints,
@@ -15,6 +17,7 @@ import {
   shouldFitSelection,
   stopsCollection,
   unassignedCollection,
+  violationsCollection,
   type MapPoint,
   type MapTrip,
   type MapVehicle,
@@ -29,11 +32,20 @@ export type PlanningMapProps = {
   onSelectVehicle: (vehicleId: string) => void;
   /** Changes when the dataset changes (e.g. the date): the map then refits. */
   datasetKey: string;
+  /** Whether the frame includes the trips without a vehicle (not when the map is narrowed to depots). */
+  fitUnassigned?: boolean;
+  /** Only the selection is shown (« Sélection seule »). */
+  selectionOnly?: boolean;
+  /** Turns « Sélection seule » on or off; null: nothing is selected (the button is disabled). */
+  onSelectionOnlyChange?: ((on: boolean) => void) | null;
 };
+
+/** Amber of a trip without a vehicle (the timeline's « À placer »). */
+const UNASSIGNED_COLOR = "#b45309";
 
 const STYLE_TIMEOUT_MS = 8_000;
 const FIT_PADDING = 48;
-const INTERACTIVE_LAYERS = ["stops", "unassigned", "routes-line"] as const;
+const INTERACTIVE_LAYERS = ["violations", "stops", "unassigned-points", "unassigned-line", "routes-line"] as const;
 
 type SetData = Parameters<GeoJSONSource["setData"]>[0];
 
@@ -63,8 +75,12 @@ function fit(map: MapLibreMap, points: MapPoint[], animate: boolean) {
 
 function addPlanningLayers(map: MapLibreMap) {
   if (map.getSource("routes")) return;
+  // Drawn at twice their size for sharp screens: 16 px diamonds, an 18 px warning sign.
+  if (!map.hasImage("unassigned-pickup")) map.addImage("unassigned-pickup", diamondIcon(32, UNASSIGNED_COLOR, false), { pixelRatio: 2 });
+  if (!map.hasImage("unassigned-dropoff")) map.addImage("unassigned-dropoff", diamondIcon(32, UNASSIGNED_COLOR, true), { pixelRatio: 2 });
+  if (!map.hasImage("violation")) map.addImage("violation", warningIcon(36), { pixelRatio: 2 });
   const empty = { type: "FeatureCollection", features: [] } as SetData;
-  for (const id of ["routes", "stops", "depots", "unassigned", "selection"]) {
+  for (const id of ["routes", "stops", "depots", "unassigned", "violations", "selection"]) {
     map.addSource(id, { type: "geojson", data: empty });
   }
   map.addLayer({
@@ -93,15 +109,12 @@ function addPlanningLayers(map: MapLibreMap) {
     },
   });
   map.addLayer({
-    id: "unassigned",
-    type: "circle",
+    id: "unassigned-line",
+    type: "line",
     source: "unassigned",
-    paint: {
-      "circle-radius": 5,
-      "circle-color": "#ffffff",
-      "circle-stroke-color": "#475569",
-      "circle-stroke-width": 2,
-    },
+    filter: ["==", ["get", "role"], "line"],
+    layout: { "line-cap": "round" },
+    paint: { "line-color": UNASSIGNED_COLOR, "line-width": 2.5, "line-dasharray": [1.5, 1.5] },
   });
   map.addLayer({
     id: "stops",
@@ -112,6 +125,28 @@ function addPlanningLayers(map: MapLibreMap) {
       "circle-color": ["case", ["==", ["get", "kind"], "PICKUP"], ["get", "color"], "#ffffff"],
       "circle-stroke-color": ["case", ["==", ["get", "kind"], "PICKUP"], "#ffffff", ["get", "color"]],
       "circle-stroke-width": 2,
+    },
+  });
+  map.addLayer({
+    id: "unassigned-points",
+    type: "symbol",
+    source: "unassigned",
+    filter: ["!=", ["get", "role"], "line"],
+    layout: {
+      "icon-image": ["case", ["==", ["get", "role"], "pickup"], "unassigned-pickup", "unassigned-dropoff"],
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+    },
+  });
+  map.addLayer({
+    id: "violations",
+    type: "symbol",
+    source: "violations",
+    layout: {
+      "icon-image": "violation",
+      "icon-offset": [7, -7],
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
     },
   });
   map.addLayer({
@@ -151,6 +186,9 @@ export function PlanningMap({
   onSelectTrip,
   onSelectVehicle,
   datasetKey,
+  fitUnassigned = true,
+  selectionOnly = false,
+  onSelectionOnlyChange = null,
 }: PlanningMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -274,11 +312,12 @@ export function PlanningMap({
     setSource(map, "stops", stopsCollection(vehicles));
     setSource(map, "depots", depotsCollection(vehicles));
     setSource(map, "unassigned", unassignedCollection(trips));
+    setSource(map, "violations", violationsCollection(vehicles, trips));
     if (fittedKey.current !== datasetKey) {
       fittedKey.current = datasetKey;
-      fit(map, allPoints(vehicles, trips), false);
+      fit(map, allPoints(vehicles, trips, fitUnassigned), false);
     }
-  }, [ready, vehicles, trips, datasetKey]);
+  }, [ready, vehicles, trips, datasetKey, fitUnassigned]);
 
   // Selection.
   useEffect(() => {
@@ -303,36 +342,136 @@ export function PlanningMap({
   }, [ready, selectedTripId, selectedVehicleId, trips, vehicles]);
 
   return (
-    <div className="relative h-full min-h-40">
+    <div className="relative h-full min-h-32">
       {/* maplibre-gl.css sets `.maplibregl-map { position: relative }` outside any cascade layer, which
           beats Tailwind's layered `absolute` on the same element: the map gets its own child, sized by
           an absolutely positioned wrapper. */}
-      <div className="absolute inset-0">
+      {/* The card does not clip (the legend may open over the panel above): the map clips itself. */}
+      <div className="absolute inset-0 overflow-hidden rounded-lg">
         <div ref={containerRef} className="size-full" role="region" aria-label="Carte des tournées" />
       </div>
       <div className="absolute left-2 top-2 flex flex-col items-start gap-1.5">
-        <button
-          type="button"
-          onClick={() => {
-            const map = mapRef.current;
-            if (map) fit(map, allPoints(vehicles, trips), true);
-          }}
-          className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white/95 px-2 py-1 text-xs font-medium text-slate-700 shadow-xs hover:bg-white focus-visible:outline-2 focus-visible:outline-brand-600"
-        >
-          <Maximize2 aria-hidden className="size-3.5" />
-          Vue d&apos;ensemble
-        </button>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              const map = mapRef.current;
+              if (map) fit(map, allPoints(vehicles, trips, fitUnassigned), true);
+            }}
+            className={MAP_BUTTON}
+          >
+            <Maximize2 aria-hidden className="size-3.5" />
+            Vue d&apos;ensemble
+          </button>
+          <button
+            type="button"
+            aria-pressed={selectionOnly}
+            disabled={onSelectionOnlyChange === null}
+            onClick={() => onSelectionOnlyChange?.(!selectionOnly)}
+            title={
+              onSelectionOnlyChange === null
+                ? "Sélectionnez une course ou un véhicule pour ne voir qu'elle ou que lui"
+                : selectionOnly
+                  ? "Revenir aux tournées de la frise"
+                  : "N'afficher que la course ou le véhicule sélectionné"
+            }
+            className={cn(MAP_BUTTON, selectionOnly && "border-brand-300 bg-brand-50 text-brand-900 hover:bg-brand-50")}
+          >
+            <Focus aria-hidden className="size-3.5" />
+            Sélection seule
+          </button>
+        </div>
         {usingFallback ? (
           <p className="rounded bg-white/90 px-1.5 py-0.5 text-[11px] text-slate-500">Fond de carte OpenStreetMap (raster)</p>
         ) : null}
       </div>
+      <MapLegend />
       {!ready ? (
-        <div className="absolute inset-0 grid place-items-center bg-slate-50 px-6 text-center text-sm text-slate-500">
+        <div className="absolute inset-0 grid place-items-center rounded-lg bg-slate-50 px-6 text-center text-sm text-slate-500">
           {webglAvailable
             ? "Chargement de la carte…"
             : "Carte indisponible : WebGL est désactivé dans ce navigateur. La frise et les listes restent utilisables."}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+const MAP_BUTTON =
+  "inline-flex min-h-6 items-center gap-1.5 rounded-md border border-slate-300 bg-white/95 px-2 py-1 text-xs font-medium text-slate-700 shadow-xs hover:bg-white focus-visible:outline-2 focus-visible:outline-brand-600 disabled:cursor-not-allowed disabled:opacity-50";
+
+/** Key to the map's symbols, folded into a button at the bottom left (the map is small beside the timeline). */
+function MapLegend() {
+  const [open, setOpen] = useState(false);
+  const item = "flex items-center gap-2";
+  const swatch = "inline-flex w-6 shrink-0 items-center justify-center";
+  return (
+    <div className="absolute bottom-2 left-2 z-10 flex flex-col items-start gap-1">
+      {open ? (
+        <ul
+          id="planning-map-legend"
+          aria-label="Légende de la carte"
+          className="max-h-56 w-64 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white/95 p-2 text-xs text-slate-700 shadow-md"
+        >
+          <li className={item}>
+            <span aria-hidden className={swatch}>
+              <span className="size-3 rounded-full border-2 border-white bg-blue-600 ring-1 ring-slate-300" />
+            </span>
+            Prise en charge (couleur du véhicule)
+          </li>
+          <li className={item}>
+            <span aria-hidden className={swatch}>
+              <span className="size-3 rounded-full border-2 border-blue-600 bg-white" />
+            </span>
+            Dépose
+          </li>
+          <li className={item}>
+            <span aria-hidden className={swatch}>
+              <span className="h-[3px] w-6 rounded-full bg-blue-600" />
+            </span>
+            Tournée (à vol d&apos;oiseau)
+          </li>
+          <li className={item}>
+            <span aria-hidden className={swatch}>
+              <span className="size-3.5 rounded-full border-[2.5px] border-white bg-slate-900 ring-1 ring-slate-300" />
+            </span>
+            Dépôt
+          </li>
+          <li className={item}>
+            <span aria-hidden className={cn(swatch, "gap-0.5")}>
+              <span className="size-2 rotate-45 border border-slate-900" style={{ background: UNASSIGNED_COLOR }} />
+              <span className="h-0 w-2 border-t-2 border-dashed" style={{ borderColor: UNASSIGNED_COLOR }} />
+            </span>
+            À placer : prise en charge → dépose (losanges)
+          </li>
+          <li className={item}>
+            <span aria-hidden className={swatch}>
+              <svg viewBox="0 0 18 18" className="size-4">
+                <path d="M9 1 17 16H1Z" fill="#fbbf24" stroke="#0f172a" strokeWidth="1.5" strokeLinejoin="round" />
+                <path d="M9 6.5v4.5M9 13v.5" stroke="#0f172a" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+            </span>
+            Course en violation
+          </li>
+          <li className={item}>
+            <span aria-hidden className={swatch}>
+              <span className="size-4 rounded-full border-[3px] border-slate-900" />
+            </span>
+            Course sélectionnée (trait : prise en charge → dépose)
+          </li>
+          <li className="pt-0.5 text-slate-500">Une couleur par véhicule, la même que dans la frise.</li>
+        </ul>
+      ) : null}
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={open ? "planning-map-legend" : undefined}
+        onClick={() => setOpen((v) => !v)}
+        className={MAP_BUTTON}
+      >
+        <MapIcon aria-hidden className="size-3.5" />
+        Légende
+      </button>
     </div>
   );
 }

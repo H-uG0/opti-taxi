@@ -12,11 +12,15 @@ import { Timeline } from "@/components/planning/timeline";
 import { VehiclePanel } from "@/components/planning/vehicle-panel";
 import type { DroppedLock } from "@/lib/optimizer/build-request";
 import { scopeLockCounts, scopeTripOf } from "@/lib/planning/bulk-lock";
-import { depotChoices, depotGroupViews, filterRows, isFiltering, issueVehicleIds, subsetKpis } from "@/lib/planning/filter";
+import { displayColors, IDLE_VEHICLE_COLOR } from "@/lib/planning/colors";
+import { depotChoices, depotGroupViews, filterRows, groupByDepot, isFiltering, issueVehicleIds, subsetKpis } from "@/lib/planning/filter";
 import { pluralize } from "@/lib/planning/format";
+import { isShortcutKey, issueTargets, nextIssueTarget } from "@/lib/planning/shortcuts";
 import type { TimeRange } from "@/lib/planning/timeline";
+import type { WaitWindows, ZoomLevel } from "@/lib/planning/timeline-layout";
 import type { VehicleIssue } from "@/lib/planning/route-issues";
 import type { DayKpis, TripView, UnassignedView, VehicleRowView, ViolationView } from "@/lib/planning/types";
+import { indexViolations } from "@/lib/planning/violation-index";
 import type { CrewRules } from "@/lib/staff/day-crews";
 import type { CrewChoice } from "@/lib/staff/route-crew";
 import { STOP_KIND_LABELS } from "@/lib/labels";
@@ -39,6 +43,8 @@ export type PlanningBoardProps = {
   vehicleIssues: VehicleIssue[];
   droppedLocks: DroppedLock[];
   timeRange: TimeRange;
+  /** The optimizer's windows: where the « À placer » row draws a trip without a vehicle. */
+  waitWindows: WaitWindows;
   planned: boolean;
   /** Indicators of the whole day (the strip shows those of the vehicles kept when a filter is on). */
   kpis: DayKpis;
@@ -61,6 +67,10 @@ export type PlanningBoardProps = {
 
 const ACTIVE = (t: TripView) => t.status !== "CANCELLED" && t.status !== "NO_SHOW";
 
+/** A link seen only when it has the focus (« Passer la frise »). */
+const SKIP_LINK =
+  "sr-only z-40 rounded-md bg-white text-sm font-medium text-brand-800 shadow-md ring-2 ring-brand-600 focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:px-3 focus:py-2 focus:outline-none";
+
 /**
  * KPI strip, then timeline (left, scrolling in its own box) beside the trip or
  * vehicle panel and the map (right): from xl the board fills the screen's
@@ -79,6 +89,7 @@ export function PlanningBoard({
   vehicleIssues,
   droppedLocks,
   timeRange,
+  waitWindows,
   planned,
   kpis,
   unplannedNote,
@@ -94,10 +105,7 @@ export function PlanningBoard({
 }: PlanningBoardProps) {
   const tripsById = useMemo(() => Object.fromEntries(trips.map((t) => [t.id, t])), [trips]);
   const vehicleLabels = useMemo(() => Object.fromEntries(vehicles.map((v) => [v.id, v.label])), [vehicles]);
-  const violatingTripIds = useMemo(
-    () => new Set(violations.map((v) => v.tripId).filter((id): id is string => id !== null)),
-    [violations],
-  );
+  const violationIndex = useMemo(() => indexViolations(violations, tripsById), [violations, tripsById]);
   const returnsToCheck = useMemo(() => trips.filter((t) => t.outboundNoShow).map((t) => t.id), [trips]);
   const issueIds = useMemo(
     () => issueVehicleIds({ trips: tripsById, violations, vehicleIssues, staleTrips, returnsToCheck, droppedLocks }),
@@ -172,6 +180,33 @@ export function PlanningBoard({
     return () => window.removeEventListener("keydown", onKey);
   }, [clear]);
 
+  // « N »: the next entry of « À traiter » (its trip, or its vehicle), said to screen readers.
+  const [announce, setAnnounce] = useState("");
+  const issues = useMemo(
+    () => issueTargets({ planned, unassigned, vehicleIssues, returnsToCheck, violations, staleTrips, droppedLocks }),
+    [planned, unassigned, vehicleIssues, returnsToCheck, violations, staleTrips, droppedLocks],
+  );
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "n" || !isShortcutKey(e)) return;
+      const next = nextIssueTarget(issues, selection);
+      e.preventDefault();
+      if (!next) {
+        setAnnounce("Rien à traiter.");
+        return;
+      }
+      const name =
+        next.target.kind === "trip"
+          ? (tripsById[next.target.id]?.patientName ?? "Course")
+          : (vehicles.find((v) => v.id === next.target.id)?.label ?? "Véhicule");
+      if (next.target.kind === "trip") selectTrip(next.target.id);
+      else showVehicle(next.target.id);
+      setAnnounce(`À traiter, ${next.index + 1} sur ${issues.length} : ${name}`);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [issues, selection, tripsById, vehicles, selectTrip, showVehicle]);
+
   // The panel shows the new selection from its top (it scrolls in its own box).
   const panelBox = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -219,42 +254,86 @@ export function PlanningBoard({
   );
   const dayCounts = useMemo(() => lockCounts(null), [lockCounts]);
 
-  const visibleIds = useMemo(() => new Set(shown.map((v) => v.id)), [shown]);
+  // One color per vehicle with a route the filter keeps (timeline, map, panel), the selected vehicle shown
+  // outside the filter after them: selecting it never recolors the others.
+  const colors = useMemo(() => {
+    // In the timeline's order (by depot): two neighbouring rows never share a color.
+    const keptIds = groupByDepot(kept)
+      .flatMap((g) => g.rows)
+      .filter((v) => v.route !== null)
+      .map((v) => v.id);
+    const extra =
+      highlightedVehicleId && shown.some((v) => v.id === highlightedVehicleId && v.route !== null) ? highlightedVehicleId : null;
+    return displayColors(keptIds, extra);
+  }, [kept, shown, highlightedVehicleId]);
+  const colorOf = useCallback((v: VehicleRowView) => colors.get(v.id) ?? (v.route ? v.color : IDLE_VEHICLE_COLOR), [colors]);
+  const unassignedIds = useMemo(() => (planned ? unassigned.map((u) => u.tripId) : []), [planned, unassigned]);
+
+  // « Sélection seule »: the map keeps the selected trip, its vehicle and its co-passengers' vehicles, or the
+  // selected vehicle; with nothing selected it shows what the timeline shows.
+  const hasSelection = selectedTrip !== null || selectedVehicle !== null;
+  const selectionOnly = filter.mapSelectionOnly && hasSelection;
+  const mapVehicleIds = useMemo(() => {
+    if (!selectionOnly) return new Set(shown.map((v) => v.id));
+    const ids = new Set<string>();
+    if (highlightedVehicleId) ids.add(highlightedVehicleId);
+    for (const id of selectedTrip?.coPassengerTripIds ?? []) {
+      const vehicleId = tripsById[id]?.vehicleId;
+      if (vehicleId) ids.add(vehicleId);
+    }
+    return ids;
+  }, [selectionOnly, shown, highlightedVehicleId, selectedTrip, tripsById]);
   const mapVehicles = useMemo<MapVehicle[]>(
     () =>
-      shown.map((v) => ({
-        id: v.id,
-        label: v.label,
-        color: v.color,
-        depot: v.depot,
-        stops: (v.route?.stops ?? []).map((s) => ({
-          tripId: s.tripId,
-          kind: s.kind,
-          lat: s.lat,
-          lng: s.lng,
-          title: `${formatMinute(s.startMinute)} · ${STOP_KIND_LABELS[s.kind]} · ${tripsById[s.tripId]?.patientName ?? "Course"} (${v.label})`,
+      shown
+        .filter((v) => mapVehicleIds.has(v.id))
+        .map((v) => ({
+          id: v.id,
+          label: v.label,
+          color: colorOf(v),
+          depot: v.depot,
+          stops: (v.route?.stops ?? []).map((s) => ({
+            tripId: s.tripId,
+            kind: s.kind,
+            lat: s.lat,
+            lng: s.lng,
+            title: `${formatMinute(s.startMinute)} · ${STOP_KIND_LABELS[s.kind]} · ${tripsById[s.tripId]?.patientName ?? "Course"} (${v.label})`,
+            violation: violationIndex.byTrip.has(s.tripId),
+          })),
         })),
-      })),
-    [shown, tripsById],
+    [shown, mapVehicleIds, colorOf, tripsById, violationIndex],
   );
-  // Trips of the vehicles shown, and the trips without a vehicle unless the map is narrowed to depots
-  // (an unassigned trip belongs to no depot: it would pull the map away from them).
-  const showUnassigned = filter.depots.length === 0;
+  // Trips of the vehicles shown and, as on the « À placer » row, the trips without a vehicle.
   const mapTrips = useMemo<MapTrip[]>(
     () =>
       trips
-        .filter((t) => ACTIVE(t) && (t.vehicleId === null ? showUnassigned || t.id === selection.tripId : visibleIds.has(t.vehicleId)))
+        .filter((t) =>
+          ACTIVE(t) &&
+          (selectionOnly
+            ? t.id === selection.tripId || (t.vehicleId !== null && mapVehicleIds.has(t.vehicleId))
+            : t.vehicleId === null || mapVehicleIds.has(t.vehicleId)),
+        )
         .map((t) => ({
           id: t.id,
           title: `${t.patientName} · ${t.direction === "OUTBOUND" ? `RDV ${formatMinute(t.appointmentMinute)}` : `fin ${formatMinute(t.readyMinute)}`}`,
           pickup: t.pickup,
           dropoff: t.dropoff,
           vehicleId: t.vehicleId,
+          violation: violationIndex.byTrip.has(t.id),
         })),
-    [trips, visibleIds, showUnassigned, selection.tripId],
+    [trips, selectionOnly, selection.tripId, mapVehicleIds, violationIndex],
   );
-  // The map frames the vehicles kept again when the filter changes.
-  const mapKey = `${date}|${filter.depots.join(",")}|${filter.types.join(",")}|${filter.states.join(",")}|${filter.hideFree}`;
+  // The map frames the vehicles kept again when the filter changes; narrowed to depots, it frames their routes
+  // only (a trip without a vehicle belongs to no depot: it would pull the map away from them).
+  const mapKey = [
+    date,
+    filter.depots.join(","),
+    filter.types.join(","),
+    filter.states.join(","),
+    filter.hideFree,
+    selectionOnly ? `sel:${selection.tripId ?? ""}:${selection.vehicleId ?? ""}` : "",
+  ].join("|");
+  const setZoom = useCallback((zoom: ZoomLevel) => setFilter({ ...filter, zoom }), [filter, setFilter]);
 
   const lockedLabel = selectedVehicle ? lockCounts(new Set([selectedVehicle.id])) : null;
   // « À traiter » as a state lists vehicles: say where the rest of « À traiter » is when none is left.
@@ -275,8 +354,15 @@ export function PlanningBoard({
         unplannedNote
       )}
 
+      <p aria-live="polite" className="sr-only">
+        {announce}
+      </p>
       <div className="grid gap-3 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[minmax(0,1fr)_26rem]">
-        <Card aria-label="Frise par véhicule" className="flex h-[75dvh] min-h-0 flex-col xl:h-auto">
+        <Card aria-label="Frise par véhicule" className="relative flex h-[75dvh] min-h-0 flex-col xl:h-auto">
+          {/* One Tab stop for the whole timeline (arrows inside), and this link to go straight past it. */}
+          <a href="#planning-panneau" className={SKIP_LINK}>
+            Passer la frise
+          </a>
           <TimelineToolbar
             search={<PlanningSearch trips={trips} vehicles={vehicles} onSelectTrip={selectTrip} onShowVehicle={showVehicle} />}
             filter={filter}
@@ -304,12 +390,17 @@ export function PlanningBoard({
             range={timeRange}
             selectedTripId={selectedTrip?.id ?? null}
             selectedVehicleId={highlightedVehicleId}
-            violatingTripIds={violatingTripIds}
+            violations={violationIndex}
+            colors={colors}
+            unassignedTripIds={unassignedIds}
+            waitWindows={waitWindows}
             onSelectTrip={selectTrip}
             onSelectVehicle={selectVehicle}
             collapsed={collapsed}
             onToggleGroup={toggleGroup}
             compact={filter.compact}
+            zoom={filter.zoom}
+            onZoomChange={setZoom}
             emptyText={emptyText}
             groupActions={
               planned
@@ -333,7 +424,13 @@ export function PlanningBoard({
           />
         </Card>
 
-        <div className="flex min-h-0 flex-col gap-3">
+        <div
+          id="planning-panneau"
+          tabIndex={-1}
+          role="region"
+          aria-label="Détail et « À traiter »"
+          className="flex min-h-0 flex-col gap-3 outline-none"
+        >
           <div ref={panelBox} className="min-w-0 space-y-3 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain">
             {selectedTrip ? (
               <TripPanel
@@ -350,7 +447,7 @@ export function PlanningBoard({
               />
             ) : selectedVehicle ? (
               <VehiclePanel
-                vehicle={selectedVehicle}
+                vehicle={{ ...selectedVehicle, color: colorOf(selectedVehicle) }}
                 trips={tripsById}
                 issues={vehicleIssues.find((issue) => issue.vehicleId === selectedVehicle.id)?.changes ?? []}
                 lockAction={
@@ -385,8 +482,8 @@ export function PlanningBoard({
             ) : (
               <p className="flex items-start gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600">
                 <MousePointerClick aria-hidden className="mt-0.5 size-4 shrink-0 text-slate-400" />
-                Cliquez sur un arrêt de la frise ou de la carte pour voir la course, la figer ou la déplacer ; sur un
-                véhicule pour suivre sa tournée. « / » pour chercher, Échap pour désélectionner.
+                Cliquez sur une course de la frise ou de la carte pour la voir, la figer ou la déplacer ; sur un véhicule pour
+                suivre sa tournée. « / » pour chercher, « ? » pour les raccourcis, Échap pour désélectionner.
               </p>
             )}
             <IssuesPanel
@@ -412,7 +509,7 @@ export function PlanningBoard({
               1 280 × 800 screen whatever the banners above. */}
           <Card
             className={cn(
-              "h-80 shrink-0 overflow-hidden",
+              "relative h-80 shrink-0",
               selectedTrip || selectedVehicle ? "xl:h-[30%] xl:min-h-32" : "xl:h-[38%] xl:min-h-44",
             )}
           >
@@ -424,6 +521,9 @@ export function PlanningBoard({
               onSelectTrip={selectTrip}
               onSelectVehicle={selectVehicle}
               datasetKey={mapKey}
+              fitUnassigned={filter.depots.length === 0 || selectionOnly}
+              selectionOnly={selectionOnly}
+              onSelectionOnlyChange={hasSelection ? (on) => setFilter({ ...filter, mapSelectionOnly: on }) : null}
             />
           </Card>
         </div>

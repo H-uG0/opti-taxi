@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { VehicleType } from "@prisma/client";
-import { CircleHelp, EyeOff, Lock, Rows3, Rows4 } from "lucide-react";
+import { CircleHelp, EyeOff, Lock, Rows3, Rows4, X } from "lucide-react";
 import { CheckMenu } from "@/components/ui/check-menu";
 import { cn } from "@/components/ui/cn";
 import { TimelineLegend } from "@/components/planning/timeline";
-import { EMPTY_FILTER, isFiltering, VEHICLE_STATE_LABELS, type PlanningFilter, type VehicleState } from "@/lib/planning/filter";
+import { isTypingTarget, PLANNING_SHORTCUTS, TIMELINE_KEYS, type ShortcutHelp } from "@/lib/planning/shortcuts";
+import { EMPTY_FILTER, isFiltering, VEHICLE_STATE_LABELS, viewOptions, type PlanningFilter, type VehicleState } from "@/lib/planning/filter";
 import { pluralize } from "@/lib/planning/format";
 import { VEHICLE_TYPE_SHORT } from "@/lib/labels";
 
@@ -23,7 +24,7 @@ function summaryOf(selected: readonly string[], names: ReadonlyMap<string, strin
   return `${selected.length}`;
 }
 
-/** A button opening a small panel under it (legend, locks of the day); Escape or a click outside closes it. */
+/** A button opening a small panel under it (locks of the day); Escape or a click outside closes it. */
 function Popover({ label, icon, children, align = "right" }: { label: string; icon: ReactNode; children: ReactNode; align?: "left" | "right" }) {
   const [open, setOpen] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
@@ -78,10 +79,152 @@ function Popover({ label, icon, children, align = "right" }: { label: string; ic
   );
 }
 
+function Keys({ keys }: { keys: readonly string[] }) {
+  return (
+    <span className="inline-flex shrink-0 gap-1">
+      {keys.map((key) => (
+        <kbd key={key} className="min-w-6 rounded border whitespace-nowrap border-slate-300 bg-slate-50 px-1 text-center font-sans text-[11px] font-semibold text-slate-800 shadow-[0_1px_0_rgb(203_213_225)]">
+          {key}
+        </kbd>
+      ))}
+    </span>
+  );
+}
+
+function ShortcutList({ title, items }: { title: string; items: readonly ShortcutHelp[] }) {
+  return (
+    <section>
+      <h3 className="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">{title}</h3>
+      <dl className="space-y-1 text-xs text-slate-700">
+        {items.map((item) => (
+          <div key={item.label} className="flex items-start gap-3">
+            <dt className="w-36 shrink-0">
+              <Keys keys={item.keys} />
+              <span className="sr-only"> : </span>
+            </dt>
+            <dd>{item.label}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+/**
+ * « Aide »: the legend of the timeline and the keyboard shortcuts, in a dialog
+ * over the page; « ? » opens and closes it from anywhere (not while typing).
+ * Escape, the close button or a click beside it closes it, and the focus goes
+ * back where it was.
+ */
+function HelpDialog({ showReturnToCheck }: { showReturnToCheck: boolean }) {
+  const [open, setOpen] = useState(false);
+  const panel = useRef<HTMLDivElement>(null);
+  const returnTo = useRef<HTMLElement | null>(null);
+  const titleId = useId();
+  const toggle = (next: boolean) => {
+    if (next) returnTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setOpen(next);
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "?" || e.ctrlKey || e.metaKey) return;
+      const inHelp = (e.target as HTMLElement | null)?.closest?.("[data-planning-help]") != null;
+      if (!inHelp && isTypingTarget(e.target)) return;
+      e.preventDefault();
+      setOpen((current) => {
+        if (!current) returnTo.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        return !current;
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  useEffect(() => {
+    if (open) panel.current?.focus({ preventScroll: true });
+    else if (returnTo.current?.isConnected) {
+      returnTo.current.focus({ preventScroll: true });
+      returnTo.current = null;
+    }
+  }, [open]);
+  return (
+    <>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-keyshortcuts="?"
+        title="Légende de la frise et raccourcis clavier (?)"
+        onClick={() => toggle(!open)}
+        className={cn(
+          ICON_BUTTON,
+          "h-7 text-xs",
+          open ? "border-brand-300 bg-brand-50 text-brand-900" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+        )}
+      >
+        <CircleHelp aria-hidden className="size-3.5" />
+        Aide
+      </button>
+      {open ? (
+        <div
+          className="fixed inset-0 z-[80] grid place-items-center bg-slate-900/25 p-4"
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget) toggle(false);
+          }}
+        >
+          <div
+            ref={panel}
+            data-planning-help
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            tabIndex={-1}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                toggle(false);
+              } else if (e.key === "Tab") {
+                // The focus stays in the dialog: its only control is the close button.
+                e.preventDefault();
+                panel.current?.querySelector<HTMLElement>("button")?.focus();
+              }
+            }}
+            className="max-h-[min(40rem,calc(100dvh-2rem))] w-[min(50rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-slate-200 bg-white p-5 shadow-xl outline-none"
+          >
+            <div className="mb-3 flex items-start justify-between gap-4">
+              <h2 id={titleId} className="text-base font-semibold text-slate-900">
+                Aide du planning
+              </h2>
+              <button
+                type="button"
+                onClick={() => toggle(false)}
+                aria-label="Fermer l'aide"
+                className="-m-1 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-brand-600"
+              >
+                <X aria-hidden className="size-4" />
+              </button>
+            </div>
+            <div className="grid gap-x-8 gap-y-5 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+              <section>
+                <h3 className="mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">Légende de la frise</h3>
+                <TimelineLegend showReturnToCheck={showReturnToCheck} />
+              </section>
+              <div className="space-y-4">
+                <ShortcutList title="Raccourcis clavier" items={PLANNING_SHORTCUTS} />
+                <ShortcutList title="Dans la frise (une seule tabulation)" items={TIMELINE_KEYS} />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 /**
  * Above the timeline: the search, the filters (depots, types, states,
- * « Masquer les libres », kept in the URL), the density, the legend and the
- * locks of the whole day.
+ * « Masquer les libres », kept in the URL), the density, the help (legend
+ * and shortcuts) and the locks of the whole day. The zoom sits on the
+ * timeline's axis.
  */
 export function TimelineToolbar({
   search,
@@ -158,7 +301,7 @@ export function TimelineToolbar({
           {filtering ? (
             <button
               type="button"
-              onClick={() => onChange({ ...EMPTY_FILTER, collapsed: filter.collapsed, compact: filter.compact })}
+              onClick={() => onChange({ ...EMPTY_FILTER, ...viewOptions(filter) })}
               className="font-medium text-brand-700 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-brand-600"
             >
               Réinitialiser les filtres
@@ -180,9 +323,7 @@ export function TimelineToolbar({
             {filter.compact ? <Rows4 aria-hidden className="size-3.5" /> : <Rows3 aria-hidden className="size-3.5" />}
             Compacte
           </button>
-          <Popover label="Légende" icon={<CircleHelp aria-hidden className="size-3.5" />}>
-            <TimelineLegend showReturnToCheck={showReturnToCheck} />
-          </Popover>
+          <HelpDialog showReturnToCheck={showReturnToCheck} />
           <Popover label="Verrous" icon={<Lock aria-hidden className="size-3.5" />}>
             <div className="w-72 space-y-2 text-sm text-slate-700">
               <p>

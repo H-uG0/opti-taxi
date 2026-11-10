@@ -1,18 +1,50 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
-import { ChevronRight, Lock } from "lucide-react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import { ChevronRight, Lock, TriangleAlert } from "lucide-react";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { cn } from "@/components/ui/cn";
-import { OUTBOUND_NO_SHOW_LABEL } from "@/lib/domain/no-show";
-import { sharedLoadColor } from "@/lib/planning/colors";
+import { IDLE_VEHICLE_COLOR } from "@/lib/planning/colors";
 import { lockedTripCount, type DepotGroupView as TimelineGroup } from "@/lib/planning/filter";
 import { formatEurosRounded, formatKmRounded, pluralize } from "@/lib/planning/format";
 import { normalizeText } from "@/lib/planning/search";
-import { hourTicks, percentOf, routeSegments, type TimeRange } from "@/lib/planning/timeline";
-import type { StopView, TripView, VehicleRowView } from "@/lib/planning/types";
-import { DIRECTION_LABELS, formatPercent, ROUTE_STATUS_LABELS, STOP_KIND_LABELS, VEHICLE_TYPE_SHORT } from "@/lib/labels";
-import { formatMinute } from "@/lib/time";
+import { percentOf, type TimeRange } from "@/lib/planning/timeline";
+import {
+  appointmentMark,
+  assignLanes,
+  axisSteps,
+  axisTicks,
+  freeSlots,
+  minutesForPx,
+  MIN_TARGET_PX,
+  routeBlocks,
+  unassignedWindow,
+  zoomFactor,
+  zoomIn,
+  ZOOM_LABELS,
+  ZOOM_LEVELS,
+  type TripBlock,
+  type WaitWindows,
+  type ZoomLevel,
+} from "@/lib/planning/timeline-layout";
+import type { TripView, VehicleRowView, ViolationView } from "@/lib/planning/types";
+import { NO_VIOLATIONS, violationLabels, type ViolationIndex } from "@/lib/planning/violation-index";
+import { formatPercent, ROUTE_STATUS_LABELS, VEHICLE_TYPE_SHORT } from "@/lib/labels";
+import { formatDuration, formatMinute } from "@/lib/time";
+import { ClusterPopover } from "./cluster-popover";
+import { ReturnToCheckMark, SHARED_STRIPES, span, TrackTrips, type OpenCluster } from "./timeline-track";
+import { ROVING_PREFERRED, ROVING_ROW, useRovingGrid } from "./use-roving-grid";
 
 export type { DepotGroupView as TimelineGroup } from "@/lib/planning/filter";
 
@@ -22,7 +54,14 @@ export type TimelineProps = {
   range: TimeRange;
   selectedTripId: string | null;
   selectedVehicleId: string | null;
-  violatingTripIds: ReadonlySet<string>;
+  /** Violations by trip and by vehicle (badge on the row, shape on the trip). */
+  violations?: ViolationIndex;
+  /** Display color of each vehicle (lib/planning/colors displayColors); a vehicle missing: its own color. */
+  colors?: ReadonlyMap<string, string>;
+  /** Trips without a vehicle, drawn on the pinned « À placer » row (none: no row). */
+  unassignedTripIds?: readonly string[];
+  /** Windows the « À placer » row draws a trip on. */
+  waitWindows?: WaitWindows;
   onSelectTrip: (tripId: string) => void;
   onSelectVehicle: (vehicleId: string) => void;
   /** Depot groups folded: their rows are not drawn. */
@@ -32,17 +71,21 @@ export type TimelineProps = {
   groupActions?: (group: TimelineGroup) => ReactNode;
   /** 28 px rows on one line. */
   compact?: boolean;
+  /** Time shown in the visible part of the track (scrolls sideways when zoomed in). */
+  zoom?: ZoomLevel;
+  /** With it, the zoom choice sits on the axis (« Journée, 4 h, 2 h »). */
+  onZoomChange?: (zoom: ZoomLevel) => void;
   /** Said when no row is left (« Aucun véhicule ne correspond aux filtres. » by default). */
   emptyText?: string;
   className?: string;
 };
 
 /**
- * Columns, declared once on the table and shared by every row through CSS
+ * Columns, declared once on the grid and shared by every row through CSS
  * subgrid, so the header and all rows line up whatever their content.
  *
- * The layout follows a container query on the card (not the viewport), at
- * 57rem = 912 px of card width:
+ * The whole day (« Journée ») follows a container query on the card (not the
+ * viewport), at 57rem = 912 px of card width:
  * - from 57rem: vehicle | track | Km | Vide | CA | Marge | Statut. The figure
  *   columns are sized to their widest value (about 19rem, 21rem with 4-digit
  *   amounts), so none is cut off; the track takes the rest, 24rem at least.
@@ -51,85 +94,48 @@ export type TimelineProps = {
  * - below (the planning's board, next to the map and the panel): vehicle |
  *   track (22rem at least), the figures wrap under the vehicle name (hidden
  *   in the compact density).
- * If the content ever needs more room than the card (4-digit amounts right at
- * the breakpoint, narrow screens), the table scrolls inside the card with the
- * vehicle column pinned: nothing is clipped.
+ * Zoomed in (« 4 h », « 2 h »), the track is as many times wider than the
+ * visible part as the day is longer than 4 h or 2 h (100cqw: the card's
+ * width), and scrolls sideways under the pinned vehicle column; the figures
+ * wrap under the vehicle name.
  *
- * The table scrolls in its own box (fixed height, given by the page): the time
- * axis stays pinned at the top, each depot's header under it while its rows
- * scroll, the vehicle column on the left.
+ * The grid scrolls in its own box (fixed height, given by the page): the time
+ * axis stays pinned at the top, the « À placer » row under it, each depot's
+ * header under them while its rows scroll, the vehicle column on the left.
  */
-const TABLE_GRID =
+const DAY_GRID =
   "grid min-w-[36rem] grid-cols-[14rem_minmax(22rem,1fr)] @min-[57rem]:grid-cols-[14rem_minmax(24rem,1fr)_repeat(5,auto)]";
+const ZOOMED_GRID = "grid grid-cols-[14rem_var(--track-w)]";
 const ROW = "col-span-full grid grid-cols-subgrid";
-/** Figure cells: only in the wide layout. */
+/** Figure cells: only in the wide layout of the whole day. */
 const STAT_CELL = "hidden self-center px-2 text-right @min-[57rem]:block";
 const STAT_LAST_CELL = "hidden self-center pl-2 pr-3 text-left @min-[57rem]:block";
 const STAT_HEADERS = ["Km", "Vide", "CA", "Marge"] as const;
 
+/** Track width assumed before it is measured (server render). */
+const DEFAULT_TRACK_PX = 560;
+/** Height of the pinned « À placer » row (24 px track, its margins, its border) in both densities: room stays for the vehicles. */
+const PINNED_ROW_PX = 29;
+const AXIS_PX = 32;
+const NO_IDS: readonly string[] = [];
+/** The settings' defaults (Paramètres), when the page gives none. */
+const DEFAULT_WAITS: WaitWindows = { beforeAppointmentMin: 30, afterSessionMin: 15 };
+const NO_COMPANIONS: ReadonlySet<string> = new Set();
+
 const OFF_SHIFT_STYLE: CSSProperties = {
   backgroundImage: "repeating-linear-gradient(135deg, rgb(241 245 249) 0 6px, rgb(226 232 240) 6px 7px)",
 };
+/** A free slot: a light green wash over the track and a green bar along its bottom. */
+const FREE_SLOT_STYLE: CSSProperties = {
+  backgroundImage: "linear-gradient(to top, rgb(52 211 153 / 0.9) 0 3px, rgb(236 253 245 / 0.75) 3px)",
+};
 
-function span(from: number, to: number, range: TimeRange): CSSProperties {
-  const left = percentOf(from, range);
-  return { left: `${left}%`, width: `${Math.max(0, percentOf(to, range) - left)}%` };
-}
-
-function stopTitle(stop: StopView, trip: TripView | undefined, trips: Record<string, TripView>): string {
-  const lines = [
-    `${formatMinute(stop.startMinute)} · ${STOP_KIND_LABELS[stop.kind]} · ${trip?.patientName ?? "Course inconnue"}`,
-    stop.address,
-  ];
-  if (trip) {
-    lines.push(
-      trip.direction === "OUTBOUND"
-        ? `${DIRECTION_LABELS.OUTBOUND} · RDV ${formatMinute(trip.appointmentMinute)}`
-        : `${DIRECTION_LABELS.RETURN} · fin de séance ${formatMinute(trip.readyMinute)}`,
-    );
-    if (trip.coPassengerTripIds.length > 0) {
-      const names = trip.coPassengerTripIds.map((id) => trips[id]?.patientName ?? "?").join(", ");
-      lines.push(`Partagée avec ${names}`);
-    }
-    if (trip.lockedVehicleId) lines.push("Course figée sur ce véhicule");
-    if (trip.status === "CANCELLED") lines.push("Course annulée");
-    if (trip.status === "NO_SHOW") lines.push("Patient absent");
-    if (trip.outboundNoShow) lines.push(OUTBOUND_NO_SHOW_LABEL);
-  }
-  if (stop.arrivalMinute < stop.startMinute) {
-    lines.push(`Arrivée ${formatMinute(stop.arrivalMinute)} (attente ${stop.startMinute - stop.arrivalMinute} min)`);
-  }
-  return lines.join("\n");
-}
-
-function segmentStyle(load: number, kind: string, color: string): { className: string; style: CSSProperties } {
-  if (kind === "wait") {
-    return {
-      className: "h-0.5",
-      style: { backgroundImage: `repeating-linear-gradient(90deg, ${load > 0 ? color : "rgb(148 163 184)"} 0 3px, transparent 3px 6px)` },
-    };
-  }
-  const height = kind === "service" ? "h-3" : "h-2";
-  if (load <= 0) return { className: cn(height, "bg-slate-300"), style: {} };
-  if (load === 1) return { className: height, style: { background: color } };
-  const dark = sharedLoadColor(color);
+function gridLines(range: TimeRange, step: number): CSSProperties {
   return {
-    className: height,
-    style: { backgroundImage: `repeating-linear-gradient(135deg, ${dark} 0 4px, ${color} 4px 7px)` },
+    backgroundImage: "linear-gradient(to right, rgb(226 232 240 / 0.8) 1px, transparent 1px)",
+    backgroundSize: `${(step / Math.max(step, range.end - range.start)) * 100}% 100%`,
   };
 }
-
-type RowProps = {
-  row: VehicleRowView;
-  trips: Record<string, TripView>;
-  range: TimeRange;
-  selected: boolean;
-  selectedTrip: TripView | null;
-  violatingTripIds: ReadonlySet<string>;
-  onSelectTrip: (tripId: string) => void;
-  onSelectVehicle: (vehicleId: string) => void;
-  compact: boolean;
-};
 
 /**
  * The label without its depot (« Taxi 1 (Marseille) » → « Taxi 1 »): the row
@@ -140,21 +146,61 @@ export function shortVehicleLabel(row: Pick<VehicleRowView, "label" | "depot">):
   return match?.[1] && match[2] !== undefined && normalizeText(match[2]) === normalizeText(row.depot.label) ? match[1] : row.label;
 }
 
+type Geometry = { range: TimeRange; pxPerMin: number; minMinutes: number; compact: boolean; zoomed: boolean; gridStep: number };
+
+type RowProps = {
+  row: VehicleRowView;
+  trips: Record<string, TripView>;
+  geometry: Geometry;
+  color: string;
+  selected: boolean;
+  selectedTrip: TripView | null;
+  violationsByTrip: ReadonlyMap<string, ViolationView[]>;
+  rowViolations: readonly ViolationView[] | undefined;
+  openClusterKey: string | null;
+  onSelectTrip: (tripId: string) => void;
+  onSelectVehicle: (vehicleId: string) => void;
+  onOpenCluster: OpenCluster;
+};
+
+/** Row badge: the vehicle's violations (its own and its trips'), by an icon and a count, named for screen readers. */
+function ViolationBadge({ violations }: { violations: readonly ViolationView[] }) {
+  const labels = violationLabels(violations);
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-0.5 rounded bg-slate-900 px-1 py-px text-[11px] leading-none font-semibold text-amber-300"
+      title={`${pluralize(violations.length, "violation")} : ${labels}`}
+    >
+      <TriangleAlert aria-hidden className="size-3" strokeWidth={2.5} />
+      <span className="tabular">{violations.length}</span>
+      <span className="sr-only">
+        {" "}
+        {violations.length > 1 ? "violations" : "violation"} : {labels}
+      </span>
+    </span>
+  );
+}
+
 const TimelineRow = memo(function TimelineRow({
   row,
   trips,
-  range,
+  geometry,
+  color,
   selected,
   selectedTrip,
-  violatingTripIds,
+  violationsByTrip,
+  rowViolations,
+  openClusterKey,
   onSelectTrip,
   onSelectVehicle,
-  compact,
+  onOpenCluster,
 }: RowProps) {
+  const { range, compact, zoomed } = geometry;
   const route = row.route;
-  const segments = useMemo(() => (route ? routeSegments(route) : []), [route]);
+  const layout = useMemo(() => (route ? routeBlocks(route.stops) : { blocks: [] as TripBlock[], lanes: 1 }), [route]);
+  const slots = useMemo(() => freeSlots(row.shift, route), [row.shift, route]);
+  const companions = useMemo(() => new Set(selectedTrip?.coPassengerTripIds ?? []), [selectedTrip]);
   const emptyRatio = route && route.distanceKm > 0 ? route.emptyKm / route.distanceKm : null;
-  const companions = new Set(selectedTrip?.coPassengerTripIds ?? []);
   const crew = (row.driverName ?? "Sans chauffeur") + (row.crewMateName ? ` + ${row.crewMateName}` : "");
   const tripCountLabel = route ? ` · ${route.tripCount} course${route.tripCount > 1 ? "s" : ""}` : "";
   const crewLine = crew + tripCountLabel;
@@ -163,6 +209,8 @@ const TimelineRow = memo(function TimelineRow({
   // « Taxi 12 » already says its type: the badge would repeat it.
   const labelSaysType = normalizeText(label).startsWith(normalizeText(VEHICLE_TYPE_SHORT[row.type]));
   const off = !row.available && !route;
+  const mark = selectedTrip && selectedTrip.vehicleId === row.id ? appointmentMark(selectedTrip) : null;
+  const tripSelectedHere = selectedTrip !== null && selectedTrip.vehicleId === row.id;
   const lockedMark =
     locked > 0 ? (
       <span
@@ -174,46 +222,49 @@ const TimelineRow = memo(function TimelineRow({
         <span className="sr-only"> {locked > 1 ? "courses figées" : "course figée"}</span>
       </span>
     ) : null;
-
-  // Bracket under the selected trip and its co-passengers on this row.
-  const brackets: Array<{ tripId: string; from: number; to: number; main: boolean }> = [];
-  if (selectedTrip && route) {
-    for (const id of [selectedTrip.id, ...companions]) {
-      const t = trips[id];
-      if (t && t.vehicleId === row.id && t.plannedPickupMinute !== null && t.plannedDropoffMinute !== null) {
-        brackets.push({ tripId: id, from: t.plannedPickupMinute, to: t.plannedDropoffMinute, main: id === selectedTrip.id });
-      }
-    }
-  }
+  const violationMark = rowViolations && rowViolations.length > 0 ? <ViolationBadge violations={rowViolations} /> : null;
+  // Short names: a screen reader says them when the focus enters the row or its track (the content is long).
+  const rowName = [
+    row.label,
+    route ? pluralize(route.tripCount, "course") : row.available ? "sans tournée" : "indisponible",
+    rowViolations && rowViolations.length > 0 ? pluralize(rowViolations.length, "violation") : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     <div
       role="row"
+      aria-label={rowName}
       data-vehicle-id={row.id}
+      {...{ [ROVING_ROW]: "" }}
       className={cn(
         ROW,
         "group/row border-b border-slate-100 text-xs text-slate-700 last:border-b-0",
         selected ? "bg-brand-50" : "hover:bg-slate-50",
       )}
     >
-      {/* Opaque background: the cell stays pinned over the track when the table scrolls. */}
+      {/* Opaque background: the cell stays pinned over the track when the grid scrolls. */}
       <div
         role="rowheader"
         className={cn(
-          "sticky left-0 z-20 min-w-0 border-l-4 pl-2 pr-3",
+          "sticky left-0 z-[22] min-w-0 border-l-4 pl-2 pr-3",
           compact ? "py-0.5" : "py-1.5",
           selected ? "border-brand-600 bg-brand-50" : "border-transparent bg-white group-hover/row:bg-slate-50",
         )}
       >
         <button
           type="button"
+          tabIndex={-1}
+          data-vehicle-button
+          {...(selected && !tripSelectedHere ? { [ROVING_PREFERRED]: "" } : {})}
           onClick={() => onSelectVehicle(row.id)}
           aria-pressed={selected}
           title={[row.label, crewLine, row.unavailableReason ? `Indisponible : ${row.unavailableReason}` : null].filter(Boolean).join("\n")}
           className="block w-full min-w-0 rounded text-left focus-visible:outline-2 focus-visible:outline-brand-600"
         >
           <span className="flex min-w-0 items-center gap-1.5">
-            <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ background: row.color }} />
+            <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ background: color }} />
             {/* The depot is the group's header: the full label goes to screen readers and the tooltip. */}
             <span aria-hidden className={cn("min-w-0 truncate text-sm font-medium text-slate-900", off && "text-slate-500")}>
               {label}
@@ -222,6 +273,7 @@ const TimelineRow = memo(function TimelineRow({
               {row.label}, dépôt {row.depot.label}
             </span>
             {labelSaysType ? null : <VehicleTypeBadge type={row.type} />}
+            {violationMark}
             {compact && route ? (
               <span className="tabular shrink-0 text-[11px] text-slate-500">
                 {route.tripCount} course{route.tripCount > 1 ? "s" : ""}
@@ -249,9 +301,9 @@ const TimelineRow = memo(function TimelineRow({
             </span>
           ) : null}
           {route && !compact ? (
-            // Narrow layout: the figures wrap between items (never inside one), so none is hidden.
+            // Narrow layout or zoomed in: the figures wrap between items (never inside one), so none is hidden.
             <span
-              className="mt-0.5 block truncate text-xs text-slate-600 @min-[57rem]:hidden"
+              className={cn("mt-0.5 block truncate text-xs text-slate-600", !zoomed && "@min-[57rem]:hidden")}
               title={`CA ${formatEurosRounded(route.revenue)} · ${ROUTE_STATUS_LABELS[route.status]}`}
             >
               <span className="tabular">{formatKmRounded(route.distanceKm)}</span> ·{" "}
@@ -261,10 +313,17 @@ const TimelineRow = memo(function TimelineRow({
             </span>
           ) : null}
         </button>
+        {slots.length > 0 ? (
+          <span className="sr-only">
+            {slots.length > 1 ? "Créneaux libres" : "Créneau libre"} :{" "}
+            {slots.map((s) => `${formatMinute(s.start)} – ${formatMinute(s.end)}`).join(", ")}.
+          </span>
+        ) : null}
       </div>
 
       <div
-        role="cell"
+        role="gridcell"
+        aria-label={route ? `Tournée de ${label} : ${pluralize(route.tripCount, "course")}` : `${label} : aucune course`}
         className={cn("relative self-center overflow-hidden rounded", compact ? "my-0.5 h-6" : "my-1.5 h-12")}
         style={row.shift || off ? OFF_SHIFT_STYLE : undefined}
       >
@@ -278,14 +337,21 @@ const TimelineRow = memo(function TimelineRow({
         ) : off ? null : (
           <div aria-hidden className="absolute inset-0 bg-white ring-1 ring-inset ring-slate-200" />
         )}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0"
-          style={{
-            backgroundImage: "linear-gradient(to right, rgb(226 232 240 / 0.8) 1px, transparent 1px)",
-            backgroundSize: `${(60 / Math.max(60, range.end - range.start)) * 100}% 100%`,
-          }}
-        />
+        <div aria-hidden className="pointer-events-none absolute inset-0" style={gridLines(range, geometry.gridStep)} />
+        {slots.map((slot) => {
+          const widthPx = (slot.end - slot.start) * geometry.pxPerMin;
+          return (
+            <div
+              key={slot.start}
+              aria-hidden
+              className="absolute inset-y-0.5 flex items-end justify-center overflow-hidden rounded-sm pb-1 text-[10px] leading-none whitespace-nowrap text-emerald-800"
+              style={{ ...span(slot.start, slot.end, range), ...FREE_SLOT_STYLE }}
+              title={`Libre de ${formatMinute(slot.start)} à ${formatMinute(slot.end)} (${formatDuration(slot.end - slot.start)})`}
+            >
+              {widthPx >= 80 && !compact ? <span className="mb-px">libre {formatDuration(slot.end - slot.start)}</span> : null}
+            </div>
+          );
+        })}
         {row.breakWindow && (route === null || route.breakStartMinute === null) ? (
           <div
             aria-hidden
@@ -294,80 +360,44 @@ const TimelineRow = memo(function TimelineRow({
             title={`Fenêtre de pause ${formatMinute(row.breakWindow.start)} – ${formatMinute(row.breakWindow.end)} (${row.breakWindow.duration} min)`}
           />
         ) : null}
+        {route ? (
+          <div
+            aria-hidden
+            className="absolute top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-slate-300"
+            style={span(route.startMinute, route.endMinute, range)}
+          />
+        ) : null}
         {route && route.breakStartMinute !== null && route.breakEndMinute !== null ? (
           <div
-            className="absolute inset-y-1 flex items-center justify-center overflow-hidden rounded bg-amber-100 text-[10px] font-medium text-amber-800 ring-1 ring-inset ring-amber-300"
+            aria-hidden
+            className="absolute inset-y-1 z-[5] flex items-center justify-center overflow-hidden rounded bg-amber-100 text-[10px] font-medium text-amber-800 ring-1 ring-inset ring-amber-300"
             style={span(route.breakStartMinute, route.breakEndMinute, range)}
             title={`Pause ${formatMinute(route.breakStartMinute)} – ${formatMinute(route.breakEndMinute)}`}
           >
-            Pause
+            {(route.breakEndMinute - route.breakStartMinute) * geometry.pxPerMin >= 36 ? "Pause" : null}
           </div>
         ) : null}
 
-        {segments.map((seg, i) => {
-          const { className, style } = segmentStyle(seg.load, seg.kind, row.color);
-          return (
-            <div
-              key={i}
-              aria-hidden
-              className={cn("absolute top-1/2 -translate-y-1/2 rounded-full", className)}
-              style={{ ...span(seg.from, seg.to, range), ...style }}
-            />
-          );
-        })}
-
-        {brackets.map((b) => (
-          <div
-            key={b.tripId}
-            aria-hidden
-            className={cn("absolute bottom-0.5 h-1 rounded-full", b.main ? "bg-slate-900" : "bg-amber-400")}
-            style={span(b.from, b.to, range)}
+        {route ? (
+          <TrackTrips
+            rowId={row.id}
+            blocks={layout.blocks}
+            lanes={layout.lanes}
+            trips={trips}
+            range={range}
+            pxPerMin={geometry.pxPerMin}
+            minMinutes={geometry.minMinutes}
+            compact={compact}
+            color={color}
+            selectedTripId={selectedTrip?.id ?? null}
+            companionIds={companions}
+            violationsByTrip={violationsByTrip}
+            mark={mark}
+            openClusterKey={openClusterKey}
+            onSelectTrip={onSelectTrip}
+            onOpenCluster={onOpenCluster}
           />
-        ))}
-
-        {route?.stops.map((stop) => {
-          const trip = trips[stop.tripId];
-          const isSelected = selectedTrip?.id === stop.tripId;
-          const isCompanion = companions.has(stop.tripId);
-          const violating = violatingTripIds.has(stop.tripId);
-          const cancelled = trip?.status === "CANCELLED" || trip?.status === "NO_SHOW";
-          const pickup = stop.kind === "PICKUP";
-          const returnToCheck = pickup && trip?.outboundNoShow === true;
-          const title = stopTitle(stop, trip, trips);
-          return (
-            <button
-              key={stop.id}
-              type="button"
-              title={title}
-              aria-label={title.replaceAll("\n", ", ")}
-              aria-pressed={isSelected}
-              tabIndex={pickup ? 0 : -1}
-              onClick={() => onSelectTrip(stop.tripId)}
-              className="group absolute top-1/2 z-10 grid size-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full focus-visible:outline-2 focus-visible:outline-brand-600"
-              style={{ left: `${percentOf(stop.startMinute, range)}%` }}
-            >
-              <span
-                aria-hidden
-                className={cn(
-                  "block size-3 border-2 transition-transform group-hover:scale-125",
-                  trip?.lockedVehicleId ? "rounded-[2px]" : "rounded-full",
-                  isSelected && "scale-125 ring-2 ring-slate-900 ring-offset-1",
-                  !isSelected && isCompanion && "ring-2 ring-amber-400 ring-offset-1",
-                  !isSelected && !isCompanion && violating && "ring-2 ring-red-500 ring-offset-1",
-                  stop.completed && "opacity-60",
-                )}
-                style={
-                  cancelled
-                    ? { background: "rgb(203 213 225)", borderColor: "rgb(100 116 139)" }
-                    : pickup
-                      ? { background: row.color, borderColor: "#ffffff" }
-                      : { background: "#ffffff", borderColor: row.color }
-                }
-              />
-              {returnToCheck ? <ReturnToCheckMark className="absolute -top-1.5 -right-1" /> : null}
-            </button>
-          );
-        })}
+        ) : null}
 
         {!route && row.available && !compact ? (
           <span className="absolute inset-0 flex items-center justify-center">
@@ -376,19 +406,19 @@ const TimelineRow = memo(function TimelineRow({
         ) : null}
       </div>
 
-      <div role="cell" className={cn(STAT_CELL, "tabular")}>
+      <div role="gridcell" className={cn(zoomed ? "hidden" : STAT_CELL, "tabular")}>
         {route ? formatKmRounded(route.distanceKm) : null}
       </div>
-      <div role="cell" className={cn(STAT_CELL, "tabular")}>
+      <div role="gridcell" className={cn(zoomed ? "hidden" : STAT_CELL, "tabular")}>
         {route ? formatPercent(emptyRatio) : null}
       </div>
-      <div role="cell" className={cn(STAT_CELL, "tabular")}>
+      <div role="gridcell" className={cn(zoomed ? "hidden" : STAT_CELL, "tabular")}>
         {route ? formatEurosRounded(route.revenue) : null}
       </div>
-      <div role="cell" className={cn(STAT_CELL, "tabular", route && route.margin < 0 && "text-red-700")}>
+      <div role="gridcell" className={cn(zoomed ? "hidden" : STAT_CELL, "tabular", route && route.margin < 0 && "text-red-700")}>
         {route ? formatEurosRounded(route.margin) : null}
       </div>
-      <div role="cell" className={STAT_LAST_CELL}>
+      <div role="gridcell" className={zoomed ? "hidden" : STAT_LAST_CELL}>
         {route ? (
           <Badge tone={route.status === "VALIDATED" ? "success" : "info"}>{ROUTE_STATUS_LABELS[route.status]}</Badge>
         ) : null}
@@ -397,34 +427,168 @@ const TimelineRow = memo(function TimelineRow({
   );
 });
 
-/** "!" on the pickup of a return trip whose outbound leg was closed as patient absent. */
-function ReturnToCheckMark({ className }: { className?: string }) {
+type PinnedProps = {
+  tripIds: readonly string[];
+  trips: Record<string, TripView>;
+  geometry: Geometry;
+  waits: WaitWindows;
+  selectedTrip: TripView | null;
+  violationsByTrip: ReadonlyMap<string, ViolationView[]>;
+  openClusterKey: string | null;
+  onSelectTrip: (tripId: string) => void;
+  onOpenCluster: OpenCluster;
+};
+
+export const UNASSIGNED_ROW_ID = "a-placer";
+
+/**
+ * « À placer », pinned under the axis: each trip without a vehicle on the
+ * window where it must be served (drop-off before the appointment, pick-up
+ * after the session), so that a free slot of the same time is easy to spot.
+ */
+const PinnedUnassignedRow = memo(function PinnedUnassignedRow({
+  tripIds,
+  trips,
+  geometry,
+  waits,
+  selectedTrip,
+  violationsByTrip,
+  openClusterKey,
+  onSelectTrip,
+  onOpenCluster,
+}: PinnedProps) {
+  const { range } = geometry;
+  const layout = useMemo(() => {
+    const windows = tripIds.flatMap((id) => {
+      const trip = trips[id];
+      const slot = trip ? unassignedWindow(trip, waits) : null;
+      return slot ? [{ tripId: id, from: slot.start, to: slot.end }] : [];
+    });
+    const { lanes, count } = assignLanes(windows);
+    // Two lanes at most: more trips at the same time share the second one (their targets are merged).
+    const blocks = windows
+      .map((w, i) => ({ ...w, lane: Math.min(lanes[i] ?? 0, 1) }))
+      .sort((a, b) => a.from - b.from || a.lane - b.lane);
+    return { blocks, lanes: Math.min(count, 2), crowded: count > 2 };
+  }, [tripIds, trips, waits]);
+  const mark = selectedTrip && selectedTrip.vehicleId === null ? appointmentMark(selectedTrip) : null;
+  const missing = tripIds.length - layout.blocks.length;
+
   return (
-    <span
-      aria-hidden
-      className={cn(
-        "grid size-3 place-items-center rounded-full bg-red-600 text-[8px] leading-none font-bold text-white ring-1 ring-white",
-        className,
-      )}
+    <div
+      role="row"
+      data-pinned-row
+      aria-label={`À placer, ${pluralize(tripIds.length, "course sans véhicule", "courses sans véhicule")}`}
+      {...{ [ROVING_ROW]: "" }}
+      className={cn(ROW, "sticky z-[27] border-b border-amber-200 bg-amber-50 text-xs text-slate-700")}
+      style={{ top: AXIS_PX, height: PINNED_ROW_PX }}
     >
-      !
-    </span>
+      <div role="rowheader" className="sticky left-0 z-[22] flex min-w-0 items-center bg-amber-50 pl-3 pr-3">
+        <p
+          className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-amber-900"
+          title="Le créneau où chaque course sans véhicule doit être servie : arrivée avant le RDV (aller), prise en charge après la séance (retour)"
+        >
+          À placer
+          <span className="tabular rounded-full bg-white px-1.5 text-xs font-medium ring-1 ring-amber-300">
+            {tripIds.length}
+            <span className="sr-only"> {tripIds.length > 1 ? "courses sans véhicule" : "course sans véhicule"}</span>
+          </span>
+          <span className="truncate text-xs font-normal text-amber-900/80">
+            {missing > 0 ? `dont ${missing} sans horaire` : "créneau à servir"}
+          </span>
+        </p>
+      </div>
+      <div
+        role="gridcell"
+        aria-label={`Courses à placer : ${pluralize(tripIds.length, "course")}`}
+        className="relative my-0.5 h-6 self-center overflow-hidden rounded bg-white/70"
+      >
+        <div aria-hidden className="pointer-events-none absolute inset-0" style={gridLines(range, geometry.gridStep)} />
+        <TrackTrips
+          rowId={UNASSIGNED_ROW_ID}
+          blocks={layout.blocks}
+          lanes={layout.lanes}
+          mergeTargets={layout.crowded}
+          trips={trips}
+          range={range}
+          pxPerMin={geometry.pxPerMin}
+          minMinutes={geometry.minMinutes}
+          compact
+          color={null}
+          selectedTripId={selectedTrip?.id ?? null}
+          companionIds={NO_COMPANIONS}
+          violationsByTrip={violationsByTrip}
+          mark={mark}
+          openClusterKey={openClusterKey}
+          onSelectTrip={onSelectTrip}
+          onOpenCluster={onOpenCluster}
+        />
+      </div>
+    </div>
+  );
+});
+
+/** The visible part of the scrolling box left free by its pinned parts (axis, « À placer », depot header, vehicle column). */
+function revealInBox(scroller: HTMLElement, element: HTMLElement) {
+  const box = scroller.getBoundingClientRect();
+  const row = element.closest<HTMLElement>("[role='row']");
+  if (row && !row.hasAttribute("data-pinned-row") && !row.hasAttribute("data-timeline-axis")) {
+    const axis = scroller.querySelector<HTMLElement>("[data-timeline-axis]")?.offsetHeight ?? 0;
+    const pinned = scroller.querySelector<HTMLElement>("[data-pinned-row]")?.offsetHeight ?? 0;
+    const groupHeader = row.hasAttribute("data-depot-header")
+      ? 0
+      : (row.closest("[data-depot-group]")?.querySelector<HTMLElement>("[data-depot-header]")?.offsetHeight ?? 0);
+    const rect = row.getBoundingClientRect();
+    const top = box.top + axis + pinned + groupHeader;
+    const bottom = box.top + scroller.clientHeight;
+    if (rect.top < top) scroller.scrollTop -= top - rect.top + 4;
+    else if (rect.bottom > bottom) scroller.scrollTop += Math.min(rect.bottom - bottom + 4, rect.top - top);
+  }
+  // Sideways (zoomed in): a trip of the track, not hidden under the vehicle column.
+  if (element.closest("[role='gridcell']")) {
+    const column = scroller.querySelector<HTMLElement>("[data-timeline-axis] [role='columnheader']")?.offsetWidth ?? 0;
+    const left = box.left + column;
+    const right = box.left + scroller.clientWidth;
+    const rect = element.getBoundingClientRect();
+    if (rect.left < left) scroller.scrollLeft -= left - rect.left + 8;
+    else if (rect.right > right) scroller.scrollLeft += Math.min(rect.right - right + 8, rect.left - left);
+  }
+}
+
+/** The zoom choice on the axis: a radio group (one Tab stop, arrows to change). */
+function ZoomChoice({ zoom, onChange }: { zoom: ZoomLevel; onChange: (zoom: ZoomLevel) => void }) {
+  const name = useId();
+  return (
+    <fieldset className="ml-auto flex shrink-0 rounded-md border border-slate-300 bg-white p-px normal-case tracking-normal">
+      <legend className="sr-only">Zoom de la frise</legend>
+      {ZOOM_LEVELS.map((level) => (
+        <label key={level} className="relative">
+          <input
+            type="radio"
+            name={name}
+            value={level}
+            checked={zoom === level}
+            onChange={() => onChange(level)}
+            className="peer absolute inset-0 cursor-pointer opacity-0"
+            aria-label={level === "day" ? "Journée entière" : `${ZOOM_LABELS[level]} à l'écran`}
+          />
+          <span
+            aria-hidden
+            className={cn(
+              "flex h-6 min-w-6 items-center justify-center rounded-[5px] px-1.5 text-xs font-medium",
+              "peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-brand-600",
+              zoom === level ? "bg-brand-700 text-white" : "text-slate-600 peer-hover:bg-slate-100",
+            )}
+          >
+            {ZOOM_LABELS[level]}
+          </span>
+        </label>
+      ))}
+    </fieldset>
   );
 }
 
-/**
- * Scrolls `row` into the visible part of `scroller`, below the pinned time axis
- * and depot header (never the page itself: the board fits the screen).
- */
-function revealRow(scroller: HTMLElement, row: HTMLElement) {
-  const axis = scroller.querySelector<HTMLElement>("[data-timeline-axis]")?.offsetHeight ?? 0;
-  const groupHeader = row.closest("[data-depot-group]")?.querySelector<HTMLElement>("[data-depot-header]")?.offsetHeight ?? 0;
-  const box = scroller.getBoundingClientRect();
-  const rect = row.getBoundingClientRect();
-  const top = box.top + axis + groupHeader;
-  if (rect.top < top) scroller.scrollTop -= top - rect.top + 4;
-  else if (rect.bottom > box.bottom) scroller.scrollTop += Math.min(rect.bottom - box.bottom + 4, rect.top - top);
-}
+type ClusterState = { rowId: string; key: string; tripIds: string[]; anchor: HTMLElement; from: number; to: number };
 
 export function Timeline({
   groups,
@@ -432,18 +596,42 @@ export function Timeline({
   range,
   selectedTripId,
   selectedVehicleId,
-  violatingTripIds,
+  violations = NO_VIOLATIONS,
+  colors,
+  unassignedTripIds = NO_IDS,
+  waitWindows = DEFAULT_WAITS,
   onSelectTrip,
   onSelectVehicle,
   collapsed,
   onToggleGroup,
   groupActions,
   compact = false,
+  zoom = "day",
+  onZoomChange,
   emptyText = "Aucun véhicule ne correspond aux filtres.",
   className,
 }: TimelineProps) {
   const scroller = useRef<HTMLDivElement>(null);
-  const ticks = hourTicks(range);
+  const grid = useRef<HTMLDivElement>(null);
+  const trackHeader = useRef<HTMLDivElement>(null);
+  const hintId = useId();
+  const [trackPx, setTrackPx] = useState(DEFAULT_TRACK_PX);
+  const [cluster, setCluster] = useState<ClusterState | null>(null);
+  const zoomed = zoom !== "day";
+  const spanMinutes = range.end - range.start;
+  const steps = axisSteps(range, zoom, trackPx / Math.max(1, spanMinutes));
+  const ticks = axisTicks(range, zoom, trackPx / Math.max(1, spanMinutes));
+  const geometry = useMemo<Geometry>(
+    () => ({
+      range,
+      pxPerMin: trackPx / Math.max(1, spanMinutes),
+      minMinutes: minutesForPx(MIN_TARGET_PX, trackPx, range),
+      compact,
+      zoomed,
+      gridStep: steps.grid,
+    }),
+    [range, trackPx, spanMinutes, compact, zoomed, steps.grid],
+  );
   const selectedTrip = selectedTripId ? (trips[selectedTripId] ?? null) : null;
   const relevantRows = new Set<string>();
   if (selectedTrip) {
@@ -453,39 +641,160 @@ export function Timeline({
       if (vehicleId) relevantRows.add(vehicleId);
     }
   }
+  const showPinned = unassignedTripIds.length > 0;
 
-  // Any selection (search, map, « À traiter », link) brings its row into view.
+  // The track's width in pixels: how many minutes 24 px cover (targets), whether initials fit.
+  useEffect(() => {
+    const element = trackHeader.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      const width = Math.round(entry?.contentRect.width ?? 0);
+      if (width > 0) setTrackPx((current) => (Math.abs(current - width) >= 4 ? width : current));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const reveal = useCallback((element: HTMLElement) => {
+    if (scroller.current) revealInBox(scroller.current, element);
+  }, []);
+  const roving = useRovingGrid(grid, { selectionKey: `${selectedTripId ?? ""}|${selectedVehicleId ?? ""}`, reveal });
+
+  /** Minute at the middle of the visible track, kept while scrolling: a zoom keeps it in the middle. */
+  const centerMinute = useRef<number | null>(null);
+  /** Where « Zoomer sur ce créneau » asked to look. */
+  const pendingCenter = useRef<number | null>(null);
+  const trackViewport = () => {
+    const box = scroller.current;
+    const column = box?.querySelector<HTMLElement>("[data-timeline-axis] [role='columnheader']")?.offsetWidth ?? 0;
+    return { box, column, width: (box?.clientWidth ?? 0) - column };
+  };
+  const onScroll = () => {
+    const { box, width } = trackViewport();
+    const track = trackHeader.current?.offsetWidth ?? 0;
+    if (!box || track <= 0) return;
+    centerMinute.current = range.start + ((box.scrollLeft + width / 2) / track) * spanMinutes;
+  };
+
+  // A new zoom keeps the same time in the middle (or the trip selected, or the slot asked for).
+  const lastZoom = useRef<ZoomLevel | null>(null);
+  useLayoutEffect(() => {
+    if (lastZoom.current === zoom) return;
+    const first = lastZoom.current === null;
+    lastZoom.current = zoom;
+    const { box, width } = trackViewport();
+    const track = trackHeader.current?.offsetWidth ?? 0;
+    if (!box || track <= 0) return;
+    if (zoom === "day") {
+      box.scrollLeft = 0;
+      return;
+    }
+    const trip = selectedTripId ? trips[selectedTripId] : undefined;
+    // The middle of the selected trip: its block, or its window when it has no vehicle.
+    const slot = trip && trip.vehicleId === null ? unassignedWindow(trip, waitWindows) : null;
+    const tripMinute = !trip
+      ? null
+      : slot
+        ? (slot.start + slot.end) / 2
+        : trip.plannedPickupMinute !== null && trip.plannedDropoffMinute !== null
+          ? (trip.plannedPickupMinute + trip.plannedDropoffMinute) / 2
+          : (trip.plannedPickupMinute ?? trip.appointmentMinute ?? trip.readyMinute);
+    const minute = pendingCenter.current ?? (first ? tripMinute : (centerMinute.current ?? tripMinute));
+    pendingCenter.current = null;
+    if (minute === null || minute === undefined) return;
+    box.scrollLeft = Math.max(0, ((minute - range.start) / spanMinutes) * track - width / 2);
+    centerMinute.current = minute;
+    // Only when the zoom changes: the selection's own effect below moves the box otherwise.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoom]);
+
+  // Any selection (search, map, « À traiter », link) brings its row, and its trip when zoomed in, into view.
   useEffect(() => {
     const box = scroller.current;
-    if (!box || !selectedVehicleId) return;
-    const row = Array.from(box.querySelectorAll<HTMLElement>("[data-vehicle-id]")).find((r) => r.dataset.vehicleId === selectedVehicleId);
-    if (row) revealRow(box, row);
+    if (!box || (!selectedVehicleId && !selectedTripId)) return;
+    const rows = Array.from(box.querySelectorAll<HTMLElement>("[data-vehicle-id]"));
+    const row = rows.find((r) => r.dataset.vehicleId === selectedVehicleId);
+    if (row) revealInBox(box, row);
+    if (selectedTripId) {
+      const target = Array.from(box.querySelectorAll<HTMLElement>("[data-trip-ids]")).find((t) =>
+        (t.dataset.tripIds ?? "").split(" ").includes(selectedTripId),
+      );
+      if (target) revealInBox(box, target);
+    }
   }, [selectedVehicleId, selectedTripId, compact]);
 
+  const clusterRef = useRef<ClusterState | null>(null);
+  useLayoutEffect(() => {
+    clusterRef.current = cluster;
+  }, [cluster]);
+  const openCluster = useCallback<OpenCluster>(({ key, tripIds, anchor, from, to }) => {
+    const rowId = anchor.closest<HTMLElement>("[data-vehicle-id]")?.dataset.vehicleId ?? UNASSIGNED_ROW_ID;
+    setCluster(clusterRef.current?.key === key ? null : { rowId, key, tripIds, anchor, from, to });
+  }, []);
+  const closeCluster = useCallback((restoreFocus: boolean) => {
+    const anchor = clusterRef.current?.anchor;
+    setCluster(null);
+    if (restoreFocus && anchor?.isConnected) anchor.focus({ preventScroll: true });
+  }, []);
+  const clusterEntries = useMemo(() => {
+    if (!cluster) return [];
+    return cluster.tripIds.map((id) => {
+      const trip = trips[id];
+      if (trip && trip.vehicleId === null) {
+        const slot = unassignedWindow(trip, waitWindows);
+        return { tripId: id, from: slot?.start ?? 0, to: slot?.end ?? 0 };
+      }
+      return { tripId: id, from: trip?.plannedPickupMinute ?? 0, to: trip?.plannedDropoffMinute ?? 0 };
+    });
+  }, [cluster, trips, waitWindows]);
+  const violatingTripIds = useMemo(() => new Set(violations.byTrip.keys()), [violations]);
+  const nextZoom = zoomIn(zoom);
+
+  const pinnedPx = showPinned ? PINNED_ROW_PX : 0;
+  const gridStyle = zoomed ? ({ "--track-w": `calc((100cqw - 14rem) * ${zoomFactor(range, zoom)})` } as CSSProperties) : undefined;
+
   return (
-    // @container: the column layout follows the card width (see TABLE_GRID).
-    <div ref={scroller} className={cn("@container relative overflow-auto overscroll-contain", className)}>
-      <div role="table" aria-label="Frise des tournées par véhicule" className={TABLE_GRID}>
+    // @container: the column layout follows the card width (see DAY_GRID).
+    <div
+      ref={scroller}
+      onScroll={zoomed ? onScroll : undefined}
+      className={cn("@container relative overflow-auto overscroll-contain", className)}
+    >
+      <p id={hintId} className="sr-only">
+        Flèches haut et bas : véhicule précédent ou suivant ; gauche et droite : course précédente ou suivante ; Entrée :
+        sélectionner ; Échap : désélectionner.
+      </p>
+      <div
+        ref={grid}
+        role="grid"
+        aria-label="Frise des tournées par véhicule"
+        aria-describedby={hintId}
+        className={zoomed ? ZOOMED_GRID : DAY_GRID}
+        style={gridStyle}
+        onKeyDown={roving.onKeyDown}
+        onFocus={roving.onFocus}
+      >
         <div
           role="row"
           data-timeline-axis
           className={cn(ROW, "sticky top-0 z-30 h-8 border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600")}
         >
-          <div role="columnheader" className="sticky left-0 z-20 flex items-center bg-slate-50 px-3 uppercase tracking-wide">
-            Véhicule
+          <div role="columnheader" className="sticky left-0 z-[22] flex items-center gap-2 bg-slate-50 pr-1 pl-3 uppercase tracking-wide">
+            <span>Véhicule</span>
+            {onZoomChange ? <ZoomChoice zoom={zoom} onChange={onZoomChange} /> : null}
           </div>
-          <div role="columnheader" className="relative h-8">
+          <div role="columnheader" ref={trackHeader} className="relative h-8">
             <span className="sr-only">
               Frise de {formatMinute(range.start)} à {formatMinute(range.end)}
             </span>
-            {ticks.map((m) => {
-              const left = percentOf(m, range);
+            {ticks.map((tick) => {
+              const left = percentOf(tick.minute, range);
               // Labels stay inside the axis: the first one starts at the edge instead of hiding under the
               // pinned vehicle column, the one at the very end (no room left) is not labelled.
               if (left >= 100) return null;
               return (
                 <span
-                  key={m}
+                  key={tick.minute}
                   aria-hidden
                   className={cn(
                     "tabular absolute top-1/2 -translate-y-1/2 text-[11px] font-medium whitespace-nowrap text-slate-500",
@@ -493,20 +802,33 @@ export function Timeline({
                   )}
                   style={{ left: `${left}%` }}
                 >
-                  {Math.floor(m / 60) % 24} h
+                  {tick.label}
                 </span>
               );
             })}
           </div>
           {STAT_HEADERS.map((label) => (
-            <div key={label} role="columnheader" className={cn(STAT_CELL, "uppercase tracking-wide")}>
+            <div key={label} role="columnheader" className={cn(zoomed ? "hidden" : STAT_CELL, "uppercase tracking-wide")}>
               {label}
             </div>
           ))}
-          <div role="columnheader" className={cn(STAT_LAST_CELL, "uppercase tracking-wide")}>
+          <div role="columnheader" className={cn(zoomed ? "hidden" : STAT_LAST_CELL, "uppercase tracking-wide")}>
             Statut
           </div>
         </div>
+        {showPinned ? (
+          <PinnedUnassignedRow
+            tripIds={unassignedTripIds}
+            trips={trips}
+            geometry={geometry}
+            waits={waitWindows}
+            selectedTrip={selectedTrip && selectedTrip.vehicleId === null ? selectedTrip : null}
+            violationsByTrip={violations.byTrip}
+            openClusterKey={cluster?.rowId === UNASSIGNED_ROW_ID ? cluster.key : null}
+            onSelectTrip={onSelectTrip}
+            onOpenCluster={openCluster}
+          />
+        ) : null}
         {groups.map((group) => {
           const folded = collapsed?.has(group.id) === true && !group.rows.some((r) => r.id === selectedVehicleId);
           const bodyId = `depot-group-${group.id}`;
@@ -514,13 +836,17 @@ export function Timeline({
             <div key={group.id} role="rowgroup" data-depot-group={group.id} className="col-span-full grid grid-cols-subgrid">
               <div
                 role="row"
+                aria-label={`Dépôt ${group.label}, ${pluralize(group.fleet, "véhicule")}${folded ? ", replié" : ""}`}
                 data-depot-header
-                className={cn(ROW, "sticky top-8 z-[25] border-b border-slate-200 bg-slate-100/95 text-xs text-slate-700")}
+                {...{ [ROVING_ROW]: "" }}
+                className={cn(ROW, "sticky z-[25] border-b border-slate-200 bg-slate-100/95 text-xs text-slate-700")}
+                style={{ top: AXIS_PX + pinnedPx }}
               >
                 <div role="rowheader" className="col-span-full">
                   <div className="sticky left-0 flex w-fit max-w-full flex-wrap items-center gap-x-3 gap-y-0.5 px-2 py-1">
                     <button
                       type="button"
+                      tabIndex={-1}
                       onClick={() => onToggleGroup?.(group.id)}
                       aria-expanded={!folded}
                       aria-controls={bodyId}
@@ -562,13 +888,16 @@ export function Timeline({
                       key={row.id}
                       row={row}
                       trips={trips}
-                      range={range}
+                      geometry={geometry}
+                      color={colors?.get(row.id) ?? (row.route ? row.color : IDLE_VEHICLE_COLOR)}
                       selected={row.id === selectedVehicleId}
                       selectedTrip={relevantRows.has(row.id) ? selectedTrip : null}
-                      violatingTripIds={violatingTripIds}
+                      violationsByTrip={violations.byTrip}
+                      rowViolations={violations.byVehicle.get(row.id)}
+                      openClusterKey={cluster?.rowId === row.id ? cluster.key : null}
                       onSelectTrip={onSelectTrip}
                       onSelectVehicle={onSelectVehicle}
-                      compact={compact}
+                      onOpenCluster={openCluster}
                     />
                   ))}
                 </div>
@@ -578,55 +907,115 @@ export function Timeline({
         })}
         {groups.length === 0 ? (
           <div role="row" className={ROW}>
-            <div role="cell" className="col-span-full px-4 py-8 text-center text-sm text-slate-500">
+            <div role="gridcell" className="col-span-full px-4 py-8 text-center text-sm text-slate-500">
               {emptyText}
             </div>
           </div>
         ) : null}
       </div>
+      {cluster ? (
+        <ClusterPopover
+          anchor={cluster.anchor}
+          title={`${cluster.tripIds.length} courses de ${formatMinute(cluster.from)} à ${formatMinute(cluster.to)}`}
+          entries={clusterEntries}
+          trips={trips}
+          violatingTripIds={violatingTripIds}
+          selectedTripId={selectedTripId}
+          canZoom={nextZoom !== null && onZoomChange !== undefined}
+          onSelect={onSelectTrip}
+          onZoom={() => {
+            if (!nextZoom || !onZoomChange) return;
+            pendingCenter.current = (cluster.from + cluster.to) / 2;
+            // Straight to the closest zoom: the trips of a « +3 » are minutes apart.
+            onZoomChange("2h");
+          }}
+          onClose={closeCluster}
+        />
+      ) : null}
     </div>
   );
 }
 
 /** Key to the timeline symbols; the "return to check" mark only when the day has one. */
 export function TimelineLegend({ showReturnToCheck = false }: { showReturnToCheck?: boolean }) {
-  const item = "inline-flex items-center gap-1.5";
+  const item = "flex items-center gap-2";
+  const block = "inline-flex h-3.5 w-8 shrink-0 items-center justify-center rounded-[3px] text-[9px] leading-none font-semibold";
   return (
-    <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600" aria-label="Légende de la frise">
+    <ul className="grid gap-y-1.5 text-xs text-slate-600" aria-label="Légende de la frise">
       <li className={item}>
-        <span aria-hidden className="h-2 w-6 rounded-full bg-slate-300" /> À vide
+        <span aria-hidden className={cn(block, "bg-blue-600 text-white")}>
+          MA
+        </span>
+        Course : de la prise en charge à la dépose (initiales du patient)
       </li>
       <li className={item}>
-        <span aria-hidden className="h-2 w-6 rounded-full bg-slate-700" /> 1 patient
+        <span aria-hidden className={cn(block, "text-white")} style={{ backgroundColor: "#2563eb", backgroundImage: SHARED_STRIPES }} />
+        Course partagée (deux patients à bord)
       </li>
       <li className={item}>
-        <span
-          aria-hidden
-          className="h-2 w-6 rounded-full"
-          style={{ backgroundImage: "repeating-linear-gradient(135deg, #1e293b 0 4px, #475569 4px 7px)" }}
-        />{" "}
-        2 patients (partagé)
+        <span aria-hidden className={cn(block, "border-l-[3px] border-slate-900 bg-blue-600")} />
+        Course figée sur son véhicule
       </li>
       <li className={item}>
-        <span aria-hidden className="size-3 rounded-full border-2 border-white bg-slate-700 ring-1 ring-slate-300" /> Prise en charge
+        <span aria-hidden className="inline-flex h-4 w-8 shrink-0 items-center justify-center">
+          <span className="inline-flex h-4 items-center rounded-full bg-white px-1 text-[10px] font-bold text-slate-800 ring-1 ring-slate-400">+3</span>
+        </span>
+        Courses rapprochées : la pastille ouvre leur liste
       </li>
       <li className={item}>
-        <span aria-hidden className="size-3 rounded-full border-2 border-slate-700 bg-white" /> Dépose
+        <span aria-hidden className={cn(block, "border-[1.5px] border-dashed border-amber-700 bg-amber-100")} />
+        À placer : créneau où la course sans véhicule doit être servie
       </li>
       <li className={item}>
-        <span aria-hidden className="size-3 rounded-[2px] border-2 border-white bg-slate-700 ring-1 ring-slate-300" /> Course figée
+        <span aria-hidden className="h-3.5 w-8 shrink-0 rounded-sm" style={FREE_SLOT_STYLE} />
+        Créneau libre de 30 min ou plus
       </li>
       <li className={item}>
-        <span aria-hidden className="h-3 w-6 rounded bg-amber-100 ring-1 ring-inset ring-amber-300" /> Pause
+        <span aria-hidden className="relative inline-flex h-4 w-8 shrink-0 justify-center">
+          <span className="h-4 border-l-2 border-slate-900" />
+        </span>
+        RDV de la course sélectionnée
       </li>
       <li className={item}>
-        <span aria-hidden className="h-3 w-6 rounded ring-1 ring-inset ring-slate-200" style={OFF_SHIFT_STYLE} /> Hors horaires
+        <span aria-hidden className="relative inline-flex h-4 w-8 shrink-0 items-center justify-center">
+          <span className="h-4 border-l-2 border-dashed border-amber-600" />
+          <TriangleAlert className="absolute right-0 size-3 text-amber-700" strokeWidth={2.5} />
+        </span>
+        Moins de 5 min de marge avant le RDV
+      </li>
+      <li className={item}>
+        <span aria-hidden className="relative inline-flex h-4 w-8 shrink-0 items-center">
+          <span className={cn(block, "w-6 bg-blue-600 outline-2 outline-offset-1 outline-slate-900 outline-dashed")} />
+          <span className="absolute right-0 -top-0.5 grid size-3.5 place-items-center rounded-full bg-slate-900 text-amber-300">
+            <TriangleAlert className="size-2.5" strokeWidth={3} />
+          </span>
+        </span>
+        Violation (pointillé et pastille) ; sur la ligne : nombre de violations
+      </li>
+      <li className={item}>
+        <span aria-hidden className="inline-flex h-4 w-8 shrink-0 items-center">
+          <span className="h-0.5 w-8 rounded-full bg-slate-300" />
+        </span>
+        Tournée : départ et retour au dépôt
+      </li>
+      <li className={item}>
+        <span aria-hidden className="h-3.5 w-8 shrink-0 rounded bg-amber-100 ring-1 ring-inset ring-amber-300" /> Pause
+      </li>
+      <li className={item}>
+        <span aria-hidden className="h-3.5 w-8 shrink-0 rounded ring-1 ring-inset ring-slate-200" style={OFF_SHIFT_STYLE} /> Hors horaires
       </li>
       {showReturnToCheck ? (
         <li className={cn(item, "font-medium text-red-800")}>
-          <ReturnToCheckMark /> Retour à vérifier (aller : patient absent)
+          <span aria-hidden className="inline-flex w-8 shrink-0 justify-center">
+            <ReturnToCheckMark />
+          </span>
+          Retour à vérifier (aller : patient absent)
         </li>
       ) : null}
+      <li className="text-slate-500">
+        Couleur : celle du véhicule, la même sur la carte. Le type (taxi, VSL, ambulance) est dans le nom ou la pastille du
+        véhicule.
+      </li>
     </ul>
   );
 }

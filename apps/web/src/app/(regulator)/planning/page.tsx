@@ -148,7 +148,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
           description={headerDescription(view, availableVehicles)}
           actions={
             <>
-              <DateNav date={date} tomorrow={tomorrow} keepParams={FILTER_PARAMS} />
+              <DateNav date={date} tomorrow={tomorrow} keepParams={FILTER_PARAMS} shortcuts />
               <LinkButton href={`/equipages?date=${date}`} variant="ghost" title="Équipages de ce jour : absences, remplaçants, équipages fixés">
                 Équipages
               </LinkButton>
@@ -236,6 +236,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
               vehicleIssues={view.vehicleIssues}
               droppedLocks={view.droppedLocks}
               timeRange={view.timeRange}
+              waitWindows={view.waitWindows}
               planned={hasRoutes}
               kpis={view.kpis}
               unplannedNote={

@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useId, useState, type ReactNode } from "react";
-import { Ambulance, ExternalLink, ListChecks, Lock, LockOpen, MoveRight, Phone, UserRound, UserX, X } from "lucide-react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Ambulance, ExternalLink, ListChecks, Lock, LockOpen, MoveRight, Phone, TriangleAlert, UserRound, UserX, X } from "lucide-react";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
@@ -11,6 +11,8 @@ import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_LABEL } from "@/lib/domain/no
 import { exceptionalAmbulanceIssue, OPTIMIZE_FIRST_ISSUE } from "@/lib/planning/exceptional-ambulance";
 import { fieldRecordLabel, fieldRecordText, sharingAnswerText } from "@/lib/planning/format";
 import { coursesTripHref, patientHref, telHref } from "@/lib/planning/links";
+import { isShortcutKey } from "@/lib/planning/shortcuts";
+import { appointmentMark, TIGHT_MARGIN_MIN } from "@/lib/planning/timeline-layout";
 import type { TripView, VehicleRowView, ViolationView } from "@/lib/planning/types";
 import {
   DIRECTION_LABELS,
@@ -91,6 +93,25 @@ export function TripPanel({
   const ambulanceSelectId = useId();
   const [target, setTarget] = useState("");
   const [ambulance, setAmbulance] = useState("");
+  const lockButton = useRef<HTMLButtonElement>(null);
+  const moveSelect = useRef<HTMLSelectElement>(null);
+
+  // « F »: Figer / Défiger, « D »: « Déplacer vers… » (the same controls, so the same rules and confirmations).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!isShortcutKey(e)) return;
+      const key = e.key.toLowerCase();
+      if (key === "f" && lockButton.current && !lockButton.current.disabled) {
+        e.preventDefault();
+        lockButton.current.click();
+      } else if (key === "d" && moveSelect.current && !moveSelect.current.disabled) {
+        e.preventDefault();
+        moveSelect.current.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const vehicleById = new Map(vehicles.map((v) => [v.id, v]));
   const current = trip.vehicleId ? vehicleById.get(trip.vehicleId) : undefined;
@@ -107,6 +128,7 @@ export function TripPanel({
       ? "Course déjà commencée."
       : (replanBlocked ?? optimizerOffline);
   const outbound = trip.direction === "OUTBOUND";
+  const mark = trip.vehicleId ? appointmentMark(trip) : null;
   // « Recours exceptionnel » (TAR-03): only for a seated trip the last optimization left without a vehicle, never
   // proposed by the optimizer itself. Before that computation, the panel says to optimize first.
   const exceptionalCandidate = { status: trip.status, payer: trip.payer, allowedVehicleTypes: trip.allowedVehicleTypes, assigned: false };
@@ -198,8 +220,10 @@ export function TripPanel({
           </p>
           {trip.lockedVehicleId ? (
             <Button
+              ref={lockButton}
               size="sm"
               variant="secondary"
+              aria-keyshortcuts="F"
               disabled={busy || lockBlocked !== null}
               onClick={() => run("Défigeage de la course…", () => unlockTrip(trip.id))}
               title={
@@ -214,8 +238,10 @@ export function TripPanel({
             </Button>
           ) : trip.vehicleId && !cancelled ? (
             <Button
+              ref={lockButton}
               size="sm"
               variant="secondary"
+              aria-keyshortcuts="F"
               disabled={busy || lockBlocked !== null}
               onClick={() => run("Verrouillage de la course…", () => lockTrip(trip.id, trip.vehicleId ?? ""))}
               title={lockBlocked ?? "La course restera sur ce véhicule à la prochaine optimisation"}
@@ -241,7 +267,9 @@ export function TripPanel({
           </label>
           <div className="flex gap-2">
             <Select
+              ref={moveSelect}
               id={selectId}
+              aria-keyshortcuts="D"
               value={targetValid ? target : ""}
               onChange={(e) => setTarget(e.currentTarget.value)}
               disabled={busy || moveBlocked !== null || options.length === 0}
@@ -352,6 +380,18 @@ export function TripPanel({
         <div className="py-1">
           <Row label={outbound ? "Rendez-vous" : "Fin de séance"}>
             <span className="tabular font-medium">{formatMinute(outbound ? trip.appointmentMinute : trip.readyMinute)}</span>
+            {mark?.kind === "appointment" && mark.marginMin !== null ? (
+              mark.tight ? (
+                <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-amber-800">
+                  <TriangleAlert aria-hidden className="size-3.5 shrink-0" />
+                  {mark.marginMin < 0
+                    ? `Dépose ${formatDuration(-mark.marginMin)} après le RDV`
+                    : `Marge de ${formatDuration(mark.marginMin)} avant le RDV (moins de ${TIGHT_MARGIN_MIN} min)`}
+                </span>
+              ) : (
+                <span className="text-slate-500"> · marge {formatDuration(mark.marginMin)}</span>
+              )
+            ) : null}
           </Row>
           <Row label="Prise en charge prévue">
             <span className="tabular">{formatMinute(trip.plannedPickupMinute)}</span>

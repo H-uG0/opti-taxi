@@ -1,12 +1,13 @@
 /**
  * Filters of the planning timeline at fleet scale (120 vehicles, 6 depots):
  * depots, vehicle types, vehicle states, « masquer les libres », collapsed
- * depot groups and density. Kept in the URL (?depot=…&type=…) so that each
- * depot regulator keeps a bookmark; the KPI strip and the map follow the same
- * filter. Pure: no React, no database.
+ * depot groups, density, zoom and what the map shows. Kept in the URL
+ * (?depot=…&type=…) so that each depot regulator keeps a bookmark; the KPI
+ * strip and the map follow the same filter. Pure: no React, no database.
  */
 import type { VehicleType } from "@prisma/client";
 import { computeDayKpis as computeDashboardDayKpis, type KpiRoute, type KpiTrip } from "@/lib/kpis";
+import type { ZoomLevel } from "./timeline-layout";
 import type { DayKpis, TripView, VehicleRowView, ViolationView } from "./types";
 
 /** route: has a route; free: available without one; off: off the road that day; issue: something to handle (« À traiter »). */
@@ -25,17 +26,36 @@ export type PlanningFilter = {
   collapsed: string[];
   /** Compact density: 28 px rows on one line. */
   compact: boolean;
+  /** Time shown in the visible part of the timeline: the whole day, 4 h or 2 h (scrolling sideways). */
+  zoom: ZoomLevel;
+  /** The map shows only the selected trip or vehicle (« Sélection seule »). */
+  mapSelectionOnly: boolean;
 };
 
-export const EMPTY_FILTER: PlanningFilter = { depots: [], types: [], states: [], hideFree: false, collapsed: [], compact: false };
+export const EMPTY_FILTER: PlanningFilter = {
+  depots: [],
+  types: [],
+  states: [],
+  hideFree: false,
+  collapsed: [],
+  compact: false,
+  zoom: "day",
+  mapSelectionOnly: false,
+};
 
 /** Query parameters owned by the filter (DateNav keeps them when the date changes). */
-export const FILTER_PARAMS = ["depot", "type", "etat", "masquer", "replie", "densite"] as const;
+export const FILTER_PARAMS = ["depot", "type", "etat", "masquer", "replie", "densite", "zoom", "carte"] as const;
+
+/** How the view is drawn, not which vehicles: kept by « Réinitialiser les filtres ». */
+export function viewOptions(filter: PlanningFilter): Pick<PlanningFilter, "collapsed" | "compact" | "zoom" | "mapSelectionOnly"> {
+  return { collapsed: filter.collapsed, compact: filter.compact, zoom: filter.zoom, mapSelectionOnly: filter.mapSelectionOnly };
+}
 
 const TYPE_PARAM: Record<VehicleType, string> = { TAXI: "taxi", VSL: "vsl", AMBULANCE: "ambulance" };
 const STATE_PARAM: Record<VehicleState, string> = { route: "tournee", free: "libre", off: "indisponible", issue: "a-traiter" };
 const TYPE_ORDER: VehicleType[] = ["TAXI", "VSL", "AMBULANCE"];
 const STATE_ORDER: VehicleState[] = ["route", "free", "off", "issue"];
+const ZOOM_PARAM: readonly ZoomLevel[] = ["4h", "2h"];
 
 export const VEHICLE_STATE_LABELS: Record<VehicleState, string> = {
   route: "Avec tournée",
@@ -77,6 +97,8 @@ export function parseFilter(params: ParamSource): PlanningFilter {
     hideFree: list(read(params, "masquer")).includes("libres"),
     collapsed: list(read(params, "replie")),
     compact: read(params, "densite") === "compacte",
+    zoom: ZOOM_PARAM.find((z) => z === read(params, "zoom")) ?? "day",
+    mapSelectionOnly: read(params, "carte") === "selection",
   };
 }
 
@@ -102,11 +124,13 @@ export function filterQuery(current: URLSearchParams, filter: PlanningFilter): s
   if (filter.hideFree) next.set("masquer", "libres");
   if (filter.collapsed.length > 0) next.set("replie", filter.collapsed.join(","));
   if (filter.compact) next.set("densite", "compacte");
+  if (filter.zoom !== "day") next.set("zoom", filter.zoom);
+  if (filter.mapSelectionOnly) next.set("carte", "selection");
   const text = next.toString();
   return text ? `?${text}` : "";
 }
 
-/** True when the filter hides vehicles (folding a group or the density does not). */
+/** True when the filter hides vehicles (folding a group, the density, the zoom or the map's mode do not). */
 export function isFiltering(filter: PlanningFilter): boolean {
   return filter.depots.length > 0 || filter.types.length > 0 || filter.states.length > 0 || filter.hideFree;
 }

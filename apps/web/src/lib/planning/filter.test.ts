@@ -4,6 +4,7 @@ import {
   depotChoices,
   depotGroupViews,
   EMPTY_FILTER,
+  viewOptions,
   filterQuery,
   filterRows,
   groupByDepot,
@@ -21,9 +22,11 @@ import { computeDayKpis, type KpiRouteSource, type KpiTripSource } from "./view"
 const NONE = new Set<string>();
 
 describe("filter in the URL", () => {
-  it("reads depots, types, states, « masquer les libres », folded groups and density", () => {
+  it("reads depots, types, states, « masquer les libres », folded groups, density, zoom and the map's mode", () => {
     const filter = parseFilter(
-      new URLSearchParams("date=2026-11-10&depot=d1,d2,d1&type=taxi,ambulance,bus&etat=libre,a-traiter&masquer=libres&replie=d2&densite=compacte"),
+      new URLSearchParams(
+        "date=2026-11-10&depot=d1,d2,d1&type=taxi,ambulance,bus&etat=libre,a-traiter&masquer=libres&replie=d2&densite=compacte&zoom=4h&carte=selection",
+      ),
     );
     expect(filter).toEqual({
       depots: ["d1", "d2"],
@@ -32,7 +35,10 @@ describe("filter in the URL", () => {
       hideFree: true,
       collapsed: ["d2"],
       compact: true,
+      zoom: "4h",
+      mapSelectionOnly: true,
     });
+    expect(parseFilter(new URLSearchParams("zoom=1h&carte=tout"))).toEqual(EMPTY_FILTER);
     expect(parseFilter({})).toEqual(EMPTY_FILTER);
     // A record of the page's searchParams works too (first value of a repeated key).
     expect(parseFilter({ type: ["vsl", "taxi"], depot: "a b,<x>,ok" }).types).toEqual(["VSL"]);
@@ -41,9 +47,20 @@ describe("filter in the URL", () => {
 
   it("writes the filter back, keeping the date and the trip, and round-trips", () => {
     const current = new URLSearchParams("date=2026-11-10&trip=t1&depot=old");
-    const filter = { ...EMPTY_FILTER, depots: ["d1", "d2"], types: ["VSL" as const], states: ["off" as const], hideFree: true, compact: true };
+    const filter = {
+      ...EMPTY_FILTER,
+      depots: ["d1", "d2"],
+      types: ["VSL" as const],
+      states: ["off" as const],
+      hideFree: true,
+      compact: true,
+      zoom: "2h" as const,
+      mapSelectionOnly: true,
+    };
     const query = filterQuery(current, filter);
-    expect(query).toBe("?date=2026-11-10&trip=t1&depot=d1%2Cd2&type=vsl&etat=indisponible&masquer=libres&densite=compacte");
+    expect(query).toBe(
+      "?date=2026-11-10&trip=t1&depot=d1%2Cd2&type=vsl&etat=indisponible&masquer=libres&densite=compacte&zoom=2h&carte=selection",
+    );
     expect(parseFilter(new URLSearchParams(query))).toEqual(filter);
     expect(filterQuery(new URLSearchParams("depot=d1"), EMPTY_FILTER)).toBe("");
   });
@@ -53,8 +70,13 @@ describe("filter in the URL", () => {
     expect(sanitizeFilter(filter, new Set(["d1"]))).toEqual({ ...EMPTY_FILTER, depots: ["d1"], collapsed: [] });
     const same = { ...EMPTY_FILTER, depots: ["d1"] };
     expect(sanitizeFilter(same, new Set(["d1"]))).toBe(same);
-    expect(isFiltering({ ...EMPTY_FILTER, collapsed: ["d1"], compact: true })).toBe(false);
+    expect(isFiltering({ ...EMPTY_FILTER, collapsed: ["d1"], compact: true, zoom: "4h", mapSelectionOnly: true })).toBe(false);
     expect(isFiltering({ ...EMPTY_FILTER, hideFree: true })).toBe(true);
+  });
+
+  it("keeps the view options (folded groups, density, zoom, map) apart from the filter", () => {
+    const filter = { ...EMPTY_FILTER, depots: ["d1"], collapsed: ["d2"], compact: true, zoom: "4h" as const, mapSelectionOnly: true };
+    expect({ ...EMPTY_FILTER, ...viewOptions(filter) }).toEqual({ ...filter, depots: [] });
   });
 });
 

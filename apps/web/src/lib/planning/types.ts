@@ -273,6 +273,13 @@ export type PlanningDayView = {
   /** Run that produced the current routes (latest successful one). */
   planRun: RunView | null;
   timeRange: { start: number; end: number };
+  /**
+   * The optimizer's time windows (Paramètres): an outbound trip arrives at most
+   * `beforeAppointmentMin` before its appointment, a return trip is picked up at
+   * most `afterSessionMin` after the end of the session. The timeline draws a
+   * trip without a vehicle on that window.
+   */
+  waitWindows: { beforeAppointmentMin: number; afterSessionMin: number };
   /** True once a trip was picked up: re-planning is then disabled. */
   dayStarted: boolean;
   /** Solver budget of an optimization launched now, scaled with the trips it would send (effectiveTimeLimitSec). */

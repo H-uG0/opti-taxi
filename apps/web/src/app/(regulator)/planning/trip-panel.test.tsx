@@ -169,6 +169,30 @@ describe("TripPanel (panneau course)", () => {
     expect(actions.contains(moveSelect())).toBe(true);
   });
 
+  it("says the margin before the appointment, and flags it under 5 minutes", () => {
+    // RDV 07:30, dropped off at 07:20.
+    renderPanel(planningFixture().trips["trip-a"]!);
+    expect(screen.getByText(/· marge 10 min/)).toBeTruthy();
+    cleanup();
+    renderPanel({ ...planningFixture().trips["trip-a"]!, plannedDropoffMinute: 447 });
+    expect(screen.getByText("Marge de 3 min avant le RDV (moins de 5 min)")).toBeTruthy();
+    cleanup();
+    renderPanel({ ...planningFixture().trips["trip-a"]!, plannedDropoffMinute: 455 });
+    expect(screen.getByText("Dépose 5 min après le RDV")).toBeTruthy();
+  });
+
+  it("freezes with « F » and goes to « Déplacer vers… » with « D », not while typing", async () => {
+    renderPanel(planningFixture().trips["trip-a"]!);
+    fireEvent.keyDown(document.body, { key: "d" });
+    expect(document.activeElement).toBe(moveSelect());
+    // In the list, « f » is a letter for the list, not the shortcut.
+    fireEvent.keyDown(moveSelect(), { key: "f" });
+    expect(actions.lockTrip).not.toHaveBeenCalled();
+    fireEvent.keyDown(document.body, { key: "F" });
+    await waitFor(() => expect(actions.lockTrip).toHaveBeenCalledWith("trip-a", "taxi-1"));
+    expect(screen.getByRole("button", { name: /Figer/ }).getAttribute("aria-keyshortcuts")).toBe("F");
+  });
+
   it("closes from its button", () => {
     const { onClose } = renderPanel(planningFixture().trips["trip-a"]!);
     fireEvent.click(screen.getByRole("button", { name: "Fermer le détail de la course" }));

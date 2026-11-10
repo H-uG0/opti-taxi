@@ -10,6 +10,8 @@ export type MapStop = MapPoint & {
   kind: "PICKUP" | "DROPOFF";
   /** Hover text: time, kind, patient. */
   title: string;
+  /** The trip breaks a hard constraint (a warning sign next to its pick-up). */
+  violation?: boolean;
 };
 
 export type MapVehicle = {
@@ -27,6 +29,7 @@ export type MapTrip = {
   pickup: MapPoint;
   dropoff: MapPoint;
   vehicleId: string | null;
+  violation?: boolean;
 };
 
 type Position = [number, number];
@@ -36,6 +39,10 @@ export type Feature<G, P> = { type: "Feature"; geometry: G; properties: P };
 export type FeatureCollection<G, P> = { type: "FeatureCollection"; features: Array<Feature<G, P>> };
 
 const position = (p: MapPoint): Position => [p.lng, p.lat];
+
+function pointFeature<P>(p: MapPoint, properties: P): Feature<PointGeometry, P> {
+  return { type: "Feature", geometry: { type: "Point", coordinates: position(p) }, properties };
+}
 
 /** One straight-line polyline per route: depot -> stops -> depot. */
 export function routesCollection(
@@ -92,18 +99,60 @@ export function depotsCollection(
   };
 }
 
-/** Pick-up points of trips without a vehicle. */
-export function unassignedCollection(trips: MapTrip[]): FeatureCollection<PointGeometry, { tripId: string; title: string }> {
+/**
+ * Trips without a vehicle: a dashed line from the pick-up (filled diamond) to
+ * the drop-off (hollow diamond), unlike the routes' round stops.
+ */
+export function unassignedCollection(
+  trips: MapTrip[],
+): FeatureCollection<PointGeometry | LineGeometry, { tripId: string; title: string; role: "line" | "pickup" | "dropoff" }> {
   return {
     type: "FeatureCollection",
     features: trips
       .filter((t) => t.vehicleId === null)
-      .map((t) => ({
-        type: "Feature",
-        geometry: { type: "Point", coordinates: position(t.pickup) },
-        properties: { tripId: t.id, title: `${t.title} (non affectée)` },
-      })),
+      .flatMap((t) => {
+        const title = `${t.title} (à placer)`;
+        return [
+          {
+            type: "Feature" as const,
+            geometry: { type: "LineString" as const, coordinates: [position(t.pickup), position(t.dropoff)] },
+            properties: { tripId: t.id, title, role: "line" as const },
+          },
+          {
+            type: "Feature" as const,
+            geometry: { type: "Point" as const, coordinates: position(t.pickup) },
+            properties: { tripId: t.id, title: `Prise en charge · ${title}`, role: "pickup" as const },
+          },
+          {
+            type: "Feature" as const,
+            geometry: { type: "Point" as const, coordinates: position(t.dropoff) },
+            properties: { tripId: t.id, title: `Dépose · ${title}`, role: "dropoff" as const },
+          },
+        ];
+      }),
   };
+}
+
+/** A warning sign at the pick-up of each trip breaking a hard constraint (a shape, not the red of an ambulance). */
+export function violationsCollection(
+  vehicles: MapVehicle[],
+  trips: MapTrip[],
+): FeatureCollection<PointGeometry, { tripId: string; title: string }> {
+  const seen = new Set<string>();
+  const features: Array<Feature<PointGeometry, { tripId: string; title: string }>> = [];
+  for (const v of vehicles) {
+    for (const s of v.stops) {
+      if (!s.violation || s.kind !== "PICKUP" || seen.has(s.tripId)) continue;
+      seen.add(s.tripId);
+      features.push(pointFeature(s, { tripId: s.tripId, title: `Violation · ${s.title}` }));
+    }
+  }
+  for (const t of trips) {
+    if (!t.violation || t.vehicleId !== null || seen.has(t.id)) continue;
+    seen.add(t.id);
+    features.push(pointFeature(t.pickup, { tripId: t.id, title: `Violation · ${t.title}` }));
+  }
+  return { type: "FeatureCollection", features };
 }
 
 /** Selected trip: pick-up -> drop-off line and both end points. */
@@ -144,12 +193,17 @@ export function boundsOf(points: MapPoint[]): [Position, Position] | null {
   ];
 }
 
-/** Every point worth showing when nothing is selected. */
-export function allPoints(vehicles: MapVehicle[], trips: MapTrip[]): MapPoint[] {
+/**
+ * Every point worth showing when nothing is selected. Without
+ * `withUnassigned` (the map narrowed to depots), the trips without a vehicle
+ * stay on the map but out of the frame.
+ */
+export function allPoints(vehicles: MapVehicle[], trips: MapTrip[], withUnassigned = true): MapPoint[] {
+  const framed = withUnassigned || vehicles.length === 0 ? trips : trips.filter((t) => t.vehicleId !== null);
   return [
     ...vehicles.map((v) => v.depot),
     ...vehicles.flatMap((v) => v.stops),
-    ...trips.flatMap((t) => [t.pickup, t.dropoff]),
+    ...framed.flatMap((t) => [t.pickup, t.dropoff]),
   ];
 }
 

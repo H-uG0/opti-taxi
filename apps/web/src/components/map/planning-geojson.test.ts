@@ -9,6 +9,7 @@ import {
   shouldFitSelection,
   stopsCollection,
   unassignedCollection,
+  violationsCollection,
   type MapTrip,
   type MapVehicle,
 } from "./planning-geojson";
@@ -21,7 +22,7 @@ const vehicles: MapVehicle[] = [
     color: "#c27c0e",
     depot,
     stops: [
-      { tripId: "a", kind: "PICKUP", lat: 43.31, lng: 5.39, title: "07:00" },
+      { tripId: "a", kind: "PICKUP", lat: 43.31, lng: 5.39, title: "07:00", violation: true },
       { tripId: "a", kind: "DROPOFF", lat: 43.52, lng: 5.44, title: "07:30" },
     ],
   },
@@ -29,7 +30,7 @@ const vehicles: MapVehicle[] = [
 ];
 const trips: MapTrip[] = [
   { id: "a", title: "A", pickup: { lat: 43.31, lng: 5.39 }, dropoff: { lat: 43.52, lng: 5.44 }, vehicleId: "v1" },
-  { id: "b", title: "B", pickup: { lat: 44.2, lng: 5.94 }, dropoff: { lat: 44.56, lng: 6.08 }, vehicleId: null },
+  { id: "b", title: "B", pickup: { lat: 44.2, lng: 5.94 }, dropoff: { lat: 44.56, lng: 6.08 }, vehicleId: null, violation: true },
 ];
 
 describe("planning map layers", () => {
@@ -45,12 +46,33 @@ describe("planning map layers", () => {
     expect(routes.features[0]?.properties).toEqual({ vehicleId: "v1", color: "#c27c0e", title: "Taxi 1" });
   });
 
-  it("lists stops, shared depots once, and unassigned pick-ups", () => {
+  it("lists stops and shared depots once", () => {
     expect(stopsCollection(vehicles).features.map((f) => f.properties.kind)).toEqual(["PICKUP", "DROPOFF"]);
     const depots = depotsCollection(vehicles);
     expect(depots.features).toHaveLength(1);
     expect(depots.features[0]?.properties.title).toBe("Dépôt Marseille : Taxi 1, Taxi 2");
-    expect(unassignedCollection(trips).features.map((f) => f.properties.tripId)).toEqual(["b"]);
+  });
+
+  it("draws a trip without a vehicle from its pick-up to its drop-off, unlike a route's stops", () => {
+    const unassigned = unassignedCollection(trips);
+    expect(unassigned.features.map((f) => [f.properties.tripId, f.properties.role, f.geometry.type])).toEqual([
+      ["b", "line", "LineString"],
+      ["b", "pickup", "Point"],
+      ["b", "dropoff", "Point"],
+    ]);
+    expect(unassigned.features[0]?.geometry.coordinates).toEqual([
+      [5.94, 44.2],
+      [6.08, 44.56],
+    ]);
+    expect(unassigned.features[1]?.properties.title).toBe("Prise en charge · B (à placer)");
+  });
+
+  it("puts a warning sign at the pick-up of each trip in violation, once", () => {
+    const signs = violationsCollection(vehicles, [...trips, { ...trips[0]!, violation: true }]);
+    expect(signs.features.map((f) => [f.properties.tripId, f.geometry.coordinates])).toEqual([
+      ["a", [5.39, 43.31]],
+      ["b", [5.94, 44.2]],
+    ]);
   });
 
   it("builds the selection and the bounds", () => {
@@ -61,6 +83,12 @@ describe("planning map layers", () => {
       [5.37, 43.3],
       [6.08, 44.56],
     ]);
+    // Narrowed to depots: the trips without a vehicle stay out of the frame (unless nothing else is shown).
+    expect(boundsOf(allPoints(vehicles, trips, false))).toEqual([
+      [5.37, 43.3],
+      [5.44, 43.52],
+    ]);
+    expect(allPoints([], trips, false)).toHaveLength(4);
   });
 });
 

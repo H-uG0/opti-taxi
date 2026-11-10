@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hexToRgb, shade, vehicleShade } from "./colors";
-import { coPassengers, computeTimeRange, DEFAULT_TIME_RANGE, hourTicks, percentOf, routeSegments } from "./timeline";
+import { coPassengers, computeTimeRange, DEFAULT_TIME_RANGE, percentOf } from "./timeline";
 
 type Kind = "PICKUP" | "DROPOFF";
 const stop = (sequence: number, tripId: string, kind: Kind, arrival: number, start: number, loadAfter: number) => ({
@@ -29,35 +29,11 @@ describe("computeTimeRange", () => {
     expect(computeTimeRange([{ shift: { start: 600, end: 700 }, route: null }])).toEqual({ start: 600, end: 960 });
   });
 
-  it("positions minutes as clamped percentages and lists hour ticks", () => {
+  it("positions minutes as clamped percentages", () => {
     const range = { start: 360, end: 1080 };
     expect(percentOf(720, range)).toBe(50);
     expect(percentOf(0, range)).toBe(0);
     expect(percentOf(2000, range)).toBe(100);
-    expect(hourTicks(range)).toHaveLength(13);
-    expect(hourTicks({ start: 300, end: 1260 })[1]).toBe(480);
-  });
-});
-
-describe("routeSegments", () => {
-  it("splits a route into driving, waiting and service pieces with the load on board", () => {
-    const segments = routeSegments({
-      startMinute: 400,
-      endMinute: 600,
-      stops: [stop(0, "a", "PICKUP", 420, 420, 1), stop(1, "b", "PICKUP", 440, 450, 2), stop(2, "a", "DROPOFF", 480, 480, 1), stop(3, "b", "DROPOFF", 500, 500, 0)],
-    });
-    expect(segments).toEqual([
-      { from: 400, to: 420, load: 0, kind: "drive" },
-      { from: 420, to: 425, load: 1, kind: "service" },
-      { from: 425, to: 440, load: 1, kind: "drive" },
-      { from: 440, to: 450, load: 1, kind: "wait" },
-      { from: 450, to: 455, load: 2, kind: "service" },
-      { from: 455, to: 480, load: 2, kind: "drive" },
-      { from: 480, to: 485, load: 2, kind: "service" },
-      { from: 485, to: 500, load: 1, kind: "drive" },
-      { from: 500, to: 505, load: 1, kind: "service" },
-      { from: 505, to: 600, load: 0, kind: "drive" },
-    ]);
   });
 });
 
