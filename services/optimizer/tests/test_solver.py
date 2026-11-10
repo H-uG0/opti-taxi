@@ -230,7 +230,7 @@ def test_dropped_trips_reason_depends_on_whether_the_search_settled(monkeypatch:
 
     monkeypatch.setattr(solver._DayModel, "search", search_ending_with("ROUTING_SUCCESS"))
     settled = optimize(raw)
-    assert all(u.reason == solver.REASON_DROPPED for u in settled.unassigned)
+    assert all(u.reason.startswith(solver.REASON_DROPPED_PREFIX) for u in settled.unassigned)
     assert not any(w.startswith("Recherche interrompue") for w in settled.meta.warnings)
 
 

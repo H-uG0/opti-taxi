@@ -59,14 +59,15 @@ def test_busy_day_serves_most_trips_at_the_default_budget(busy_plan: PlanRespons
 
 def test_busy_day_unplaced_trips_say_whether_more_time_would_help(busy_plan: PlanResponse) -> None:
     reasons = {u.reason for u in busy_plan.unassigned}
+    no_room = any(reason.startswith(solver.REASON_DROPPED_PREFIX) for reason in reasons)
+    out_of_time = solver.REASON_DROPPED_TIME_LIMIT in reasons
     cut_short = solver.search_cut_short(busy_plan.meta.solver_status)
-    expected, other = (
-        (solver.REASON_DROPPED_TIME_LIMIT, solver.REASON_DROPPED)
-        if cut_short
-        else (solver.REASON_DROPPED, solver.REASON_DROPPED_TIME_LIMIT)
-    )
-    assert other not in reasons
-    assert expected in reasons or busy_plan.kpis.trips_unassigned == 0
+    if cut_short:
+        assert not no_room
+        assert out_of_time or busy_plan.kpis.trips_unassigned == 0
+    else:
+        assert not out_of_time
+        assert no_room or busy_plan.kpis.trips_unassigned == 0
     warned = any(w.startswith("Recherche interrompue par la limite") for w in busy_plan.meta.warnings)
     assert warned == (cut_short and solver.REASON_DROPPED_TIME_LIMIT in reasons)
 
@@ -108,7 +109,8 @@ def test_large_fleet_gets_a_full_plan_within_the_web_timeout(trips: int, budget_
     elapsed = time.perf_counter() - started
     logger.info("fleet day: %d of %d trips served in %.1f s", plan.kpis.trips_served, trips, elapsed)
     assert plan.validation.valid, plan.validation.violations[:5]
-    dropped = [u for u in plan.unassigned if u.reason in (solver.REASON_DROPPED, solver.REASON_DROPPED_TIME_LIMIT)]
+    no_room = solver.REASON_DROPPED_PREFIX
+    dropped = [u for u in plan.unassigned if u.reason.startswith(no_room) or u.reason == solver.REASON_DROPPED_TIME_LIMIT]
     assert len(dropped) <= trips // 100, dropped[:5]
     assert elapsed < budget_sec + WEB_RESPONSE_MARGIN_SEC
 

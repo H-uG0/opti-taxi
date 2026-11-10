@@ -139,8 +139,10 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   moins un co-passager : la borne est donc toujours valide (exactement la règle des 10 km pour un
   véhicule à 2 places, prudente au-delà).
 - Pause chauffeur : un nœud « pause » par lieu candidat (dépôt du véhicule et établissements des
-  courses qu'il peut faire, au plus 12 ; plus les domiciles où finit un retour de midi quand aucun
-  autre lieu n'est atteignable à temps, voir « Limites connues »), réservé au véhicule, dans la
+  courses qu'il peut faire, verrous mis à part, au plus 12 ; plus les domiciles où le chauffeur doit
+  se reposer faute d'autre lieu atteignable à temps, autour d'un retour de midi ou d'un long aller,
+  et, au démarrage depuis le planning en place, les lieux où ses tournées prennent la pause, voir
+  « Limites connues »), réservé au véhicule, dans la
   fenêtre de pause, avec un temps d'arrêt égal à la durée de la pause et **aucun patient à bord**
   (cumul de places forcé à 0) ; un seul est visité. Le trajet jusqu'au lieu de pause est compté.
   Si l'horaire du véhicule laisse toujours la pause avant le départ ou après le retour, aucun nœud
@@ -223,7 +225,10 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   patient dépasse son temps à bord ou attend à bord au-delà de sa fenêtre, ou une tournée de plus
   de 6 h sans pause, sort de la tournée (la moins chère d'abord) puis est réinsérée là où la même
   vérification passe (5 s au plus), à égalité de coût la course d'identifiant le plus petit (le
-  choix ne dépend pas de `PYTHONHASHSEED`). Une course qui ne trouve pas de place reçoit le motif
+  choix ne dépend pas de `PYTHONHASHSEED`). Les courses que la recherche a laissées de côté ont le
+  même essai (depuis OPT-09) : ses mouvements ne placent pas une course qui ne tient qu'en déplaçant
+  la pause du véhicule, l'insertion Python si (avec la passe suivante, 2 à 7 courses de plus sur
+  les journées chargées). Une course qui ne trouve pas de place reçoit le motif
   « Pas de place dans les tournées sans dépasser le temps à bord ou l'attente au lieu de soins… »,
   ou, sortie pour la durée de tournée, « Pas de place dans les tournées sans dépasser 6 h de
   travail sans pause de 20 min… ».
@@ -234,6 +239,12 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   faire place, puis est réinsérée là où elle tient. La recherche locale
   d'OR-Tools ne fait pas cet échange : sur la journée chargée, la pénalité seule ne réduisait pas le
   nombre de patients à moitié servis.
+- **Place faite à une course** (`_DayModel.make_room`, OPT-09). Une course encore non placée (le
+  trajet manquant d'un patient à moitié servi d'abord) prend la place d'une course qui la gêne et
+  qui tient ailleurs (autre véhicule, ou autre position du même) : une course servie de plus, aucune
+  perdue, vérifié sur les horaires de `schedule.py`. Cette passe reçoit le temps que la recherche a laissé
+  (grande flotte : l'insertion seule, aussitôt) et au moins 2 s. La recherche locale et l'insertion
+  ne font pas ce double mouvement : 473 courses au lieu de 472 sur le banc de 480 voyages.
 - **Planning en place** (`initialRoutes`, contrat). Quand la date a déjà des tournées, le web les
   envoie ; l'optimizer les répare selon les règles de la requête (`_DayModel._from_plan` : courses
   d'un véhicule inconnu ou d'un type non autorisé, dépose avant prise en charge, places, transport
@@ -251,7 +262,15 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   (`test_reoptimizing_a_planned_day_without_change_is_at_least_as_good`) ; le web ne pose plus
   « Remplacer quand même ? » dans ce cas, sauf si le planning rendu sert une course de moins en
   échange d'un patient à moitié servi de moins, ou perd plus de marge que le seuil en servant
-  davantage. Réparer le planning en place prend quelques millisecondes à 60 courses.
+  davantage. Réparer le planning en place prend quelques millisecondes à 60 courses. La réparation
+  est idempotente (OPT-09) : réparer un planning produit par l'optimiseur, aux mêmes règles et
+  données, garde toutes ses courses, aussi quand « Placer les non affectées » fige chacune sur son
+  véhicule (`tests/test_repair.py`, dont le 11/11 du jeu `--fleet`). Avant, les verrous retiraient
+  au véhicule les lieux de pause des courses figées ailleurs (un taxi passait de 23 lieux à 4) : sa
+  pause n'avait plus de lieu et la réparation laissait tomber 4 des 288 courses. Les lieux de pause
+  ne dépendent plus des verrous, et ceux où les tournées en place prennent leur pause (minutées par
+  `schedule.py`) s'y ajoutent : une autre version de l'optimiseur ou d'autres courses ne retirent
+  plus le lieu de pause d'une tournée en place.
 - **Première solution coupée par sa limite** (grande flotte : à 120 véhicules et 300 voyages, aucune
   course placée en 33 s) : le départ Python, moins coûteux, l'emporte. Avant que ce départ passe en
   premier, la réponse était un planning vide.
@@ -263,7 +282,13 @@ départ ou après le retour) a des tournées limitées à 6 h (`model.work_limit
   des tournées interrompue… planning construit par une méthode de secours… ») le signale dans
   `meta.warnings`.
 - Motif des courses non placées par le solveur : si la recherche locale a atteint un optimum
-  local, « Pas de place dans les tournées… » ; si elle a été interrompue par la limite de temps
+  local, « Pas de place dans les tournées pour le trajet de 11:30 à 11:54 : « Ambulance 1 »
+  transporte un autre patient de 11:05 à 11:40 ; « Ambulance 2 » est en pause de 11:30 à 12:15 »
+  (ce que fait chaque véhicule compatible pendant que le patient serait à bord, aux horaires de la
+  course ; au-delà de 3 véhicules, leur décompte : « sur 26 véhicules compatibles, 19 transportent
+  d'autres patients, 4 sont en pause et 3 ne peuvent pas l'intercaler entre leurs courses » ; « ne
+  peut pas l'assurer avec la pause de son chauffeur » quand même seul il ne le peut pas ; au plus
+  1 s pour toutes, ensuite les seuls horaires) ; si elle a été interrompue par la limite de temps
   (statut `ROUTING_PARTIAL_SUCCESS_LOCAL_OPTIMUM_NOT_REACHED`) ou si le planning vient de la
   méthode de secours ci-dessus, « Non placée dans le temps de calcul imparti… » et un
   avertissement dans `meta.warnings` donne le nombre de courses concernées et le temps conseillé.
@@ -371,11 +396,17 @@ les horaires (minutes entières, calcul exact).
   réelle ; le CA renvoyé, lui, les applique, et la comparaison finale de deux plannings aussi.
 - Pour un véhicule de 3 places ou plus, le détour autorisé par le solveur reste celui d'un seul
   co-passager (prudent).
-- Lieux de pause candidats limités au dépôt, aux 11 établissements les plus proches du dépôt et
-  aux domiciles où un retour peut finir dans la fenêtre de pause sans qu'aucun autre lieu soit
-  atteignable avant le dernier début de pause possible (retour Gap → Sisteron à midi : sans ce
-  domicile, la course ou la pause ne trouvait pas de place). Le planning recalculé, lui, peut
-  placer la pause sur n'importe quel trajet à vide.
+- Lieux de pause candidats limités au dépôt, aux 11 établissements les plus proches du dépôt, aux
+  domiciles où le chauffeur doit se reposer et aux lieux de pause des tournées en place. Domiciles :
+  là où un retour peut finir dans la fenêtre de pause sans qu'aucun autre lieu soit atteignable
+  avant le dernier début de pause possible (retour Gap → Sisteron à midi : sans ce domicile, la
+  course ou la pause ne trouvait pas de place), un trajet partagé pouvant finir jusqu'à
+  `maxRideExtraMin` plus tard que le patient seul (OPT-09 : deux retours de Marseille vers Sisteron
+  à 10:55, la seconde dépose finit une minute avant le dernier début de pause, le dépôt est à
+  5 min ; le planning recalculé se repose en chemin) ; et là où commence un aller dont le trajet
+  couvre la fin de la fenêtre, quand se reposer ailleurs puis y aller est trop tard (204 km pour un
+  rendez-vous à 15:00). Au plus 12 domiciles par véhicule, les plus nécessaires d'abord. Le
+  planning recalculé, lui, peut placer la pause sur n'importe quel trajet à vide.
 - Trafic moyen, pas celui du jour : des facteurs par zone et par créneau ralentissent des temps sans
   congestion (`settings.traffic`, voir le contrat). Le créneau d'un trajet vient de l'heure attendue de
   ses extrémités, pas de l'heure exacte de passage, inconnue d'une table d'arcs fixe. L'estimation à vol
@@ -386,11 +417,13 @@ les horaires (minutes entières, calcul exact).
   arrive après ce délai, plus le calcul de la matrice, au plus 5 s de plus si le départ Python
   n'a pas fini dans le budget, 5 s si la première solution non plus, et encore au plus 5 s si
   elle a échoué, plus la vérification finale et les patients à moitié servis quand il y en a
-  (au plus 5 + 3 s en tout, planning en place compris : 23 s au pire ; le web attend
-  `timeLimitSec` + 30 s).
+  (au plus 5 + 3 s en tout, planning en place compris), la place faite à une course (au moins 2 s,
+  plus si la recherche a fini avant le budget) et le motif des courses non placées (1 s) : 26 s au
+  pire ; le web attend `timeLimitSec` + 30 s).
 - **Grande flotte.** Matrices et modèle sont construits en Python en O(n²), n comptant aussi les
-  lieux de pause (jusqu'à 24 par véhicule). À l'échelle annoncée par V (120 véhicules ; `fleet_day()`
-  des tests, distances à vol d'oiseau, 1,5 cœur), au budget envoyé par le web :
+  lieux de pause (jusqu'à 24 par véhicule, plus ceux des tournées en place). À l'échelle annoncée
+  par V (120 véhicules ; `fleet_day()` des tests, distances à vol d'oiseau, 1,5 cœur), au budget
+  envoyé par le web :
 
   | Voyages (budget) | Nœuds (dont pauses) | Modèle | Avant le 7/11 | 7/11 | Depuis le 9/11 | Mémoire 7/11 → 9/11 |
   | --- | --- | --- | --- | --- | --- | --- |
@@ -401,6 +434,12 @@ les horaires (minutes entières, calcul exact).
   14,2 s (300 voyages), 30,5 s (480) et 15,6 s (300, tirage 5) : à cette taille, la première
   solution est sautée et une seule insertion est construite (la seconde, par regret seul, ne sert
   qu'à une recherche locale).
+  Depuis OPT-09 (10/11) : 297 sur 297 en 7,9 s, 473 sur 476 en 16,6 s, 293 sur 294 en 8,2 s. La
+  matrice des temps partage la ligne des nœuds de même lieu, même minute de référence et même
+  fenêtre de pause (modèle en 1,3 s au lieu de 8,9 s à 300 voyages, 2,5 s au lieu de 18,9 s à 480) ;
+  les nouveaux lieux de pause (domiciles, voir plus haut) portent les nœuds à 2 412 et 3 007 et la
+  mémoire à 0,54 et 0,78 Go ; à 480 voyages, l'insertion seule sert 472 courses et la place faite à
+  une course (`make_room`) donne la 473e.
   Mesures du 9 novembre sur la machine de développement (8 cœurs, un calcul à la fois). Avec les
   règles d'avant le 9/11 (sans attente à bord, temps à bord ni limite de 6 h), le code du 9/11 rend
   exactement le même planning (mêmes courses, km et CA) en 14 s et 29 s : le gain vient du coût au

@@ -184,6 +184,12 @@ def breaks_alone(self: solver._DayModel, starts: Any, deadline: float) -> Any:
     return self.routing.ReadAssignmentFromRoutes(self._breaks_only_routes(), True)
 
 
+def without_final_insertion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No time for the final check to place the trips the search left out (guarded): a poor search
+    stays poor."""
+    monkeypatch.setattr(solver, "GUARD_SEC", 0.0)
+
+
 def test_the_plan_in_place_is_returned_when_the_search_finds_worse(monkeypatch: pytest.MonkeyPatch) -> None:
     """With a search that only finds the breaks alone, the plan in place (repaired) comes back."""
     raw = generated_day(time_limit_sec=2)
@@ -191,6 +197,7 @@ def test_the_plan_in_place_is_returned_when_the_search_finds_worse(monkeypatch: 
     assert in_place.validation.valid and in_place.kpis.trips_served >= 50
 
     monkeypatch.setattr(solver._DayModel, "_portfolio", breaks_alone)
+    without_final_insertion(monkeypatch)
     assert service.optimize(OptimizeRequest.model_validate(raw)).kpis.trips_served == 0
     again = service.optimize(OptimizeRequest.model_validate({**raw, "initialRoutes": routes_of(in_place)}))
     assert again.validation.valid, again.validation.violations[:5]
@@ -214,6 +221,7 @@ def test_a_plan_in_place_the_routing_model_rejects_is_never_returned(monkeypatch
 
     monkeypatch.setattr(solver._DayModel, "_confirmed", refused_in_place)
     monkeypatch.setattr(solver._DayModel, "_portfolio", breaks_alone)
+    without_final_insertion(monkeypatch)
     again = service.optimize(OptimizeRequest.model_validate({**raw, "initialRoutes": routes_of(in_place)}))
     assert again.kpis.trips_served == 0
     model = day_model({**raw, "initialRoutes": routes_of(in_place)})
