@@ -7,8 +7,9 @@ import type { Payer, SharingStatus, TripDirection, TripStatus, VehicleType } fro
 import { CalendarClock, Check, ChevronDown, Lock, TriangleAlert, Undo2, UserX, Users, X } from "lucide-react";
 import { Badge, VEHICLE_TYPE_COLORS, VehicleTypeBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmPanel, useConfirmStep, type ConfirmStep } from "@/components/ui/confirm-action";
 import { cn } from "@/components/ui/cn";
-import { Checkbox, Input, Select, Textarea } from "@/components/ui/form";
+import { Checkbox, Input, Select, Textarea, UnitInput } from "@/components/ui/form";
 import {
   CANCELLATION_NOTE_MAX,
   CANCELLATION_REASON_LABELS,
@@ -21,10 +22,9 @@ import { Td } from "@/components/ui/table";
 import { DIRECTION_LABELS, PAYER_LABELS, SHARING_STATUS_LABELS, TRIP_STATUS_LABELS, VEHICLE_TYPE_SHORT, formatEuros, formatKm } from "@/lib/labels";
 import { formatMinute } from "@/lib/time";
 import { cancelTrip, recordSharingDecision, rescheduleTrip, restoreTrip, setTripToll } from "./actions";
-import { UnitInput } from "../vehicules/_lib/ui";
 import { submitWithoutReset } from "../patients/_components/form-submit";
 import { ActionForm, ActionMessage } from "./action-form";
-import { INITIAL_ACTION_RESULT } from "./trip-form";
+import { INITIAL_ACTION_RESULT, PENDING_LABEL, SAVING_LABEL } from "@/lib/forms";
 import type { RecordTrace } from "./record-trace";
 import type { PairedReturn } from "./trip-list";
 import {
@@ -355,7 +355,7 @@ function TripDetails({ trip }: { trip: TripRowData }) {
               {trip.cancellationTrace ? <span className="block text-xs text-slate-500">{trip.cancellationTrace.full}</span> : null}
             </Detail>
           ) : null}
-          {trip.lockedVehicleLabel ? <Detail label="Verrou">Figée sur {trip.lockedVehicleLabel}</Detail> : null}
+          {trip.lockedVehicleLabel ? <Detail label="Figée">Sur {trip.lockedVehicleLabel}</Detail> : null}
           {trip.exceptionalAmbulance ? (
             <Detail label="Recours exceptionnel">
               {EXCEPTIONAL_AMBULANCE_REASON} : ambulance facturée au tarif VSL.
@@ -419,7 +419,7 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
   );
 }
 
-function cancelConfirmMessage(trip: TripRowData, withReturn: boolean): string {
+export function cancelConfirmMessage(trip: Pick<TripRowData, "pairedReturn" | "patientName" | "direction" | "vehicleLabel" | "shared">, withReturn: boolean): string {
   const back = trip.pairedReturn;
   const what = withReturn && back
     ? `Annuler la course de ${trip.patientName} (aller) et son retour${back.keyMinute !== null ? ` (fin de séance ${formatMinute(back.keyMinute)})` : ""} ?`
@@ -435,27 +435,23 @@ function cancelConfirmMessage(trip: TripRowData, withReturn: boolean): string {
  * action's message (late cancellation, co-passengers left alone, possible
  * duplicate on restore…) stays on screen. Submitted without React's form reset
  * (submitWithoutReset): a refused cancellation keeps the reason, note and box chosen.
+ * « Annuler la course » first asks, in the app's confirmation panel (never the browser's dialog).
  */
 function LifecycleForm({ trip }: { trip: TripRowData }) {
   const restorable = canRestore(trip.status);
   const [state, formAction, pending] = useActionState(restorable ? restoreTrip : cancelTrip, INITIAL_ACTION_RESULT);
+  const step = useConfirmStep();
   if (!restorable && !canCancel(trip.status)) {
     return (
       <p className="border-t border-slate-100 pt-3 text-xs text-slate-500">
-        Course {TRIP_STATUS_LABELS[trip.status].toLowerCase()} : elle ne peut plus être annulée.
+        Cette course ne peut plus être annulée (statut : {TRIP_STATUS_LABELS[trip.status].toLowerCase()}).
       </p>
     );
   }
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
-    if (!restorable) {
-      // The box can be unticked: the question says what will really be cancelled.
-      const back = event.currentTarget.querySelector<HTMLInputElement>('input[name="returnTripId"]');
-      if (!window.confirm(cancelConfirmMessage(trip, back?.checked === true))) {
-        event.preventDefault();
-        return;
-      }
-    }
+    // The panel closes with the submission; the focus goes back to « Annuler la course », which shows the progress.
+    if (step.open) step.close();
     submitWithoutReset(formAction)(event);
   }
 
@@ -465,7 +461,7 @@ function LifecycleForm({ trip }: { trip: TripRowData }) {
       {restorable ? (
         <Button type="submit" variant="secondary" size="sm" disabled={pending} aria-busy={pending}>
           {pending ? (
-            "Rétablissement…"
+            PENDING_LABEL
           ) : (
             <>
               <Undo2 aria-hidden className="size-4" />
@@ -475,15 +471,26 @@ function LifecycleForm({ trip }: { trip: TripRowData }) {
         </Button>
       ) : (
         // Keyed by status: a trip cancelled then restored starts with an empty form.
-        <CancelFields key={trip.status} trip={trip} pending={pending} />
+        <CancelFields key={trip.status} trip={trip} pending={pending} step={step} />
       )}
       <ActionMessage result={state} />
     </form>
   );
 }
 
-/** Fields of « Annuler la course » : a reason from the list, an optional note, and the return of the same care if any. */
-function CancelFields({ trip, pending }: { trip: TripRowData; pending: boolean }) {
+/**
+ * Fields of « Annuler la course » : a reason from the list, an optional note, and the return of the same care if any.
+ * The button checks the fields, then asks; the question says what will really be cancelled (the box can be unticked).
+ */
+function CancelFields({
+  trip,
+  pending,
+  step: { open, triggerRef, ask, close },
+}: {
+  trip: TripRowData;
+  pending: boolean;
+  step: ConfirmStep;
+}) {
   const reasonId = useId();
   const noteId = useId();
   const back = trip.pairedReturn;
@@ -492,6 +499,7 @@ function CancelFields({ trip, pending }: { trip: TripRowData; pending: boolean }
   // Null while untouched: the box follows the reason (ticked for RETURN_GOES_TOO); a click fixes it.
   const [withReturn, setWithReturn] = useState<boolean | null>(null);
   const returnChecked = withReturn ?? RETURN_GOES_TOO.has(reason);
+  const bothLegs = Boolean(back) && returnChecked;
   return (
     <>
       <div className="space-y-2">
@@ -540,23 +548,37 @@ function CancelFields({ trip, pending }: { trip: TripRowData; pending: boolean }
           label={`Annuler aussi le retour${back.keyMinute !== null ? ` (fin de séance ${formatMinute(back.keyMinute)})` : ""}`}
         />
       ) : null}
-      <Button
-        type="submit"
-        variant="secondary"
-        size="sm"
-        className="text-red-700 hover:bg-red-50"
-        disabled={pending}
-        aria-busy={pending}
-      >
-        {pending ? (
-          "Annulation…"
-        ) : (
-          <>
-            <X aria-hidden className="size-4" />
-            Annuler la course
-          </>
-        )}
-      </Button>
+      {open ? (
+        <ConfirmPanel
+          question={cancelConfirmMessage(trip, bothLegs)}
+          confirmLabel={bothLegs ? "Oui, annuler les deux courses" : "Oui, annuler la course"}
+          keepLabel={bothLegs ? "Garder les courses" : "Garder la course"}
+          onKeep={close}
+        />
+      ) : (
+        <Button
+          ref={triggerRef}
+          variant="secondary"
+          size="sm"
+          className="text-red-700 hover:bg-red-50"
+          disabled={pending}
+          aria-busy={pending}
+          onClick={(event) => {
+            // The reason is required (the note too for « Autre »): the browser says what is missing before asking.
+            if (event.currentTarget.form?.reportValidity() === false) return;
+            ask();
+          }}
+        >
+          {pending ? (
+            PENDING_LABEL
+          ) : (
+            <>
+              <X aria-hidden className="size-4" />
+              Annuler la course
+            </>
+          )}
+        </Button>
+      )}
     </>
   );
 }
@@ -582,7 +604,7 @@ function TollForm({ trip }: { trip: TripRowData }) {
             className="tabular w-32"
           />
         </div>
-        <SubmitButton variant="secondary" size="sm" pendingLabel="Enregistrement…">
+        <SubmitButton variant="secondary" size="sm" pendingLabel={SAVING_LABEL}>
           Enregistrer le péage
         </SubmitButton>
       </div>
@@ -599,7 +621,7 @@ function ScheduleForm({ trip }: { trip: TripRowData }) {
         <p className="text-slate-700">
           {timeFieldLabel(trip.direction)} : <span className="tabular font-medium">{formatMinute(trip.keyMinute)}</span>
         </p>
-        <p className="text-xs text-slate-500">Horaire figé : la course est commencée, terminée ou annulée.</p>
+        <p className="text-xs text-slate-500">Horaire non modifiable : la course est commencée, terminée ou annulée.</p>
       </div>
     );
   }
@@ -618,7 +640,7 @@ function ScheduleForm({ trip }: { trip: TripRowData }) {
             defaultValue={trip.keyMinute !== null ? formatMinute(trip.keyMinute) : ""}
             className="tabular w-32"
           />
-          <SubmitButton variant="secondary" size="sm" pendingLabel="Modification…">
+          <SubmitButton variant="secondary" size="sm" pendingLabel={SAVING_LABEL}>
             Modifier l&apos;horaire
           </SubmitButton>
         </div>
@@ -730,7 +752,7 @@ function DecisionButtons({ decisions }: { decisions: SharingDecision[] }) {
             className={cn(decision === "REFUSED" && "text-red-700 hover:bg-red-50", decision === "ACCEPTED" && "text-emerald-800 hover:bg-emerald-50")}
           >
             <Icon aria-hidden className="size-4" />
-            {pending && submitted === decision ? "Enregistrement…" : SHARING_DECISION_LABELS[decision]}
+            {pending && submitted === decision ? SAVING_LABEL : SHARING_DECISION_LABELS[decision]}
           </Button>
         );
       })}

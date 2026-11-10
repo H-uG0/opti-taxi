@@ -81,7 +81,7 @@ describe("proposeExceptionalAmbulance", () => {
     const result = await proposeExceptionalAmbulance("t1", "amb");
     expect(result).toEqual({
       ok: true,
-      message: "Course de Jeanne Martin confiée à Ambulance 1 : recours exceptionnel, facturé au tarif VSL. Planning optimisé : 10/10 courses servies.",
+      message: "Course de MARTIN Jeanne confiée à Ambulance 1 : recours exceptionnel, facturé au tarif VSL. Planning optimisé : 10/10 courses servies.",
     });
     expect(fake.db.trip.updateMany).toHaveBeenCalledTimes(1);
     expect(fake.db.trip.updateMany.mock.calls[0]![0]).toMatchObject({
@@ -99,7 +99,7 @@ describe("proposeExceptionalAmbulance", () => {
     fake.runOptimization.mockResolvedValue({
       ok: false,
       moveRejected: true,
-      error: "Déplacement refusé : Ambulance 1 ne peut pas servir l'aller de Jeanne Martin. Le planning n'a pas été modifié.",
+      error: "Déplacement refusé : Ambulance 1 ne peut pas servir l'aller de MARTIN Jeanne. Le planning n'a pas été modifié.",
     });
     // The refused move already put the lock back: only the proposal is left to withdraw.
     fake.db.trip.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 }).mockResolvedValueOnce({ count: 1 });
@@ -107,8 +107,8 @@ describe("proposeExceptionalAmbulance", () => {
     expect(result).toEqual({
       ok: false,
       error:
-        "Déplacement refusé : Ambulance 1 ne peut pas servir l'aller de Jeanne Martin. Le planning n'a pas été modifié. " +
-        "Le recours exceptionnel à Ambulance 1 est retiré : la course de Jeanne Martin reste sans véhicule.",
+        "Déplacement refusé : Ambulance 1 ne peut pas servir l'aller de MARTIN Jeanne. Le planning n'a pas été modifié. " +
+        "Le recours exceptionnel à Ambulance 1 est retiré : la course de MARTIN Jeanne reste sans véhicule.",
     });
     const proposedAt = fake.db.trip.updateMany.mock.calls[0]![0].data.exceptionalAmbulanceAt;
     expect(fake.db.trip.updateMany.mock.calls[2]![0]).toEqual({
@@ -123,7 +123,7 @@ describe("proposeExceptionalAmbulance", () => {
     const result = await proposeExceptionalAmbulance("t1", "amb");
     expect(result).toEqual({
       ok: false,
-      error: "Le service d'optimisation ne répond pas. Le recours exceptionnel à Ambulance 1 est retiré : la course de Jeanne Martin reste sans véhicule.",
+      error: "Le service d'optimisation ne répond pas. Le recours exceptionnel à Ambulance 1 est retiré : la course de MARTIN Jeanne reste sans véhicule.",
     });
     // The lock written for the proposal, if still there and the trip still without a route.
     expect(fake.db.trip.updateMany.mock.calls[1]![0]).toEqual({

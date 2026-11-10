@@ -80,17 +80,20 @@ export async function createVehicle(_state: FormState, formData: FormData): Prom
   const errors = await referenceErrors(parsed.data, null);
   if (Object.keys(errors).length > 0) return errorState(errors, values);
 
+  let createdId: string;
   try {
-    await db.$transaction(async (tx) => {
+    createdId = await db.$transaction(async (tx) => {
       const created = await tx.vehicle.create({ data: parsed.data, select: { id: true } });
       await audit(tx, user, { action: "vehicle.create", entity: "Vehicle", entityId: created.id });
+      return created.id;
     });
   } catch (error) {
     if (isUniqueViolation(error, "registration")) return errorState({ registration: REGISTRATION_TAKEN }, values);
     throw error;
   }
   revalidateFleet();
-  redirect("/vehicules");
+  // A creation opens the record (indisponibilités, échéances, pleins) with a banner.
+  redirect(`/vehicules/${createdId}?cree=1`);
 }
 
 export async function updateVehicle(vehicleId: string, _state: FormState, formData: FormData): Promise<FormState> {
@@ -120,7 +123,8 @@ export async function updateVehicle(vehicleId: string, _state: FormState, formDa
     throw error;
   }
   revalidateFleet(current.id);
-  redirect("/vehicules");
+  // A change stays on the record, with a banner.
+  return successState("Véhicule enregistré.");
 }
 
 const activeArgs = z.object({ id: idSchema, active: z.boolean() });

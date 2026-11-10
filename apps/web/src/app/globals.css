@@ -16,6 +16,18 @@
   --color-brand-800: #1d4c4a;
   --color-brand-900: #1b3f3e;
 
+  /* Form control boundaries: 3:1 or more on white and the light surfaces (WCAG 1.4.11). */
+  --color-field: #78849a;
+
+  /*
+   * Shared transport (two patients on board), on the dispatcher and driver sides alike: violet,
+   * never the amber of warnings. -strong for text and icons (7:1 on white), -soft for fills and rings.
+   */
+  --color-shared: #6d28d9;
+  --color-shared-strong: #5b21b6;
+  --color-shared-soft: #ede9fe;
+  --color-shared-ring: #c4b5fd;
+
   /* Vehicle types, used consistently in badges, timeline and map. */
   --color-taxi: #c27c0e;
   --color-vsl: #2563eb;

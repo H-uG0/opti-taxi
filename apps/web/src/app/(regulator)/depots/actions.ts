@@ -30,7 +30,8 @@ export async function createDepot(_state: FormState, formData: FormData): Promis
     return created;
   });
   revalidateDepots();
-  redirect(`/depots/${depot.id}`);
+  // A creation opens the record with a banner; a change stays on it with a banner (the app's rule).
+  redirect(`/depots/${depot.id}?cree=1`);
 }
 
 /**
@@ -60,9 +61,9 @@ export async function updateDepot(depotId: string, _state: FormState, formData: 
       select: { serviceDate: true, status: true },
     });
     const notice = movedDepotNotice(toUpcomingRoutes(routes));
-    if (notice) return successState(notice);
+    if (notice) return successState(`Dépôt enregistré. ${notice}`);
   }
-  redirect("/depots");
+  return successState("Dépôt enregistré.");
 }
 
 const activeArgs = z.object({ id: idSchema, active: z.boolean() });

@@ -6,8 +6,9 @@
 import type { Payer, SharingStatus, TripDirection, TripStatus } from "@prisma/client";
 import { isSameEpisode, type LegKey } from "@/lib/domain/no-show";
 import { normalizeSearch } from "@/lib/list-filters";
-import { formatShortDate, TIME_ZONE } from "@/lib/time";
+import { formatDateTime, formatShortDate } from "@/lib/time";
 import { keyMinute, sharingConflict } from "./trip-rules";
+import { formatPersonName } from "@/lib/names";
 
 const TRIP_STATUSES = ["PLANNED", "ASSIGNED", "PICKED_UP", "DROPPED_OFF", "CANCELLED", "NO_SHOW"] as const satisfies readonly TripStatus[];
 const SHARING_STATUSES = ["NOT_ELIGIBLE", "NOT_PROPOSED", "PROPOSED", "ACCEPTED", "REFUSED"] as const satisfies readonly SharingStatus[];
@@ -297,30 +298,19 @@ export function coursesHref(date: string, filters: TripFilters = EMPTY_FILTERS):
 // Co-passengers from the route stops: one implementation, shared with the detach of a trip.
 export { coPassengersFromStops, type StopForCoPassengers } from "@/lib/planning/detach";
 
-/** "Dupont Marie" -> "Dupont M." (compact co-passenger hint). */
+/** "DUPONT M." (compact co-passenger hint): the short form of lib/names. */
 export function shortPatientName(patient: { firstName: string; lastName: string }): string {
-  const initial = patient.firstName.trim().charAt(0);
-  return initial ? `${patient.lastName} ${initial.toUpperCase()}.` : patient.lastName;
+  return formatPersonName(patient, "short");
 }
 
 /** "DUPONT Marie" — last name first, as on a planning sheet. */
 export function patientDisplayName(patient: { firstName: string; lastName: string }): string {
-  return `${patient.lastName.toUpperCase()} ${patient.firstName}`;
+  return formatPersonName(patient);
 }
 
-const instantFormat = new Intl.DateTimeFormat("fr-FR", {
-  timeZone: TIME_ZONE,
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
-/** Real instant (UTC) -> "02/11/2026 14:05" in Europe/Paris. */
+/** Real instant (UTC) -> "02/11 à 14:05" in Europe/Paris (lib/time formatDateTime); null stays null. */
 export function formatInstant(instant: Date | null | undefined): string | null {
-  if (!instant) return null;
-  return instantFormat.format(instant).replace(",", "");
+  return instant ? formatDateTime(instant) : null;
 }
 
 /** French plural: 0 and 1 take the singular. */

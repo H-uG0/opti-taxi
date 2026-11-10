@@ -7,10 +7,10 @@ import { todayIso } from "@/lib/time";
 import { LinkButton } from "@/components/ui/button";
 import { EmptyState, PageHeader } from "@/components/ui/layout";
 import { createRecurrence } from "../../../actions";
-import { BackLink } from "../../../_components/back-link";
 import { RecurrenceForm } from "../../../_components/recurrence-form";
 import { loadRecurrenceOptions } from "../../../_lib/recurrence-options";
 import { pickCurrentPrescription } from "../../../_lib/status";
+import { BackLink } from "@/components/ui/back-link";
 
 export const metadata: Metadata = { title: "Nouvelle récurrence" };
 

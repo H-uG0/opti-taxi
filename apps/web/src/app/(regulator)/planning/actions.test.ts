@@ -95,7 +95,7 @@ beforeEach(() => {
 describe("changeRouteCrew", () => {
   it("writes the route and the crew of the day, which resolves without a blocking problem", async () => {
     const result = await changeRouteCrew(ROUTE, "drv", "dea", "v1");
-    expect(result).toEqual({ ok: true, message: "Équipage de Ambulance 1 changé : dea DEA voit la tournée sur sa feuille de route dès maintenant, sick SICK n'y a plus accès." });
+    expect(result).toEqual({ ok: true, message: "Équipage de Ambulance 1 changé : DEA dea voit la tournée sur sa feuille de route dès maintenant, SICK sick n'y a plus accès." });
     // Conditional on the crew read: a colleague's change in between makes it a no-op.
     expect(fake.route.updateMany).toHaveBeenCalledWith({
       where: { id: ROUTE, driverId: "drv", crewMateId: "sick" },
@@ -122,7 +122,7 @@ describe("changeRouteCrew", () => {
     const result = await changeRouteCrew(ROUTE, "drv", "eve", "v1");
     expect(result).toMatchObject({
       ok: false,
-      fieldErrors: { crewMate: "drv DRV et eve EVE n'ont que 3 h 00 d'horaire commun (4 h 00 au moins, Paramètres)." },
+      fieldErrors: { crewMate: "DRV drv et EVE eve n'ont que 3 h 00 d'horaire commun (4 h 00 au moins, Paramètres)." },
     });
     expect(fake.route.updateMany).not.toHaveBeenCalled();
     expect(fake.dayCrew.upsert).not.toHaveBeenCalled();
@@ -143,7 +143,7 @@ describe("changeRouteCrew", () => {
     expect(result).toEqual({
       ok: true,
       message:
-        "Équipage de Ambulance 1 changé : sick SICK n'y a plus accès. dea DEA n'a pas de compte actif : transmettez-lui la tournée (Chauffeurs, fiche)." +
+        "Équipage de Ambulance 1 changé : SICK sick n'y a plus accès. DEA dea n'a pas de compte actif : transmettez-lui la tournée (Chauffeurs, fiche)." +
         " L'équipage fixé de VSL 2 revient à la proposition automatique (page Équipages).",
     });
     expect(fake.dayCrew.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["dc_vsl"] } } });

@@ -3,9 +3,9 @@ import { requireUser } from "@/lib/auth";
 import { geocoderEnabled } from "@/lib/geocode";
 import { EMPTY_ADDRESS } from "@/components/address/address-utils";
 import { PageHeader } from "@/components/ui/layout";
-import { BackLink } from "@/app/(regulator)/patients/_components/back-link";
 import { createFacility } from "../actions";
 import { FacilityForm } from "../_components/facility-form";
+import { BackLink } from "@/components/ui/back-link";
 
 export const metadata: Metadata = { title: "Nouvel établissement" };
 

@@ -56,6 +56,7 @@ import { compareVehicles, VEHICLE_TYPE_ORDER } from "@/lib/fleet/order";
 import { ABSENCE_KIND_LABELS, QUALIFICATION_NOUNS } from "@/lib/labels";
 import { formatDuration, formatMinute, formatShortDate, isoWeekday, WEEKDAY_LABELS } from "@/lib/time";
 import { workTimeIssue, workTimeSummary, type BreakSettings } from "./work-time";
+import { formatPersonName } from "@/lib/names";
 
 export type StaffPerson = {
   id: string;
@@ -168,7 +169,7 @@ function comparePeople(a: StaffPerson, b: StaffPerson): number {
 }
 
 export function staffName(person: Pick<StaffPerson, "firstName" | "lastName">): string {
-  return `${person.firstName} ${person.lastName}`.trim();
+  return formatPersonName(person);
 }
 
 /** Qualifications accepted for a seat of this vehicle type; null: the seat does not exist. */

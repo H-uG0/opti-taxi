@@ -4,6 +4,7 @@
  * before optimizing: « N récurrences actives sans course ce jour ». Pure.
  */
 import { prescriptionOn, recurrenceOccursOn, type RecurrenceForGeneration } from "@/lib/domain/trip-generation";
+import { formatPersonName } from "@/lib/names";
 
 export type MissingRecurrence = {
   recurrenceId: string;
@@ -31,7 +32,7 @@ export function recurrencesWithoutTrip(
     .map((rec) => ({
       recurrenceId: rec.id,
       patientId: rec.patientId,
-      patientName: `${rec.patient.lastName.toUpperCase()} ${rec.patient.firstName}`,
+      patientName: formatPersonName(rec.patient),
       label: rec.label?.trim() || rec.facility.name,
       withoutPrescription: prescriptionOn(rec, isoDate) === null,
     }))

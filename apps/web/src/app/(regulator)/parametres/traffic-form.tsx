@@ -1,15 +1,16 @@
 "use client";
 
 import { useActionState } from "react";
-import { Checkbox, Field, Fieldset, FormMessage, Input } from "@/components/ui/form";
+import { Checkbox, Field, Fieldset, FormMessage, Input, UnitInput } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Table, TBody, Td, Th, THead } from "@/components/ui/table";
 import { MIN_OBSERVED_LEGS, type ObservedCalibration, type ObservedFactor } from "@/lib/domain/traffic-observed";
 import { MATRIX_SOURCE_LABELS } from "@/lib/labels";
 import { TRAFFIC_BAND_LABELS, TRAFFIC_BANDS, type TrafficBandKey } from "@/lib/domain/traffic";
-import { formatDecimalInput, IDLE_STATE, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
-import { FormFooter, UnitInput } from "../vehicules/_lib/ui";
+import { formatDecimalInput, IDLE_STATE, PENDING_LABEL, refusalKey, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
 import { factorField, radiusField, trafficFormView } from "./traffic-schema";
+import { FormFooter } from "@/components/ui/form-footer";
+import { ErrorFocus } from "@/components/ui/error-focus";
 
 type Action = (state: FormState, formData: FormData) => Promise<FormState>;
 
@@ -41,6 +42,7 @@ export function TrafficForm({
       {response.message ? <FormMessage tone={response.status === "error" ? "error" : "success"}>{response.message}</FormMessage> : null}
       {/* Remount on every response so inputs show the echoed (error) or saved (success) values. */}
       <form key={`${state.submissionId}-${applied.submissionId}`} action={formAction} className="space-y-6">
+      <ErrorFocus refusal={refusalKey(state)} />
         <Fieldset legend="Trafic">
           <p className="text-sm text-slate-600">
             Les temps de trajet viennent d&apos;un calcul à circulation fluide. Ils sont ici ralentis selon l&apos;heure et l&apos;endroit :
@@ -104,7 +106,7 @@ export function TrafficForm({
           </p>
           <CalibrationSource {...calibration} />
         </div>
-        <SubmitButton variant="secondary" disabled={applicable === 0} pendingLabel="Application…">
+        <SubmitButton variant="secondary" disabled={applicable === 0} pendingLabel={PENDING_LABEL}>
           Appliquer les valeurs observées
         </SubmitButton>
       </form>

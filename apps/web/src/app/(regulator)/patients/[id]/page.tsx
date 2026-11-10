@@ -31,10 +31,8 @@ import { LinkButton } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
 import { TBody, Td, Th, THead } from "@/components/ui/table";
 import { attachRecurrencesToRenewal, deletePrescription, setPatientActive, setRecurrenceActive } from "../actions";
-import { ActionButton } from "../_components/action-button";
-import { BackLink } from "../_components/back-link";
+import { ActionButton } from "@/components/ui/action-button";
 import { SyncNotice } from "../_components/sync-notice";
-import { Warning } from "../_components/warning";
 import {
   findPredecessor,
   findRenewal,
@@ -46,11 +44,14 @@ import {
   uncoveredDays,
   uncoveredText,
   validityLabel,
-  type Notice,
+  type Notice as StatusNotice,
   type ValidityState,
 } from "../_lib/status";
 import { countOpenTripsByRecurrence } from "../_lib/trip-counts";
 import { openTripsLabel } from "../_lib/trip-sync";
+import { BackLink } from "@/components/ui/back-link";
+import { Notice } from "@/components/ui/notice";
+import { formatPersonName } from "@/lib/names";
 
 export const metadata: Metadata = { title: "Fiche patient" };
 
@@ -167,7 +168,7 @@ export default async function PatientPage({
       (a.plannedPickupMinute ?? a.appointmentMinute ?? a.readyMinute ?? 0) -
         (b.plannedPickupMinute ?? b.appointmentMinute ?? b.readyMinute ?? 0),
   );
-  const fullName = `${patient.lastName.toUpperCase()} ${patient.firstName}`;
+  const fullName = formatPersonName(patient);
   // Trips of today the referential sync cancelled (e.g. patient deactivated by mistake this morning): a
   // reactivation brings back the trips from tomorrow on only, those of today are restored by hand.
   const todayCancelledBySync = patient.active
@@ -215,9 +216,13 @@ export default async function PatientPage({
               <ActionButton
                 action={setPatientActive}
                 fields={{ patientId: patient.id, active: patient.active ? "false" : "true" }}
-                confirmMessage={
+                confirm={
                   patient.active
-                    ? `Désactiver ${fullName} ? Ses récurrences ne généreront plus de courses${cancelledTripsClause(totalOpenTrips)}. L'historique est conservé.`
+                    ? {
+                        question: `Désactiver ${fullName} ? Ses récurrences ne généreront plus de courses${cancelledTripsClause(totalOpenTrips)}. L'historique est conservé.`,
+                        confirmLabel: "Oui, désactiver le patient",
+                        keepLabel: "Garder le patient actif",
+                      }
                     : undefined
                 }
                 variant={patient.active ? "secondary" : "primary"}
@@ -230,19 +235,19 @@ export default async function PatientPage({
         <div className="space-y-2">
           <SyncNotice query={query} />
           {todayCancelledBySync > 0 ? (
-            <Warning>
+            <Notice size="sm">
               {todayCancelledBySync === 1
                 ? "1 course d'aujourd'hui, annulée par la synchronisation du référentiel, reste annulée : les courses du jour ne reviennent pas d'elles-mêmes. Rétablissez-la si le transport a lieu."
                 : `${todayCancelledBySync} courses d'aujourd'hui, annulées par la synchronisation du référentiel, restent annulées : les courses du jour ne reviennent pas d'elles-mêmes. Rétablissez-les si les transports ont lieu.`}{" "}
               <Link href={`/courses?date=${today}&statut=CANCELLED`} className="font-medium underline underline-offset-2">
                 Voir les courses annulées du jour
               </Link>
-            </Warning>
+            </Notice>
           ) : null}
           {!patient.active ? (
-            <Warning tone="info">
+            <Notice size="sm" tone="info">
               Patient désactivé : ses récurrences ne génèrent plus de courses. Sa fiche et son historique sont conservés.
-            </Warning>
+            </Notice>
           ) : null}
         </div>
       </div>
@@ -333,16 +338,16 @@ export default async function PatientPage({
             toReattach.length > 0 ? (
               <div className="space-y-2 border-b border-slate-200 px-4 py-3">
                 {!hasValidToday && activeRecurrences.length > 0 ? (
-                  <Warning tone="danger">
+                  <Notice size="sm" tone="danger">
                     Aucune prescription valide aujourd&apos;hui : les récurrences de ce patient ne génèrent pas de courses.
-                  </Warning>
+                  </Notice>
                 ) : null}
                 {prescriptions
                   .filter((p) => p.mismatch)
                   .map((p) => (
-                    <Warning key={p.id}>
+                    <Notice size="sm" key={p.id}>
                       Prescription du {formatShortDate(p.dates.validFrom)} au {formatShortDate(p.dates.validTo)} : {p.mismatch}
-                    </Warning>
+                    </Notice>
                   ))}
                 {toReattach.map((p) =>
                   p.renewal ? (
@@ -362,9 +367,12 @@ export default async function PatientPage({
                       <ActionButton
                         action={attachRecurrencesToRenewal}
                         fields={{ patientId: patient.id, fromPrescriptionId: p.id, toPrescriptionId: p.renewal.id }}
-                        confirmMessage={`Rattacher ${p._count.recurrences === 1 ? "la récurrence" : `les ${p._count.recurrences} récurrences`} à la prescription du ${formatShortDate(p.renewal.validFrom)} au ${formatShortDate(p.renewal.validTo)} ? Les courses jusqu'au ${formatShortDate(p.dates.validTo)} restent sur la prescription actuelle.`}
+                        confirm={{
+                          question: `Rattacher ${p._count.recurrences === 1 ? "la récurrence" : `les ${p._count.recurrences} récurrences`} à la prescription du ${formatShortDate(p.renewal.validFrom)} au ${formatShortDate(p.renewal.validTo)} ? Les courses jusqu'au ${formatShortDate(p.dates.validTo)} restent sur la prescription actuelle.`,
+                          confirmLabel: "Oui, rattacher",
+                          tone: "primary",
+                        }}
                         variant="secondary"
-                        pendingLabel="Rattachement…"
                       >
                         Rattacher au renouvellement
                       </ActionButton>
@@ -456,11 +464,15 @@ export default async function PatientPage({
                           <ActionButton
                             action={deletePrescription}
                             fields={{ patientId: patient.id, prescriptionId: p.id }}
-                            confirmMessage={`Supprimer définitivement la prescription du ${formatShortDate(p.dates.validFrom)} au ${formatShortDate(p.dates.validTo)} ?`}
+                            confirm={{
+                              question: `Supprimer définitivement la prescription du ${formatShortDate(p.dates.validFrom)} au ${formatShortDate(p.dates.validTo)} ?`,
+                              confirmLabel: "Oui, supprimer la prescription",
+                              keepLabel: "Garder la prescription",
+                            }}
                             variant="ghost"
-                            pendingLabel="Suppression…"
+                            ariaLabel={`Supprimer la prescription du ${formatShortDate(p.dates.validFrom)} au ${formatShortDate(p.dates.validTo)}`}
                           >
-                            <span className="text-red-700">Supprimer</span>
+                            Supprimer
                           </ActionButton>
                         </div>
                       </Td>
@@ -518,7 +530,7 @@ export default async function PatientPage({
                     validFrom: toIsoDate(r.prescription.validFrom),
                     validTo: toIsoDate(r.prescription.validTo),
                   };
-                  const warnings: Notice[] = [];
+                  const warnings: StatusNotice[] = [];
                   if (r.active) {
                     const own = prescriptionById.get(r.prescription.id);
                     const coverage = recurrenceCoverageNotice(
@@ -554,9 +566,9 @@ export default async function PatientPage({
                         {warnings.length > 0 ? (
                           <div className="mt-1.5 max-w-md space-y-1">
                             {warnings.map((w) => (
-                              <Warning key={w.text} tone={w.tone}>
+                              <Notice size="sm" key={w.text} tone={w.tone}>
                                 {w.text}
-                              </Warning>
+                              </Notice>
                             ))}
                           </div>
                         ) : null}
@@ -601,9 +613,13 @@ export default async function PatientPage({
                           <ActionButton
                             action={setRecurrenceActive}
                             fields={{ patientId: patient.id, recurrenceId: r.id, active: r.active ? "false" : "true" }}
-                            confirmMessage={
+                            confirm={
                               r.active
-                                ? `Désactiver cette récurrence ? Elle ne générera plus de courses${cancelledTripsClause(openTrips.get(r.id) ?? 0)}.`
+                                ? {
+                                    question: `Désactiver cette récurrence ? Elle ne générera plus de courses${cancelledTripsClause(openTrips.get(r.id) ?? 0)}.`,
+                                    confirmLabel: "Oui, désactiver la récurrence",
+                                    keepLabel: "Garder la récurrence active",
+                                  }
                                 : undefined
                             }
                             variant="ghost"

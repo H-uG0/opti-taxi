@@ -4,12 +4,15 @@ import { startTransition, useActionState, type MouseEvent } from "react";
 import { AddressFields } from "@/components/address/address-fields";
 import type { AddressFormValues } from "@/components/address/address-utils";
 import Link from "next/link";
-import { Button, LinkButton } from "@/components/ui/button";
-import { Checkbox, Field, Fieldset, FormMessage, Input, Select, Textarea } from "@/components/ui/form";
+import { Button } from "@/components/ui/button";
+import { Field, Fieldset, FormMessage, Input, Select, Textarea } from "@/components/ui/form";
 import { MOBILITY_LABELS } from "@/lib/labels";
-import { echoed, echoedCheckbox, INITIAL_FORM_STATE, type FormState } from "../_lib/form-state";
+import { echoed, IDLE_STATE, refusalKey } from "@/lib/forms";
+import { ErrorFocus } from "@/components/ui/error-focus";
+import { FormFooter } from "@/components/ui/form-footer";
+import type { PatientFormState } from "../_lib/patient-form-state";
 import { MOBILITIES } from "../_lib/options";
-import { FormSubmitButton, submitWithoutReset } from "./form-submit";
+import { submitWithoutReset } from "./form-submit";
 
 export type PatientFormInitial = {
   lastName: string;
@@ -17,7 +20,6 @@ export type PatientFormInitial = {
   phone: string;
   mobility: string;
   accessNotes: string;
-  active: boolean;
   address: AddressFormValues;
 };
 
@@ -27,19 +29,16 @@ export function PatientForm({
   geocoderEnabled,
   submitLabel,
   cancelHref,
-  activeHint,
 }: {
-  action: (prev: FormState, formData: FormData) => Promise<FormState>;
+  action: (prev: PatientFormState, formData: FormData) => Promise<PatientFormState>;
   initial: PatientFormInitial;
   geocoderEnabled: boolean;
   submitLabel: string;
   cancelHref: string;
-  /** Shown under the « actif » box of an active patient: what unticking it does. */
-  activeHint?: string;
 }) {
-  const [state, formAction, isPending] = useActionState(action, INITIAL_FORM_STATE);
+  const [state, formAction, isPending] = useActionState<PatientFormState, FormData>(action, IDLE_STATE);
   const errors = state.fieldErrors;
-  const value = (key: keyof Omit<PatientFormInitial, "active" | "address">) => echoed(state, key, initial[key]);
+  const value = (key: keyof Omit<PatientFormInitial, "address">) => echoed(state, key, initial[key]);
   const similar = state.similar ?? [];
 
   function createAnyway(event: MouseEvent<HTMLButtonElement>) {
@@ -130,7 +129,7 @@ export function PatientForm({
         geocoderEnabled={geocoderEnabled}
       />
 
-      <Fieldset legend="Accès et statut">
+      <Fieldset legend="Accès">
         <Field
           label="Notes d'accès"
           htmlFor="accessNotes"
@@ -146,14 +145,6 @@ export function PatientForm({
             aria-invalid={errors.accessNotes ? true : undefined}
           />
         </Field>
-        <div className="space-y-1">
-          <Checkbox
-            name="active"
-            defaultChecked={echoedCheckbox(state, "active", initial.active)}
-            label="Patient actif (ses récurrences génèrent des courses)"
-          />
-          {initial.active && activeHint ? <p className="text-xs text-slate-500">{activeHint}</p> : null}
-        </div>
       </Fieldset>
 
       {similar.length > 0 ? (
@@ -174,7 +165,7 @@ export function PatientForm({
                   {p.name}
                 </Link>{" "}
                 — {p.city}
-                {p.active ? "" : " (inactif)"} · <span className="text-amber-900">{p.reasons.join(", ")}</span>
+                {p.active ? "" : " (désactivé)"} · <span className="text-amber-900">{p.reasons.join(", ")}</span>
               </li>
             ))}
           </ul>
@@ -189,12 +180,8 @@ export function PatientForm({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-3">
-        <FormSubmitButton pending={isPending}>{submitLabel}</FormSubmitButton>
-        <LinkButton href={cancelHref} variant="ghost">
-          Annuler
-        </LinkButton>
-      </div>
+      <FormFooter cancelHref={cancelHref} submitLabel={submitLabel} pending={isPending} />
+      <ErrorFocus refusal={similar.length > 0 ? null : refusalKey(state)} />
     </form>
   );
 }

@@ -73,6 +73,7 @@ import {
   type OptimizerVehicle,
 } from "./contract";
 import { compareVehicles, VEHICLE_TYPE_ORDER } from "@/lib/fleet/order";
+import { formatPersonName } from "@/lib/names";
 
 const MAX_DAY_MINUTE = 2 * 24 * 60;
 const MAX_CAPACITY = 8;
@@ -337,8 +338,9 @@ export function tripServiceMinutes(
   return { pickupServiceMin: sent(pickup, settings.pickupServiceMin), dropoffServiceMin: sent(dropoff, settings.dropoffServiceMin) };
 }
 
+/** « DUPONT Marie » (lib/names): in the reasons a vehicle is left out, and on the planning screens. */
 export function personName(person: { firstName: string; lastName: string }): string {
-  return `${person.firstName} ${person.lastName}`.trim();
+  return formatPersonName(person);
 }
 
 function isDayMinute(value: number): boolean {

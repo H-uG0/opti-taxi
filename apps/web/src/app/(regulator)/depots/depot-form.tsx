@@ -2,14 +2,28 @@
 
 import { useActionState, useState, type ClipboardEvent } from "react";
 import { ExternalLink } from "lucide-react";
+import { AddressLookup } from "@/components/address/address-fields";
+import { formatCoordinate, type GeocodeSuggestion } from "@/components/address/address-utils";
+import { ErrorFocus } from "@/components/ui/error-focus";
 import { Field, Fieldset, FormMessage, Input, Textarea } from "@/components/ui/form";
-import { IDLE_STATE, parseDecimal, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
-import { FormFooter, InlineWarning } from "@/app/(regulator)/vehicules/_lib/ui";
+import { IDLE_STATE, parseDecimal, refusalKey, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
 import { isInFrance, parseCoordinatePair } from "./schema";
+import { FormFooter } from "@/components/ui/form-footer";
+import { InlineWarning } from "@/components/ui/notice";
 
 type Action = (state: FormState, formData: FormData) => Promise<FormState>;
 
-export function DepotForm({ action, initial, submitLabel }: { action: Action; initial: FormValues; submitLabel: string }) {
+export function DepotForm({
+  action,
+  initial,
+  submitLabel,
+  geocoderEnabled,
+}: {
+  action: Action;
+  initial: FormValues;
+  submitLabel: string;
+  geocoderEnabled: boolean;
+}) {
   const [state, formAction] = useActionState(action, IDLE_STATE);
   const values = state.values ?? initial;
 
@@ -18,15 +32,26 @@ export function DepotForm({ action, initial, submitLabel }: { action: Action; in
     <form key={state.submissionId} action={formAction} className="space-y-6">
       {state.status === "error" && state.message ? <FormMessage>{state.message}</FormMessage> : null}
       {state.status === "success" && state.message ? <FormMessage tone="success">{state.message}</FormMessage> : null}
-      <DepotFields values={values} errors={state.fieldErrors} />
+      <DepotFields values={values} errors={state.fieldErrors} geocoderEnabled={geocoderEnabled} />
       <FormFooter cancelHref="/depots" submitLabel={submitLabel} />
+      <ErrorFocus refusal={refusalKey(state)} />
     </form>
   );
 }
 
-function DepotFields({ values, errors }: { values: FormValues; errors: FieldErrors }) {
+function DepotFields({ values, errors, geocoderEnabled }: { values: FormValues; errors: FieldErrors; geocoderEnabled: boolean }) {
+  const [address, setAddress] = useState(valueOf(values, "address"));
   const [lat, setLat] = useState(valueOf(values, "lat"));
   const [lng, setLng] = useState(valueOf(values, "lng"));
+  // The address the coordinates were taken from (« Localiser l'adresse »), to say when it changed since.
+  const [located, setLocated] = useState<string | null>(null);
+
+  function choose(suggestion: GeocodeSuggestion) {
+    setAddress(suggestion.label);
+    setLat(formatCoordinate(suggestion.lat));
+    setLng(formatCoordinate(suggestion.lng));
+    setLocated(suggestion.label);
+  }
 
   /** Pasting "43.2965, 5.3698" from a map fills both coordinates. */
   function pasteCoordinates(event: ClipboardEvent<HTMLInputElement>) {
@@ -70,10 +95,14 @@ function DepotFields({ values, errors }: { values: FormValues; errors: FieldErro
               required
               maxLength={200}
               autoComplete="street-address"
-              defaultValue={valueOf(values, "address")}
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
               aria-invalid={Boolean(errors.address)}
             />
           </Field>
+          <div className="sm:col-span-2 lg:col-span-4">
+            <AddressLookup query={address} onChoose={choose} geocoderEnabled={geocoderEnabled} changed={located !== null && located !== address} />
+          </div>
           <Field label="Latitude" htmlFor="lat" error={errors.lat}>
             <Input
               id="lat"
@@ -81,7 +110,7 @@ function DepotFields({ values, errors }: { values: FormValues; errors: FieldErro
               required
               inputMode="decimal"
               autoComplete="off"
-              placeholder="43.2965"
+              placeholder="43,2965"
               className="tabular"
               value={lat}
               onChange={(e) => setLat(e.target.value)}
@@ -97,7 +126,7 @@ function DepotFields({ values, errors }: { values: FormValues; errors: FieldErro
               required
               inputMode="decimal"
               autoComplete="off"
-              placeholder="5.3698"
+              placeholder="5,3698"
               className="tabular"
               value={lng}
               onChange={(e) => setLng(e.target.value)}
@@ -108,8 +137,9 @@ function DepotFields({ values, errors }: { values: FormValues; errors: FieldErro
           </Field>
           <div id="coordinates-hint" className="space-y-1 text-xs text-slate-500 sm:col-span-2 lg:self-end">
             <p>
-              Coordonnées en degrés décimaux. Dans OpenStreetMap ou Google Maps, un clic droit sur le dépôt affiche
-              « 43.2965, 5.3698 » : collez ce texte dans l&apos;un des deux champs, ils seront remplis ensemble.
+              Remplies par « Localiser l&apos;adresse », ou en degrés décimaux : dans OpenStreetMap ou Google Maps, un clic
+              droit sur le dépôt affiche « 43.2965, 5.3698 » ; collez ce texte dans l&apos;un des deux champs, ils seront
+              remplis ensemble.
             </p>
             {hasCoordinates && !coordinatesInFrance ? (
               <p>
@@ -132,9 +162,9 @@ function DepotFields({ values, errors }: { values: FormValues; errors: FieldErro
             ) : null}
           </div>
           <Field
-            label="Notes"
+            label="Notes (facultatif)"
             htmlFor="notes"
-            hint="Facultatif : accès, parking, horaires d'ouverture… visibles par les équipages au départ et au retour"
+            hint="Accès, parking, horaires d'ouverture… visibles par les équipages au départ et au retour"
             error={errors.notes}
             className="sm:col-span-2 lg:col-span-4"
           >

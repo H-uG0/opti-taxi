@@ -1,9 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   fieldRecordLabel,
   fieldRecordText,
-  formatInstant,
-  formatTimeOn,
   recordedByText,
   sharingAnswerText,
   tariffGapList,
@@ -11,18 +9,18 @@ import {
   UNKNOWN_AUTHOR,
 } from "./format";
 
+// Dates and times without a year are those of the current year (lib/time formatDateTime): the clock is set in 2026.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-10T12:00:00Z") });
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
+
 // November: Europe/Paris is UTC+1.
 const DATE = "2026-11-03";
 
 describe("recorded values", () => {
-  it("gives the time alone on the planned day, and the day too otherwise (Europe/Paris)", () => {
-    expect(formatTimeOn("2026-11-03T07:02:00.000Z", DATE)).toBe("08:02");
-    // 23:30 UTC on the 2nd is 00:30 on the 3rd in Paris.
-    expect(formatTimeOn("2026-11-02T23:30:00.000Z", DATE)).toBe("00:30");
-    expect(formatTimeOn("2026-11-03T23:10:00.000Z", DATE)).toBe("04/11 à 00:10");
-    expect(formatInstant("2026-11-02T16:40:00.000Z")).toBe("02/11 à 17:40");
-  });
-
   it("names the account that recorded the value, or says it was not traced (as /courses)", () => {
     expect(recordedByText("Jean Martin")).toBe("par Jean Martin");
     expect(recordedByText(null)).toBe("auteur non tracé");

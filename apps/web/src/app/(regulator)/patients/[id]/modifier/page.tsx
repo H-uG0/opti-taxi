@@ -9,9 +9,9 @@ import { addressFormValues } from "@/components/address/address-utils";
 import { PageHeader } from "@/components/ui/layout";
 import { updatePatient } from "../../actions";
 import { PatientForm } from "../../_components/patient-form";
-import { BackLink } from "../../_components/back-link";
 import { countOpenTrips } from "../../_lib/trip-counts";
 import { openTripsLabel } from "../../_lib/trip-sync";
+import { BackLink } from "@/components/ui/back-link";
 
 export const metadata: Metadata = { title: "Modifier le patient" };
 
@@ -49,17 +49,11 @@ export default async function EditPatientPage({ params }: { params: Promise<{ id
           phone: patient.phone ?? "",
           mobility: patient.mobility,
           accessNotes: patient.accessNotes ?? "",
-          active: patient.active,
           address: addressFormValues(patient),
         }}
         geocoderEnabled={geocoderEnabled()}
         submitLabel="Enregistrer"
         cancelHref={`/patients/${patient.id}`}
-        activeHint={
-          openTrips > 0
-            ? `Décocher annule ${openTrips === 1 ? "sa course à venir non commencée" : `ses ${openTripsLabel(openTrips)} non commencées`}.`
-            : undefined
-        }
       />
     </div>
   );

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { CalendarPlus, ListChecks } from "lucide-react";
+import { CalendarPlus, ListChecks, Share2 } from "lucide-react";
 import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -13,17 +13,18 @@ import { PlanRunLine, RunBanner } from "@/components/planning/run-banner";
 import { SimulatedDayBadge } from "@/components/planning/simulated-day-badge";
 import { TariffGapBanner } from "@/components/planning/tariff-gap-banner";
 import { FILTER_PARAMS } from "@/lib/planning/filter";
-import { formatDayMonth, formatInstant, pluralize } from "@/lib/planning/format";
+import { formatDayMonth, pluralize } from "@/lib/planning/format";
 import { loadPlanningDay } from "@/lib/planning/load";
 import type { PlanningDayView } from "@/lib/planning/types";
 import { loadDayVersion } from "@/lib/planning/version";
-import { formatLongDate, isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
+import { formatDateTime, formatDayDate, formatLongDate, isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
 import { currentHorizon, inHorizon } from "@/lib/trips/completion";
 import { loadRecurrencesWithoutTrip } from "@/lib/trips/missing-load";
 import { generationStateOf, MissingRecurrencesNote } from "@/components/trips/missing-recurrences";
 import type { MissingRecurrence } from "@/lib/trips/missing";
 import { TripCompletion } from "@/components/trips/trip-completion";
-import { DateNav } from "./date-nav";
+import { DayTabs } from "@/components/nav/day-tabs";
+import { DayNav } from "@/components/ui/day-nav";
 import { OptimizerStatus, OptimizerStatusPending } from "./optimizer-status";
 import { OptimizeHint } from "./optimize-hint";
 import { PendingPlanBanner, RestorePlanButton } from "./pending-plan";
@@ -32,19 +33,23 @@ import { PlanningBoard } from "./planning-board";
 import { PlanningToolbar } from "./planning-toolbar";
 import { PlanningVersionWatcher } from "./version-watcher";
 
-export const metadata: Metadata = { title: "Planning J+1" };
-
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
+/** The tab says which day: « Planning 12/11 » (never a patient, even with ?trip=). */
+export async function generateMetadata({ searchParams }: { searchParams: SearchParams }): Promise<Metadata> {
+  const requested = firstParam((await searchParams).date);
+  return { title: `Planning ${formatDayDate(isIsoDate(requested) ? requested : tomorrowIso())}` };
+}
+
 /** A computation of the date running now (not one interrupted by a restart), said for the disabled buttons. */
 function runningReasonOf(view: PlanningDayView): string | null {
   const run = view.lastRun;
   if (!run || run.status !== "RUNNING" || run.interrupted) return null;
-  return `Une optimisation de cette date est en cours (lancée le ${formatInstant(run.startedAt)}${run.requestedBy ? ` par ${run.requestedBy}` : ""}) : attendez la fin du calcul.`;
+  return `Une optimisation de cette date est en cours (lancée le ${formatDateTime(run.startedAt)}${run.requestedBy ? ` par ${run.requestedBy}` : ""}) : attendez la fin du calcul.`;
 }
 
 /** Why the routes of the day cannot be recomputed (mirrors replanBlocker on the server). */
@@ -65,7 +70,7 @@ function headerDescription(view: PlanningDayView, availableVehicles: number): st
     case "VALIDATED": {
       const validatedAt = view.vehicles.find((v) => v.route?.validatedAt)?.route?.validatedAt;
       return validatedAt
-        ? `Planning validé le ${formatInstant(validatedAt)}. Rouvrez-le pour l'ajuster.`
+        ? `Planning validé le ${formatDateTime(validatedAt)}. Rouvrez-le pour l'ajuster.`
         : "Planning validé. Rouvrez-le pour l'ajuster.";
     }
     default:
@@ -146,12 +151,10 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
             </span>
           }
           description={headerDescription(view, availableVehicles)}
+          titleAside={<DayTabs current="/planning" date={date} />}
           actions={
             <>
-              <DateNav date={date} tomorrow={tomorrow} keepParams={FILTER_PARAMS} shortcuts />
-              <LinkButton href={`/equipages?date=${date}`} variant="ghost" title="Équipages de ce jour : absences, remplaçants, équipages fixés">
-                Équipages
-              </LinkButton>
+              <DayNav basePath="/planning" date={date} tomorrow={tomorrow} keepParams={FILTER_PARAMS} shortcuts fieldLabel="Date du planning" />
               <PlanningToolbar
                 date={date}
                 version={shownVersion.version}
@@ -162,6 +165,13 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
                 canReopen={!past && (view.dayStatus === "VALIDATED" || view.dayStatus === "MIXED")}
                 unassignedCount={hasRoutes && !past ? placeable : 0}
               />
+              {view.dayStatus === "VALIDATED" && !past ? (
+                // The next step once the day is validated: the sheets for the reception desks.
+                <LinkButton href={`/arrivees-partagees?date=${date}`} variant="secondary">
+                  <Share2 aria-hidden className="size-4" />
+                  Prévenir les accueils
+                </LinkButton>
+              ) : null}
             </>
           }
         />

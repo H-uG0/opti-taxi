@@ -39,6 +39,7 @@ import {
   type Seat,
   type StaffPerson,
 } from "./day-crews";
+import { formatPersonName } from "@/lib/names";
 
 export type RouteCrew = { driverId: string | null; crewMateId: string | null };
 
@@ -226,7 +227,7 @@ export function crewChoices(
       const depot = p.depotId ? depotOf.get(p.depotId) : undefined;
       return {
         id: p.id,
-        name: `${p.lastName.toUpperCase()} ${p.firstName}`,
+        name: formatPersonName(p),
         firstName: p.firstName,
         lastName: p.lastName,
         depotId: p.depotId,

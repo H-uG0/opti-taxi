@@ -1,10 +1,13 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   addDays,
+  formatDateTime,
+  formatDayDate,
   formatDuration,
   formatLongDate,
   formatMinute,
   formatShortDate,
+  formatTimeOn,
   fromIsoDate,
   isIsoDate,
   isoDateOf,
@@ -260,5 +263,28 @@ describe("date labels", () => {
     expect(WEEKDAY_LABELS[1]).toBe("Lundi");
     expect(WEEKDAY_LABELS[7]).toBe("Dimanche");
     expect(WEEKDAY_SHORT[isoWeekday("2026-11-07")]).toBe("Sam");
+  });
+});
+
+describe("formatDateTime, formatTimeOn and formatDayDate: the one way to write an instant or a day", () => {
+  const NOW = new Date("2026-11-10T12:00:00Z");
+
+  it("writes « 02/11 à 18:40 » in Europe/Paris, with the year only outside the current one", () => {
+    expect(formatDateTime(new Date("2026-11-03T07:12:00Z"), NOW)).toBe("03/11 à 08:12");
+    expect(formatDateTime("2026-07-14T21:30:00Z", NOW)).toBe("14/07 à 23:30"); // summer time
+    expect(formatDateTime(new Date("2026-11-03T23:05:00Z"), NOW)).toBe("04/11 à 00:05"); // next day in Paris, 00 not 24
+    expect(formatDateTime(new Date("2025-12-31T22:30:00Z"), NOW)).toBe("31/12/2025 à 23:30");
+  });
+
+  it("gives the time alone on the day shown, and the day too otherwise", () => {
+    expect(formatTimeOn("2026-11-03T07:02:00.000Z", "2026-11-03", NOW)).toBe("08:02");
+    // 23:30 UTC on the 2nd is 00:30 on the 3rd in Paris.
+    expect(formatTimeOn("2026-11-02T23:30:00.000Z", "2026-11-03", NOW)).toBe("00:30");
+    expect(formatTimeOn("2026-11-03T23:10:00.000Z", "2026-11-03", NOW)).toBe("04/11 à 00:10");
+  });
+
+  it("writes a day as « 12/11 », with the year outside the current one", () => {
+    expect(formatDayDate("2026-11-12", NOW)).toBe("12/11");
+    expect(formatDayDate("2027-01-04", NOW)).toBe("04/01/2027");
   });
 });

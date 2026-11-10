@@ -109,7 +109,7 @@ describe("CrewForm", () => {
     fireEvent.click(screen.getByRole("button", { name: "Revenir aux propositions (tout le jour)" }));
     const confirm = screen.getByRole("group", { name: "Confirmer le retour aux propositions" });
     expect(confirm.textContent).toContain("L'équipage fixé (par Marie) sera oublié.");
-    const submit = within(confirm).getByRole("button", { name: "Revenir aux propositions" });
+    const submit = within(confirm).getByRole("button", { name: "Oui, revenir aux propositions" });
     expect(submit.getAttribute("type")).toBe("submit");
     expect(submit.getAttribute("value")).toBe("reset");
     fireEvent.click(within(confirm).getByRole("button", { name: "Garder les équipages" }));
@@ -132,29 +132,31 @@ describe("CrewForm", () => {
     expect(field("driver:Taxi 2")?.value).toBe("");
   });
 
-  it("asks before leaving the date with unsaved changes", () => {
+  it("asks before leaving the date with unsaved changes, in the app's dialog", async () => {
     render(<CrewForm date="2026-11-11" rows={ROWS} people={PEOPLE} depots={DEPOTS} locked={null} hasSavedCrews={false} />);
     const link = document.body.appendChild(document.createElement("a"));
     link.href = "/equipages?date=2026-11-12";
     link.textContent = "Jour suivant";
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     // Nothing to lose yet: no question.
     link.addEventListener("click", (event) => event.preventDefault(), { once: true });
     fireEvent.click(link);
-    expect(confirm).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Chauffeur de Taxi 3 : — Aucun chauffeur —" }));
     fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: /CYD/ }));
-    // Another date: asked, and refused, the link does not navigate.
+    // Another date: asked in the app's dialog (never the browser's), the link does not navigate meanwhile.
     expect(fireEvent.click(link)).toBe(false);
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("La modification des équipages du"));
+    const dialog = await screen.findByRole("alertdialog", { name: "Modifications non enregistrées" });
+    expect(dialog.textContent).toContain("La modification des équipages du 11/11/2026 n'est pas enregistrée");
+    // « Rester sur la page »: nothing lost, the focus back where it was.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Rester sur la page" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Enregistrer la modification" })).toBeTruthy();
     // The same date (a filter, an anchor): no question.
-    confirm.mockClear();
     link.href = "/equipages?date=2026-11-11&depot=gap";
     link.addEventListener("click", (event) => event.preventDefault(), { once: true });
     fireEvent.click(link);
-    expect(confirm).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
     link.remove();
-    confirm.mockRestore();
   });
 });

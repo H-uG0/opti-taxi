@@ -74,7 +74,7 @@ export function RefreshControl({ renderedAt }: { renderedAt: string }) {
           disabled={busy}
           className="inline-flex min-h-11 touch-manipulation items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:opacity-60"
         >
-          <RotateCcw aria-hidden className={cn("size-4", busy && "animate-spin")} />
+          <RotateCcw aria-hidden className={cn("size-4", busy && "motion-safe:animate-spin")} />
           {busy ? "Actualisation…" : "Actualiser"}
         </button>
       </div>

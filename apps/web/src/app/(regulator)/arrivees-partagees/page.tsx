@@ -13,8 +13,9 @@ import { db } from "@/lib/db";
 import { isSimulatedDay } from "@/lib/simulated-day";
 import { formatAddress, isShareable } from "@/lib/domain/rules";
 import { FACILITY_TYPE_LABELS } from "@/lib/labels";
-import { formatLongDate, formatMinute, fromIsoDate, isIsoDate, tomorrowIso } from "@/lib/time";
-import { DayNav } from "../courses/day-nav";
+import { formatDayDate, formatLongDate, formatMinute, fromIsoDate, isIsoDate, tomorrowIso } from "@/lib/time";
+import { DayTabs } from "@/components/nav/day-tabs";
+import { DayNav } from "@/components/ui/day-nav";
 import { coPassengersFromStops, coursesHref, EMPTY_FILTERS, patientDisplayName, plural } from "../courses/trip-list";
 import {
   countPatients,
@@ -25,8 +26,14 @@ import {
   type TransportGroup,
 } from "./grouping";
 import { PrintButton } from "./print-button";
+import { formatPersonName } from "@/lib/names";
 
-export const metadata: Metadata = { title: "Arrivées partagées" };
+/** The tab says which day: « Transports partagés 12/11 ». */
+export async function generateMetadata({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }): Promise<Metadata> {
+  const raw = (await searchParams).date;
+  const requested = Array.isArray(raw) ? raw[0] : raw;
+  return { title: `Transports partagés ${formatDayDate(isIsoDate(requested) ? requested : tomorrowIso())}` };
+}
 
 /**
  * The regulator shell (sidebar, top bar) is not printed (print:hidden in the
@@ -115,7 +122,7 @@ export default async function SharedArrivalsPage({
         }
       : null,
     vehicle: trip.route?.vehicle ?? null,
-    driverName: trip.route?.driver ? `${trip.route.driver.firstName} ${trip.route.driver.lastName}` : null,
+    driverName: trip.route?.driver ? formatPersonName(trip.route.driver) : null,
     routeValidated: trip.route?.status === "VALIDATED",
     plannedPickupMinute: trip.plannedPickupMinute,
     plannedDropoffMinute: trip.plannedDropoffMinute,
@@ -139,15 +146,16 @@ export default async function SharedArrivalsPage({
       <PageHeader
         title={
           <span className="flex flex-wrap items-center gap-2">
-            <span>{sheet ? `Transports partagés · ${sheet.facility.name}` : "Arrivées partagées"}</span>
+            <span>{sheet ? `Transports partagés · ${sheet.facility.name}` : "Transports partagés"}</span>
             {simulated ? <SimulatedDayBadge /> : null}
           </span>
         }
         description={
           facilityFilter
             ? `Fiche pour l'accueil de l'établissement · ${longDate}`
-            : `Transports partagés du ${longDate}, par lieu de soins`
+            : `Arrivées et départs partagés du ${longDate}, par lieu de soins`
         }
+        titleAside={facilityFilter ? undefined : <DayTabs current="/arrivees-partagees" date={date} />}
         actions={
           facilityFilter || facilities.length > 0 ? (
             <>
@@ -197,6 +205,8 @@ export default async function SharedArrivalsPage({
         key={date}
         basePath="/arrivees-partagees"
         date={date}
+        tomorrow={tomorrowIso()}
+        fieldLabel="Date des transports partagés"
         params={facilityFilter ? { etablissement: facilityFilter } : {}}
         className="mb-5 print:hidden"
       />

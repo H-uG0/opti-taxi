@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { audit, changedFields } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { idSchema, invalidState, messageState, readForm, type FormState } from "@/lib/forms";
+import { idSchema, invalidState, messageState, readForm, successState, type FormState } from "@/lib/forms";
 import { TARIFF_AUDIT_FIELDS, tariffSchema } from "./schema";
 
 const GRID_GONE = "Cette grille n'existe plus : rechargez la page.";
@@ -16,7 +16,7 @@ export async function createTariff(_state: FormState, formData: FormData): Promi
   const parsed = tariffSchema.safeParse(values);
   if (!parsed.success) return invalidState(parsed.error, values);
 
-  await db.$transaction(async (tx) => {
+  const created = await db.$transaction(async (tx) => {
     const grid = await tx.tariffGrid.create({ data: parsed.data, select: { id: true } });
     await audit(tx, user, {
       action: "tariff.create",
@@ -24,9 +24,11 @@ export async function createTariff(_state: FormState, formData: FormData): Promi
       entityId: grid.id,
       details: changedFields({}, parsed.data, TARIFF_AUDIT_FIELDS),
     });
+    return grid;
   });
   revalidatePath("/tarifs");
-  redirect("/tarifs");
+  // A creation opens the record with a banner; a change stays on it with a banner (the app's rule).
+  redirect(`/tarifs/${created.id}?cree=1`);
 }
 
 export async function updateTariff(gridId: string, _state: FormState, formData: FormData): Promise<FormState> {
@@ -52,7 +54,7 @@ export async function updateTariff(gridId: string, _state: FormState, formData: 
   });
   revalidatePath("/tarifs");
   revalidatePath(`/tarifs/${current.id}`);
-  redirect("/tarifs");
+  return successState("Grille enregistrée.");
 }
 
 /**

@@ -13,14 +13,21 @@ import { vehicleIssues } from "@/lib/planning/route-issues";
 import { replanBlocker } from "@/lib/planning/run-optimization";
 import { compareLabels, comparePeople, compareVehiclesByDepot } from "@/lib/fleet/order";
 import { absenceOn, depotDistanceKm, isQualified, planningAbsenceText, staffName } from "@/lib/staff/day-crews";
-import { formatLongDate, fromIsoDate, isIsoDate, isoWeekday, todayIso, tomorrowIso } from "@/lib/time";
-import { DateNav } from "../planning/date-nav";
-import { Callout } from "../vehicules/_lib/ui";
+import { formatDayDate, formatLongDate, fromIsoDate, isIsoDate, isoWeekday, todayIso, tomorrowIso } from "@/lib/time";
+import { DayTabs } from "@/components/nav/day-tabs";
+import { DayNav } from "@/components/ui/day-nav";
 import { CrewForm, type CrewDepots, type CrewPersonOption, type CrewRow } from "./crew-form";
 import { QUALIFICATION_SHORT, QUALIFICATIONS } from "../chauffeurs/schema";
 import { crewOrigin } from "./schema";
+import { Notice } from "@/components/ui/notice";
+import { formatPersonName } from "@/lib/names";
 
-export const metadata: Metadata = { title: "Équipages" };
+/** The tab says which day: « Équipages 12/11 ». */
+export async function generateMetadata({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }): Promise<Metadata> {
+  const raw = (await searchParams).date;
+  const requested = Array.isArray(raw) ? raw[0] : raw;
+  return { title: `Équipages ${formatDayDate(isIsoDate(requested) ? requested : tomorrowIso())}` };
+}
 
 /** The filter of the page (depot, « à traiter seulement ») follows from one date to the next. */
 const KEPT_PARAMS = ["depot", "etat"] as const;
@@ -100,7 +107,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
       const absence = absenceOn(p.id, date, input.absences);
       return {
         id: p.id,
-        name: `${p.lastName.toUpperCase()} ${p.firstName}`,
+        name: formatPersonName(p),
         active: p.active,
         depotId: p.depotId,
         absence: absence ? planningAbsenceText(absence).toLowerCase() : null,
@@ -151,7 +158,8 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
           </span>
         }
         description={summary.join(" · ")}
-        actions={<DateNav date={date} tomorrow={tomorrow} basePath="/equipages" keepParams={KEPT_PARAMS} />}
+        titleAside={<DayTabs current="/equipages" date={date} />}
+        actions={<DayNav basePath="/equipages" date={date} tomorrow={tomorrow} keepParams={KEPT_PARAMS} fieldLabel="Date des équipages" />}
       />
 
       <div className="space-y-6">
@@ -167,7 +175,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
           </FormMessage>
         ) : null}
         {issues.length > 0 ? (
-          <Callout tone="warning" title={`Véhicules à revoir (${issues.length})`}>
+          <Notice tone="warning" title={`Véhicules à revoir (${issues.length})`}>
             {issues.some((issue) => issue.changes.length > 0) ? (
               locked ? (
                 // Re-planning is not possible now: say why instead of asking for it.
@@ -202,7 +210,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
                 </li>
               ))}
             </ul>
-          </Callout>
+          </Notice>
         ) : null}
         <p className="text-sm text-slate-600">
           {fixedCount > 0

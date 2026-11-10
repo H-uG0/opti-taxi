@@ -6,11 +6,11 @@ import { geocoderEnabled } from "@/lib/geocode";
 import { addressFormValues } from "@/components/address/address-utils";
 import { PageHeader } from "@/components/ui/layout";
 import { todayIso } from "@/lib/time";
-import { BackLink } from "@/app/(regulator)/patients/_components/back-link";
 import { countOpenTrips } from "@/app/(regulator)/patients/_lib/trip-counts";
 import { openTripsLabel } from "@/app/(regulator)/patients/_lib/trip-sync";
 import { updateFacility } from "../../actions";
 import { FacilityForm } from "../../_components/facility-form";
+import { BackLink } from "@/components/ui/back-link";
 
 export const metadata: Metadata = { title: "Modifier l'établissement" };
 

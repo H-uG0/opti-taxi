@@ -3,9 +3,10 @@
 import { useActionState } from "react";
 import { Field, FormMessage, Input, Select } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { IDLE_STATE, valueOf, type FormState } from "@/lib/forms";
+import { IDLE_STATE, refusalKey, SAVING_LABEL, valueOf, type FormState } from "@/lib/forms";
 import { ABSENCE_KIND_LABELS } from "@/lib/labels";
 import { ABSENCE_KINDS } from "../staff-schema";
+import { ErrorFocus } from "@/components/ui/error-focus";
 
 type Action = (state: FormState, formData: FormData) => Promise<FormState>;
 
@@ -21,6 +22,7 @@ export function AbsenceForm({ action, defaultDate }: { action: Action; defaultDa
   const errors = state.fieldErrors;
   return (
     <form key={state.submissionId} action={formAction} className="space-y-3">
+      <ErrorFocus refusal={refusalKey(state)} />
       <Result state={state} />
       <div className="grid gap-3 sm:grid-cols-3">
         <Field label="Motif" htmlFor="absence-kind" error={errors.kind}>
@@ -62,7 +64,7 @@ export function AbsenceForm({ action, defaultDate }: { action: Action; defaultDa
         <Input id="absence-note" name="note" maxLength={200} defaultValue={valueOf(values, "note")} />
       </Field>
       <div className="flex justify-end">
-        <SubmitButton pendingLabel="Enregistrement…">Ajouter l&apos;absence</SubmitButton>
+        <SubmitButton pendingLabel={SAVING_LABEL}>Ajouter l&apos;absence</SubmitButton>
       </div>
     </form>
   );
@@ -75,6 +77,7 @@ export function IncompatibilityForm({ action, people }: { action: Action; people
   const errors = state.fieldErrors;
   return (
     <form key={state.submissionId} action={formAction} className="space-y-3">
+      <ErrorFocus refusal={refusalKey(state)} />
       <Result state={state} />
       <Field label="Ne pas faire travailler avec" htmlFor="pair-other" error={errors.otherId}>
         <Select id="pair-other" name="otherId" required defaultValue={valueOf(values, "otherId")} aria-invalid={Boolean(errors.otherId)}>
@@ -95,7 +98,7 @@ export function IncompatibilityForm({ action, people }: { action: Action; people
         <Input id="pair-note" name="note" maxLength={200} defaultValue={valueOf(values, "note")} />
       </Field>
       <div className="flex justify-end">
-        <SubmitButton pendingLabel="Enregistrement…" variant="secondary">
+        <SubmitButton pendingLabel={SAVING_LABEL} variant="secondary">
           Ajouter la paire
         </SubmitButton>
       </div>

@@ -7,7 +7,7 @@ import { addressShape } from "@/components/address/address-schema";
 import { readAddressForm } from "@/components/address/address-utils";
 import { isIsoDate, parseMinute } from "@/lib/time";
 import { optionalPhone, optionalText, parseForm, type ParseResult } from "./form-parse";
-import { formCheckbox, formString, formStrings, type FormValues } from "./form-state";
+import { formCheckbox, formString, formStrings, type FormValues } from "@/lib/forms";
 import { MAX_SESSION_MINUTES, MOBILITIES, PRESCRIBED_MODES, RECURRENCE_LEGS, SHARING_SCOPES } from "./options";
 
 function requiredDate(label: string) {
@@ -35,7 +35,6 @@ export const patientSchema = z.object({
   ...addressShape,
   mobility: z.enum(MOBILITIES, { error: "Choisissez une mobilité" }),
   accessNotes: optionalText(1000, "Notes d'accès"),
-  active: z.boolean(),
 });
 
 export type PatientInput = z.output<typeof patientSchema>;
@@ -50,8 +49,7 @@ export function readPatientForm(formData: FormData): { raw: Record<string, unkno
     mobility: formString(formData, "mobility"),
     accessNotes: formString(formData, "accessNotes"),
   };
-  if (formCheckbox(formData, "active")) values.active = "on";
-  return { raw: { ...values, active: formCheckbox(formData, "active") }, values };
+  return { raw: values, values };
 }
 
 export function parsePatientForm(formData: FormData): ParseResult<PatientInput> {

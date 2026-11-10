@@ -12,14 +12,15 @@ import { db } from "@/lib/db";
 import { OUTBOUND_NO_SHOW_ADVICE, returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
 import { compareLabels, compareVehiclesByDepot } from "@/lib/fleet/order";
 import { formatPercent, PRESCRIBED_MODE_LABELS, SHARING_SCOPE_LABELS } from "@/lib/labels";
-import { addDays, formatLongDate, formatShortDate, fromIsoDate, isIsoDate, startOfIsoWeek, todayIso, tomorrowIso } from "@/lib/time";
+import { addDays, formatDayDate, formatLongDate, formatShortDate, fromIsoDate, isIsoDate, startOfIsoWeek, todayIso, tomorrowIso } from "@/lib/time";
 import { currentHorizon, inHorizon } from "@/lib/trips/completion";
 import { loadRecurrencesWithoutTrip } from "@/lib/trips/missing-load";
 import { generationStateOf, MissingRecurrencesNote } from "@/components/trips/missing-recurrences";
 import { TripCompletion } from "@/components/trips/trip-completion";
 import { SimulatedDayBadge } from "@/components/planning/simulated-day-badge";
 import { isSimulatedDay } from "@/lib/simulated-day";
-import { DayNav } from "./day-nav";
+import { DayTabs } from "@/components/nav/day-tabs";
+import { DayNav } from "@/components/ui/day-nav";
 import { GenerateTripsForm } from "./generate-trips-form";
 import { cancellationTrace, exceptionalAmbulanceTrace, outboundNoShowTrace, sharingAnswerTrace, stopStatusTraces } from "./record-trace";
 import { TripFiltersForm, type TripFilterChoices } from "./trip-filters";
@@ -46,7 +47,12 @@ import type { TripRowData } from "./trip-row";
 import { TripTable } from "./trip-table";
 import { keyMinute } from "./trip-rules";
 
-export const metadata: Metadata = { title: "Courses" };
+/** The tab says which day: « Courses 12/11 ». */
+export async function generateMetadata({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }): Promise<Metadata> {
+  const raw = (await searchParams).date;
+  const requested = Array.isArray(raw) ? raw[0] : raw;
+  return { title: `Courses ${formatDayDate(isIsoDate(requested) ? requested : tomorrowIso())}` };
+}
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -252,6 +258,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
           </span>
         }
         description={capitalize(formatLongDate(date))}
+        titleAside={<DayTabs current="/courses" date={date} />}
         actions={
           <LinkButton href={`/courses/nouvelle?date=${date}`} variant="primary">
             <Plus aria-hidden className="size-4" />
@@ -276,7 +283,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       ) : null}
 
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
-        <DayNav basePath="/courses" date={date} params={filtersToParams(filters)} />
+        <DayNav basePath="/courses" date={date} tomorrow={tomorrowIso()} params={filtersToParams(filters)} fieldLabel="Date des courses" />
         {/* Keyed so the feedback of another week does not stay on screen after a client navigation. */}
         <GenerateTripsForm
           key={weekStart}

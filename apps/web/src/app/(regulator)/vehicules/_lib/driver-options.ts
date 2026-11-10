@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "@/lib/db";
 import type { DriverOption } from "../vehicle-form";
+import { formatPersonName } from "@/lib/names";
 
 /**
  * Drivers offered in the vehicle form: the active ones, plus those already
@@ -31,7 +32,7 @@ export async function loadDriverOptions(keepIds: (string | null)[] = [], vehicle
   });
   return drivers.map((d) => ({
     id: d.id,
-    name: `${d.lastName.toUpperCase()} ${d.firstName}`,
+    name: formatPersonName(d),
     qualifications: d.qualifications,
     active: d.active,
     seats: [

@@ -88,8 +88,8 @@ describe("resolveDayCrews", () => {
     const crew = crewOf(result, "Taxi A");
     expect(crew).toMatchObject({ driverId: "spare_a", source: "replacement", blocked: null });
     expect(crew.issues.map((i) => i.message)).toEqual([
-      "Chauffeur attitré indisponible (taxi1 TAXI1 : absence du 09/11/2026 au 13/11/2026)",
-      "Chauffeur remplaçant proposé : spare_a SPARE_A",
+      "Chauffeur attitré indisponible (TAXI1 taxi1 : absence du 09/11/2026 au 13/11/2026)",
+      "Chauffeur remplaçant proposé : SPARE_A spare_a",
     ]);
     expect(result.absent).toEqual([
       { driverId: "taxi1", startDate: "2026-11-09", endDate: "2026-11-13", text: "Absence du 09/11/2026 au 13/11/2026" },
@@ -134,7 +134,7 @@ describe("resolveDayCrews", () => {
     const result = plan({ absences: [leave("taxi1"), leave("spare_a")] });
     const crew = crewOf(result, "Taxi A");
     expect(crew.driverId).toBe("spare_b");
-    expect(crew.issues.at(-1)?.message).toBe("Chauffeur remplaçant proposé : spare_b SPARE_B (autre dépôt)");
+    expect(crew.issues.at(-1)?.message).toBe("Chauffeur remplaçant proposé : SPARE_B spare_b (autre dépôt)");
   });
 
   it("leaves the vehicle out when nobody qualified is available", () => {
@@ -150,7 +150,7 @@ describe("resolveDayCrews", () => {
   it("does not propose a person on a day they do not work", () => {
     const result = plan({ date: SATURDAY });
     expect(crewOf(result, "Taxi A")).toMatchObject({ driverId: null, blocked: "Aucun chauffeur disponible" });
-    expect(crewOf(result, "Taxi A").issues[0]?.message).toBe("Chauffeur attitré indisponible (taxi1 TAXI1 : ne travaille pas le samedi)");
+    expect(crewOf(result, "Taxi A").issues[0]?.message).toBe("Chauffeur attitré indisponible (TAXI1 taxi1 : ne travaille pas le samedi)");
   });
 
   it("accepts weekend duty fixed by the regulator, noted only", () => {
@@ -158,7 +158,7 @@ describe("resolveDayCrews", () => {
     const crew = crewOf(result, "Taxi A");
     expect(crew).toMatchObject({ driverId: "taxi1", source: "saved", blocked: null });
     expect(crew.issues).toEqual([
-      { level: "info", seat: "driver", message: "taxi1 TAXI1 ne travaille pas habituellement le samedi : affectation exceptionnelle" },
+      { level: "info", seat: "driver", message: "TAXI1 taxi1 ne travaille pas habituellement le samedi : affectation exceptionnelle" },
     ]);
   });
 
@@ -167,13 +167,13 @@ describe("resolveDayCrews", () => {
     const absent = plan({ absences: [{ ...leave("taxi1"), kind: "SICK" }], saved: fixed });
     expect(crewOf(absent, "Taxi A")).toMatchObject({ driverId: "spare_a", source: "saved", proposedSeats: ["driver"], blocked: null });
     expect(crewOf(absent, "Taxi A").issues.map((i) => i.message)).toEqual([
-      "Chauffeur fixé indisponible (taxi1 TAXI1 : absence le 09/11/2026)",
-      "Chauffeur remplaçant proposé : spare_a SPARE_A",
+      "Chauffeur fixé indisponible (TAXI1 taxi1 : absence le 09/11/2026)",
+      "Chauffeur remplaçant proposé : SPARE_A spare_a",
     ]);
     const onCall = plan({ absences: [{ ...leave("taxi1"), kind: "ON_CALL" }], saved: fixed });
-    expect(crewOf(onCall, "Taxi A").issues[0]?.message).toBe("Chauffeur fixé indisponible (taxi1 TAXI1 : garde le 09/11/2026)");
+    expect(crewOf(onCall, "Taxi A").issues[0]?.message).toBe("Chauffeur fixé indisponible (TAXI1 taxi1 : garde le 09/11/2026)");
     const deactivated = plan({ people: PEOPLE.map((p) => (p.id === "taxi1" ? { ...p, active: false } : p)), saved: fixed });
-    expect(crewOf(deactivated, "Taxi A").issues[0]?.message).toBe("Chauffeur fixé indisponible (taxi1 TAXI1 : désactivé)");
+    expect(crewOf(deactivated, "Taxi A").issues[0]?.message).toBe("Chauffeur fixé indisponible (TAXI1 taxi1 : désactivé)");
   });
 
   it("keeps the other member of a fixed ambulance crew and replaces the absent one", () => {
@@ -190,7 +190,7 @@ describe("resolveDayCrews", () => {
 
   it("blocks a fixed crew whose member is unqualified", () => {
     const unqualified = plan({ saved: [{ vehicleId: "Taxi A", driverId: "aux2", crewMateId: null }] });
-    expect(crewOf(unqualified, "Taxi A").blocked).toBe("aux2 AUX2 n'a pas la qualification requise pour ce poste");
+    expect(crewOf(unqualified, "Taxi A").blocked).toBe("AUX2 aux2 n'a pas la qualification requise pour ce poste");
   });
 
   it("refuses an incompatible pair fixed by the regulator", () => {
@@ -198,14 +198,14 @@ describe("resolveDayCrews", () => {
       incompatibilities: [{ driverAId: "aux1", driverBId: "dea1" }],
       saved: [{ vehicleId: "Amb", driverId: "dea1", crewMateId: "aux1" }],
     });
-    expect(crewOf(result, "Amb").blocked).toBe("dea1 DEA1 et aux1 AUX1 ne doivent pas travailler ensemble");
+    expect(crewOf(result, "Amb").blocked).toBe("DEA1 dea1 et AUX1 aux1 ne doivent pas travailler ensemble");
   });
 
   it("replaces a default crew mate incompatible with the driver", () => {
     const result = plan({ incompatibilities: [{ driverAId: "aux1", driverBId: "dea1" }] });
     const crew = crewOf(result, "Amb");
     expect(crew).toMatchObject({ driverId: "dea1", crewMateId: "aux2", source: "replacement", blocked: null });
-    expect(crew.issues[0]?.message).toBe("Équipier attitré indisponible (aux1 AUX1 : incompatible avec le chauffeur)");
+    expect(crew.issues[0]?.message).toBe("Équipier attitré indisponible (AUX1 aux1 : incompatible avec le chauffeur)");
   });
 
   it("reports a person fixed on two vehicles: the first in display order keeps them", () => {
@@ -216,7 +216,7 @@ describe("resolveDayCrews", () => {
       ],
     });
     expect(crewOf(result, "Taxi A").blocked).toBeNull();
-    expect(crewOf(result, "Taxi B").blocked).toBe("taxi1 TAXI1 est déjà affecté à Taxi A ce jour");
+    expect(crewOf(result, "Taxi B").blocked).toBe("TAXI1 taxi1 est déjà affecté à Taxi A ce jour");
     // taxi2 has no seat (Taxi B is fixed with taxi1): idle.
     expect(result.idle).toContain("taxi2");
   });
@@ -289,7 +289,7 @@ describe("resolveDayCrews", () => {
     const amb = crewOf(result, "Amb");
     expect(amb).toMatchObject({ driverId: null, crewMateId: null, source: "none", blocked: "Aucun équipier ambulancier DE disponible" });
     expect(amb.issues.map((i) => i.message)).toContain(
-      "Chauffeur attitré proposé sur VSL (aux1 AUX1) : aucun équipier ambulancier DE disponible pour cette ambulance",
+      "Chauffeur attitré proposé sur VSL (AUX1 aux1) : aucun équipier ambulancier DE disponible pour cette ambulance",
     );
     expect(result.idle).toEqual([]);
     // Nobody else needs them: they stay on their ambulance.
@@ -316,7 +316,7 @@ describe("replacement ranking (depots, shifts, versatility)", () => {
     ];
     const result = plan({ vehicles: [vehicle("Taxi A", "TAXI", "taxi1")], people, depots: DEPOTS, absences: [leave("taxi1")] });
     expect(crewOf(result, "Taxi A").driverId).toBe("near");
-    expect(crewOf(result, "Taxi A").issues.at(-1)?.message).toMatch(/^Chauffeur remplaçant proposé : near NEAR \(dépôt de Aix, \d+ km\)$/);
+    expect(crewOf(result, "Taxi A").issues.at(-1)?.message).toMatch(/^Chauffeur remplaçant proposé : NEAR near \(dépôt de Aix, \d+ km\)$/);
     // Gap is beyond the limit: nobody rather than a driver 160 km away.
     const onlyFar = plan({
       vehicles: [vehicle("Taxi A", "TAXI", "taxi1")],
@@ -327,7 +327,7 @@ describe("replacement ranking (depots, shifts, versatility)", () => {
     expect(crewOf(onlyFar, "Taxi A")).toMatchObject({
       driverId: null,
       // The free driver kept out by the distance is named, so the « Disponibles » card does not contradict the row.
-      blocked: "Aucun chauffeur disponible dans un rayon de 60 km (Paramètres) : far FAR (dépôt de Gap, 150 km) est libre",
+      blocked: "Aucun chauffeur disponible dans un rayon de 60 km (Paramètres) : FAR far (dépôt de Gap, 150 km) est libre",
     });
     const wider = plan({
       vehicles: [vehicle("Taxi A", "TAXI", "taxi1")],
@@ -376,7 +376,7 @@ describe("replacement ranking (depots, shifts, versatility)", () => {
       rules: { ...DEFAULT_CREW_RULES, reservePerDepot: 1 },
     });
     expect(crewOf(result, "Spare").blocked).toBe(
-      "Aucun chauffeur disponible sans entamer la réserve du dépôt (Paramètres) : t1 T1 reste en réserve",
+      "Aucun chauffeur disponible sans entamer la réserve du dépôt (Paramètres) : T1 t1 reste en réserve",
     );
   });
 
@@ -397,7 +397,7 @@ describe("replacement ranking (depots, shifts, versatility)", () => {
     expect(crewOf(result, "Taxi A")).toMatchObject({ driverId: "fullday", shift: { start: 360, end: 1140 } });
     const short = plan({ vehicles: [vehicle("Taxi A", "TAXI", "taxi1")], people: people.filter((p) => p.id !== "fullday"), absences: [leave("taxi1")] });
     expect(crewOf(short, "Taxi A").issues.at(-1)?.message).toBe(
-      "Chauffeur remplaçant proposé : afternoon AFTERNOON (horaire 13:00 – 19:00 au lieu de 06:00 – 18:00)",
+      "Chauffeur remplaçant proposé : AFTERNOON afternoon (horaire 13:00 – 19:00 au lieu de 06:00 – 18:00)",
     );
   });
 
@@ -411,10 +411,10 @@ describe("replacement ranking (depots, shifts, versatility)", () => {
     const result = plan({ vehicles: [vehicle("Amb", "AMBULANCE", "dea1", "aux1")], people });
     const crew = crewOf(result, "Amb");
     expect(crew).toMatchObject({ driverId: "dea1", crewMateId: "aux2", blocked: null, shift: { start: 420, end: 840 } });
-    expect(crew.issues[0]?.message).toBe("Équipier attitré indisponible (aux1 AUX1 : 1 h 00 d'horaire commun avec le chauffeur, 4 h 00 au moins)");
+    expect(crew.issues[0]?.message).toBe("Équipier attitré indisponible (AUX1 aux1 : 1 h 00 d'horaire commun avec le chauffeur, 4 h 00 au moins)");
     // Fixed by the regulator: refused with the numbers.
     const fixed = plan({ vehicles: [vehicle("Amb", "AMBULANCE", "dea1", "aux1")], people, saved: [{ vehicleId: "Amb", driverId: "dea1", crewMateId: "aux1" }] });
-    expect(crewOf(fixed, "Amb").blocked).toBe("dea1 DEA1 et aux1 AUX1 n'ont que 1 h 00 d'horaire commun (4 h 00 au moins, Paramètres)");
+    expect(crewOf(fixed, "Amb").blocked).toBe("DEA1 dea1 et AUX1 aux1 n'ont que 1 h 00 d'horaire commun (4 h 00 au moins, Paramètres)");
   });
 
   it("keeps a reserve per depot before staffing a spare vehicle", () => {
@@ -535,7 +535,7 @@ describe("work time of the crew (art. L. 3121-16)", () => {
     // Nobody else: the seat stays empty and says why the free driver was not proposed.
     const alone = plan({ vehicles: [vehicle("Taxi A", "TAXI", "titular")], people: people.slice(0, 2), absences: [leave("titular")] });
     expect(crewOf(alone, "Taxi A").blocked).toBe(
-      "Aucun chauffeur disponible : a_breakless A_BREAKLESS est libre, mais l'équipage dépasserait 6 h de travail sans pause de 20 min (art. L. 3121-16)",
+      "Aucun chauffeur disponible : A_BREAKLESS a_breakless est libre, mais l'équipage dépasserait 6 h de travail sans pause de 20 min (art. L. 3121-16)",
     );
     // A shift of 6 hours needs no break: proposed.
     const short = plan({

@@ -1,7 +1,6 @@
 "use client";
 
-import { startTransition, type FormEvent, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
+import { startTransition, type FormEvent } from "react";
 
 /**
  * Submit handler of the referential forms: dispatches the action itself, in
@@ -25,21 +24,4 @@ export function submitWithoutReset(dispatch: (formData: FormData) => void) {
     const formData = new FormData(event.currentTarget, submitter instanceof HTMLButtonElement && submitter.name ? submitter : null);
     startTransition(() => dispatch(formData));
   };
-}
-
-/** Submit button driven by the `isPending` flag of useActionState. */
-export function FormSubmitButton({
-  pending,
-  children,
-  pendingLabel = "Enregistrement…",
-}: {
-  pending: boolean;
-  children: ReactNode;
-  pendingLabel?: string;
-}) {
-  return (
-    <Button type="submit" disabled={pending} aria-busy={pending}>
-      {pending ? pendingLabel : children}
-    </Button>
-  );
 }

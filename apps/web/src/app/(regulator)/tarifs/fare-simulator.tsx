@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Checkbox, Field, Select } from "@/components/ui/form";
+import { Checkbox, Field, Select, UnitInput } from "@/components/ui/form";
 import { fareEuros, rideMinutes, sameRide, type FareCalendar, type FareGrid, type FareRules } from "@/lib/domain/fare";
 import { formatEuros, formatPercent } from "@/lib/labels";
 import { parseDecimal } from "@/lib/forms";
-import { UnitInput } from "../vehicules/_lib/ui";
 
 export type SimulatorGrid = FareGrid & { id: string; name: string };
 

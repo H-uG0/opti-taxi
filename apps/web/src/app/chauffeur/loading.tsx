@@ -5,11 +5,11 @@ export default function DriverRoadmapLoading() {
       <p role="status" className="sr-only">
         Chargement de la feuille de route…
       </p>
-      <div className="h-13 animate-pulse rounded-2xl bg-slate-200" />
-      <div className="h-7 w-2/3 animate-pulse rounded-lg bg-slate-200" />
-      <div className="h-44 animate-pulse rounded-2xl bg-slate-200" />
-      <div className="h-56 animate-pulse rounded-2xl bg-slate-200" />
-      <div className="h-56 animate-pulse rounded-2xl bg-slate-200" />
+      <div className="h-13 motion-safe:animate-pulse rounded-2xl bg-slate-200" />
+      <div className="h-7 w-2/3 motion-safe:animate-pulse rounded-lg bg-slate-200" />
+      <div className="h-44 motion-safe:animate-pulse rounded-2xl bg-slate-200" />
+      <div className="h-56 motion-safe:animate-pulse rounded-2xl bg-slate-200" />
+      <div className="h-56 motion-safe:animate-pulse rounded-2xl bg-slate-200" />
     </div>
   );
 }

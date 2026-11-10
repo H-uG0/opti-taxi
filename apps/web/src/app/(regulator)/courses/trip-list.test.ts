@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   coPassengersFromStops,
   coursesHref,
@@ -16,6 +16,14 @@ import {
   sortTrips,
   summarizeTrips,
 } from "./trip-list";
+
+// Dates and times without a year are those of the current year (lib/time formatDateTime): the clock is set in 2026.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-10T12:00:00Z") });
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 type T = Parameters<typeof summarizeTrips>[0][number] &
   Parameters<typeof sortTrips>[0][number] &
@@ -234,11 +242,11 @@ describe("coPassengersFromStops", () => {
 
 describe("formatting", () => {
   it("formats names, plurals and instants", () => {
-    expect(shortPatientName({ firstName: "marie", lastName: "Dupont" })).toBe("Dupont M.");
+    expect(shortPatientName({ firstName: "marie", lastName: "Dupont" })).toBe("DUPONT M.");
     expect(patientDisplayName({ firstName: "Marie", lastName: "Dupont" })).toBe("DUPONT Marie");
     expect(plural(0, "course", "courses")).toBe("0 course");
     expect(plural(2, "course", "courses")).toBe("2 courses");
-    expect(formatInstant(new Date("2026-11-02T13:05:00Z"))).toBe("02/11/2026 14:05");
+    expect(formatInstant(new Date("2026-11-02T13:05:00Z"))).toBe("02/11 à 14:05");
     expect(formatInstant(null)).toBeNull();
   });
 

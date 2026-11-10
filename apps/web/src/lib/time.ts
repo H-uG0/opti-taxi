@@ -127,6 +127,42 @@ export function formatShortDate(isoDate: string): string {
   return new Intl.DateTimeFormat("fr-FR", { timeZone: "UTC" }).format(fromIsoDate(isoDate));
 }
 
+/** "2026-11-12" -> "12/11", or "12/11/2025" outside the current year (Europe/Paris): a day in a list or a tab title. */
+export function formatDayDate(isoDate: string, now: Date = new Date()): string {
+  const [year, month, day] = isoDate.split("-");
+  return year === todayIso(now).slice(0, 4) ? `${day}/${month}` : `${day}/${month}/${year}`;
+}
+
+const instantParts = new Intl.DateTimeFormat("fr-FR", {
+  timeZone: TIME_ZONE,
+  year: "numeric",
+  day: "2-digit",
+  month: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/**
+ * The one date-time format of the app: a real instant -> "02/11 à 18:40" in Europe/Paris,
+ * "02/11/2025 à 18:40" outside the current year. `year: "always"` for a text that is stored
+ * and read again later (a note): "02/11/2026 à 18:40". Assembled from parts, whatever the locale's pattern.
+ */
+export function formatDateTime(instant: Date | string, now: Date = new Date(), year: "auto" | "always" = "auto"): string {
+  const parts = instantParts.formatToParts(typeof instant === "string" ? new Date(instant) : instant);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  const shownYear = year === "always" || part("year") !== todayIso(now).slice(0, 4);
+  const day = shownYear ? `${part("day")}/${part("month")}/${part("year")}` : `${part("day")}/${part("month")}`;
+  return `${day} à ${part("hour")}:${part("minute")}`;
+}
+
+/** A real instant -> "08:12" when it falls on isoDate (Europe/Paris), else formatDateTime ("02/11 à 18:40"). */
+export function formatTimeOn(instant: Date | string, isoDate: string, now: Date = new Date()): string {
+  const date = typeof instant === "string" ? new Date(instant) : instant;
+  if (isoDateOf(date) !== isoDate) return formatDateTime(date, now);
+  return formatMinute(minuteOfDay(date));
+}
+
 export const WEEKDAY_LABELS: Record<number, string> = {
   1: "Lundi",
   2: "Mardi",

@@ -134,7 +134,8 @@ function Elapsed({ startedAt, expectedSec }: { startedAt: number; expectedSec: n
   const progress = expected ? Math.min(0.97, seconds / expected) : null;
   return (
     <>
-      <span className="tabular text-brand-700">
+      {/* Seen, not read: inside the live region, a counter changing twice a second would be announced over and over. */}
+      <span aria-hidden className="tabular text-brand-700">
         {seconds} s{expected ? ` / ~${expected} s` : null}
       </span>
       {progress !== null ? (

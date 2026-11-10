@@ -13,7 +13,6 @@
  * refused on the changed row, whatever the display order.
  */
 import type { VehicleType } from "@prisma/client";
-import { formatInstant } from "@/lib/planning/format";
 import { valueOf, type FieldErrors, type FormValues } from "@/lib/forms";
 import {
   absenceOn,
@@ -25,6 +24,7 @@ import {
   type SavedCrew,
   type StaffPerson,
 } from "@/lib/staff/day-crews";
+import { formatDateTime } from "@/lib/time";
 
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 const VERSION = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -138,7 +138,7 @@ export type CurrentCrew = { updatedAt: Date; updatedBy: string | null };
 export function changedMeanwhileText(current: CurrentCrew | undefined): string {
   if (!current) return "Remis à la proposition automatique par un collègue entre-temps : rechargez la page.";
   const by = current.updatedBy ? ` par ${current.updatedBy}` : "";
-  return `Modifié${by} le ${formatInstant(current.updatedAt.toISOString())} entre-temps : rechargez la page pour voir son choix.`;
+  return `Modifié${by} le ${formatDateTime(current.updatedAt.toISOString())} entre-temps : rechargez la page pour voir son choix.`;
 }
 
 /**

@@ -10,10 +10,6 @@ import { allowedVehicleTypesFor, formatAddress, initialSharingStatus, sharingAll
 import { fromIsoDate, isIsoDate, isoWeekday, parseMinute, toIsoDate } from "@/lib/time";
 import { prescriptionValidOn } from "./trip-rules";
 
-/** Result of the small row actions (cancel, restore, schedule, sharing). */
-export type ActionResult = { ok: boolean; message: string | null };
-export const INITIAL_ACTION_RESULT: ActionResult = { ok: false, message: null };
-
 export type FieldErrors = Partial<Record<string, string[]>>;
 
 /** Reads string fields of a FormData; files and missing fields become undefined. */

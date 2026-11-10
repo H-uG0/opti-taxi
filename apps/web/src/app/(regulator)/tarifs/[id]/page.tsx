@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
+import { FormMessage } from "@/components/ui/form";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -9,7 +10,6 @@ import { tariffsInForce } from "@/lib/domain/tariffs";
 import { todayIso } from "@/lib/time";
 import { ConfirmAction } from "@/components/ui/confirm-action";
 import { departmentLabel } from "../../vehicules/_lib/departments";
-import { BackLink } from "../../vehicules/_lib/ui";
 import { deleteTariff, updateTariff } from "../actions";
 import {
   certificationLabel,
@@ -20,10 +20,23 @@ import {
   VERIFICATION_TONES,
 } from "../schema";
 import { TariffForm } from "../tariff-form";
+import { BackLink } from "@/components/ui/back-link";
 
-export const metadata: Metadata = { title: "Modifier une grille tarifaire" };
+/** The tab names the record (never a patient: titles stay in the browser history). */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const record = await db.tariffGrid.findUnique({ where: { id }, select: { label: true } });
+  return { title: record?.label ?? "Grille tarifaire" };
+}
 
-export default async function EditTariffPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EditTariffPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ cree?: string }>;
+}) {
+  const { cree } = await searchParams;
   await requireUser("REGULATOR");
   const { id } = await params;
   const grid = await db.tariffGrid.findUnique({ where: { id } });
@@ -64,6 +77,12 @@ export default async function EditTariffPage({ params }: { params: Promise<{ id:
         }
       />
 
+      {cree === "1" ? (
+        <div className="mb-6">
+          <FormMessage tone="success">Grille créée. Elle s&apos;applique aux calculs des dates qu&apos;elle couvre.</FormMessage>
+        </div>
+      ) : null}
+
       <div className="space-y-6">
         <TariffForm action={updateTariff.bind(null, grid.id)} initial={tariffFormValues(grid)} submitLabel="Enregistrer" />
 
@@ -78,8 +97,8 @@ export default async function EditTariffPage({ params }: { params: Promise<{ id:
             <ConfirmAction
               action={deleteTariff.bind(null, grid.id)}
               label="Supprimer la grille"
-              confirmLabel="Supprimer définitivement"
-              pendingLabel="Suppression…"
+              confirmLabel="Oui, supprimer la grille"
+              keepLabel="Garder la grille"
               question={<p>La grille sera supprimée définitivement. Cette action est irréversible.</p>}
             />
           </CardBody>

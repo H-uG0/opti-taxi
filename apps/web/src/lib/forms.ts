@@ -1,7 +1,8 @@
 /**
- * Form plumbing for regulator screens (véhicules, chauffeurs, tarifs,
- * paramètres…): server action state, FormData reading, tolerant French
- * number / time / date parsing and Prisma unique-constraint detection.
+ * Form plumbing for every regulator screen (patients, établissements,
+ * véhicules, personnel, tarifs, paramètres…): server action state, FormData
+ * reading, tolerant French number / time / date parsing and Prisma
+ * unique-constraint detection. The one form-state module of the app.
  *
  * Pure module (no server-only import): unit-tested with vitest and importable
  * from client components.
@@ -34,6 +35,15 @@ export const IDLE_STATE: FormState = {
 
 export const REQUIRED = "Champ obligatoire.";
 export const GENERIC_ERROR = "Le formulaire contient des erreurs : corrigez les champs signalés.";
+
+/** Label of a button while its action runs; a save says « Enregistrement… » (SAVING_LABEL). */
+export const PENDING_LABEL = "En cours…";
+export const SAVING_LABEL = "Enregistrement…";
+
+/** Result of a one-button action (deactivate, delete, cancel a trip…): a success or a refusal, one line. */
+export type ActionResult = { ok: boolean; message: string | null };
+
+export const INITIAL_ACTION_RESULT: ActionResult = { ok: true, message: null };
 
 function nextSubmissionId(): number {
   return Date.now() + Math.random();
@@ -87,6 +97,50 @@ export function readForm(formData: FormData, multi: readonly string[] = []): For
   }
   for (const key of multi) values[key] ??= [];
   return values;
+}
+
+/** A text input value ("" when missing or a file). */
+export function formString(formData: FormData, key: string): string {
+  const value = formData.get(key);
+  return typeof value === "string" ? value : "";
+}
+
+/** All values of a multi-valued input (checkbox group). */
+export function formStrings(formData: FormData, key: string): string[] {
+  return formData.getAll(key).filter((v): v is string => typeof v === "string");
+}
+
+/** A checkbox is "on" when checked and absent otherwise. */
+export function formCheckbox(formData: FormData, key: string): boolean {
+  return formData.get(key) === "on";
+}
+
+/** Reads a value for a form input: the echoed value after a rejected submit, else the initial one. */
+export function echoed(state: Pick<FormState, "values">, key: string, initial: string): string {
+  const value = state.values?.[key];
+  return typeof value === "string" ? value : initial;
+}
+
+/** Checkbox state: absent from the echoed values means unchecked. */
+export function echoedCheckbox(state: Pick<FormState, "values">, key: string, initial: boolean): boolean {
+  if (!state.values) return initial;
+  return state.values[key] === "on";
+}
+
+/** Checkbox group: the echoed list after a rejected submit, else the initial list. */
+export function echoedList(state: Pick<FormState, "values">, key: string, initial: string[]): string[] {
+  if (!state.values) return initial;
+  const value = state.values[key];
+  if (Array.isArray(value)) return value;
+  return typeof value === "string" ? [value] : [];
+}
+
+/**
+ * Key that changes on every refused submission (null otherwise): ErrorFocus moves the focus to the
+ * first field to correct, or to the form message, each time it changes.
+ */
+export function refusalKey(state: Pick<FormState, "status" | "submissionId">): number | null {
+  return state.status === "error" ? state.submissionId : null;
 }
 
 export function valueOf(values: FormValues, key: string): string {

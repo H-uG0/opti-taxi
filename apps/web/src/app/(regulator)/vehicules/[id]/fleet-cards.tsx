@@ -1,12 +1,12 @@
 "use client";
 
 import { useActionState } from "react";
-import { Checkbox, Field, FormMessage, Input, Select } from "@/components/ui/form";
+import { Checkbox, Field, FormMessage, Input, Select, UnitInput } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { IDLE_STATE, valueOf, type FormState, type FormValues } from "@/lib/forms";
+import { IDLE_STATE, refusalKey, SAVING_LABEL, valueOf, type FormState, type FormValues } from "@/lib/forms";
 import { MAINTENANCE_KIND_LABELS, VEHICLE_UNAVAILABILITY_LABELS } from "@/lib/labels";
 import { MAINTENANCE_KINDS, UNAVAILABILITY_KINDS } from "../fleet-schema";
-import { UnitInput } from "../_lib/ui";
+import { ErrorFocus } from "@/components/ui/error-focus";
 
 type Action = (state: FormState, formData: FormData) => Promise<FormState>;
 
@@ -27,6 +27,7 @@ export function UnavailabilityForm({ action, defaultDate }: { action: Action; de
   const errors = state.fieldErrors;
   return (
     <form key={state.submissionId} action={formAction} className="space-y-3">
+      <ErrorFocus refusal={refusalKey(state)} />
       <Result state={state} />
       <div className="grid gap-3 sm:grid-cols-3">
         <Field label="Motif" htmlFor="out-kind" error={errors.kind}>
@@ -45,11 +46,11 @@ export function UnavailabilityForm({ action, defaultDate }: { action: Action; de
           <Input id="out-end" name="endDate" type="date" required defaultValue={valueOf(values, "endDate") || defaultDate} />
         </Field>
       </div>
-      <Field label="Note" htmlFor="out-note" hint="Facultatif : garage, rendez-vous…" error={errors.note}>
+      <Field label="Note (facultatif)" htmlFor="out-note" hint="Garage, rendez-vous…" error={errors.note}>
         <Input id="out-note" name="note" maxLength={200} defaultValue={valueOf(values, "note")} />
       </Field>
       <div className="flex justify-end">
-        <SubmitButton pendingLabel="Enregistrement…">Ajouter l&apos;indisponibilité</SubmitButton>
+        <SubmitButton pendingLabel={SAVING_LABEL}>Ajouter l&apos;indisponibilité</SubmitButton>
       </div>
     </form>
   );
@@ -62,6 +63,7 @@ export function DeadlineForm({ action }: { action: Action }) {
   const errors = state.fieldErrors;
   return (
     <form key={state.submissionId} action={formAction} className="space-y-3">
+      <ErrorFocus refusal={refusalKey(state)} />
       <Result state={state} />
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Type" htmlFor="due-kind" error={errors.kind}>
@@ -73,19 +75,19 @@ export function DeadlineForm({ action }: { action: Action }) {
             ))}
           </Select>
         </Field>
-        <Field label="Précision" htmlFor="due-label" hint="Facultatif, ex. « Vidange + filtres »." error={errors.label}>
+        <Field label="Précision (facultatif)" htmlFor="due-label" hint="Ex. « Vidange + filtres »." error={errors.label}>
           <Input id="due-label" name="label" maxLength={60} defaultValue={valueOf(values, "label")} />
         </Field>
         <Field label="Échéance (date)" htmlFor="due-date" error={errors.dueDate}>
           <Input id="due-date" name="dueDate" type="date" defaultValue={valueOf(values, "dueDate")} />
         </Field>
-        <Field label="Échéance (kilométrage)" htmlFor="due-km" error={errors.dueKm}>
+        <Field label="Échéance (km au compteur)" htmlFor="due-km" error={errors.dueKm}>
           <UnitInput id="due-km" name="dueKm" inputMode="numeric" unit="km" defaultValue={valueOf(values, "dueKm")} />
         </Field>
       </div>
       <p className="text-xs text-slate-500">Date, kilométrage ou les deux : l&apos;alerte part au premier atteint.</p>
       <div className="flex justify-end">
-        <SubmitButton pendingLabel="Enregistrement…" variant="secondary">
+        <SubmitButton pendingLabel={SAVING_LABEL} variant="secondary">
           Ajouter l&apos;échéance
         </SubmitButton>
       </div>
@@ -101,18 +103,19 @@ export function FuelForm({ action, defaultDate, unit }: { action: Action; defaul
   const full = state.status === "error" ? valueOf(values, "fullTank") === "on" : true;
   return (
     <form key={state.submissionId} action={formAction} className="space-y-3">
+      <ErrorFocus refusal={refusalKey(state)} />
       <Result state={state} />
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Date" htmlFor="fuel-date" error={errors.date}>
           <Input id="fuel-date" name="date" type="date" required defaultValue={valueOf(values, "date") || defaultDate} />
         </Field>
-        <Field label="Compteur" htmlFor="fuel-km" error={errors.odometerKm}>
+        <Field label="Compteur (km)" htmlFor="fuel-km" error={errors.odometerKm}>
           <UnitInput id="fuel-km" name="odometerKm" inputMode="numeric" required unit="km" defaultValue={valueOf(values, "odometerKm")} />
         </Field>
-        <Field label="Quantité" htmlFor="fuel-qty" error={errors.quantity}>
+        <Field label={`Quantité (${unit})`} htmlFor="fuel-qty" error={errors.quantity}>
           <UnitInput id="fuel-qty" name="quantity" inputMode="decimal" required unit={unit} defaultValue={valueOf(values, "quantity")} />
         </Field>
-        <Field label="Montant" htmlFor="fuel-cost" error={errors.cost}>
+        <Field label="Montant (€)" htmlFor="fuel-cost" error={errors.cost}>
           <UnitInput id="fuel-cost" name="cost" inputMode="decimal" required unit="€" defaultValue={valueOf(values, "cost")} />
         </Field>
       </div>
@@ -122,7 +125,7 @@ export function FuelForm({ action, defaultDate, unit }: { action: Action; defaul
         label={unit === "kWh" ? "Charge complète" : "Plein complet (sert au calcul de la consommation)"}
       />
       <div className="flex justify-end">
-        <SubmitButton pendingLabel="Enregistrement…" variant="secondary">
+        <SubmitButton pendingLabel={SAVING_LABEL} variant="secondary">
           Ajouter le {unit === "kWh" ? "relevé de charge" : "plein"}
         </SubmitButton>
       </div>

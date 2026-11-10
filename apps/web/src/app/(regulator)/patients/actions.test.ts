@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPatient, setPatientActive, setRecurrenceActive, updatePatient } from "./actions";
-import { INITIAL_ACTION_RESULT, INITIAL_FORM_STATE } from "./_lib/form-state";
+import { IDLE_STATE as INITIAL_FORM_STATE, INITIAL_ACTION_RESULT } from "@/lib/forms";
 
 // The server actions run against a fake Prisma client: these tests check which
 // writes are guarded and which audit events are recorded, not the database.
@@ -230,7 +230,7 @@ describe("setRecurrenceActive", () => {
 
 describe("updatePatient", () => {
   const home = { address: "4 avenue Jean Jaurès", postalCode: "04100", city: "Manosque", lat: 43.8297, lng: 5.7864 };
-  // The form as submitted with « actif » unticked, home unchanged.
+  // The form as submitted, home unchanged (it has no « actif » box: « Désactiver » on the fiche changes it).
   const fields = {
     lastName: "Durand",
     firstName: "Marie",
@@ -249,28 +249,21 @@ describe("updatePatient", () => {
     fake.patient.update.mockResolvedValue({});
   });
 
-  it("traces the deactivation and cancels the trips when this save switches « actif »", async () => {
-    fake.patient.updateMany.mockResolvedValue({ count: 1 });
+  it("saves the record without touching « actif », and leaves the trips alone when the home did not move", async () => {
+    await updatePatient("p1", INITIAL_FORM_STATE, form({ ...fields, active: "" }));
 
-    await updatePatient("p1", INITIAL_FORM_STATE, form(fields));
-
-    expect(fake.patient.updateMany).toHaveBeenCalledWith({ where: { id: "p1", active: true }, data: { active: false } });
-    expect(recorded()).toEqual([
-      { action: "patient.update", entityId: "p1" },
-      { action: "patient.deactivate", entityId: "p1" },
-    ]);
-    expect(fake.trip.findMany).toHaveBeenCalledTimes(1);
+    expect(fake.patient.updateMany).not.toHaveBeenCalled();
+    const data = fake.patient.update.mock.calls[0]?.[0]?.data as Record<string, unknown>;
+    expect("active" in data).toBe(false);
+    expect(recorded()).toEqual([{ action: "patient.update", entityId: "p1" }]);
+    expect(fake.trip.findMany).not.toHaveBeenCalled();
     expect(redirect).toHaveBeenCalledWith("/patients/p1");
   });
 
-  it("traces the update only when the patient was deactivated meanwhile by someone else", async () => {
-    fake.patient.updateMany.mockResolvedValue({ count: 0 });
+  it("copies a new home to the open trips", async () => {
+    await updatePatient("p1", INITIAL_FORM_STATE, form({ ...fields, address: "12 rue des Lilas" }));
 
-    await updatePatient("p1", INITIAL_FORM_STATE, form(fields));
-
-    expect(recorded()).toEqual([{ action: "patient.update", entityId: "p1" }]);
-    // The other save already cancelled the trips; the home did not move.
-    expect(fake.trip.findMany).not.toHaveBeenCalled();
+    expect(fake.trip.findMany).toHaveBeenCalledTimes(1);
     expect(redirect).toHaveBeenCalledWith("/patients/p1");
   });
 });
@@ -287,7 +280,6 @@ describe("createPatient", () => {
     lng: "5.7864",
     mobility: "SEATED",
     accessNotes: "",
-    active: "on",
   };
   const existing = { id: "p9", firstName: "Helene", lastName: "DUPONT", phone: null, address: "1 rue A", postalCode: "13001", city: "Marseille", active: true };
 

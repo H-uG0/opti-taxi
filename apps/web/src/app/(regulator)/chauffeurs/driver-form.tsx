@@ -1,14 +1,15 @@
 "use client";
 
 import { useActionState } from "react";
-import { Checkbox, Field, Fieldset, FormMessage, Input, Select } from "@/components/ui/form";
+import { Checkbox, Field, Fieldset, FormMessage, Input, Select, UnitInput } from "@/components/ui/form";
 import type { DepotOption } from "@/app/(regulator)/depots/options";
 import { QUALIFICATION_LABELS } from "@/lib/labels";
 import { WEEKDAY_LABELS } from "@/lib/time";
 import { qualificationScope } from "../vehicules/_lib/crew";
-import { IDLE_STATE, listOf, valueOf, type FormState, type FormValues } from "@/lib/forms";
-import { FormFooter, UnitInput } from "../vehicules/_lib/ui";
+import { IDLE_STATE, listOf, refusalKey, valueOf, type FormState, type FormValues } from "@/lib/forms";
 import { ISO_WEEKDAYS, MAX_BREAK_MINUTES, QUALIFICATIONS } from "./schema";
+import { FormFooter } from "@/components/ui/form-footer";
+import { ErrorFocus } from "@/components/ui/error-focus";
 
 type Action = (state: FormState, formData: FormData) => Promise<FormState>;
 
@@ -34,22 +35,12 @@ export function DriverForm({
   return (
     // Remount on every response so uncontrolled inputs show the echoed values.
     <form key={state.submissionId} action={formAction} className="space-y-6">
+      <ErrorFocus refusal={refusalKey(state)} />
       {state.status === "error" && state.message ? <FormMessage>{state.message}</FormMessage> : null}
       {state.status === "success" && state.message ? <FormMessage tone="success">{state.message}</FormMessage> : null}
 
       <Fieldset legend="Identité">
         <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Prénom" htmlFor="firstName" error={errors.firstName}>
-            <Input
-              id="firstName"
-              name="firstName"
-              required
-              maxLength={60}
-              autoComplete="off"
-              defaultValue={valueOf(values, "firstName")}
-              aria-invalid={Boolean(errors.firstName)}
-            />
-          </Field>
           <Field label="Nom" htmlFor="lastName" error={errors.lastName}>
             <Input
               id="lastName"
@@ -59,6 +50,17 @@ export function DriverForm({
               autoComplete="off"
               defaultValue={valueOf(values, "lastName")}
               aria-invalid={Boolean(errors.lastName)}
+            />
+          </Field>
+          <Field label="Prénom" htmlFor="firstName" error={errors.firstName}>
+            <Input
+              id="firstName"
+              name="firstName"
+              required
+              maxLength={60}
+              autoComplete="off"
+              defaultValue={valueOf(values, "firstName")}
+              aria-invalid={Boolean(errors.firstName)}
             />
           </Field>
           <Field label="Téléphone (facultatif)" htmlFor="phone" error={errors.phone}>

@@ -3,7 +3,7 @@
  * Pure (no database access): shared by the server action and the tests.
  */
 import type { SharingStatus } from "@prisma/client";
-import { formatInstant } from "./trip-list";
+import { formatDateTime } from "@/lib/time";
 import { SHARING_DECISION_LABELS, type SharingDecision } from "./trip-rules";
 
 /** The note keeps the history of corrected answers; bounded so it stays readable. */
@@ -34,9 +34,9 @@ function isAnswer(status: SharingStatus): status is SharingDecision {
   return status === "ACCEPTED" || status === "REFUSED";
 }
 
-/** "[Réponse précédente : partage refusé par Marie Durand le 02/11/2026 14:05]" */
+/** "[Réponse précédente : partage refusé par Marie Durand le 02/11/2026 à 14:05]": stored, so with its year. */
 export function previousAnswerLine(status: SharingDecision, respondedAt: Date | null, respondedByName?: string | null): string {
-  const when = formatInstant(respondedAt);
+  const when = respondedAt ? formatDateTime(respondedAt, undefined, "always") : null;
   const by = respondedByName?.trim();
   // Author before date, as the traces shown next to the answer (lib/record-trace).
   return `[Réponse précédente : ${SHARING_DECISION_LABELS[status].toLowerCase()}${by ? ` par ${by}` : ""}${when ? ` le ${when}` : ""}]`;

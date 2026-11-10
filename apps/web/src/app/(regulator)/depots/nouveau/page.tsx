@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/layout";
 import { requireUser } from "@/lib/auth";
-import { BackLink } from "@/app/(regulator)/vehicules/_lib/ui";
 import { createDepot } from "../actions";
+import { geocoderEnabled } from "@/lib/geocode";
 import { DepotForm } from "../depot-form";
 import { depotFormValues } from "../schema";
+import { BackLink } from "@/components/ui/back-link";
 
 export const metadata: Metadata = { title: "Nouveau dépôt" };
 
@@ -18,7 +19,7 @@ export default async function NewDepotPage() {
         title="Nouveau dépôt"
         description="Il sera proposé dans les fiches véhicule et chauffeur dès son enregistrement."
       />
-      <DepotForm action={createDepot} initial={depotFormValues()} submitLabel="Créer le dépôt" />
+      <DepotForm action={createDepot} initial={depotFormValues()} submitLabel="Créer le dépôt" geocoderEnabled={geocoderEnabled()} />
     </div>
   );
 }

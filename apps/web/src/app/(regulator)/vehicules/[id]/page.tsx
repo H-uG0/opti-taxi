@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { UpcomingRoutesCallout } from "../_lib/ui";
 import { notFound } from "next/navigation";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
+import { FormMessage } from "@/components/ui/form";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -24,18 +26,30 @@ import { setVehicleActive, updateVehicle } from "../actions";
 import { ConfirmAction } from "@/components/ui/confirm-action";
 import { loadDepotOptions } from "@/app/(regulator)/depots/options";
 import { loadDriverOptions } from "../_lib/driver-options";
-import { BackLink, UpcomingRoutesCallout } from "../_lib/ui";
 import { toUpcomingRoutes, upcomingRoutesNotice } from "../_lib/upcoming-routes";
 import { vehicleFormValues } from "../schema";
 import { VehicleForm } from "../vehicle-form";
+import { BackLink } from "@/components/ui/back-link";
 
-export const metadata: Metadata = { title: "Modifier un véhicule" };
+/** The tab names the record (never a patient: titles stay in the browser history). */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const record = await db.vehicle.findUnique({ where: { id }, select: { label: true } });
+  return { title: record?.label ?? "Véhicule" };
+}
 
 const STATUS_ORDER: Record<DeadlineStatus, number> = { overdue: 0, soon: 1, ok: 2, done: 3 };
 const STATUS_TONES: Record<DeadlineStatus, BadgeTone> = { overdue: "danger", soon: "warning", ok: "neutral", done: "success" };
 const STATUS_LABELS: Record<DeadlineStatus, string> = { overdue: "Dépassée", soon: "Bientôt", ok: "À venir", done: "Faite" };
 
-export default async function EditVehiclePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EditVehiclePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ cree?: string }>;
+}) {
+  const { cree } = await searchParams;
   await requireUser("REGULATOR");
   const { id } = await params;
   const vehicle = await db.vehicle.findUnique({ where: { id } });
@@ -91,6 +105,12 @@ export default async function EditVehiclePage({ params }: { params: Promise<{ id
         }
       />
 
+      {cree === "1" ? (
+        <div className="mb-6">
+          <FormMessage tone="success">Véhicule créé. Saisissez ici ses indisponibilités, ses échéances et ses pleins.</FormMessage>
+        </div>
+      ) : null}
+
       <div className="space-y-6">
         <VehicleForm
           action={updateVehicle.bind(null, vehicle.id)}
@@ -125,9 +145,10 @@ export default async function EditVehiclePage({ params }: { params: Promise<{ id
                         <ConfirmAction
                           action={deleteUnavailability.bind(null, vehicle.id, o.id)}
                           label="Supprimer"
-                          confirmLabel="Confirmer la suppression"
-                          pendingLabel="Suppression…"
-                          variant="ghost"
+                          ariaLabel={`Supprimer « ${text} »`}
+                          confirmLabel="Oui, supprimer l'indisponibilité"
+                          keepLabel="Garder l'indisponibilité"
+                          triggerVariant="ghost"
                           question={<p>Supprimer « {text} » ? Le véhicule redevient planifiable ces jours-là.</p>}
                         />
                       </li>
@@ -161,9 +182,8 @@ export default async function EditVehiclePage({ params }: { params: Promise<{ id
                           <ConfirmAction
                             action={completeDeadline.bind(null, vehicle.id, d.id)}
                             label="Marquer comme faite"
-                            confirmLabel="Confirmer"
-                            pendingLabel="Enregistrement…"
-                            variant="secondary"
+                            confirmLabel="Oui, marquer comme faite"
+                            tone="primary"
                             question={
                               <p>
                                 « {deadlineName(d)} » faite aujourd&apos;hui
@@ -175,9 +195,10 @@ export default async function EditVehiclePage({ params }: { params: Promise<{ id
                         <ConfirmAction
                           action={deleteDeadline.bind(null, vehicle.id, d.id)}
                           label="Supprimer"
-                          confirmLabel="Confirmer la suppression"
-                          pendingLabel="Suppression…"
-                          variant="ghost"
+                          ariaLabel={`Supprimer l'échéance « ${deadlineName(d)} »`}
+                          confirmLabel="Oui, supprimer l'échéance"
+                          keepLabel="Garder l'échéance"
+                          triggerVariant="ghost"
                           question={<p>Supprimer l&apos;échéance « {deadlineName(d)} » ?</p>}
                         />
                       </div>
@@ -233,10 +254,10 @@ export default async function EditVehiclePage({ params }: { params: Promise<{ id
                       <ConfirmAction
                         action={deleteFuelLog.bind(null, vehicle.id, f.id)}
                         label="Supprimer"
-                        confirmLabel="Confirmer"
-                        pendingLabel="Suppression…"
-                        variant="ghost"
-                        question={<p>Supprimer ce relevé ?</p>}
+                        confirmLabel="Oui, supprimer le plein"
+                        keepLabel="Garder le plein"
+                        triggerVariant="ghost"
+                        question={<p>Supprimer ce plein ?</p>}
                       />
                     </li>
                   ))}
@@ -262,8 +283,8 @@ export default async function EditVehiclePage({ params }: { params: Promise<{ id
                 <ConfirmAction
                   action={setVehicleActive.bind(null, vehicle.id, false)}
                   label="Désactiver le véhicule"
-                  confirmLabel="Confirmer la désactivation"
-                  pendingLabel="Désactivation…"
+                  confirmLabel="Oui, désactiver le véhicule"
+                  keepLabel="Garder le véhicule actif"
                   question={
                     <div className="space-y-2">
                       <p>
@@ -288,9 +309,8 @@ export default async function EditVehiclePage({ params }: { params: Promise<{ id
                 <ConfirmAction
                   action={setVehicleActive.bind(null, vehicle.id, true)}
                   label="Réactiver le véhicule"
-                  confirmLabel="Confirmer la réactivation"
-                  pendingLabel="Réactivation…"
-                  variant="primary"
+                  confirmLabel="Oui, réactiver le véhicule"
+                  tone="primary"
                   question={<p>Le véhicule sera de nouveau proposé à l&apos;optimisation dès le prochain calcul.</p>}
                 />
               </>

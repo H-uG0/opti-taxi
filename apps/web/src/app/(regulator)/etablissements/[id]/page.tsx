@@ -13,14 +13,19 @@ import { Badge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
 import { TBody, Td, Th, THead } from "@/components/ui/table";
-import { ActionButton } from "@/app/(regulator)/patients/_components/action-button";
-import { BackLink } from "@/app/(regulator)/patients/_components/back-link";
+import { ActionButton } from "@/components/ui/action-button";
 import { SyncNotice } from "@/app/(regulator)/patients/_components/sync-notice";
-import { Warning } from "@/app/(regulator)/patients/_components/warning";
 import { formatWeekdays } from "@/app/(regulator)/patients/_lib/status";
 import { setFacilityActive } from "../actions";
+import { BackLink } from "@/components/ui/back-link";
+import { Notice } from "@/components/ui/notice";
 
-export const metadata: Metadata = { title: "Établissement" };
+/** The tab names the record (never a patient: titles stay in the browser history). */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const record = await db.facility.findUnique({ where: { id }, select: { name: true } });
+  return { title: record?.name ?? "Établissement" };
+}
 
 export default async function FacilityPage({
   params,
@@ -78,9 +83,13 @@ export default async function FacilityPage({
               <ActionButton
                 action={setFacilityActive}
                 fields={{ facilityId: facility.id, active: facility.active ? "false" : "true" }}
-                confirmMessage={
+                confirm={
                   facility.active
-                    ? `Désactiver « ${facility.name} » ? Il ne sera plus proposé dans les nouvelles récurrences. L'historique est conservé.`
+                    ? {
+                        question: `Désactiver « ${facility.name} » ? Il ne sera plus proposé dans les nouvelles récurrences. L'historique est conservé.`,
+                        confirmLabel: "Oui, désactiver l'établissement",
+                        keepLabel: "Garder l'établissement actif",
+                      }
                     : undefined
                 }
                 variant={facility.active ? "secondary" : "primary"}
@@ -93,9 +102,9 @@ export default async function FacilityPage({
         <div className="space-y-2">
           <SyncNotice query={query} />
           {!facility.active ? (
-            <Warning tone="info">
+            <Notice size="sm" tone="info">
               Établissement désactivé : il n&apos;est plus proposé dans les nouvelles récurrences. Son historique est conservé.
-            </Warning>
+            </Notice>
           ) : null}
         </div>
       </div>

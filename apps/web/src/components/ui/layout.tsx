@@ -5,18 +5,24 @@ export function PageHeader({
   title,
   description,
   actions,
+  titleAside,
   className,
 }: {
   title: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
+  /** On the title's line, at its right (the day screens' tabs): costs no height when the actions wrap below. */
+  titleAside?: ReactNode;
   /** Replaces the bottom margin, e.g. in a full-height page that spaces its parts itself. */
   className?: string;
 }) {
   return (
     <div className={cn("flex flex-wrap items-end justify-between gap-4", className ?? "mb-6")}>
-      <div className="min-w-0">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{title}</h1>
+      <div className={cn("min-w-0", titleAside ? "grow" : undefined)}>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{title}</h1>
+          {titleAside}
+        </div>
         {description ? <p className="mt-1 text-sm text-slate-600">{description}</p> : null}
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}

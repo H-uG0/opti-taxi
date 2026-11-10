@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/layout";
 import { requireUser } from "@/lib/auth";
-import { BackLink } from "../../../../vehicules/_lib/ui";
 import { createArea } from "../../actions";
 import { AreaForm } from "../../forms";
 import { areaFormValues } from "../../schema";
+import { BackLink } from "@/components/ui/back-link";
 
 export const metadata: Metadata = { title: "Nouvelle zone tarifaire" };
 

@@ -10,7 +10,7 @@ import { LinkButton } from "@/components/ui/button";
 import { EmptyState, PageHeader } from "@/components/ui/layout";
 import { Table, TBody, Td, Th, THead } from "@/components/ui/table";
 import { attachRecurrencesToRenewal } from "../patients/actions";
-import { ActionButton } from "../patients/_components/action-button";
+import { ActionButton } from "@/components/ui/action-button";
 import { EXPIRY_WARNING_DAYS, uncoveredText } from "../patients/_lib/status";
 import { countByState, type WorkItem, type WorkState } from "../patients/_lib/work-list";
 import { loadPrescriptionWork } from "../patients/_lib/work-list-db";
@@ -140,8 +140,11 @@ export default async function PrescriptionsPage() {
                           fromPrescriptionId: item.prescription.id,
                           toPrescriptionId: item.renewal.id,
                         }}
-                        confirmMessage={`Rattacher ${item.recurrences.length > 1 ? "les récurrences" : "la récurrence"} de ${item.patient.name} à la prescription du ${formatShortDate(item.renewal.validFrom)} au ${formatShortDate(item.renewal.validTo)} ?`}
-                        pendingLabel="Rattachement…"
+                        confirm={{
+                          question: `Rattacher ${item.recurrences.length > 1 ? "les récurrences" : "la récurrence"} de ${item.patient.name} à la prescription du ${formatShortDate(item.renewal.validFrom)} au ${formatShortDate(item.renewal.validTo)} ?`,
+                          confirmLabel: "Oui, rattacher",
+                          tone: "primary",
+                        }}
                       >
                         {/* One line, as the « Saisir la nouvelle PMT » buttons of the column. */}
                         <span className="whitespace-nowrap">Rattacher au renouvellement</span>

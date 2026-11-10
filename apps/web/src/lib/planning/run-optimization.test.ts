@@ -65,7 +65,7 @@ const {
 const { planVersionToken, requestHash } = await import("./version");
 
 const DATE = "2099-03-02";
-const PATIENT = "Jeanne Martin";
+const PATIENT = "MARTIN Jeanne";
 const MOVE: MoveTarget = { tripId: "t1", vehicleId: "vsl_gre", vehicleLabel: "VSL Grenoble", patientName: PATIENT };
 const REGULATOR = { id: "u-reg", role: "REGULATOR" as const };
 
@@ -407,7 +407,7 @@ describe("never replacing the routes in place silently with a worse plan", () =>
     // Not refused any more (a full re-solve often swaps a trip): the regulator decides, knowing which patients.
     expect(outcome).toMatchObject({ ok: false, needsConfirmation: true });
     expect((outcome as { error: string }).error).toMatch(
-      /laisserait sans véhicule 1 autre course \(le retour de Paul Durand\)\. Ce calcul sert 1 course contre 2/,
+      /laisserait sans véhicule 1 autre course \(le retour de DURAND Paul\)\. Ce calcul sert 1 course contre 2/,
     );
     const stored = fake.db.optimizationRun.update.mock.calls.at(-1)![0] as { data: { status: string; details: unknown } };
     expect(stored.data.status).toBe("AWAITING_CONFIRMATION");
@@ -765,7 +765,7 @@ describe("« Placer les non affectées » (runOptimization placeOnly)", () => {
     expect(outcome).toEqual({
       ok: false,
       error:
-        "Planning inchangé : ce placement aurait retiré 1 course déjà placée de son véhicule (le retour de Paul Durand). " +
+        "Planning inchangé : ce placement aurait retiré 1 course déjà placée de son véhicule (le retour de DURAND Paul). " +
         "Placez les courses non affectées une à une avec « Déplacer vers… », ou réoptimisez la journée.",
     });
     // Not offered for confirmation either: the run is closed as not kept, with the trip by id only.

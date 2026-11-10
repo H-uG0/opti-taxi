@@ -1,16 +1,17 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { LinkButton } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { Field, Fieldset, FormMessage, Input, Select } from "@/components/ui/form";
 import { RECURRENCE_LEGS_LABELS } from "@/lib/labels";
 import { formatDuration, formatMinute, isIsoDate, parseMinute, WEEKDAY_LABELS, WEEKDAY_SHORT } from "@/lib/time";
-import { echoed, echoedList, INITIAL_FORM_STATE, type FormState } from "../_lib/form-state";
+import { echoed, echoedList, IDLE_STATE, refusalKey, type FormState } from "@/lib/forms";
 import { ISO_WEEKDAYS, MAX_SESSION_MINUTES, RECURRENCE_LEGS } from "../_lib/options";
 import { recurrenceFormNotices, type FormPrescription } from "../_lib/status";
-import { FormSubmitButton, submitWithoutReset } from "./form-submit";
-import { Warning } from "./warning";
+import { submitWithoutReset } from "./form-submit";
+import { ErrorFocus } from "@/components/ui/error-focus";
+import { FormFooter } from "@/components/ui/form-footer";
+import { Notice } from "@/components/ui/notice";
 
 export type RecurrenceFormInitial = {
   facilityId: string;
@@ -50,7 +51,7 @@ export function RecurrenceForm({
   submitLabel: string;
   cancelHref: string;
 }) {
-  const [state, formAction, isPending] = useActionState(action, INITIAL_FORM_STATE);
+  const [state, formAction, isPending] = useActionState(action, IDLE_STATE);
   const errors = state.fieldErrors;
   const value = (key: keyof Omit<RecurrenceFormInitial, "weekdays">) => echoed(state, key, initial[key]);
 
@@ -268,18 +269,14 @@ export function RecurrenceForm({
           </Field>
         </div>
         {validityNotices.map((notice) => (
-          <Warning key={notice.text} tone={notice.tone}>
+          <Notice size="sm" key={notice.text} tone={notice.tone}>
             {notice.text}
-          </Warning>
+          </Notice>
         ))}
       </Fieldset>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <FormSubmitButton pending={isPending}>{submitLabel}</FormSubmitButton>
-        <LinkButton href={cancelHref} variant="ghost">
-          Annuler
-        </LinkButton>
-      </div>
+      <FormFooter cancelHref={cancelHref} submitLabel={submitLabel} pending={isPending} />
+      <ErrorFocus refusal={refusalKey(state)} />
     </form>
   );
 }

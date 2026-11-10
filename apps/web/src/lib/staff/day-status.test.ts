@@ -54,12 +54,12 @@ describe("vehicleDay", () => {
   it("names the crew, a replacement, an outage and a vehicle nobody can take", () => {
     expect(vehicleDay(crewOf("Taxi 1"), TUESDAY, names, INPUT.vehicleUnavailabilities)).toEqual({
       kind: "crew",
-      driver: "ana ANA",
+      driver: "ANA ana",
       crewMate: null,
       source: "default",
     });
     // Taxi 3 is out of service: its driver bob replaces the absent driver of Taxi 2.
-    expect(vehicleDay(crewOf("Taxi 2"), TUESDAY, names)).toMatchObject({ kind: "crew", driver: "bob BOB", source: "replacement" });
+    expect(vehicleDay(crewOf("Taxi 2"), TUESDAY, names)).toMatchObject({ kind: "crew", driver: "BOB bob", source: "replacement" });
     expect(vehicleDay(crewOf("Taxi 3"), TUESDAY, names, INPUT.vehicleUnavailabilities)).toEqual({
       kind: "off",
       text: "Entretien du 10/11/2026 au 11/11/2026",
@@ -77,7 +77,7 @@ describe("vehicleDay", () => {
     });
     const crew = (id: string) => saved.crews.find((c) => c.vehicleId === id)!;
     expect(vehicleDay(crew("Taxi 1"), TUESDAY, names)).toEqual({ kind: "parked" });
-    expect(vehicleDay(crew("Taxi 2"), TUESDAY, names)).toMatchObject({ kind: "crew", driver: "ana ANA", source: "fixed" });
+    expect(vehicleDay(crew("Taxi 2"), TUESDAY, names)).toMatchObject({ kind: "crew", driver: "ANA ana", source: "fixed" });
   });
 });
 

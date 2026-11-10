@@ -8,7 +8,7 @@ import { Checkbox, FormMessage, Input, Select } from "@/components/ui/form";
 import { Table, TBody, THead, Th } from "@/components/ui/table";
 import { CANCELLATION_NOTE_MAX, CANCELLATION_REASON_LABELS, USER_CANCELLATION_REASONS } from "@/lib/domain/cancellation";
 import { cancelTrips } from "./actions";
-import { INITIAL_ACTION_RESULT, type ActionResult } from "./trip-form";
+import { INITIAL_ACTION_RESULT, PENDING_LABEL, type ActionResult } from "@/lib/forms";
 import { plural, type PairedReturn } from "./trip-list";
 import { TripRow, type TripRowData } from "./trip-row";
 import { canCancel, RETURN_GOES_TOO } from "./trip-rules";
@@ -261,16 +261,25 @@ function BulkCancelBar({
         )}
       </div>
       {confirming ? (
-        <div role="group" aria-label="Confirmer l'annulation" className="flex flex-wrap items-center gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2">
-          <p className="mr-auto text-sm text-red-900">{bulkConfirmText({ count, reason, inRoutes, shared, returnsLeft: returnsTaken ? 0 : returns.length })}</p>
+        <div
+          role="group"
+          aria-label="Confirmer l'annulation"
+          className="flex flex-wrap items-center gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2"
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            refocus.current = true;
+            setConfirming(false);
+          }}
+        >
+          <p className="mr-auto text-sm text-red-950">{bulkConfirmText({ count, reason, inRoutes, shared, returnsLeft: returnsTaken ? 0 : returns.length })}</p>
           <Button
-            variant="ghost"
+            variant="secondary"
             onClick={() => {
               refocus.current = true;
               setConfirming(false);
             }}
           >
-            Ne pas annuler
+            {count > 1 ? "Garder les courses" : "Garder la course"}
           </Button>
           <ConfirmButton count={count} />
         </div>
@@ -311,7 +320,7 @@ function ConfirmButton({ count }: { count: number }) {
   const { pending } = useFormStatus();
   return (
     <Button type="submit" variant="danger" disabled={pending} aria-busy={pending} autoFocus>
-      {pending ? "Annulation…" : `Confirmer l'annulation${count > 1 ? ` des ${count} courses` : ""}`}
+      {pending ? PENDING_LABEL : count > 1 ? `Oui, annuler les ${count} courses` : "Oui, annuler la course"}
     </Button>
   );
 }

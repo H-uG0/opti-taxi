@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { TriangleAlert, Clock, Info, LoaderCircle, CircleX } from "lucide-react";
-import { formatEurosRounded, formatInstant, formatSeconds, pluralize } from "@/lib/planning/format";
+import { formatEurosRounded, formatSeconds, pluralize } from "@/lib/planning/format";
 import { MOVE_REFUSED_PREFIX } from "@/lib/planning/move";
 import { NOT_KEPT_PREFIX } from "@/lib/planning/plan-compare";
 import type { RunView } from "@/lib/planning/types";
 import { MATRIX_SOURCE_LABELS } from "@/lib/labels";
+import { formatDateTime } from "@/lib/time";
 
 
 const PLAN_RUN_LABEL: Record<NonNullable<RunView["kind"]>, string> = {
@@ -47,7 +48,7 @@ export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planR
         <p role="alert" className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
           <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
           <span>
-            <span className="font-semibold">L&apos;optimisation du {formatInstant(interrupted.startedAt)} ne s&apos;est pas terminée</span>
+            <span className="font-semibold">L&apos;optimisation du {formatDateTime(interrupted.startedAt)} ne s&apos;est pas terminée</span>
             {interrupted.requestedBy ? ` (lancée par ${interrupted.requestedBy})` : ""} : le serveur a sans doute redémarré
             pendant le calcul. Relancez l&apos;optimisation{planRun ? " ; les tournées affichées sont celles du calcul précédent" : ""}.
           </span>
@@ -57,7 +58,7 @@ export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planR
       {running ? (
         <p role="status" className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm text-sky-900">
           <LoaderCircle aria-hidden className="size-4 shrink-0 motion-safe:animate-spin" />
-          Une optimisation de cette date a démarré le {formatInstant(running.startedAt)}
+          Une optimisation de cette date a démarré le {formatDateTime(running.startedAt)}
           {running.requestedBy ? ` (${running.requestedBy})` : ""} pour {pluralize(running.tripsCount, "course")} : calcul
           d&apos;environ {running.timeLimitSec} s. Un bandeau proposera de recharger le planning à la fin du calcul.
         </p>
@@ -67,7 +68,7 @@ export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planR
         <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-900">
           <CircleX aria-hidden className="mt-0.5 size-4 shrink-0" />
           <p className="min-w-0 break-words">
-            <span className="font-semibold">Échec de l&apos;optimisation du {formatInstant(failed.startedAt)}</span>
+            <span className="font-semibold">Échec de l&apos;optimisation du {formatDateTime(failed.startedAt)}</span>
             {planRun ? " (les tournées affichées sont celles du calcul précédent)" : ""} : {failed.error ?? "erreur inconnue"}
           </p>
         </div>
@@ -77,7 +78,7 @@ export function RunBanner({ lastRun, planRun }: { lastRun: RunView | null; planR
         <p role="status" className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">
           <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-slate-400" />
           <span className="min-w-0 break-words">
-            {NOT_KEPT_LABEL[notKept.kind ?? "optimize"]} du {formatInstant(notKept.startedAt)}
+            {NOT_KEPT_LABEL[notKept.kind ?? "optimize"]} du {formatDateTime(notKept.startedAt)}
             {notKept.requestedBy ? ` (${notKept.requestedBy})` : ""} non retenu
             {notKept.error ? ` : ${notKept.error.slice(NOT_KEPT_PREFIX.length).replace(/^\s*:\s*/, "")}` : "."}
           </span>
@@ -105,7 +106,7 @@ export function PlanRunLine({ planRun, restore }: { planRun: RunView | null; res
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
       <Clock aria-hidden className="size-3.5 shrink-0 text-slate-400" />
       <span>
-        {PLAN_RUN_LABEL[planRun.kind ?? "optimize"]} le <span className="tabular">{formatInstant(planRun.startedAt)}</span>
+        {PLAN_RUN_LABEL[planRun.kind ?? "optimize"]} le <span className="tabular">{formatDateTime(planRun.startedAt)}</span>
         {planRun.requestedBy ? ` par ${planRun.requestedBy}` : ""}
       </span>
       {dot}

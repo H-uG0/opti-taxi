@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { getSettings } from "@/lib/domain/settings";
 import { loadTrafficZones } from "@/lib/domain/traffic";
 import { loadObservedCalibration } from "@/lib/domain/traffic-observed";
-import { TIME_ZONE } from "@/lib/time";
+import { formatDateTime } from "@/lib/time";
 import { applyObservedTraffic, saveSettings, saveTraffic } from "./actions";
 import { settingsFormValues } from "./schema";
 import { SettingsForm } from "./settings-form";
@@ -14,7 +14,6 @@ import { trafficFormValues } from "./traffic-schema";
 
 export const metadata: Metadata = { title: "Paramètres" };
 
-const updatedAtFormat = new Intl.DateTimeFormat("fr-FR", { timeZone: TIME_ZONE, dateStyle: "long", timeStyle: "short" });
 
 export default async function SettingsPage() {
   await requireUser("REGULATOR");
@@ -25,7 +24,7 @@ export default async function SettingsPage() {
     <div className="max-w-5xl space-y-8">
       <PageHeader
         title="Paramètres"
-        description={`Règles appliquées à chaque calcul des tournées et numéro de la régulation affiché aux chauffeurs. Dernière modification : ${updatedAtFormat.format(settings.updatedAt)}.`}
+        description={`Règles appliquées à chaque calcul des tournées et numéro de la régulation affiché aux chauffeurs. Dernière modification le ${formatDateTime(settings.updatedAt)}.`}
       />
       <SettingsForm action={saveSettings} initial={settingsFormValues(settings)} />
       <TrafficForm

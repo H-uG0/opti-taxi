@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { echoed, echoedCheckbox, echoedList, INITIAL_FORM_STATE, type FormState } from "./form-state";
+import { echoed, echoedCheckbox, echoedList, IDLE_STATE as INITIAL_FORM_STATE, type FormState } from "@/lib/forms";
 import { parsePatientForm, parsePrescriptionForm, parseRecurrenceForm } from "./schemas";
 
 // The first Date/Intl call of a process initialises ICU time zones, which takes
@@ -47,11 +47,10 @@ describe("parsePatientForm", () => {
       lng: 5.7864,
       mobility: "SEATED",
       accessNotes: "Code 1234B, 2e étage",
-      active: true,
     });
   });
 
-  it("turns empty optional fields into null and an unchecked box into false", () => {
+  it("turns empty optional fields into null, and never reads « actif » (only « Désactiver » changes it)", () => {
     const fd = form({ ...patient, phone: "", accessNotes: "  " });
     fd.delete("active");
     const result = parsePatientForm(fd);
@@ -59,7 +58,7 @@ describe("parsePatientForm", () => {
     if (!result.success) return;
     expect(result.data.phone).toBeNull();
     expect(result.data.accessNotes).toBeNull();
-    expect(result.data.active).toBe(false);
+    expect("active" in result.data).toBe(false);
   });
 
   it("returns per-field errors and echoes the typed values", () => {
@@ -70,14 +69,14 @@ describe("parsePatientForm", () => {
     if (result.success) return;
     const { fieldErrors, values, message } = result.state;
     expect(message).toMatch(/erreurs/);
-    expect(fieldErrors.lastName?.[0]).toBe("Nom obligatoire");
-    expect(fieldErrors.postalCode?.[0]).toBe("Code postal : 5 chiffres");
-    expect(fieldErrors.lat?.[0]).toMatch(/hors de France/);
-    expect(fieldErrors.mobility?.[0]).toBe("Choisissez une mobilité");
-    expect(fieldErrors.phone?.[0]).toMatch(/téléphone invalide/);
+    expect(fieldErrors.lastName).toBe("Nom obligatoire");
+    expect(fieldErrors.postalCode).toBe("Code postal : 5 chiffres");
+    expect(fieldErrors.lat).toMatch(/hors de France/);
+    expect(fieldErrors.mobility).toBe("Choisissez une mobilité");
+    expect(fieldErrors.phone).toMatch(/téléphone invalide/);
     expect(fieldErrors.firstName).toBeUndefined();
     expect(values?.postalCode).toBe("4100");
-    expect(values?.active).toBe("on");
+    expect(values?.active).toBeUndefined();
   });
 });
 
@@ -115,15 +114,15 @@ describe("parsePrescriptionForm", () => {
     const result = parsePrescriptionForm(form({ ...prescription, validTo: "2026-08-31" }));
     expect(result.success).toBe(false);
     if (result.success) return;
-    expect(result.state.fieldErrors.validTo?.[0]).toMatch(/postérieure au début/);
+    expect(result.state.fieldErrors.validTo).toMatch(/postérieure au début/);
   });
 
   it("rejects missing and impossible dates", () => {
     const result = parsePrescriptionForm(form({ ...prescription, validFrom: "", validTo: "2026-02-30" }));
     expect(result.success).toBe(false);
     if (result.success) return;
-    expect(result.state.fieldErrors.validFrom?.[0]).toBe("Début de validité obligatoire");
-    expect(result.state.fieldErrors.validTo?.[0]).toMatch(/invalide/);
+    expect(result.state.fieldErrors.validFrom).toBe("Début de validité obligatoire");
+    expect(result.state.fieldErrors.validTo).toMatch(/invalide/);
   });
 
   it("forces sharing to NONE for an ambulance prescription", () => {
@@ -135,8 +134,8 @@ describe("parsePrescriptionForm", () => {
     const result = parsePrescriptionForm(form({ ...prescription, mode: "VSL", sharing: "ALL" }));
     expect(result.success).toBe(false);
     if (result.success) return;
-    expect(result.state.fieldErrors.mode?.[0]).toBe("Choisissez le mode prescrit");
-    expect(result.state.fieldErrors.sharing?.[0]).toBe("Choisissez le partage autorisé");
+    expect(result.state.fieldErrors.mode).toBe("Choisissez le mode prescrit");
+    expect(result.state.fieldErrors.sharing).toBe("Choisissez le partage autorisé");
   });
 });
 
@@ -172,7 +171,7 @@ describe("parseRecurrenceForm", () => {
 
   it("requires at least one weekday and rejects invalid ones", () => {
     const none = parseRecurrenceForm(form({ ...recurrence, weekdays: [] }));
-    expect(!none.success && none.state.fieldErrors.weekdays?.[0]).toBe("Cochez au moins un jour");
+    expect(!none.success && none.state.fieldErrors.weekdays).toBe("Cochez au moins un jour");
     const bad = parseRecurrenceForm(form({ ...recurrence, weekdays: ["0", "8"] }));
     expect(bad.success).toBe(false);
   });
@@ -181,22 +180,22 @@ describe("parseRecurrenceForm", () => {
     const result = parseRecurrenceForm(form({ ...recurrence, appointmentTime: "25:00", sessionMinutes: "-5" }));
     expect(result.success).toBe(false);
     if (result.success) return;
-    expect(result.state.fieldErrors.appointmentTime?.[0]).toMatch(/Heure invalide/);
-    expect(result.state.fieldErrors.sessionMinutes?.[0]).toMatch(/minutes entières/);
+    expect(result.state.fieldErrors.appointmentTime).toMatch(/Heure invalide/);
+    expect(result.state.fieldErrors.sessionMinutes).toMatch(/minutes entières/);
     const tooLong = parseRecurrenceForm(form({ ...recurrence, sessionMinutes: "800" }));
-    expect(!tooLong.success && tooLong.state.fieldErrors.sessionMinutes?.[0]).toMatch(/720 min/);
+    expect(!tooLong.success && tooLong.state.fieldErrors.sessionMinutes).toMatch(/720 min/);
   });
 
   it("rejects an end date before the start date", () => {
     const result = parseRecurrenceForm(form({ ...recurrence, endDate: "2026-11-01" }));
-    expect(!result.success && result.state.fieldErrors.endDate?.[0]).toMatch(/postérieure à la date de début/);
+    expect(!result.success && result.state.fieldErrors.endDate).toMatch(/postérieure à la date de début/);
     expect(parseRecurrenceForm(form({ ...recurrence, endDate: "2026-11-02" })).success).toBe(true);
   });
 
   it("refuses a return leg ready after midnight but allows it for an outbound-only recurrence", () => {
     const late = { ...recurrence, appointmentTime: "22:00", sessionMinutes: "180" };
     const both = parseRecurrenceForm(form(late));
-    expect(!both.success && both.state.fieldErrors.sessionMinutes?.[0]).toMatch(/minuit/);
+    expect(!both.success && both.state.fieldErrors.sessionMinutes).toMatch(/minuit/);
     expect(parseRecurrenceForm(form({ ...late, legs: "OUTBOUND" })).success).toBe(true);
   });
 
@@ -204,17 +203,19 @@ describe("parseRecurrenceForm", () => {
     const result = parseRecurrenceForm(form({ ...recurrence, facilityId: "", prescriptionId: "" }));
     expect(result.success).toBe(false);
     if (result.success) return;
-    expect(result.state.fieldErrors.facilityId?.[0]).toBe("Choisissez un établissement");
-    expect(result.state.fieldErrors.prescriptionId?.[0]).toBe("Choisissez une prescription");
+    expect(result.state.fieldErrors.facilityId).toBe("Choisissez un établissement");
+    expect(result.state.fieldErrors.prescriptionId).toBe("Choisissez une prescription");
     expect(result.state.values?.weekdays).toEqual(["5", "1", "3"]);
   });
 });
 
 describe("echoed form values", () => {
   const rejected: FormState = {
+    status: "error",
     message: "x",
     fieldErrors: {},
     values: { lastName: "Typed", weekdays: ["1", "3"], other: "x" },
+    submissionId: 1,
   };
 
   it("uses initial values before any submit", () => {

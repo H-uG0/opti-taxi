@@ -22,41 +22,41 @@ type Notice = { tone: "info" | "warning" | "error"; text: string } | null;
 
 const MANUAL_HINT = "Vous pouvez saisir la latitude et la longitude à la main (relevées sur une carte).";
 
+/** What choosing a suggestion says: its confidence, a warning under LOW_GEOCODE_SCORE. */
+export function chosenNotice(suggestion: Pick<GeocodeSuggestion, "label" | "score">): NonNullable<Notice> {
+  const score = formatPercent(suggestion.score);
+  return suggestion.score < LOW_GEOCODE_SCORE
+    ? {
+        tone: "warning",
+        text: `Correspondance faible (${score}) pour « ${suggestion.label} » : vérifiez l'adresse et les coordonnées avant d'enregistrer.`,
+      }
+    : { tone: "info", text: `Coordonnées reprises de « ${suggestion.label} » (confiance ${score}).` };
+}
+
 /**
- * Street address, postal code, city and coordinates, with an optional
- * « Localiser l'adresse » lookup in the national address base. Inputs are
- * named address / postalCode / city / lat / lng for the enclosing form.
+ * « Localiser l'adresse »: looks `query` up in the national address base (the
+ * address only, never a name) and lists the matches; choosing one hands it to
+ * `onChoose` (which fills the coordinates). Used by AddressFields and by the
+ * forms that keep the address in one field (dépôt, free address of a trip).
+ * `changed`: the address was edited since the last choice (said under the button).
  */
-export function AddressFields({
-  defaultValues,
-  errors,
+export function AddressLookup({
+  query,
+  onChoose,
   geocoderEnabled,
-  legend = "Adresse",
+  changed = false,
 }: {
-  defaultValues: AddressFormValues;
-  errors?: AddressFieldErrors;
+  query: string;
+  onChoose: (suggestion: GeocodeSuggestion) => void;
   geocoderEnabled: boolean;
-  legend?: string;
+  changed?: boolean;
 }) {
-  const prefix = useId();
-  const [values, setValues] = useState<AddressFormValues>(defaultValues);
   const [suggestions, setSuggestions] = useState<GeocodeSuggestion[]>([]);
   const [notice, setNotice] = useState<Notice>(null);
-  const [locatedQuery, setLocatedQuery] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const id = (name: AddressFieldName) => `${prefix}-${name}`;
-  const set = (name: AddressFieldName) => (event: ChangeEvent<HTMLInputElement>) => {
-    const next = event.target.value;
-    setValues((current) => ({ ...current, [name]: next }));
-  };
-  const invalid = (name: AddressFieldName) => (errors?.[name]?.length ? true : undefined);
-
-  const query = buildGeocodeQuery(values);
-  const addressChangedSinceLocate = locatedQuery !== null && locatedQuery !== query;
-
   function locate() {
-    if (query.length < 3) {
+    if (query.trim().length < 3) {
       setSuggestions([]);
       setNotice({ tone: "error", text: "Saisissez d'abord l'adresse, le code postal ou la ville." });
       return;
@@ -95,6 +95,106 @@ export function AddressFields({
   }
 
   function choose(suggestion: GeocodeSuggestion) {
+    setSuggestions([]);
+    setNotice(chosenNotice(suggestion));
+    onChoose(suggestion);
+  }
+
+  return (
+    <div className="space-y-2">
+      {geocoderEnabled ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="secondary" size="sm" onClick={locate} disabled={pending} aria-busy={pending}>
+            {pending ? (
+              <LoaderCircle aria-hidden className="size-4 motion-safe:animate-spin" />
+            ) : (
+              <MapPin aria-hidden className="size-4" />
+            )}
+            {pending ? "Recherche…" : "Localiser l'adresse"}
+          </Button>
+          <p className="text-xs text-slate-600">Seule l&apos;adresse est envoyée au service de géocodage.</p>
+        </div>
+      ) : (
+        <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          Géocodage non configuré sur ce poste. {MANUAL_HINT}
+        </p>
+      )}
+
+      <div aria-live="polite" className="space-y-2">
+        {notice ? <NoticeLine notice={notice} /> : null}
+        {changed ? (
+          <NoticeLine
+            notice={{
+              tone: "warning",
+              text: "L'adresse a changé depuis la localisation : relancez la recherche ou vérifiez les coordonnées.",
+            }}
+          />
+        ) : null}
+        {suggestions.length > 0 ? (
+          <div className="rounded-md border border-slate-200">
+            <p className="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600">
+              {suggestions.length === 1 ? "1 adresse trouvée" : `${suggestions.length} adresses trouvées`} — choisissez la bonne
+            </p>
+            <ul className="divide-y divide-slate-100">
+              {suggestions.map((s, index) => (
+                <li key={`${s.label}-${index}`}>
+                  <button
+                    type="button"
+                    onClick={() => choose(s)}
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-brand-50 focus-visible:bg-brand-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium text-slate-900">{s.label}</span>
+                      <span className="tabular block text-xs text-slate-600">
+                        {formatCoordinate(s.lat)}, {formatCoordinate(s.lng)}
+                      </span>
+                    </span>
+                    <Badge tone={s.score < LOW_GEOCODE_SCORE ? "warning" : "success"} className="tabular shrink-0">
+                      {s.score < LOW_GEOCODE_SCORE ? "À vérifier · " : ""}
+                      {formatPercent(s.score)}
+                    </Badge>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Street address, postal code, city and coordinates, with an optional
+ * « Localiser l'adresse » lookup in the national address base. Inputs are
+ * named address / postalCode / city / lat / lng for the enclosing form.
+ */
+export function AddressFields({
+  defaultValues,
+  errors,
+  geocoderEnabled,
+  legend = "Adresse",
+}: {
+  defaultValues: AddressFormValues;
+  errors?: AddressFieldErrors;
+  geocoderEnabled: boolean;
+  legend?: string;
+}) {
+  const prefix = useId();
+  const [values, setValues] = useState<AddressFormValues>(defaultValues);
+  const [locatedQuery, setLocatedQuery] = useState<string | null>(null);
+
+  const id = (name: AddressFieldName) => `${prefix}-${name}`;
+  const set = (name: AddressFieldName) => (event: ChangeEvent<HTMLInputElement>) => {
+    const next = event.target.value;
+    setValues((current) => ({ ...current, [name]: next }));
+  };
+  const invalid = (name: AddressFieldName) => (errors?.[name]?.length ? true : undefined);
+
+  const query = buildGeocodeQuery(values);
+  const addressChangedSinceLocate = locatedQuery !== null && locatedQuery !== query;
+
+  function choose(suggestion: GeocodeSuggestion) {
     const next: AddressFormValues = {
       address: suggestion.address || values.address,
       postalCode: suggestion.postalCode || values.postalCode,
@@ -103,17 +203,7 @@ export function AddressFields({
       lng: formatCoordinate(suggestion.lng),
     };
     setValues(next);
-    setSuggestions([]);
     setLocatedQuery(buildGeocodeQuery(next));
-    const score = formatPercent(suggestion.score);
-    setNotice(
-      suggestion.score < LOW_GEOCODE_SCORE
-        ? {
-            tone: "warning",
-            text: `Correspondance faible (${score}) pour « ${suggestion.label} » : vérifiez l'adresse et les coordonnées avant d'enregistrer.`,
-          }
-        : { tone: "info", text: `Coordonnées reprises de « ${suggestion.label} » (confiance ${score}).` },
-    );
   }
 
   return (
@@ -160,66 +250,7 @@ export function AddressFields({
         </Field>
       </div>
 
-      <div className="space-y-2">
-        {geocoderEnabled ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <Button variant="secondary" size="sm" onClick={locate} disabled={pending} aria-busy={pending}>
-              {pending ? (
-                <LoaderCircle aria-hidden className="size-4 animate-spin" />
-              ) : (
-                <MapPin aria-hidden className="size-4" />
-              )}
-              {pending ? "Recherche…" : "Localiser l'adresse"}
-            </Button>
-            <p className="text-xs text-slate-500">Seule l&apos;adresse est envoyée au service de géocodage.</p>
-          </div>
-        ) : (
-          <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            Géocodage non configuré sur ce poste. {MANUAL_HINT}
-          </p>
-        )}
-
-        <div aria-live="polite" className="space-y-2">
-          {notice ? <NoticeLine notice={notice} /> : null}
-          {addressChangedSinceLocate ? (
-            <NoticeLine
-              notice={{
-                tone: "warning",
-                text: "L'adresse a changé depuis la localisation : relancez la recherche ou vérifiez les coordonnées.",
-              }}
-            />
-          ) : null}
-          {suggestions.length > 0 ? (
-            <div className="rounded-md border border-slate-200">
-              <p className="border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-600">
-                {suggestions.length === 1 ? "1 adresse trouvée" : `${suggestions.length} adresses trouvées`} — choisissez la bonne
-              </p>
-              <ul className="divide-y divide-slate-100">
-                {suggestions.map((s, index) => (
-                  <li key={`${s.label}-${index}`}>
-                    <button
-                      type="button"
-                      onClick={() => choose(s)}
-                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-brand-50 focus-visible:bg-brand-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600"
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium text-slate-900">{s.label}</span>
-                        <span className="tabular block text-xs text-slate-500">
-                          {formatCoordinate(s.lat)}, {formatCoordinate(s.lng)}
-                        </span>
-                      </span>
-                      <Badge tone={s.score < LOW_GEOCODE_SCORE ? "warning" : "success"} className="tabular shrink-0">
-                        {s.score < LOW_GEOCODE_SCORE ? "À vérifier · " : ""}
-                        {formatPercent(s.score)}
-                      </Badge>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </div>
-      </div>
+      <AddressLookup query={query} onChoose={choose} geocoderEnabled={geocoderEnabled} changed={addressChangedSinceLocate} />
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field

@@ -2,7 +2,7 @@
 
 import { useActionState, useState, type ReactNode } from "react";
 import type { Qualification, VehicleType } from "@prisma/client";
-import { Checkbox, Field, Fieldset, FormMessage, Input, Select } from "@/components/ui/form";
+import { Checkbox, Field, Fieldset, FormMessage, Input, Select, UnitInput } from "@/components/ui/form";
 import { DEFAULT_CAPACITY } from "@/lib/domain/rules";
 import { ENERGY_LABELS, VEHICLE_TYPE_LABELS } from "@/lib/labels";
 import { ENERGY_TYPES } from "./fleet-schema";
@@ -20,10 +20,12 @@ import {
   type CrewSeat,
 } from "./_lib/crew";
 import { DEPARTMENT_NAMES } from "./_lib/departments";
-import { IDLE_STATE, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
+import { IDLE_STATE, refusalKey, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
 import type { DepotOption } from "@/app/(regulator)/depots/options";
-import { FormFooter, InlineWarning, UnitInput } from "./_lib/ui";
 import { MAX_SHARED_CAPACITY, VEHICLE_TYPES, isVehicleType } from "./schema";
+import { FormFooter } from "@/components/ui/form-footer";
+import { InlineWarning } from "@/components/ui/notice";
+import { ErrorFocus } from "@/components/ui/error-focus";
 
 export type DriverOption = {
   id: string;
@@ -55,7 +57,9 @@ export function VehicleForm({
   return (
     // Remount on every response so uncontrolled inputs show the echoed values.
     <form key={state.submissionId} action={formAction} className="space-y-6">
+      <ErrorFocus refusal={refusalKey(state)} />
       {state.status === "error" && state.message ? <FormMessage>{state.message}</FormMessage> : null}
+      {state.status === "success" && state.message ? <FormMessage tone="success">{state.message}</FormMessage> : null}
       <VehicleFields values={values} errors={state.fieldErrors} drivers={drivers} depots={depots} />
       <FormFooter cancelHref="/vehicules" submitLabel={submitLabel} />
     </form>

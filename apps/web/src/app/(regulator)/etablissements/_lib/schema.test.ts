@@ -47,7 +47,7 @@ describe("parseFacilityForm", () => {
     for (const [typed, message] of cases) {
       const result = parseFacilityForm(form({ ...facility, extraServiceMin: typed }));
       expect(result.success).toBe(false);
-      if (!result.success) expect(result.state.fieldErrors.extraServiceMin?.[0]).toContain(message);
+      if (!result.success) expect(result.state.fieldErrors.extraServiceMin).toContain(message);
     }
   });
 
@@ -55,10 +55,10 @@ describe("parseFacilityForm", () => {
     const result = parseFacilityForm(form({ ...facility, name: " ", type: "SPA", postalCode: "5000", lng: "" }));
     expect(result.success).toBe(false);
     if (result.success) return;
-    expect(result.state.fieldErrors.name?.[0]).toBe("Nom obligatoire");
-    expect(result.state.fieldErrors.type?.[0]).toBe("Choisissez un type d'établissement");
-    expect(result.state.fieldErrors.postalCode?.[0]).toBe("Code postal : 5 chiffres");
-    expect(result.state.fieldErrors.lng?.[0]).toBe("Longitude obligatoire");
+    expect(result.state.fieldErrors.name).toBe("Nom obligatoire");
+    expect(result.state.fieldErrors.type).toBe("Choisissez un type d'établissement");
+    expect(result.state.fieldErrors.postalCode).toBe("Code postal : 5 chiffres");
+    expect(result.state.fieldErrors.lng).toBe("Longitude obligatoire");
     expect(result.state.values?.name).toBe(" ");
   });
 

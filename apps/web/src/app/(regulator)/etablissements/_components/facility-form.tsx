@@ -3,11 +3,12 @@
 import { useActionState } from "react";
 import { AddressFields } from "@/components/address/address-fields";
 import type { AddressFormValues } from "@/components/address/address-utils";
-import { LinkButton } from "@/components/ui/button";
 import { Field, Fieldset, FormMessage, Input, Select, Textarea } from "@/components/ui/form";
 import { FACILITY_TYPE_LABELS } from "@/lib/labels";
-import { FormSubmitButton, submitWithoutReset } from "@/app/(regulator)/patients/_components/form-submit";
-import { echoed, INITIAL_FORM_STATE, type FormState } from "@/app/(regulator)/patients/_lib/form-state";
+import { submitWithoutReset } from "@/app/(regulator)/patients/_components/form-submit";
+import { ErrorFocus } from "@/components/ui/error-focus";
+import { FormFooter } from "@/components/ui/form-footer";
+import { echoed, IDLE_STATE, refusalKey, type FormState } from "@/lib/forms";
 import { FACILITY_TYPES } from "../_lib/options";
 
 export type FacilityFormInitial = {
@@ -33,7 +34,7 @@ export function FacilityForm({
   submitLabel: string;
   cancelHref: string;
 }) {
-  const [state, formAction, isPending] = useActionState(action, INITIAL_FORM_STATE);
+  const [state, formAction, isPending] = useActionState(action, IDLE_STATE);
   const errors = state.fieldErrors;
   const value = (key: keyof Omit<FacilityFormInitial, "address">) => echoed(state, key, initial[key]);
 
@@ -126,12 +127,8 @@ export function FacilityForm({
         </Field>
       </Fieldset>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <FormSubmitButton pending={isPending}>{submitLabel}</FormSubmitButton>
-        <LinkButton href={cancelHref} variant="ghost">
-          Annuler
-        </LinkButton>
-      </div>
+      <FormFooter cancelHref={cancelHref} submitLabel={submitLabel} pending={isPending} />
+      <ErrorFocus refusal={refusalKey(state)} />
     </form>
   );
 }

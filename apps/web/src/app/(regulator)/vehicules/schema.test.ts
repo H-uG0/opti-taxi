@@ -127,7 +127,7 @@ describe("crew qualifications", () => {
 
   it("blocks a driver or crew mate without the required qualification", () => {
     expect(crewQualificationErrors("TAXI", auxiliary, null).defaultDriverId).toBe(
-      "Léa Martin n'a pas la qualification requise pour conduire un taxi (Carte professionnelle taxi).",
+      "MARTIN Léa n'a pas la qualification requise pour conduire un taxi (Carte professionnelle taxi).",
     );
     // R. 6312-10: an auxiliary may drive the ambulance when the crew mate is a DEA.
     expect(crewQualificationErrors("AMBULANCE", auxiliary, dea)).toEqual({});
@@ -136,7 +136,7 @@ describe("crew qualifications", () => {
     );
     expect(crewQualificationErrors("AMBULANCE", auxiliary, auxiliary).defaultCrewMateId).toMatch(/au moins un ambulancier DE/);
     expect(crewQualificationErrors("AMBULANCE", dea, taxiDriver).defaultCrewMateId).toBe(
-      "Marc Durand n'a pas la qualification requise pour être équipier d'ambulance (Auxiliaire ambulancier ou Ambulancier DE).",
+      "DURAND Marc n'a pas la qualification requise pour être équipier d'ambulance (Auxiliaire ambulancier ou Ambulancier DE).",
     );
   });
 

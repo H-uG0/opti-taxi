@@ -7,6 +7,7 @@ import { LOW_GEOCODE_SCORE } from "@/components/address/address-utils";
 import { audit, auditRead, type AuditEntry } from "@/lib/audit";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import type { ActionResult } from "@/lib/forms";
 import { CANCELLATION_REASON_LABELS, isLateCancellation, NO_CANCELLATION, userCancellation } from "@/lib/domain/cancellation";
 import { conflictLabel, restoreBlocker, tripConflicts } from "@/lib/domain/duplicates";
 import { isSameEpisode } from "@/lib/domain/no-show";
@@ -42,7 +43,6 @@ import {
   tollSchema,
   sharingDecisionSchema,
   tripIdSchema,
-  type ActionResult,
   type FieldErrors,
   type NewTripValues,
   type TripDestination,

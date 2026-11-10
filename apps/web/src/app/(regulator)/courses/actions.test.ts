@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addDays, startOfIsoWeek, todayIso } from "@/lib/time";
 import { cancelTrip, cancelTrips, completeDayTrips, generateWeekTrips, restoreTrip } from "./actions";
-import { INITIAL_ACTION_RESULT } from "./trip-form";
+import { INITIAL_ACTION_RESULT } from "@/lib/forms";
 
 // The trips screen actions against a fake Prisma client: which writes are
 // guarded, what they write and which audit events are recorded, not the database.

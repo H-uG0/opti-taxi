@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { INITIAL_ACTION_RESULT } from "@/app/(regulator)/patients/_lib/form-state";
+import { INITIAL_ACTION_RESULT } from "@/lib/forms";
 import { setFacilityActive } from "./actions";
 
 // The server action runs against a fake Prisma client: these tests check the

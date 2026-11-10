@@ -70,6 +70,7 @@ import {
   type RouteFigures,
 } from "./plan-compare";
 import { loadPlanVersion, requestHash } from "./version";
+import { formatPersonName } from "@/lib/names";
 
 export type RunOutcome =
   | {
@@ -388,7 +389,7 @@ async function shownMessage(text: string, move?: MoveTarget): Promise<string> {
         select: { id: true, direction: true, patient: { select: { firstName: true, lastName: true } } },
       });
       for (const row of rows) {
-        const patient = `${row.patient.firstName} ${row.patient.lastName}`.trim();
+        const patient = formatPersonName(row.patient);
         names.set(row.id, { patient, direction: row.direction });
       }
     } catch (error) {

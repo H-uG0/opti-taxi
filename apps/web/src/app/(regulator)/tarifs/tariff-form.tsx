@@ -1,13 +1,14 @@
 "use client";
 
 import { useActionState, useState, type FormEvent, type ReactNode } from "react";
-import { Checkbox, Field, Fieldset, FormMessage, Input, Select, Textarea } from "@/components/ui/form";
+import { Checkbox, Field, Fieldset, FormMessage, Input, Select, Textarea, UnitInput } from "@/components/ui/form";
 import { DEFAULT_FARE_RULES, fareEuros, NO_TRIP_FLAGS, sameRide, type FareGrid } from "@/lib/domain/fare";
 import { formatEuros, VEHICLE_TYPE_LABELS } from "@/lib/labels";
 import { ALL_ZONES, DEPARTMENT_NAMES } from "../vehicules/_lib/departments";
-import { IDLE_STATE, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
-import { FormFooter, UnitInput } from "../vehicules/_lib/ui";
+import { IDLE_STATE, refusalKey, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
 import { CERTIFICATION_OPTIONS, previewFareGrid, VEHICLE_TYPES, VERIFICATION_LABELS, VERIFICATIONS } from "./schema";
+import { FormFooter } from "@/components/ui/form-footer";
+import { ErrorFocus } from "@/components/ui/error-focus";
 
 type Action = (state: FormState, formData: FormData) => Promise<FormState>;
 
@@ -22,7 +23,9 @@ export function TariffForm({ action, initial, submitLabel }: { action: Action; i
   return (
     // Remount on every response so uncontrolled inputs show the echoed values.
     <form key={state.submissionId} action={formAction} className="space-y-6">
+      <ErrorFocus refusal={refusalKey(state)} />
       {state.status === "error" && state.message ? <FormMessage>{state.message}</FormMessage> : null}
+      {state.status === "success" && state.message ? <FormMessage tone="success">{state.message}</FormMessage> : null}
       <TariffFields values={values} errors={state.fieldErrors} />
       <FormFooter cancelHref="/tarifs" submitLabel={submitLabel} />
     </form>

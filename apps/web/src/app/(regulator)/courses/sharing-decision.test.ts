@@ -45,7 +45,7 @@ describe("sharingDecisionData", () => {
       sharingProposedAt: T0,
       sharingRespondedAt: T2,
       sharingRespondedById: OTHER,
-      sharingNote: "[Réponse précédente : partage refusé le 02/11/2026 14:05]\nPréfère voyager seul",
+      sharingNote: "[Réponse précédente : partage refusé le 02/11/2026 à 14:05]\nPréfère voyager seul",
     });
 
     const refusedAgain = sharingDecisionData(
@@ -58,8 +58,8 @@ describe("sharingDecisionData", () => {
     expect(refusedAgain.sharingNote).toBe(
       [
         "Fatigué",
-        "[Réponse précédente : partage accepté par Paul Roux le 03/11/2026 10:30]",
-        "[Réponse précédente : partage refusé le 02/11/2026 14:05]",
+        "[Réponse précédente : partage accepté par Paul Roux le 03/11/2026 à 10:30]",
+        "[Réponse précédente : partage refusé le 02/11/2026 à 14:05]",
         "Préfère voyager seul",
       ].join("\n"),
     );
@@ -82,7 +82,7 @@ describe("sharingDecisionData", () => {
     };
     const note = sharingDecisionData(long, "ACCEPTED", "A changé d'avis", T2, ME).sharingNote ?? "";
     expect(note).toHaveLength(SHARING_NOTE_MAX);
-    expect(note.startsWith("A changé d'avis\n[Réponse précédente : partage refusé le 02/11/2026 14:05]\n")).toBe(true);
+    expect(note.startsWith("A changé d'avis\n[Réponse précédente : partage refusé le 02/11/2026 à 14:05]\n")).toBe(true);
     expect(note.endsWith("…")).toBe(true);
   });
 
@@ -92,8 +92,8 @@ describe("sharingDecisionData", () => {
 
   it("names who recorded the previous answer when known", () => {
     expect(previousAnswerLine("REFUSED", T1, "Marie Durand")).toBe(
-      "[Réponse précédente : partage refusé par Marie Durand le 02/11/2026 14:05]",
+      "[Réponse précédente : partage refusé par Marie Durand le 02/11/2026 à 14:05]",
     );
-    expect(previousAnswerLine("REFUSED", T1, " ")).toBe("[Réponse précédente : partage refusé le 02/11/2026 14:05]");
+    expect(previousAnswerLine("REFUSED", T1, " ")).toBe("[Réponse précédente : partage refusé le 02/11/2026 à 14:05]");
   });
 });

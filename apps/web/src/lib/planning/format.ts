@@ -3,7 +3,7 @@ import type { SharingStatus, StopKind, TripStatus } from "@prisma/client";
 import type { TariffGap } from "@/lib/domain/tariffs";
 import { VEHICLE_TYPE_SHORT } from "@/lib/labels";
 import { recordTrace, sharingAnswerWords, UNKNOWN_AUTHOR } from "@/lib/record-trace";
-import { isoDateOf, TIME_ZONE } from "@/lib/time";
+import { formatTimeOn } from "@/lib/time";
 import type { RecordedByView } from "./types";
 
 const euros0 = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
@@ -32,22 +32,6 @@ export function formatSeconds(ms: number | null | undefined): string {
   if (seconds < 60) return `${decimal1.format(seconds)} s`;
   const whole = Math.round(seconds);
   return `${Math.floor(whole / 60)} min ${String(whole % 60).padStart(2, "0")} s`;
-}
-
-/** ISO instant -> "02/11 à 18:40" in Europe/Paris. */
-export function formatInstant(iso: string): string {
-  const date = new Date(iso);
-  const day = new Intl.DateTimeFormat("fr-FR", { timeZone: TIME_ZONE, day: "2-digit", month: "2-digit" }).format(date);
-  const time = new Intl.DateTimeFormat("fr-FR", { timeZone: TIME_ZONE, hour: "2-digit", minute: "2-digit" }).format(date);
-  return `${day} à ${time}`;
-}
-
-const clock = new Intl.DateTimeFormat("fr-FR", { timeZone: TIME_ZONE, hour: "2-digit", minute: "2-digit" });
-
-/** ISO instant -> "08:12" when it falls on isoDate in Europe/Paris, else "02/11 à 18:40". */
-export function formatTimeOn(iso: string, isoDate: string): string {
-  const date = new Date(iso);
-  return isoDateOf(date) === isoDate ? clock.format(date) : formatInstant(iso);
 }
 
 export { UNKNOWN_AUTHOR } from "@/lib/record-trace";

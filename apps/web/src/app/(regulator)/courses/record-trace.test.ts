@@ -1,8 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   cancellationTrace,
   exceptionalAmbulanceTrace,
-  formatDayTime,
   outboundNoShowTrace,
   recordTrace,
   sharingAnswerTrace,
@@ -10,17 +9,17 @@ import {
   type CompletedStop,
 } from "./record-trace";
 
+// Dates and times without a year are those of the current year (lib/time formatDateTime): the clock is set in 2026.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-10T12:00:00Z") });
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
+
 const AT = new Date("2026-11-03T07:12:00Z"); // 08:12 in Paris (winter time)
 const PICKED = new Date("2026-11-04T06:40:00Z"); // 07:40 in Paris
 const DROPPED = new Date("2026-11-04T07:05:00Z"); // 08:05 in Paris
-
-describe("formatDayTime", () => {
-  it("formats day, month and time in Europe/Paris", () => {
-    expect(formatDayTime(AT)).toBe("03/11 à 08:12");
-    expect(formatDayTime(new Date("2026-07-14T21:30:00Z"))).toBe("14/07 à 23:30"); // summer time
-    expect(formatDayTime(new Date("2026-11-03T23:05:00Z"))).toBe("04/11 à 00:05"); // next day in Paris, 00 not 24
-  });
-});
 
 describe("recordTrace", () => {
   it("names who recorded it, and when", () => {

@@ -14,12 +14,7 @@ import { activationEvent, alreadyInStateMessage } from "@/app/(regulator)/patien
 import { idSchema } from "@/app/(regulator)/patients/_lib/form-parse";
 import { EMPTY_SYNC, isEmptySync, withSyncNotice } from "@/app/(regulator)/patients/_lib/trip-sync";
 import { SYNC_TX_OPTIONS, syncOpenTrips } from "@/app/(regulator)/patients/_lib/trip-sync-db";
-import {
-  formString,
-  messageState,
-  type ActionResult,
-  type FormState,
-} from "@/app/(regulator)/patients/_lib/form-state";
+import { formString, messageState, type ActionResult, type FormState } from "@/lib/forms";
 import { parseFacilityForm } from "./_lib/schema";
 
 const NOT_FOUND = "Établissement introuvable : il a peut-être été supprimé. Rechargez la page.";

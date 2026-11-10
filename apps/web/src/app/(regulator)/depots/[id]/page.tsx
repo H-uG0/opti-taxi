@@ -3,18 +3,33 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { ConfirmAction } from "@/components/ui/confirm-action";
+import { FormMessage } from "@/components/ui/form";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { compareVehicles } from "@/lib/fleet/order";
-import { BackLink } from "@/app/(regulator)/vehicules/_lib/ui";
 import { setDepotActive, updateDepot } from "../actions";
+import { geocoderEnabled } from "@/lib/geocode";
 import { DepotForm } from "../depot-form";
 import { depotFormValues } from "../schema";
+import { BackLink } from "@/components/ui/back-link";
+import { formatPersonName } from "@/lib/names";
 
-export const metadata: Metadata = { title: "Modifier un dépôt" };
+/** The tab names the record (never a patient: titles stay in the browser history). */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const record = await db.depot.findUnique({ where: { id }, select: { name: true } });
+  return { title: record?.name ?? "Dépôt" };
+}
 
-export default async function EditDepotPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EditDepotPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ cree?: string }>;
+}) {
+  const { cree } = await searchParams;
   await requireUser("REGULATOR");
   const { id } = await params;
   const depot = await db.depot.findUnique({
@@ -43,8 +58,14 @@ export default async function EditDepotPage({ params }: { params: Promise<{ id: 
         }
       />
 
+      {cree === "1" ? (
+        <div className="mb-6">
+          <FormMessage tone="success">Dépôt créé. Rattachez-lui maintenant ses véhicules et son personnel depuis leurs fiches.</FormMessage>
+        </div>
+      ) : null}
+
       <div className="space-y-6">
-        <DepotForm action={updateDepot.bind(null, depot.id)} initial={depotFormValues(depot)} submitLabel="Enregistrer" />
+        <DepotForm action={updateDepot.bind(null, depot.id)} initial={depotFormValues(depot)} submitLabel="Enregistrer" geocoderEnabled={geocoderEnabled()} />
 
         <Card>
           <CardHeader title="Rattachés à ce dépôt" />
@@ -77,7 +98,7 @@ export default async function EditDepotPage({ params }: { params: Promise<{ id: 
                   {depot.drivers.map((d) => (
                     <li key={d.id} className="flex items-center gap-2">
                       <Link href={`/chauffeurs/${d.id}`} className="underline-offset-2 hover:text-brand-700 hover:underline">
-                        {d.lastName.toUpperCase()} {d.firstName}
+                        {formatPersonName(d)}
                       </Link>
                       {d.active ? null : <Badge>Désactivé</Badge>}
                     </li>
@@ -102,8 +123,8 @@ export default async function EditDepotPage({ params }: { params: Promise<{ id: 
                 <ConfirmAction
                   action={setDepotActive.bind(null, depot.id, false)}
                   label="Désactiver le dépôt"
-                  confirmLabel="Confirmer la désactivation"
-                  pendingLabel="Désactivation…"
+                  confirmLabel="Oui, désactiver le dépôt"
+                  keepLabel="Garder le dépôt actif"
                   question={
                     <p>
                       Le dépôt ne sera plus proposé dans les fiches véhicule et chauffeur. Le personnel qui y est rattaché
@@ -121,9 +142,8 @@ export default async function EditDepotPage({ params }: { params: Promise<{ id: 
                 <ConfirmAction
                   action={setDepotActive.bind(null, depot.id, true)}
                   label="Réactiver le dépôt"
-                  confirmLabel="Confirmer la réactivation"
-                  pendingLabel="Réactivation…"
-                  variant="primary"
+                  confirmLabel="Oui, réactiver le dépôt"
+                  tone="primary"
                   question={<p>Le dépôt sera de nouveau proposé dans les fiches véhicule et chauffeur.</p>}
                 />
               </>

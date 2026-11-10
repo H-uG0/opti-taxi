@@ -9,7 +9,7 @@ import { isSameEpisode, type LegKey } from "@/lib/domain/no-show";
 import { isExceptionalAmbulanceTrip } from "@/lib/planning/exceptional-ambulance";
 import { recordTrace, sharingAnswerWords, type RecordTrace } from "@/lib/record-trace";
 
-export { formatDayTime, recordTrace, UNKNOWN_AUTHOR, type RecordTrace } from "@/lib/record-trace";
+export { recordTrace, UNKNOWN_AUTHOR, type RecordTrace } from "@/lib/record-trace";
 
 /**
  * Trace of the patient's current answer to shared transport (accepted or

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { resolveDayCrews, type DayCrewInput, type DayCrewView, type StaffPerson } from "@/lib/staff/day-crews";
 import {
   asShown,
@@ -18,6 +18,14 @@ import {
   unfixIntentVehicle,
   type CrewFormRow,
 } from "./schema";
+
+// Dates and times without a year are those of the current year (lib/time formatDateTime): the clock is set in 2026.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-10T12:00:00Z") });
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 const VEHICLES = [
   { id: "taxi", type: "TAXI" as const },
@@ -159,8 +167,8 @@ describe("concurrency on the fixed crews", () => {
     const amb = { ...row("amb", ""), crewMateId: "m2" };
     expect(
       unavailableChoiceErrors([amb], people, [{ driverId: "d9", kind: "SICK", startDate: "2026-11-09", endDate: "2026-11-10" }], "2026-11-09"),
-    ).toEqual({ "driver:amb": "Paul Roux : absence du 09/11/2026 au 10/11/2026", "mate:amb": "Léa Faure est désactivé" });
-    expect(unavailableChoiceErrors([amb], people, [], "2026-11-09")).toEqual({ "mate:amb": "Léa Faure est désactivé" });
+    ).toEqual({ "driver:amb": "ROUX Paul : absence du 09/11/2026 au 10/11/2026", "mate:amb": "FAURE Léa est désactivé" });
+    expect(unavailableChoiceErrors([amb], people, [], "2026-11-09")).toEqual({ "mate:amb": "FAURE Léa est désactivé" });
   });
 
   it("reads the vehicle of a « Revenir à la proposition » or « Fixer cette proposition » button", () => {
@@ -274,13 +282,13 @@ describe("a change taking a person from another fixed crew", () => {
   }
 
   const message =
-    "x X fait déjà partie de l'équipage fixé de Taxi B ce jour : revenez d'abord à la proposition sur Taxi B, ou choisissez quelqu'un d'autre.";
+    "X x fait déjà partie de l'équipage fixé de Taxi B ce jour : revenez d'abord à la proposition sur Taxi B, ou choisissez quelqu'un d'autre.";
 
   it("refuses it on the changed row when that row comes first in display order", () => {
     // Taxi A (changed) comes before Taxi B (fixed with x): the crews of the day would give x to Taxi A.
     const { errors, broken } = check([{ vehicleId: "taxiB", driverId: "x", crewMateId: null }], [change("taxiA", "x", "a")]);
     expect(errors).toEqual({ "driver:taxiA": message });
-    expect(broken).toEqual([{ vehicleId: "taxiB", message: "x X est déjà affecté à Taxi A ce jour" }]);
+    expect(broken).toEqual([{ vehicleId: "taxiB", message: "X x est déjà affecté à Taxi A ce jour" }]);
   });
 
   it("refuses it with the same message when the changed row comes later", () => {
@@ -288,7 +296,7 @@ describe("a change taking a person from another fixed crew", () => {
     const { errors, broken } = check([{ vehicleId: "taxiA", driverId: "x", crewMateId: null }], [change("taxiB", "x", "b")]);
     expect(errors).toEqual({
       "driver:taxiB":
-        "x X fait déjà partie de l'équipage fixé de Taxi A ce jour : revenez d'abord à la proposition sur Taxi A, ou choisissez quelqu'un d'autre.",
+        "X x fait déjà partie de l'équipage fixé de Taxi A ce jour : revenez d'abord à la proposition sur Taxi A, ou choisissez quelqu'un d'autre.",
     });
     expect(broken).toEqual([]);
   });

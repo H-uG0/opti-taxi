@@ -198,7 +198,7 @@ describe("buildPlanningView", () => {
     expect(view.vehicles[2]?.unavailableReason).toBe(view.skippedVehicles[0]?.reason);
     expect(view.vehicles[2]).toMatchObject({ shift: null, depot: { id: "depot-marseille", label: "Marseille" } });
     expect(view.skippedVehicles.map((s) => s.vehicleId)).toEqual(["v3"]);
-    expect(view.vehicles[0]).toMatchObject({ driverName: "Jean Route", shift: { start: 360, end: 1140 }, available: true });
+    expect(view.vehicles[0]).toMatchObject({ driverName: "ROUTE Jean", shift: { start: 360, end: 1140 }, available: true });
     expect(view.vehicles[0]?.color).not.toBe(view.vehicles[1]?.color);
   });
 
@@ -285,11 +285,11 @@ describe("buildPlanningView", () => {
     ]);
     const view = buildPlanningView(input({ lastRun: pendingRun, details }));
     expect(view.lastRun?.pending).toEqual({
-      question: expect.stringMatching(/^Déplacement de l'aller de Patient A vers Taxi 2 : ce calcul sert 1 course contre 2/),
+      question: expect.stringMatching(/^Déplacement de l'aller de A Patient vers Taxi 2 : ce calcul sert 1 course contre 2/),
       comparison,
       // Named, with the leg and time, as the page shows them; the violation's raw message is not shown.
-      lostTrips: ["Patient B (aller, RDV 08:00)"],
-      violations: ["Hors fenêtre horaire — Taxi 1, Patient B (aller, RDV 08:00)"],
+      lostTrips: ["B Patient (aller, RDV 08:00)"],
+      violations: ["Hors fenêtre horaire — Taxi 1, B Patient (aller, RDV 08:00)"],
     });
     expect(view.lastRun?.kind).toBe("move");
     expect(view.planRun).toMatchObject({ kind: "restore", previous: comparison.current, pending: null });
@@ -345,7 +345,7 @@ describe("buildPlanningView", () => {
     });
     const view = buildPlanningView(input({ lastRun: failed }));
     expect(view.lastRun?.error).toBe(
-      "Déplacement refusé : l'optimiseur a placé l'aller de Patient C sur Taxi 2 et non sur Taxi 1. Le planning n'a pas été modifié.",
+      "Déplacement refusé : l'optimiseur a placé l'aller de C Patient sur Taxi 2 et non sur Taxi 1. Le planning n'a pas été modifié.",
     );
   });
 

@@ -6,10 +6,11 @@ import { VEHICLE_TYPE_SHORT } from "@/lib/labels";
 import { todayIso } from "@/lib/time";
 import { departmentLabel } from "../../vehicules/_lib/departments";
 import { idSchema } from "@/lib/forms";
-import { BackLink, Callout } from "../../vehicules/_lib/ui";
 import { createTariff } from "../actions";
 import { duplicateOverrides, tariffFormValues } from "../schema";
 import { TariffForm } from "../tariff-form";
+import { BackLink } from "@/components/ui/back-link";
+import { Notice } from "@/components/ui/notice";
 
 export const metadata: Metadata = { title: "Nouvelle grille tarifaire" };
 
@@ -32,7 +33,7 @@ export default async function NewTariffPage({
         description="Une grille s'applique aux véhicules d'un type rattachés à un département, entre deux dates."
       />
       {source ? (
-        <Callout className="mb-6">
+        <Notice className="mb-6">
           <p>
             Valeurs reprises de la grille {VEHICLE_TYPE_SHORT[source.vehicleType]} · {departmentLabel(source.department)}
             {source.label ? ` « ${source.label} »` : ""}. Ajustez les montants et la date d&apos;effet : à partir de
@@ -42,7 +43,7 @@ export default async function NewTariffPage({
             La vérification repart à « Non vérifié » et la source est vide : indiquez le nouveau texte, puis « Officiel » une
             fois les montants vérifiés.
           </p>
-        </Callout>
+        </Notice>
       ) : null}
       <TariffForm
         action={createTariff}

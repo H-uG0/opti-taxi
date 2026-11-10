@@ -79,28 +79,28 @@ describe("PlanningToolbar (barre d'outils)", () => {
   it("asks before validating when the server says so, then validates with the question answered", async () => {
     renderToolbar();
     fireEvent.click(screen.getByRole("button", { name: /Valider le planning/ }));
-    const dialog = await screen.findByRole("alertdialog");
+    const dialog = await screen.findByRole("group", { name: CONFIRM });
     expect(dialog.textContent).toContain("Valider quand même ?");
     expect(actions.validateDay).toHaveBeenLastCalledWith("2026-11-10", null, "v-1");
     // The confirmation takes the focus.
-    await waitFor(() => expect(document.activeElement?.textContent).toBe("Valider quand même"));
-    fireEvent.click(screen.getByRole("button", { name: "Valider quand même" }));
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("Oui, valider quand même"));
+    fireEvent.click(screen.getByRole("button", { name: "Oui, valider quand même" }));
     await waitFor(() => expect(actions.validateDay).toHaveBeenLastCalledWith("2026-11-10", CONFIRM, "v-1"));
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("group", { name: CONFIRM })).toBeNull());
   });
 
-  it("closes the question with « Annuler » or Escape without validating, the focus back on « Valider le planning »", async () => {
+  it("closes the question with « Revoir le planning » or Escape without validating, the focus back on « Valider le planning »", async () => {
     renderToolbar();
     const validateButton = screen.getByRole("button", { name: /Valider le planning/ });
     fireEvent.click(validateButton);
-    await waitFor(() => expect(document.activeElement?.textContent).toBe("Valider quand même"));
-    fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
-    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("Oui, valider quand même"));
+    fireEvent.click(screen.getByRole("button", { name: "Revoir le planning" }));
+    expect(screen.queryByRole("group", { name: CONFIRM })).toBeNull();
     expect(document.activeElement).toBe(validateButton);
     fireEvent.click(validateButton);
-    await waitFor(() => expect(document.activeElement?.textContent).toBe("Valider quand même"));
-    fireEvent.keyDown(screen.getByRole("alertdialog"), { key: "Escape" });
-    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("Oui, valider quand même"));
+    fireEvent.keyDown(screen.getByRole("group", { name: CONFIRM }), { key: "Escape" });
+    expect(screen.queryByRole("group", { name: CONFIRM })).toBeNull();
     expect(document.activeElement).toBe(validateButton);
     expect(actions.validateDay).toHaveBeenCalledTimes(2);
   });

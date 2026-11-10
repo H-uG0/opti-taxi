@@ -25,7 +25,6 @@ export default async function NewPatientPage() {
           phone: "",
           mobility: "SEATED",
           accessNotes: "",
-          active: true,
           address: EMPTY_ADDRESS,
         }}
         geocoderEnabled={geocoderEnabled()}

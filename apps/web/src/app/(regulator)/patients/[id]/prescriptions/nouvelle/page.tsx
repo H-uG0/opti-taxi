@@ -6,8 +6,8 @@ import { db } from "@/lib/db";
 import { todayIso } from "@/lib/time";
 import { PageHeader } from "@/components/ui/layout";
 import { createPrescription } from "../../../actions";
-import { BackLink } from "../../../_components/back-link";
 import { PrescriptionForm } from "../../../_components/prescription-form";
+import { BackLink } from "@/components/ui/back-link";
 
 export const metadata: Metadata = { title: "Nouvelle prescription" };
 

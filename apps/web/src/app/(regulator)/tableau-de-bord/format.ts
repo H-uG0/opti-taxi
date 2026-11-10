@@ -1,6 +1,6 @@
 /** Number and date formatting of the dashboard (French, "—" for unknown values). */
 import type { DayKpis } from "@/lib/kpis";
-import { formatDuration, fromIsoDate, TIME_ZONE } from "@/lib/time";
+import { formatDateTime, formatDuration, fromIsoDate } from "@/lib/time";
 
 const decimalFormats = new Map<number, Intl.NumberFormat>();
 function decimalFormat(digits: number): Intl.NumberFormat {
@@ -18,13 +18,6 @@ const eurosDelta = new Intl.NumberFormat("fr-FR", {
   currency: "EUR",
   maximumFractionDigits: 0,
   signDisplay: "exceptZero",
-});
-const instantFormat = new Intl.DateTimeFormat("fr-FR", {
-  timeZone: TIME_ZONE,
-  day: "2-digit",
-  month: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
 });
 const dayShort = new Intl.DateTimeFormat("fr-FR", { timeZone: "UTC", weekday: "short", day: "2-digit", month: "2-digit" });
 const dayMonth = new Intl.DateTimeFormat("fr-FR", { timeZone: "UTC", day: "2-digit", month: "2-digit" });
@@ -44,9 +37,9 @@ export function formatDayShort(isoDate: string): string {
   return dayShort.format(fromIsoDate(isoDate));
 }
 
-/** Real instant -> "02/11 18:50" (Europe/Paris). */
+/** Real instant -> "02/11 à 18:50" (Europe/Paris): the app's one date-time format (lib/time). */
 export function formatInstant(instant: Date): string {
-  return instantFormat.format(instant).replace(",", "");
+  return formatDateTime(instant);
 }
 
 /** "mardi 3 novembre 2026" -> "Mardi 3 novembre 2026". */

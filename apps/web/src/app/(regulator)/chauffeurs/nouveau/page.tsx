@@ -2,10 +2,10 @@ import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui/layout";
 import { requireUser } from "@/lib/auth";
 import { loadDepotOptions } from "@/app/(regulator)/depots/options";
-import { BackLink } from "../../vehicules/_lib/ui";
 import { createDriver } from "../actions";
 import { DriverForm } from "../driver-form";
 import { driverFormValues } from "../schema";
+import { BackLink } from "@/components/ui/back-link";
 
 export const metadata: Metadata = { title: "Nouveau chauffeur" };
 

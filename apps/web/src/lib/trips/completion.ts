@@ -26,6 +26,7 @@ import {
 import { fromIsoDate, toIsoDate, tomorrowIso } from "@/lib/time";
 import { oneOffRevival, type OneOffRevivalTrip } from "./revival";
 import { DEFAULT_TRIP_HORIZON_DAYS, horizonOf, writableRange, type DateRange } from "./horizon";
+import { formatPersonName } from "@/lib/names";
 
 export { DEFAULT_TRIP_HORIZON_DAYS, horizonOf, inHorizon, type DateRange } from "./horizon";
 
@@ -78,7 +79,7 @@ function skippedRecurrences(recurrences: readonly LoadedRecurrence[], skipped: R
     const entry = byRecurrence.get(rec.id) ?? {
       recurrenceId: rec.id,
       patientId: rec.patientId,
-      patientName: `${rec.patient.lastName.toUpperCase()} ${rec.patient.firstName}`,
+      patientName: formatPersonName(rec.patient),
       label: rec.label?.trim() || rec.facility.name,
       dates: [],
     };

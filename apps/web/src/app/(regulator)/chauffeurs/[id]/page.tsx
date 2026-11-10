@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { UpcomingRoutesCallout } from "../../vehicules/_lib/ui";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
@@ -11,7 +12,6 @@ import { addDays, fromIsoDate, todayIso, toIsoDate, tomorrowIso } from "@/lib/ti
 import { absenceText } from "@/lib/staff/day-crews";
 import { ConfirmAction } from "@/components/ui/confirm-action";
 import { plannedSeatCount } from "../../vehicules/_lib/crew";
-import { BackLink, Callout, UpcomingRoutesCallout } from "../../vehicules/_lib/ui";
 import { toUpcomingRoutes, upcomingRoutesNotice } from "../../vehicules/_lib/upcoming-routes";
 import { saveDriverAccount, setDriverAccountActive, setDriverActive, updateDriver } from "../actions";
 import { DriverForm } from "../driver-form";
@@ -20,8 +20,16 @@ import { loadDepotOptions } from "@/app/(regulator)/depots/options";
 import { addAbsence, addIncompatibility, deleteAbsence, deleteIncompatibility } from "../staff-actions";
 import { AccountForm } from "./account-form";
 import { AbsenceForm, IncompatibilityForm } from "./staff-cards";
+import { BackLink } from "@/components/ui/back-link";
+import { Notice } from "@/components/ui/notice";
+import { formatPersonName } from "@/lib/names";
 
-export const metadata: Metadata = { title: "Fiche chauffeur" };
+/** The tab names the person (« MARTIN Jean »). */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const person = await db.driver.findUnique({ where: { id }, select: { firstName: true, lastName: true } });
+  return { title: person ? formatPersonName(person) : "Fiche personnel" };
+}
 
 const dateTimeFormat = new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", dateStyle: "long" });
 
@@ -80,7 +88,7 @@ export default async function EditDriverPage({
   );
   const upcomingNotice = upcomingRoutesNotice(upcomingRoutes, "driver");
 
-  const fullName = `${driver.firstName} ${driver.lastName}`;
+  const fullName = formatPersonName(driver);
   const account = driver.user && driver.user.role === "DRIVER" ? driver.user : null;
   const assignments = [
     ...driver.defaultForVehicles.map((v) => ({ ...v, role: "Chauffeur par défaut" })),
@@ -171,8 +179,9 @@ export default async function EditDriverPage({
                       <ConfirmAction
                         action={setDriverAccountActive.bind(null, driver.id, !account.active)}
                         label={account.active ? "Désactiver l'accès" : "Réactiver l'accès"}
-                        confirmLabel={account.active ? "Confirmer la désactivation" : "Confirmer la réactivation"}
-                        variant={account.active ? "danger" : "primary"}
+                        confirmLabel={account.active ? "Oui, désactiver l'accès" : "Oui, réactiver l'accès"}
+                        keepLabel={account.active ? "Garder l'accès" : "Retour"}
+                        tone={account.active ? "danger" : "primary"}
                         question={
                           account.active ? (
                             <p>Le chauffeur ne pourra plus se connecter. {OPEN_SESSION_NOTE}</p>
@@ -218,9 +227,10 @@ export default async function EditDriverPage({
                         <ConfirmAction
                           action={deleteAbsence.bind(null, driver.id, a.id)}
                           label="Supprimer"
-                          confirmLabel="Confirmer la suppression"
-                          pendingLabel="Suppression…"
-                          variant="ghost"
+                          ariaLabel={`Supprimer « ${text} »`}
+                          confirmLabel="Oui, supprimer l'absence"
+                          keepLabel="Garder l'absence"
+                          triggerVariant="ghost"
                           question={<p>Supprimer « {text} » ?</p>}
                         />
                       </li>
@@ -247,7 +257,7 @@ export default async function EditDriverPage({
                 <ul className="divide-y divide-slate-100">
                   {pairs.map((pair) => {
                     const other = pair.driverA.id === driver.id ? pair.driverB : pair.driverA;
-                    const name = `${other.firstName} ${other.lastName}`;
+                    const name = formatPersonName(other);
                     return (
                       <li key={pair.id} className="space-y-1 py-2">
                         <Link href={`/chauffeurs/${other.id}`} className="font-medium underline-offset-2 hover:underline">
@@ -257,9 +267,9 @@ export default async function EditDriverPage({
                         <ConfirmAction
                           action={deleteIncompatibility.bind(null, driver.id, pair.id)}
                           label="Supprimer"
-                          confirmLabel="Confirmer la suppression"
-                          pendingLabel="Suppression…"
-                          variant="ghost"
+                          confirmLabel="Oui, retirer l'interdiction"
+                          keepLabel="Garder l'interdiction"
+                          triggerVariant="ghost"
                           question={<p>Ces deux personnes pourront de nouveau être proposées ensemble.</p>}
                         />
                       </li>
@@ -270,7 +280,7 @@ export default async function EditDriverPage({
               <div className="border-t border-slate-200 pt-4">
                 <IncompatibilityForm
                   action={addIncompatibility.bind(null, driver.id)}
-                  people={others.map((o) => ({ id: o.id, name: `${o.lastName.toUpperCase()} ${o.firstName}` }))}
+                  people={others.map((o) => ({ id: o.id, name: formatPersonName(o) }))}
                 />
               </div>
             </CardBody>
@@ -280,11 +290,11 @@ export default async function EditDriverPage({
             <CardHeader title="Véhicules" />
             <CardBody className="text-sm">
               {driver.active && plannedSeats > 1 ? (
-                <Callout tone="warning" className="mb-3">
+                <Notice tone="warning" className="mb-3">
                   Dans l&apos;équipage par défaut de {plannedSeats} véhicules actifs : une personne ne roule que sur un
                   véhicule par jour, les autres reçoivent un remplaçant s&apos;il y en a un de libre (page Équipages), sinon
                   restent au dépôt. Affectez une autre personne aux autres véhicules.
-                </Callout>
+                </Notice>
               ) : null}
               {assignments.length === 0 ? (
                 <p className="text-slate-500">
@@ -338,8 +348,9 @@ export default async function EditDriverPage({
               <ConfirmAction
                 action={setDriverActive.bind(null, driver.id, !driver.active)}
                 label={driver.active ? "Désactiver le chauffeur" : "Réactiver le chauffeur"}
-                confirmLabel={driver.active ? "Confirmer la désactivation" : "Confirmer la réactivation"}
-                variant={driver.active ? "danger" : "primary"}
+                confirmLabel={driver.active ? "Oui, désactiver la fiche" : "Oui, réactiver la fiche"}
+                keepLabel={driver.active ? "Garder la fiche active" : "Retour"}
+                tone={driver.active ? "danger" : "primary"}
                 question={
                   driver.active ? (
                     <div className="space-y-2">

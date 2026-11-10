@@ -166,7 +166,7 @@ describe("saveDayCrews", () => {
     expect(result.status).toBe("error");
     expect(result.fieldErrors).toEqual({
       "driver:taxiA":
-        "x X fait déjà partie de l'équipage fixé de Taxi B ce jour : revenez d'abord à la proposition sur Taxi B, ou choisissez quelqu'un d'autre.",
+        "X x fait déjà partie de l'équipage fixé de Taxi B ce jour : revenez d'abord à la proposition sur Taxi B, ou choisissez quelqu'un d'autre.",
     });
     expect(fake.dayCrew.create).not.toHaveBeenCalled();
   });

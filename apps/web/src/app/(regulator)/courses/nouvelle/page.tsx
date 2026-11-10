@@ -9,6 +9,7 @@ import { geocoderEnabled } from "@/lib/geocode";
 import { FACILITY_TYPE_LABELS, MOBILITY_LABELS, PRESCRIBED_MODE_LABELS, SHARING_SCOPE_LABELS } from "@/lib/labels";
 import { formatShortDate, fromIsoDate, isIsoDate, todayIso, toIsoDate, tomorrowIso } from "@/lib/time";
 import { NewTripForm, type FacilityOption, type PatientOption } from "./new-trip-form";
+import { formatPersonName } from "@/lib/names";
 
 export const metadata: Metadata = { title: "Nouvelle course" };
 
@@ -51,7 +52,7 @@ export default async function NewTripPage({
 
   const patientOptions: PatientOption[] = patients.map((patient) => ({
     id: patient.id,
-    label: `${patient.lastName.toUpperCase()} ${patient.firstName} — ${patient.city}`,
+    label: `${formatPersonName(patient)} — ${patient.city}`,
     mobilityLabel: MOBILITY_LABELS[patient.mobility],
     prescriptions: patient.prescriptions.map((p) => {
       const validFrom = toIsoDate(p.validFrom);

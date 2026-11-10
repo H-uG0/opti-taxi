@@ -1,9 +1,10 @@
 /**
- * zod helpers of the referential forms: FormData validation into a FormState
- * with per-field errors, and common field schemas. Server actions and tests only.
+ * zod helpers of the referential forms (patients, établissements): FormData
+ * validation into the app's FormState (lib/forms) with one message per field,
+ * and common field schemas. Server actions and tests only.
  */
 import { z } from "zod";
-import { GENERIC_FORM_ERROR, type FieldErrors, type FormState, type FormValues } from "./form-state";
+import { invalidState, type FormState, type FormValues } from "@/lib/forms";
 
 export type ParseResult<T> = { success: true; data: T } | { success: false; state: FormState };
 
@@ -15,21 +16,7 @@ export function parseForm<S extends z.ZodType>(
 ): ParseResult<z.output<S>> {
   const result = schema.safeParse(raw);
   if (result.success) return { success: true, data: result.data };
-  return { success: false, state: errorState(result.error, values) };
-}
-
-export function errorState(error: z.ZodError, values: FormValues): FormState {
-  const fieldErrors: FieldErrors = {};
-  const formErrors: string[] = [];
-  for (const issue of error.issues) {
-    const key = issue.path[0];
-    if (typeof key === "string") {
-      (fieldErrors[key] ??= []).push(issue.message);
-    } else {
-      formErrors.push(issue.message);
-    }
-  }
-  return { message: formErrors[0] ?? GENERIC_FORM_ERROR, fieldErrors, values };
+  return { success: false, state: invalidState(result.error, values) };
 }
 
 /** Record ids received from forms (cuid). */

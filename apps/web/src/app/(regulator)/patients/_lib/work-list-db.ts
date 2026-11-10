@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { fromIsoDate, toIsoDate } from "@/lib/time";
 import { findRenewal, formatRecurrenceSummary } from "./status";
 import { prescriptionWorkItems, workListLimit, type WorkItem } from "./work-list";
+import { formatPersonName } from "@/lib/names";
 
 /**
  * Number of prescriptions to handle (work-list.ts), for the navigation: one
@@ -66,7 +67,7 @@ export async function loadPrescriptionWork(todayIso: string): Promise<WorkItem[]
           label: r.label,
           facilityName: r.facility.name,
         }),
-        patient: { id: r.patient.id, name: `${r.patient.lastName.toUpperCase()} ${r.patient.firstName}`, city: r.patient.city },
+        patient: { id: r.patient.id, name: formatPersonName(r.patient), city: r.patient.city },
         prescription: {
           id: r.prescription.id,
           mode: r.prescription.mode,

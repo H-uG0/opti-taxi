@@ -2,15 +2,16 @@
 
 import { useActionState, useState } from "react";
 import type { Mobility } from "@prisma/client";
-import { LinkButton } from "@/components/ui/button";
 import { Checkbox, Field, Fieldset, FormMessage, Input, Select, Textarea } from "@/components/ui/form";
 import { MOBILITY_LABELS, PRESCRIBED_MODE_LABELS, SHARING_SCOPE_LABELS } from "@/lib/labels";
 import { isIsoDate } from "@/lib/time";
-import { echoed, echoedCheckbox, INITIAL_FORM_STATE, type FormState } from "../_lib/form-state";
+import { echoed, echoedCheckbox, IDLE_STATE, refusalKey, type FormState } from "@/lib/forms";
 import { PRESCRIBED_MODES, SHARING_SCOPES } from "../_lib/options";
 import { mobilityModeWarning, prescriptionValidity, validityLabel } from "../_lib/status";
-import { FormSubmitButton, submitWithoutReset } from "./form-submit";
-import { Warning } from "./warning";
+import { submitWithoutReset } from "./form-submit";
+import { ErrorFocus } from "@/components/ui/error-focus";
+import { FormFooter } from "@/components/ui/form-footer";
+import { Notice } from "@/components/ui/notice";
 
 export type PrescriptionFormInitial = {
   mode: string;
@@ -37,7 +38,7 @@ export function PrescriptionForm({
   submitLabel: string;
   cancelHref: string;
 }) {
-  const [state, formAction, isPending] = useActionState(action, INITIAL_FORM_STATE);
+  const [state, formAction, isPending] = useActionState(action, IDLE_STATE);
   const errors = state.fieldErrors;
   const value = (key: keyof Omit<PrescriptionFormInitial, "isSeries">) => echoed(state, key, initial[key]);
 
@@ -102,7 +103,7 @@ export function PrescriptionForm({
             </Select>
           </Field>
         </div>
-        {modeWarning ? <Warning>{modeWarning}</Warning> : null}
+        {modeWarning ? <Notice size="sm">{modeWarning}</Notice> : null}
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Début de validité" htmlFor="validFrom" error={errors.validFrom}>
@@ -130,9 +131,9 @@ export function PrescriptionForm({
           </Field>
         </div>
         {validity && (validity.state === "expired" || validity.state === "expiring") ? (
-          <Warning tone={validity.state === "expired" ? "danger" : "warning"}>
+          <Notice size="sm" tone={validity.state === "expired" ? "danger" : "warning"}>
             {validityLabel({ validFrom, validTo }, todayIso)} : aucune course ne sera générée après la fin de validité.
-          </Warning>
+          </Notice>
         ) : null}
 
         <Checkbox
@@ -165,12 +166,8 @@ export function PrescriptionForm({
         </Field>
       </Fieldset>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <FormSubmitButton pending={isPending}>{submitLabel}</FormSubmitButton>
-        <LinkButton href={cancelHref} variant="ghost">
-          Annuler
-        </LinkButton>
-      </div>
+      <FormFooter cancelHref={cancelHref} submitLabel={submitLabel} pending={isPending} />
+      <ErrorFocus refusal={refusalKey(state)} />
     </form>
   );
 }

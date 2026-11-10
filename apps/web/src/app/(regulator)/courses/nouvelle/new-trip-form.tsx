@@ -11,6 +11,7 @@ import { allowedVehicleTypesFor, sharingAllowedFor } from "@/lib/domain/rules";
 import { formatShortDate } from "@/lib/time";
 import { createTrip, type NewTripState } from "../actions";
 import { prescriptionValidOn, timeFieldHint, timeFieldLabel } from "../trip-rules";
+import { SAVING_LABEL } from "@/lib/forms";
 
 export type PrescriptionOption = {
   id: string;
@@ -303,7 +304,7 @@ function NewTripFields({
       </section>
 
       <div className="flex flex-wrap items-center gap-2">
-        <SubmitButton pendingLabel="Création…">Créer la course</SubmitButton>
+        <SubmitButton pendingLabel={SAVING_LABEL}>Créer la course</SubmitButton>
         <LinkButton href={`/courses?date=${serviceDate || today}`} variant="ghost">
           Annuler
         </LinkButton>

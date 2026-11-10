@@ -4,11 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { History, Scale } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
-import { formatEurosRounded, formatInstant, formatKmRounded, pluralize } from "@/lib/planning/format";
+import { formatEurosRounded, formatKmRounded, pluralize } from "@/lib/planning/format";
 import type { PlanFigures } from "@/lib/planning/plan-compare";
 import type { RunView } from "@/lib/planning/types";
 import { confirmPlan, discardPlan, restorePlan } from "./actions";
 import { usePlanningActivity } from "./planning-activity";
+import { formatDateTime } from "@/lib/time";
 
 type Row = { label: string; current: string; next: string; worse: boolean };
 
@@ -112,7 +113,7 @@ export function PendingPlanBanner({ run }: { run: RunView & { pending: NonNullab
         <Scale aria-hidden className="mt-0.5 size-4 shrink-0 text-amber-700" />
         <div className="min-w-0 flex-1 space-y-2">
           <p id="pending-plan-title" className="font-semibold">
-            {KIND_LABEL[run.kind ?? "optimize"]} du {formatInstant(run.startedAt)}
+            {KIND_LABEL[run.kind ?? "optimize"]} du {formatDateTime(run.startedAt)}
             {run.requestedBy ? ` (${run.requestedBy})` : ""}{" "}
             {current ? "n'a pas remplacé le planning en place" : "n'a pas été enregistré"}
           </p>

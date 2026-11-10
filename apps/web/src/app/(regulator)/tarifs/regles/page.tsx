@@ -12,7 +12,6 @@ import { getSettings } from "@/lib/domain/settings";
 import { certifiedOn } from "@/lib/domain/tariffs";
 import { AREA_KIND_LABELS, AREA_RULE_LABELS } from "@/lib/domain/tariff-areas";
 import { formatLongDate, formatShortDate, fromIsoDate, todayIso, tomorrowIso, toIsoDate } from "@/lib/time";
-import { BackLink, Callout } from "../../vehicules/_lib/ui";
 import { VERIFICATION_LABELS, VERIFICATION_TONES } from "../schema";
 import {
   addCertification,
@@ -23,6 +22,9 @@ import {
   saveBillingSettings,
 } from "./actions";
 import { AddRowForm, BillingSettingsForm, RowAction } from "./forms";
+import { BackLink } from "@/components/ui/back-link";
+import { Notice } from "@/components/ui/notice";
+import { PENDING_LABEL } from "@/lib/forms";
 
 export const metadata: Metadata = { title: "Règles de facturation" };
 
@@ -91,8 +93,8 @@ export default async function BillingRulesPage() {
                           action={deleteCertification.bind(null, c.id)}
                           label="Supprimer"
                           ariaLabel={`Supprimer la période de certification ${period(c.validFrom, c.validTo)}`}
-                          confirmLabel="Supprimer la période"
-                          pendingLabel="Suppression…"
+                          confirmLabel="Oui, supprimer la période"
+                          keepLabel="Garder la période"
                           question={<p>Les calculs à venir sur ces dates prendront les grilles socle des VSL et des ambulances.</p>}
                         />
                       </Td>
@@ -118,12 +120,12 @@ export default async function BillingRulesPage() {
         <Card>
           <CardHeader title="Siège et lecture des conventions" />
           <CardBody className="space-y-4">
-            <Callout tone="warning" title="Lectures à confirmer">
+            <Notice tone="warning" title="Lectures à confirmer">
               <p>
                 Ces réglages tranchent des points que les conventions laissent ouverts, en attendant la confirmation de la CPAM. Ils
                 changent le chiffre d&apos;affaires estimé des tournées à partir du prochain calcul.
               </p>
-            </Callout>
+            </Notice>
             <BillingSettingsForm
               action={saveBillingSettings}
               initial={{
@@ -196,7 +198,7 @@ export default async function BillingRulesPage() {
             </p>
             <div className="flex flex-wrap gap-2">
               {years.map((y) => (
-                <RowAction key={y} action={addLegalHolidays.bind(null, y)} label={`Ajouter les jours fériés légaux de ${y}`} pendingLabel="Ajout…" />
+                <RowAction key={y} action={addLegalHolidays.bind(null, y)} label={`Ajouter les jours fériés légaux de ${y}`} pendingLabel={PENDING_LABEL} />
               ))}
             </div>
             {holidays.length > 0 ? (
@@ -213,8 +215,8 @@ export default async function BillingRulesPage() {
                         action={deleteHoliday.bind(null, iso)}
                         label="Retirer"
                         ariaLabel={`Retirer le ${formatLongDate(iso)} des jours fériés`}
-                        confirmLabel="Retirer le jour"
-                        pendingLabel="Retrait…"
+                        confirmLabel="Oui, retirer le jour"
+                        keepLabel="Garder le jour férié"
                         question={<p>La majoration « dimanche et jour férié » ne s&apos;appliquera plus ce jour-là aux prochains calculs.</p>}
                       />
                     </li>

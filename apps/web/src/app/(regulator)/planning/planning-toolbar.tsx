@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { CheckCheck, ListPlus, LockOpen, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmPanel } from "@/components/ui/confirm-action";
 import { optimizeDay, placeUnassigned, reopenDay, validateDay } from "./actions";
 import { usePlanningActivity } from "./planning-activity";
 
@@ -38,20 +39,13 @@ export function PlanningToolbar({
 }: ToolbarProps) {
   const { busy, run, remoteRunning, optimizerOffline } = usePlanningActivity();
   const [confirmation, setConfirmation] = useState<string | null>(null);
-  const confirmRef = useRef<HTMLButtonElement>(null);
   const validateRef = useRef<HTMLButtonElement>(null);
 
-  /** « Annuler » or Escape: the question closes and the focus goes back to « Valider le planning » (not to the page's top). */
+  /** « Revoir le planning » or Escape: the question closes and the focus goes back to « Valider le planning » (not to the page's top). */
   const dismiss = () => {
     setConfirmation(null);
     validateRef.current?.focus();
   };
-
-  // The question appears while the validation is still finishing (its button disabled, so not focusable):
-  // the focus goes to « Valider quand même » once it is enabled.
-  useEffect(() => {
-    if (confirmation && !busy) confirmRef.current?.focus();
-  }, [confirmation, busy]);
 
   // Why each button is off right now (shown as its title and read by screen readers). A poll of the
   // version (remoteRunning) is more recent than the page's own render (runningReason).
@@ -104,7 +98,7 @@ export function PlanningToolbar({
       ) : null}
 
       {canValidate ? (
-        <div className="relative">
+        <>
           <Button
             ref={validateRef}
             variant="secondary"
@@ -122,26 +116,19 @@ export function PlanningToolbar({
             </span>
           ) : null}
           {confirmation ? (
-            <div
-              role="alertdialog"
-              aria-labelledby="validate-confirm-text"
-              onKeyDown={(e) => {
-                if (e.key === "Escape") dismiss();
-              }}
-              className="absolute right-0 top-full z-30 mt-2 w-80 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 shadow-lg"
-            >
-              <p id="validate-confirm-text">{confirmation}</p>
-              <div className="mt-3 flex justify-end gap-2">
-                <Button size="sm" variant="ghost" onClick={dismiss}>
-                  Annuler
-                </Button>
-                <Button ref={confirmRef} size="sm" onClick={() => validate(confirmation)} disabled={busy}>
-                  Valider quand même
-                </Button>
-              </div>
-            </div>
+            // The app's one confirmation, on its own line of the toolbar: never wider than the screen.
+            <ConfirmPanel
+              question={confirmation}
+              confirmLabel="Oui, valider quand même"
+              keepLabel="Revoir le planning"
+              tone="primary"
+              onKeep={dismiss}
+              onConfirm={() => validate(confirmation)}
+              pending={busy}
+              className="basis-full border-amber-200 bg-amber-50 [&>div:first-child]:text-amber-950"
+            />
           ) : null}
-        </div>
+        </>
       ) : null}
 
       {canReopen ? (

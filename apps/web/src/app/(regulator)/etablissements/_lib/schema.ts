@@ -6,7 +6,7 @@ import { z } from "zod";
 import { addressShape } from "@/components/address/address-schema";
 import { readAddressForm } from "@/components/address/address-utils";
 import { optionalPhone, optionalText, parseForm, type ParseResult } from "@/app/(regulator)/patients/_lib/form-parse";
-import { formString, type FormValues } from "@/app/(regulator)/patients/_lib/form-state";
+import { formString, type FormValues } from "@/lib/forms";
 import { parseDecimal } from "@/lib/forms";
 import { FACILITY_TYPES } from "./options";
 

@@ -108,14 +108,14 @@ describe("crewQualificationErrors", () => {
   it("refuses an ambulance crew without any DEA, on the crew mate field", () => {
     expect(crewQualificationErrors("AMBULANCE", member("Inès", ["AUXILIARY"]), member("Paul", ["AUXILIARY", "TAXI_CARD"]))).toEqual({
       defaultCrewMateId:
-        "Il faut au moins un ambulancier DE dans l'équipage d'ambulance, au volant ou auprès du patient : ni Inès Roux ni Paul Roux ne l'est.",
+        "Il faut au moins un ambulancier DE dans l'équipage d'ambulance, au volant ou auprès du patient : ni ROUX Inès ni ROUX Paul ne l'est.",
     });
   });
 
   it("still checks each seat first", () => {
     expect(crewQualificationErrors("AMBULANCE", member("Julien", ["TAXI_CARD"]), member("Laurent", ["DEA"]))).toEqual({
       defaultDriverId:
-        "Julien Roux n'a pas la qualification requise pour conduire une ambulance (Auxiliaire ambulancier ou Ambulancier DE).",
+        "ROUX Julien n'a pas la qualification requise pour conduire une ambulance (Auxiliaire ambulancier ou Ambulancier DE).",
     });
     expect(crewQualificationErrors("VSL", member("Julien", ["TAXI_CARD"]), null).defaultDriverId).toMatch(/conduire un VSL/);
   });

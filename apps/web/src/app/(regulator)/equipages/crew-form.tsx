@@ -11,13 +11,12 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { FilterBar, FilterCheckbox, FilterSelect } from "@/components/ui/filter-bar";
 import { FormMessage } from "@/components/ui/form";
-import { useLeaveGuard } from "@/components/ui/leave-guard";
+import { LeaveGuard } from "@/components/ui/leave-guard";
 import { SearchSelect, type SearchSelectOption } from "@/components/ui/search-select";
 import { GroupHeaderRow, TBody, THead, Table, Td, Th } from "@/components/ui/table";
-import { IDLE_STATE, valueOf, type FieldErrors, type FormValues } from "@/lib/forms";
-import { formatInstant } from "@/lib/planning/format";
+import { IDLE_STATE, PENDING_LABEL, SAVING_LABEL, valueOf, type FieldErrors, type FormValues } from "@/lib/forms";
 import { shiftText, type CrewIssue, type Seat } from "@/lib/staff/day-crews";
-import { formatShortDate } from "@/lib/time";
+import { formatDateTime, formatShortDate } from "@/lib/time";
 import { saveDayCrews } from "./actions";
 import { assignmentsOf, seatOptions, type CrewPersonOption, type DepotInfo } from "./person-options";
 import {
@@ -207,11 +206,10 @@ function CrewFormBody({
   const errorRows = rows.filter(withError);
 
   // Unsaved changes are not lost without a warning: closing or reloading the tab, another page or another date.
-  useLeaveGuard(
+  const leaveMessage =
     dirty.size === 0
       ? null
-      : `${dirty.size > 1 ? `Les ${dirty.size} modifications` : "La modification"} des équipages du ${formatShortDate(date)} ${dirty.size > 1 ? "ne sont pas enregistrées et seront perdues" : "n'est pas enregistrée et sera perdue"}. Quitter quand même ?`,
-  );
+      : `${dirty.size > 1 ? `Les ${dirty.size} modifications` : "La modification"} des équipages du ${formatShortDate(date)} ${dirty.size > 1 ? "ne sont pas enregistrées : elles seront perdues" : "n'est pas enregistrée : elle sera perdue"} si vous quittez la page.`;
 
   const setSeat = (vehicleId: string, seat: Seat, value: string) =>
     setValues((previous) => {
@@ -236,6 +234,7 @@ function CrewFormBody({
 
   return (
     <div className="space-y-3">
+      <LeaveGuard message={leaveMessage} />
       <FilterBar
         action="/equipages"
         label="Filtrer les véhicules"
@@ -415,7 +414,7 @@ function CrewFormBody({
                           {row.fixed && !row.unavailable ? (
                             <>
                               <span className="max-w-40 text-xs text-slate-500">
-                                {row.fixed.by ? `par ${row.fixed.by}, ` : ""}le {formatInstant(row.fixed.version)}
+                                {row.fixed.by ? `par ${row.fixed.by}, ` : ""}le {formatDateTime(row.fixed.version)}
                               </span>
                               <Button
                                 type="submit"
@@ -478,7 +477,16 @@ function CrewFormBody({
               </p>
             ) : null}
             {confirmingReset ? (
-              <div className="flex flex-wrap items-center justify-end gap-3" role="group" aria-label="Confirmer le retour aux propositions">
+              <div
+                className="flex flex-wrap items-center justify-end gap-3"
+                role="group"
+                aria-label="Confirmer le retour aux propositions"
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  refocusReset.current = true;
+                  setConfirmingReset(false);
+                }}
+              >
                 <p className="mr-auto max-w-3xl text-sm text-slate-800">
                   Revenir aux propositions automatiques pour tout le {formatShortDate(date)} ?{" "}
                   {many ? `Les ${fixedRows.length} équipages fixés` : "L'équipage fixé"}
@@ -487,7 +495,7 @@ function CrewFormBody({
                   ou modifié depuis l&apos;affichage de la page est gardé.
                 </p>
                 <Button
-                  variant="ghost"
+                  variant="secondary"
                   onClick={() => {
                     refocusReset.current = true;
                     setConfirmingReset(false);
@@ -495,8 +503,8 @@ function CrewFormBody({
                 >
                   Garder les équipages
                 </Button>
-                <IntentSubmit intent="reset" variant="danger" pendingLabel="Retour aux propositions…" autoFocus>
-                  Revenir aux propositions
+                <IntentSubmit intent="reset" variant="danger" pendingLabel={PENDING_LABEL} autoFocus>
+                  Oui, revenir aux propositions
                 </IntentSubmit>
               </div>
             ) : (
@@ -522,7 +530,7 @@ function CrewFormBody({
                     Revenir aux propositions (tout le jour)
                   </Button>
                 ) : null}
-                <IntentSubmit intent="save" pendingLabel="Enregistrement…" disabled={dirty.size === 0}>
+                <IntentSubmit intent="save" pendingLabel={SAVING_LABEL} disabled={dirty.size === 0}>
                   {dirty.size === 0
                     ? "Aucune modification"
                     : `Enregistrer ${dirty.size > 1 ? `les ${dirty.size} modifications` : "la modification"}`}

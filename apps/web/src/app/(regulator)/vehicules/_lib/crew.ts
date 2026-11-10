@@ -8,6 +8,7 @@
 import type { Qualification, VehicleType } from "@prisma/client";
 import { CREW_REQUIRED_ONE_OF, crewHoldsRequired, REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
 import { QUALIFICATION_LABELS, QUALIFICATION_NOUNS } from "@/lib/labels";
+import { formatPersonName } from "@/lib/names";
 
 export const VEHICLE_TYPE_WITH_ARTICLE: Record<VehicleType, string> = {
   TAXI: "un taxi",
@@ -22,7 +23,7 @@ export type CrewMember = {
 };
 
 export function crewMemberName(member: Pick<CrewMember, "firstName" | "lastName">): string {
-  return `${member.firstName} ${member.lastName}`;
+  return formatPersonName(member);
 }
 
 export function hasRequiredQualification(

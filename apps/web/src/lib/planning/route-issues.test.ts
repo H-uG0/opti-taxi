@@ -83,14 +83,14 @@ describe("vehicleIssues", () => {
   it("names who replaces an absent driver in the crew of the day", () => {
     const people = [...PEOPLE, person("spare", ["TAXI_CARD"])];
     const [issue] = issuesAfter({ people, absences: [{ driverId: "taxi1", kind: "LEAVE", startDate: MONDAY, endDate: MONDAY }] });
-    expect(issue?.changes).toEqual(["taxi1 X (chauffeur) : absence le 09/11/2026 ; équipage du jour : spare X"]);
+    expect(issue?.changes).toEqual(["X taxi1 (chauffeur) : absence le 09/11/2026 ; équipage du jour : X spare"]);
   });
 
   it("flags a route whose driver is now absent, without saying why", () => {
     const [issue] = issuesAfter({ absences: [{ driverId: "taxi1", kind: "SICK", startDate: MONDAY, endDate: MONDAY }] });
     // The day crew found nobody else: the vehicle is blocked, and the route's driver is absent.
     expect(issue?.vehicleId).toBe("A");
-    expect(issue?.changes).toContain("taxi1 X (chauffeur) : absence le 09/11/2026");
+    expect(issue?.changes).toContain("X taxi1 (chauffeur) : absence le 09/11/2026");
     expect(issue?.changes.join(" ")).not.toMatch(/maladie/i);
   });
 
@@ -99,18 +99,18 @@ describe("vehicleIssues", () => {
     const [issue] = issuesAfter({ people: PEOPLE.map((p) => (p.id === "taxi1" ? { ...p, ...breakless } : p)) });
     expect(issue?.changes).toEqual(["Pause de 20 min requise : horaire de 13 h 00 sans pause (art. L. 3121-16)"]);
     const blocked = issuesAfter({ saved: [{ vehicleId: "A", driverId: "dea1", crewMateId: null }] }).find((i) => i.vehicleId === "A");
-    expect(blocked?.changes).toContain("Équipage du jour bloqué : dea1 X n'a pas la qualification requise pour ce poste");
+    expect(blocked?.changes).toContain("Équipage du jour bloqué : X dea1 n'a pas la qualification requise pour ce poste");
   });
 
   it("flags a crew changed on the crew screen after the computation", () => {
     const [issue] = issuesAfter({ saved: [{ vehicleId: "A", driverId: "taxi2", crewMateId: null }] });
-    expect(issue?.changes).toEqual(["Chauffeur changé : taxi1 X sur la tournée, taxi2 X dans l'équipage du jour"]);
+    expect(issue?.changes).toEqual(["Chauffeur changé : X taxi1 sur la tournée, X taxi2 dans l'équipage du jour"]);
   });
 
   it("checks the crew mate of an ambulance", () => {
     const [issue] = issuesAfter({ people: PEOPLE.map((p) => (p.id === "aux1" ? { ...p, active: false } : p)) });
     expect(issue?.vehicleId).toBe("Amb");
-    expect(issue?.changes).toContain("aux1 X (équipier) : désactivé depuis le calcul");
+    expect(issue?.changes).toContain("X aux1 (équipier) : désactivé depuis le calcul");
   });
 
   it("flags a route on a vehicle deactivated since", () => {

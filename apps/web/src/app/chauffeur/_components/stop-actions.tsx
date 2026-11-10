@@ -107,7 +107,7 @@ function LocalStatusPanel({ stopId, local }: { stopId: string; local: LocalStatu
       <p className="flex items-center gap-2 text-base font-semibold">
         {local.action === "UNDO" ? <Undo2 aria-hidden className="size-5" /> : <Check aria-hidden className="size-5" />}
         <span className="tabular">{label}</span>
-        {local.phase === "sending" ? <LoaderCircle aria-hidden className="ml-auto size-5 animate-spin" /> : null}
+        {local.phase === "sending" ? <LoaderCircle aria-hidden className="ml-auto size-5 motion-safe:animate-spin" /> : null}
       </p>
       <p className="mt-0.5 text-sm">
         {local.phase === "sent"

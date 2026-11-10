@@ -13,7 +13,6 @@ import { companyStatusOn, readSharedDiscounts, tariffCoverageAlerts, tariffsInFo
 import { formatEuros, formatKm, formatPercent, VEHICLE_TYPE_LABELS, VEHICLE_TYPE_SHORT } from "@/lib/labels";
 import { addDays, formatLongDate, formatShortDate, todayIso, tomorrowIso, toIsoDate } from "@/lib/time";
 import { ALL_ZONES, departmentLabel } from "../vehicules/_lib/departments";
-import { Callout } from "../vehicules/_lib/ui";
 import { EMPTY_LEG_SHORT, PATIENT_COUNT_SHORT } from "./billing-labels";
 import { COVERAGE_DAYS, coverageAlertText } from "./coverage";
 import { FareSimulator, type SimulatorGrid } from "./fare-simulator";
@@ -25,6 +24,7 @@ import {
   VERIFICATION_TONES,
   type TariffStatus,
 } from "./schema";
+import { Notice } from "@/components/ui/notice";
 
 export const metadata: Metadata = { title: "Grilles tarifaires" };
 
@@ -147,7 +147,7 @@ export default async function TariffsPage({
       />
 
       <div className="mb-6 space-y-3">
-        <Callout title="Facturation de l'entreprise">
+        <Notice title="Facturation de l'entreprise">
           <p>
             {certifiedTomorrow ? (
               <>
@@ -171,10 +171,10 @@ export default async function TariffsPage({
             Les montants changent avec la convention des taxis et les avenants des transporteurs sanitaires : ils se saisissent ici,
             jamais dans le code. Pour un nouvel avenant, <strong>dupliquez</strong> la grille et indiquez sa date d&apos;effet.
           </p>
-        </Callout>
+        </Notice>
 
         {coverage.length > 0 ? (
-          <Callout
+          <Notice
             tone="warning"
             title={`Véhicules sans grille en vigueur entre le ${formatShortDate(tomorrow)} et le ${formatShortDate(coverageEnd)}`}
           >
@@ -194,7 +194,7 @@ export default async function TariffsPage({
               Créez la grille qui prend le relais (« Dupliquer » sur la grille actuelle, puis sa date d&apos;effet), ou vérifiez la
               certification et le siège dans les règles de facturation.
             </p>
-          </Callout>
+          </Notice>
         ) : null}
       </div>
 

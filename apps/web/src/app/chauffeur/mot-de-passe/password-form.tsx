@@ -6,7 +6,7 @@ import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, FormMessage, Input } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { IDLE_STATE } from "@/lib/forms";
+import { IDLE_STATE, SAVING_LABEL } from "@/lib/forms";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@/app/(regulator)/chauffeurs/schema";
 import { fieldsToClear } from "../_lib/password";
 import { changeOwnPassword } from "./actions";
@@ -136,7 +136,7 @@ export function PasswordChange({ forced: forcedOnLoad }: { forced: boolean }) {
               {visible ? <EyeOff aria-hidden className="size-5" /> : <Eye aria-hidden className="size-5" />}
               {visible ? "Masquer les mots de passe" : "Afficher les mots de passe"}
             </Button>
-            <SubmitButton className="min-h-12 w-full text-base" pendingLabel="Enregistrement…">
+            <SubmitButton className="min-h-12 w-full text-base" pendingLabel={SAVING_LABEL}>
               Enregistrer mon mot de passe
             </SubmitButton>
           </form>

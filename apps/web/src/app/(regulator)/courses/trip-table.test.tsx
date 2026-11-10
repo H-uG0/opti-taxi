@@ -101,8 +101,9 @@ describe("Annuler la sélection", () => {
     expect(confirm.textContent).toContain("Annuler 4 courses pour le motif « Hospitalisation » ? 2 seront retirées de leur tournée.");
     expect(confirm.textContent).toContain("sera tracée course par course");
 
-    // « Ne pas annuler »: the focus goes back to the button that asked.
-    fireEvent.click(within(confirm).getByRole("button", { name: "Ne pas annuler" }));
+    expect(within(confirm).getByRole("button", { name: "Oui, annuler les 4 courses" }).getAttribute("type")).toBe("submit");
+    // « Garder les courses »: the focus goes back to the button that asked.
+    fireEvent.click(within(confirm).getByRole("button", { name: "Garder les courses" }));
     expect(document.activeElement).toBe(within(bar).getByRole("button", { name: "Annuler les 4 courses" }));
 
     // Unticked by hand: said in the question.

@@ -5,10 +5,11 @@ import type { EmptyLegRule, SharedPatientCount, SurchargeOrder } from "@prisma/c
 import { Field, FormMessage, Input, Select, Textarea } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { AREA_KIND_LABELS, AREA_RULE_LABELS } from "@/lib/domain/tariff-areas";
-import { IDLE_STATE, valueOf, type FormState, type FormValues } from "@/lib/forms";
-import { FormFooter } from "../../vehicules/_lib/ui";
+import { IDLE_STATE, refusalKey, valueOf, type FormState, type FormValues } from "@/lib/forms";
 import { EMPTY_LEG_LABELS, PATIENT_COUNT_LABELS, SURCHARGE_ORDER_LABELS } from "../billing-labels";
 import { VERIFICATION_LABELS, VERIFICATIONS } from "../schema";
+import { FormFooter } from "@/components/ui/form-footer";
+import { ErrorFocus } from "@/components/ui/error-focus";
 
 type Action = (state: FormState, formData: FormData) => Promise<FormState>;
 
@@ -52,6 +53,7 @@ export function BillingSettingsForm({ action, initial }: { action: Action; initi
   const errors = state.fieldErrors;
   return (
     <form key={state.submissionId} action={formAction} className="space-y-4">
+      <ErrorFocus refusal={refusalKey(state)} />
       <Result state={state} />
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
@@ -111,6 +113,7 @@ export function AddRowForm({
   const values = state.status === "error" ? (state.values ?? {}) : {};
   return (
     <form key={state.submissionId} action={formAction} className="space-y-3">
+      <ErrorFocus refusal={refusalKey(state)} />
       <Result state={state} />
       <div className="flex flex-wrap items-start gap-3">
         {fields.map((field) => (
@@ -153,6 +156,7 @@ export function AreaForm({ action, initial, submitLabel }: { action: Action; ini
   const errors = state.fieldErrors;
   return (
     <form key={state.submissionId} action={formAction} className="space-y-6">
+      <ErrorFocus refusal={refusalKey(state)} />
       {state.status === "error" && state.message ? <FormMessage>{state.message}</FormMessage> : null}
       <div className="grid gap-4 rounded-lg border border-slate-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-4">
         <Choice name="kind" label="Type de zone" options={AREA_KIND_LABELS} values={values} error={errors.kind} />

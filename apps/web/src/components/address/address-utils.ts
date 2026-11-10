@@ -9,7 +9,7 @@ export type AddressFieldName = (typeof ADDRESS_FIELD_NAMES)[number];
 /** Raw (string) values of the address inputs, as typed in the form. */
 export type AddressFormValues = Record<AddressFieldName, string>;
 
-export type AddressFieldErrors = Partial<Record<AddressFieldName, string[] | undefined>>;
+export type AddressFieldErrors = Partial<Record<AddressFieldName, string | string[] | undefined>>;
 
 /**
  * Coordinates must fall in metropolitan France (Corsica included). This catches

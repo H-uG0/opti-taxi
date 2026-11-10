@@ -2,13 +2,14 @@
 
 import { useActionState, useState, type ChangeEvent, type ReactNode } from "react";
 import { cn } from "@/components/ui/cn";
-import { Field, Fieldset, FormMessage, Input } from "@/components/ui/form";
+import { Field, Fieldset, FormMessage, Input, UnitInput } from "@/components/ui/form";
 import { formatMinute } from "@/lib/time";
-import { IDLE_STATE, parseDecimal, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
+import { IDLE_STATE, parseDecimal, refusalKey, valueOf, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
 import { CONTRACT_MAX_TIME_LIMIT_SEC, TRIPS_PER_SOLVER_SECOND } from "@/lib/optimizer/build-request";
-import { FormFooter, UnitInput } from "../vehicules/_lib/ui";
 import { TRIP_HORIZON_DAYS } from "@/lib/trips/horizon";
 import { DECREE_LIMITS, MAX_SOLVER_TIME_LIMIT_SEC } from "./schema";
+import { FormFooter } from "@/components/ui/form-footer";
+import { ErrorFocus } from "@/components/ui/error-focus";
 
 type Action = (state: FormState, formData: FormData) => Promise<FormState>;
 
@@ -23,6 +24,7 @@ export function SettingsForm({ action, initial }: { action: Action; initial: For
   return (
     // Remount on every response so inputs show the echoed (error) or saved (success) values.
     <form key={state.submissionId} action={formAction} className="space-y-6">
+      <ErrorFocus refusal={refusalKey(state)} />
       {state.message ? (
         <FormMessage tone={state.status === "error" ? "error" : "success"}>{state.message}</FormMessage>
       ) : null}

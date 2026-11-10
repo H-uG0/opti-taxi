@@ -127,7 +127,7 @@ export function FieldStatusBars() {
       ) : snapshot.pending > 0 && snapshot.sessionLost === null ? (
         <div role="status" className="flex items-center gap-3 bg-amber-100 px-4 py-2 text-amber-950">
           {sending ? (
-            <LoaderCircle aria-hidden className="size-5 shrink-0 animate-spin" />
+            <LoaderCircle aria-hidden className="size-5 shrink-0 motion-safe:animate-spin" />
           ) : (
             <CloudUpload aria-hidden className="size-5 shrink-0" />
           )}

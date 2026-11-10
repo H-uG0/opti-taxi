@@ -6,12 +6,12 @@ import { db } from "@/lib/db";
 import { formatMinute, todayIso, toIsoDate } from "@/lib/time";
 import { PageHeader } from "@/components/ui/layout";
 import { updateRecurrence } from "../../../../actions";
-import { BackLink } from "../../../../_components/back-link";
 import { RecurrenceForm } from "../../../../_components/recurrence-form";
-import { Warning } from "../../../../_components/warning";
 import { loadRecurrenceOptions } from "../../../../_lib/recurrence-options";
 import { countOpenTrips } from "../../../../_lib/trip-counts";
 import { openTripsLabel } from "../../../../_lib/trip-sync";
+import { BackLink } from "@/components/ui/back-link";
+import { Notice } from "@/components/ui/notice";
 
 export const metadata: Metadata = { title: "Modifier la récurrence" };
 
@@ -44,7 +44,7 @@ export default async function EditRecurrencePage({
         <span className="uppercase">{patient.lastName}</span> {patient.firstName}
       </BackLink>
       <PageHeader title="Modifier la récurrence" />
-      <Warning tone="info" className="mb-5 max-w-3xl">
+      <Notice size="sm" tone="info" className="mb-5 max-w-3xl">
         {openTrips > 0 ? (
           <>
             {openTripsLabel(openTrips)} de cette récurrence {openTrips === 1 ? "suivra" : "suivront"} la modification
@@ -55,7 +55,7 @@ export default async function EditRecurrencePage({
           "Les modifications s'appliquent aux courses générées ensuite."
         )}
         {recurrence.active ? null : " Cette récurrence est désactivée : réactivez-la depuis la fiche patient."}
-      </Warning>
+      </Notice>
       <RecurrenceForm
         action={updateRecurrence.bind(null, patient.id, recurrence.id)}
         initial={{

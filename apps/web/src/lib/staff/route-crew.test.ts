@@ -94,28 +94,28 @@ describe("checkRouteCrewChange", () => {
 
   it("applies the rules of the crews of the day to the people put on the route", () => {
     expect(check({ absences: [{ driverId: "dea2", kind: "SICK", startDate: MONDAY, endDate: MONDAY }] }).errors).toEqual({
-      crewMate: "dea2 DEA2 : absence le 09/11/2026.",
+      crewMate: "DEA2 dea2 : absence le 09/11/2026.",
     });
     expect(check({ people: new Map([...PEOPLE, ["dea2", { ...PEOPLE.get("dea2")!, active: false }]]) }).errors.crewMate).toBe(
-      "dea2 DEA2 est désactivé.",
+      "DEA2 dea2 est désactivé.",
     );
     expect(check({ next: { driverId: "taxi1", crewMateId: "dea1" } }).errors.driver).toBe(
-      "taxi1 TAXI1 n'a pas la qualification requise pour être chauffeur (Auxiliaire ambulancier ou Ambulancier DE).",
+      "TAXI1 taxi1 n'a pas la qualification requise pour être chauffeur (Auxiliaire ambulancier ou Ambulancier DE).",
     );
     expect(check({ otherRoutes: [{ vehicleLabel: "VSL 2", driverId: "dea2", crewMateId: null }] }).errors.crewMate).toBe(
-      "dea2 DEA2 est déjà sur la tournée de VSL 2 ce jour.",
+      "DEA2 dea2 est déjà sur la tournée de VSL 2 ce jour.",
     );
     expect(check({ next: { driverId: "aux1", crewMateId: "late" } }).errors.crewMate).toBe(
-      "Horaire de late LATE (10:00 – 19:00) : ne couvre pas la suite de la tournée (07:00 – 18:00).",
+      "Horaire de LATE late (10:00 – 19:00) : ne couvre pas la suite de la tournée (07:00 – 18:00).",
     );
   });
 
   it("checks the pair: incompatible, or no DEA left on board", () => {
     expect(check({ incompatibilities: [{ driverAId: "aux1", driverBId: "dea2" }] }).errors.crewMate).toBe(
-      "aux1 AUX1 et dea2 DEA2 ne doivent pas travailler ensemble.",
+      "AUX1 aux1 et DEA2 dea2 ne doivent pas travailler ensemble.",
     );
     expect(check({ next: { driverId: "aux1", crewMateId: "aux2" } }).errors.crewMate).toBe(
-      "Il faut au moins un ambulancier DE dans l'équipage, au volant ou auprès du patient : ni aux1 AUX1 ni aux2 AUX2 ne l'est.",
+      "Il faut au moins un ambulancier DE dans l'équipage, au volant ou auprès du patient : ni AUX1 aux1 ni AUX2 aux2 ne l'est.",
     );
   });
 
@@ -124,7 +124,7 @@ describe("checkRouteCrewChange", () => {
     const people = new Map([...PEOPLE, ["drv", person("drv", ["AUXILIARY"], [360, 1080])], ["eve", person("eve", ["DEA"], [900, 1140])]]);
     const late = { people, current: { driverId: "drv", crewMateId: "dea1" }, remaining: { start: 930, end: 1070 } };
     expect(check({ ...late, next: { driverId: "drv", crewMateId: "eve" } }).errors.crewMate).toBe(
-      "drv DRV et eve EVE n'ont que 3 h 00 d'horaire commun (4 h 00 au moins, Paramètres).",
+      "DRV drv et EVE eve n'ont que 3 h 00 d'horaire commun (4 h 00 au moins, Paramètres).",
     );
     expect(check({ ...late, next: { driverId: "drv", crewMateId: "eve" }, rules: { minPairOverlapMin: 180 } }).errors).toEqual({});
     // Every change accepted gives a crew of the day (DayCrew) that resolves without a blocking problem.
@@ -162,7 +162,7 @@ describe("checkRouteCrewChange", () => {
     const aux = person("aux1", ["AUXILIARY"]);
     expect(pairProblem(aux, person("aux2", ["AUXILIARY"]), "AMBULANCE", DEFAULT_CREW_RULES)).toMatch(/^Il faut au moins un ambulancier DE/);
     expect(pairProblem(aux, person("dea", ["DEA"], [960, 1140]), "AMBULANCE", DEFAULT_CREW_RULES)).toBe(
-      "aux1 AUX1 et dea DEA n'ont que 3 h 00 d'horaire commun (4 h 00 au moins, Paramètres).",
+      "AUX1 aux1 et DEA dea n'ont que 3 h 00 d'horaire commun (4 h 00 au moins, Paramètres).",
     );
     // Exactly the minimum is enough.
     expect(pairProblem(aux, person("dea", ["DEA"], [900, 1140]), "AMBULANCE", DEFAULT_CREW_RULES)).toBeNull();
@@ -175,7 +175,7 @@ describe("checkRouteCrewChange", () => {
     expect(check({ absences: [{ driverId: "aux1", kind: "LEAVE", startDate: MONDAY, endDate: MONDAY }] }).errors).toEqual({});
     expect(check({ next: { driverId: "aux1", crewMateId: "sat" } })).toEqual({
       errors: {},
-      notes: ["sat SAT ne travaille pas habituellement le lundi : affectation exceptionnelle."],
+      notes: ["SAT sat ne travaille pas habituellement le lundi : affectation exceptionnelle."],
     });
   });
 

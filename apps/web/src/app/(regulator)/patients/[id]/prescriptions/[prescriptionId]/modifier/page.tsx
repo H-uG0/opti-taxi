@@ -6,11 +6,11 @@ import { db } from "@/lib/db";
 import { todayIso, toIsoDate } from "@/lib/time";
 import { PageHeader } from "@/components/ui/layout";
 import { updatePrescription } from "../../../../actions";
-import { BackLink } from "../../../../_components/back-link";
 import { PrescriptionForm } from "../../../../_components/prescription-form";
-import { Warning } from "../../../../_components/warning";
 import { countOpenTrips } from "../../../../_lib/trip-counts";
 import { openTripsLabel } from "../../../../_lib/trip-sync";
+import { BackLink } from "@/components/ui/back-link";
+import { Notice } from "@/components/ui/notice";
 
 export const metadata: Metadata = { title: "Modifier la prescription" };
 
@@ -44,14 +44,14 @@ export default async function EditPrescriptionPage({
       </BackLink>
       <PageHeader title="Modifier la prescription" />
       {recurrences > 0 || openTrips > 0 ? (
-        <Warning tone="info" className="mb-5 max-w-3xl">
+        <Notice size="sm" tone="info" className="mb-5 max-w-3xl">
           {recurrences > 0
             ? `${recurrences === 1 ? "1 récurrence s'appuie" : `${recurrences} récurrences s'appuient`} sur cette prescription : les prochaines courses générées suivront le nouveau mode et les nouvelles dates. `
             : null}
           {openTrips > 0
             ? `${openTripsLabel(openTrips)} déjà ${openTrips === 1 ? "générée suit" : "générées suivent"} aussi la modification à l'enregistrement : véhicule autorisé et partage selon le nouveau mode ; ${openTrips === 1 ? "annulée si elle sort" : "annulées si elles sortent"} de la nouvelle validité ; ${openTrips === 1 ? "retirée de sa tournée si elle n'y est plus compatible" : "retirées de leur tournée si elles n'y sont plus compatibles"}.`
             : null}
-        </Warning>
+        </Notice>
       ) : null}
       <PrescriptionForm
         action={updatePrescription.bind(null, patient.id, prescription.id)}

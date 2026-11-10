@@ -4,9 +4,9 @@ import { requireUser } from "@/lib/auth";
 import { createVehicle } from "../actions";
 import { loadDepotOptions } from "@/app/(regulator)/depots/options";
 import { loadDriverOptions } from "../_lib/driver-options";
-import { BackLink } from "../_lib/ui";
 import { vehicleFormValues } from "../schema";
 import { VehicleForm } from "../vehicle-form";
+import { BackLink } from "@/components/ui/back-link";
 
 export const metadata: Metadata = { title: "Nouveau véhicule" };
 

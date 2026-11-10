@@ -5,10 +5,10 @@ import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { AREA_KIND_LABELS } from "@/lib/domain/tariff-areas";
-import { BackLink } from "../../../../vehicules/_lib/ui";
 import { deleteArea, updateArea } from "../../actions";
 import { AreaForm } from "../../forms";
 import { areaFormValues } from "../../schema";
+import { BackLink } from "@/components/ui/back-link";
 
 export const metadata: Metadata = { title: "Zone tarifaire" };
 
@@ -30,8 +30,8 @@ export default async function EditAreaPage({ params }: { params: Promise<{ id: s
             <ConfirmAction
               action={deleteArea.bind(null, area.id)}
               label="Supprimer la zone"
-              confirmLabel="Supprimer définitivement"
-              pendingLabel="Suppression…"
+              confirmLabel="Oui, supprimer la zone"
+              keepLabel="Garder la zone"
               question={<p>La zone sera supprimée définitivement. Cette action est irréversible.</p>}
             />
           </CardBody>

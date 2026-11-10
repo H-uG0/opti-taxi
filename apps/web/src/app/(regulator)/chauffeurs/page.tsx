@@ -27,6 +27,7 @@ import {
   TOMORROW_FILTERS,
 } from "./list-filter";
 import { describeBreak, ISO_WEEKDAYS, QUALIFICATION_SHORT, QUALIFICATIONS } from "./schema";
+import { formatPersonName } from "@/lib/names";
 
 export const metadata: Metadata = { title: "Chauffeurs" };
 
@@ -260,7 +261,7 @@ export default async function DriversPage({
                     <span className="ml-2">{plural(group.rows.length, "personne", "personnes")}</span>
                   </GroupHeaderRow>,
                   ...group.rows.map(({ driver, multiSeat, workTime, tomorrow: day }) => {
-                    const name = `${driver.lastName.toUpperCase()} ${driver.firstName}`;
+                    const name = formatPersonName(driver);
                     const breakText = describeBreak(driver);
                     const multiSeatText =
                       multiSeat > 1

@@ -20,9 +20,10 @@ import {
 import { GENERATION_INCLUDE, prescriptionOn } from "@/lib/domain/trip-generation";
 import { completeTrips, currentHorizon, reviveOneOffTrips, type Completion } from "@/lib/trips/completion";
 import { formatShortDate, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
-import { activationEvent, alreadyInStateMessage, patientUpdateEvents, renewalEvents } from "./_lib/audit-events";
+import { activationEvent, alreadyInStateMessage, renewalEvents } from "./_lib/audit-events";
 import { idSchema } from "./_lib/form-parse";
-import { formString, messageState, type ActionResult, type FormState } from "./_lib/form-state";
+import { errorState, formString, messageState, type ActionResult, type FormState } from "@/lib/forms";
+import type { PatientFormState } from "./_lib/patient-form-state";
 import { parsePatientForm, parsePrescriptionForm, parseRecurrenceForm, readPatientForm, readRecurrenceForm } from "./_lib/schemas";
 import { isRenewalOf } from "./_lib/status";
 import { RENEWAL_MAX_GAP_DAYS } from "@/lib/domain/renewal";
@@ -42,6 +43,7 @@ import {
   type SyncTrip,
 } from "./_lib/trip-sync";
 import { SYNC_TX_OPTIONS, syncOpenTrips } from "./_lib/trip-sync-db";
+import { formatPersonName } from "@/lib/names";
 
 const NOT_FOUND = "Fiche introuvable : elle a peut-être été supprimée. Rechargez la page.";
 
@@ -162,7 +164,7 @@ function skippedNote(completion: Completion): string {
  * the same person (same name without accents, same phone or same address)
  * are shown; « Créer quand même » (confirmSimilar) saves anyway.
  */
-export async function createPatient(_prev: FormState, formData: FormData): Promise<FormState> {
+export async function createPatient(_prev: PatientFormState, formData: FormData): Promise<PatientFormState> {
   const user = await requireUser("REGULATOR");
   const parsed = parsePatientForm(formData);
   if (!parsed.success) return parsed.state;
@@ -185,7 +187,7 @@ export async function createPatient(_prev: FormState, formData: FormData): Promi
         ),
         similar: similar.slice(0, 10).map(({ patient, reasons }) => ({
           id: patient.id,
-          name: `${patient.lastName.toUpperCase()} ${patient.firstName}`,
+          name: formatPersonName(patient),
           city: patient.city,
           active: patient.active,
           reasons: reasons.map((reason) => SIMILARITY_LABELS[reason]),
@@ -204,8 +206,9 @@ export async function createPatient(_prev: FormState, formData: FormData): Promi
 }
 
 /**
- * Saves the patient. Its open trips to come follow: a new home address is
- * copied to them, and unticking « actif » cancels them.
+ * Saves the patient. Its open trips to come follow a new home address. The
+ * form never changes « actif »: deactivating is the fiche's « Désactiver »
+ * button (setPatientActive), which says first what it cancels.
  */
 export async function updatePatient(patientId: string, _prev: FormState, formData: FormData): Promise<FormState> {
   const user = await requireUser("REGULATOR");
@@ -227,34 +230,11 @@ export async function updatePatient(patientId: string, _prev: FormState, formDat
 
   const leftRoutes = new Set<string>();
   const summary = await db.$transaction(async (tx) => {
-    // Guarded on the opposite state, not on `existing` (read before the
-    // transaction): only the save that switches « actif » traces the
-    // (de)activation and cancels the trips.
-    const flip = await tx.patient.updateMany({
-      where: { id: existing.id, active: !data.active },
-      data: { active: data.active },
-    });
-    const switched = flip.count > 0;
     await tx.patient.update({ where: { id: existing.id }, data });
-    await audit(tx, user, patientUpdateEvents(existing.id, { value: data.active, switched }));
-    const deactivated = switched && !data.active;
-    const synced =
-      deactivated || moved
-        ? await syncOpenTrips(
-            tx,
-            { patientId: existing.id },
-            () => (deactivated ? CANCEL : { kind: "update", home }),
-            today,
-            leftRoutes,
-            user,
-            { cause: CAUSES.patientDeactivated },
-          )
-        : EMPTY_SYNC;
-    if (!switched || !data.active) return synced;
-    // Reactivated: the trips of the horizon come back (new ones, and those the deactivation cancelled).
-    const completion = await completeHorizon(tx, user, { patientId: existing.id });
-    const revivedOneOff = await reviveOneOffTrips(tx, user, { patientId: existing.id });
-    return withCompletion(synced, { created: completion.created, revived: completion.revived + revivedOneOff });
+    await audit(tx, user, { action: "patient.update", entity: "Patient", entityId: existing.id });
+    return moved
+      ? await syncOpenTrips(tx, { patientId: existing.id }, () => ({ kind: "update", home }), today, leftRoutes, user)
+      : EMPTY_SYNC;
   }, SYNC_TX_OPTIONS);
   const refresh = await refreshLeftRoutes(leftRoutes);
 
@@ -543,17 +523,17 @@ async function checkRecurrenceReferences(
   facilityId: string,
   prescriptionId: string,
   allowedInactiveFacilityId: string | null,
-): Promise<Record<string, string[]> | null> {
+): Promise<Record<string, string> | null> {
   const [facility, prescription] = await Promise.all([
     db.facility.findUnique({ where: { id: facilityId }, select: { id: true, active: true } }),
     db.prescription.findFirst({ where: { id: prescriptionId, patientId }, select: { id: true } }),
   ]);
-  const errors: Record<string, string[]> = {};
-  if (!facility) errors.facilityId = ["Établissement introuvable"];
+  const errors: Record<string, string> = {};
+  if (!facility) errors.facilityId = "Établissement introuvable";
   else if (!facility.active && facility.id !== allowedInactiveFacilityId) {
-    errors.facilityId = ["Cet établissement est désactivé"];
+    errors.facilityId = "Cet établissement est désactivé";
   }
-  if (!prescription) errors.prescriptionId = ["Choisissez une prescription de ce patient"];
+  if (!prescription) errors.prescriptionId = "Choisissez une prescription de ce patient";
   return Object.keys(errors).length > 0 ? errors : null;
 }
 
@@ -570,7 +550,7 @@ export async function createRecurrence(patientId: string, _prev: FormState, form
   const { startDate, endDate, ...rest } = parsed.data;
   const refErrors = await checkRecurrenceReferences(patient.id, rest.facilityId, rest.prescriptionId, null);
   if (refErrors) {
-    return messageState("Vérifiez l'établissement et la prescription.", readRecurrenceForm(formData), refErrors);
+    return errorState(refErrors, readRecurrenceForm(formData), "Vérifiez l'établissement et la prescription.");
   }
 
   const summary = await db.$transaction(async (tx) => {
@@ -650,7 +630,7 @@ export async function updateRecurrence(
     existing.facilityId,
   );
   if (refErrors) {
-    return messageState("Vérifiez l'établissement et la prescription.", readRecurrenceForm(formData), refErrors);
+    return errorState(refErrors, readRecurrenceForm(formData), "Vérifiez l'établissement et la prescription.");
   }
 
   const before: RecurrenceSchedule = {
