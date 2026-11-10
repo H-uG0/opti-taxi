@@ -50,7 +50,7 @@ vi.mock("./run-optimization", () => ({
   withdrawLapsedProposals: fake.withdraw,
 }));
 
-const { checkDraftPlan, saveDraftPlan, DRAFT_STALE_ERROR, DRAFT_UNASSIGNED_REASON } = await import("./draft-plan");
+const { checkDraftPlan, saveDraftPlan, DRAFT_EMPTY_ERROR, DRAFT_STALE_ERROR, DRAFT_UNASSIGNED_REASON } = await import("./draft-plan");
 
 const DATE = "2099-03-02";
 const REGULATOR = { id: "u-reg", role: "REGULATOR" as const };
@@ -92,8 +92,11 @@ const ambulanceRoute = (completedAt: Date | null = null) => ({
 
 type Sequence = { vehicleId: string; stops: { tripId: string; kind: "PICKUP" | "DROPOFF" }[] };
 
-/** /evaluate as the fakes give it: the routes timed every 20 min from 06:40, each trip's result. */
-function evaluated(request: { routes: Sequence[]; trips: { id: string }[] }) {
+/**
+ * /evaluate as the fakes give it: the routes timed every 20 min from 06:40, each trip's result, and
+ * a LOCK violation for a trip served off the vehicle it is locked on (as the optimizer's validator).
+ */
+function evaluated(request: { routes: Sequence[]; trips: { id: string; lockedVehicleId?: string | null }[] }) {
   const routes = request.routes.map((route) => ({
     vehicleId: route.vehicleId,
     startMin: 400,
@@ -118,6 +121,12 @@ function evaluated(request: { routes: Sequence[]; trips: { id: string }[] }) {
   }));
   const served = new Map<string, { vehicleId: string; pickupMin: number }>();
   for (const route of routes) for (const s of route.stops) if (s.kind === "PICKUP") served.set(s.tripId, { vehicleId: route.vehicleId, pickupMin: s.startMin });
+  const violations = request.trips.flatMap((t) => {
+    const at = served.get(t.id);
+    return t.lockedVehicleId && at && at.vehicleId !== t.lockedVehicleId
+      ? [{ code: "LOCK", message: `Course ${t.id} figée sur ${t.lockedVehicleId} mais placée sur ${at.vehicleId}`, tripId: t.id, vehicleId: at.vehicleId }]
+      : [];
+  });
   return {
     status: "OK",
     routes,
@@ -139,7 +148,7 @@ function evaluated(request: { routes: Sequence[]; trips: { id: string }[] }) {
     }),
     unassigned: request.trips.filter((t) => !served.has(t.id)).map((t) => ({ tripId: t.id, reason: "Non affectée" })),
     kpis: {},
-    validation: { valid: true, violations: [] },
+    validation: { valid: violations.length === 0, violations },
     meta: { matrixSource: "haversine", trafficSource: "none", solverStatus: "EVALUATE", objective: null, wallTimeMs: 3, warnings: [] },
   };
 }
@@ -188,6 +197,16 @@ function setUp(routes: unknown[] = [taxiRoute(), ambulanceRoute()]) {
   fake.tx.optimizationRun.findFirst.mockResolvedValue({
     id: "run-1",
     details: { solverStatus: "OK", violations: [], warnings: [], unassigned: [{ tripId: "trip_1", reason: "Non affectée" }] },
+  });
+}
+
+/** The day's request with these trips locked (trip → vehicle), as « Déplacer vers… », « Figer » or a saved draft leave them. */
+function lockTrips(locks: Record<string, string>) {
+  const built = fake.build();
+  const request = built.request as { trips: { id: string; lockedVehicleId?: string | null }[] };
+  fake.build.mockReturnValue({
+    ...built,
+    request: { ...request, trips: request.trips.map((t) => (t.id in locks ? { ...t, lockedVehicleId: locks[t.id] } : t)) },
   });
 }
 
@@ -262,6 +281,22 @@ describe("checkDraftPlan", () => {
     expect(fake.insert).not.toHaveBeenCalled();
   });
 
+  it("moves a trip locked elsewhere with its lock: no LOCK violation in the draft, the later moves see the new locks", async () => {
+    lockTrips({ trip_1: "veh_vsl_1", trip_3: "veh_taxi_1" });
+    const outcome = await checkDraftPlan(DATE, [
+      { tripId: "trip_3", toVehicleId: null },
+      { tripId: "trip_1", toVehicleId: "veh_taxi_1" },
+    ]);
+    const sent = fake.insert.mock.calls[0]![0] as { trips: { id: string; lockedVehicleId: string | null }[] };
+    // trip_3, put in « À placer » first, is unlocked for the next move (/insert lifts the lock of the trip it places itself).
+    expect(sent.trips.find((t) => t.id === "trip_3")!.lockedVehicleId).toBeNull();
+    const [before, after] = fake.evaluate.mock.calls.map((c) => c[0] as { trips: { id: string; lockedVehicleId: string | null }[] });
+    expect(before!.trips.find((t) => t.id === "trip_1")!.lockedVehicleId).toBe("veh_vsl_1");
+    expect(after!.trips.find((t) => t.id === "trip_1")!.lockedVehicleId).toBe("veh_taxi_1");
+    expect(outcome.ok && outcome.view.moves.every((m) => m.ok)).toBe(true);
+    expect(outcome.ok && outcome.view.newViolations).toEqual([]);
+  });
+
   it("says the optimizer's error, and refuses a past date", async () => {
     fake.evaluate.mockResolvedValue({ ok: false, error: "Le service d'optimisation ne répond pas." });
     expect(await checkDraftPlan(DATE, [{ tripId: "trip_3", toVehicleId: null }])).toEqual({ ok: false, error: "Le service d'optimisation ne répond pas." });
@@ -300,6 +335,31 @@ describe("saveDraftPlan", () => {
       data: { valid: true, details: expect.objectContaining({ violations: [], unassigned: [] }) },
     });
     expect(fake.withdraw).toHaveBeenCalledWith(fake.tx, REGULATOR, DATE);
+  });
+
+  it("saves a trip locked elsewhere, moved again, without a false LOCK violation in the plan run", async () => {
+    lockTrips({ trip_1: "veh_vsl_1" });
+    const outcome = await saveDraftPlan(DATE, "v-1", [{ tripId: "trip_1", toVehicleId: "veh_taxi_1" }], null, REGULATOR);
+    expect(outcome).toMatchObject({ ok: true });
+    expect(outcome.ok && outcome.warning).toBeFalsy();
+    expect(fake.tx.optimizationRun.update).toHaveBeenCalledWith({
+      where: { id: "run-1" },
+      data: { valid: true, details: expect.objectContaining({ violations: [] }) },
+    });
+    const placed = fake.tx.trip.update.mock.calls.find((c) => (c[0] as { where: { id: string } }).where.id === "trip_1")![0] as { data: Record<string, unknown> };
+    expect(placed.data.lockedVehicleId).toBe("veh_taxi_1");
+  });
+
+  it("refuses an empty draft and asks the browser to check it again (a move that no longer changes anything)", async () => {
+    // trip_3 is already on the taxi: the move does nothing, the browser drops it once checked.
+    expect(await saveDraftPlan(DATE, "v-1", [{ tripId: "trip_3", toVehicleId: "veh_taxi_1" }], null, REGULATOR)).toEqual({
+      ok: false,
+      error: DRAFT_EMPTY_ERROR,
+      recheck: true,
+    });
+    const checked = await checkDraftPlan(DATE, [{ tripId: "trip_3", toVehicleId: "veh_taxi_1" }]);
+    expect(checked.ok && checked.view.moves).toEqual([]);
+    expect(fake.tx.route.update).not.toHaveBeenCalled();
   });
 
   it("puts a trip dropped on « À placer » without a vehicle, unlocked, in the plan's list", async () => {

@@ -4,7 +4,7 @@ import { useId, useState } from "react";
 import { ChevronRight, LoaderCircle, PencilLine, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
-import { ConfirmPanel } from "@/components/ui/confirm-action";
+import { ConfirmPanel, useConfirmStep } from "@/components/ui/confirm-action";
 import { draftCountText, type DraftView } from "@/lib/planning/draft";
 import { pluralize } from "@/lib/planning/format";
 import { violationLineText } from "@/lib/planning/naming";
@@ -54,8 +54,11 @@ export function DraftBar({
   const { busy } = usePlanningActivity();
   const [open, setOpen] = useState(false);
   const detailId = useId();
+  const { open: abandoning, triggerRef: abandonTrigger, ask: askAbandon, close: closeAbandon } = useConfirmStep();
   const { moves, view, checking, refusal, question } = draft;
   if (moves.length === 0 && !refusal) return null;
+  // One move is undone by dropping it again: « Annuler » asks first only from two moves on.
+  const cancel = () => (moves.length > 1 ? askAbandon() : draft.cancel());
   const where = (vehicleId: string | null) => (vehicleId ? vehicleLabel(vehicleId) : "À placer");
   const placed = view?.moves.filter((m) => m.ok) ?? [];
 
@@ -92,19 +95,41 @@ export function DraftBar({
               <ChevronRight aria-hidden className={cn("size-3.5", open && "rotate-90")} />
               Détail
             </button>
-            <Button size="sm" variant="secondary" onClick={draft.cancel} disabled={busy}>
-              Annuler
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => draft.save(null)}
-              disabled={busy || checking || !view}
-              title="Écrit les tournées changées, et elles seules, et fige les courses déplacées sur leur nouveau véhicule"
-            >
-              Enregistrer
-            </Button>
+            {abandoning ? null : (
+              <Button ref={abandonTrigger} size="sm" variant="secondary" onClick={cancel} disabled={busy}>
+                Annuler
+              </Button>
+            )}
+            {!view && !checking ? (
+              // The check did not answer: nothing is saved before the draft is checked again.
+              <Button size="sm" onClick={draft.retry} disabled={busy}>
+                Vérifier de nouveau
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                onClick={() => draft.save(null)}
+                disabled={busy || checking || !view}
+                title="Écrit les tournées changées, et elles seules, et fige les courses déplacées sur leur nouveau véhicule"
+              >
+                Enregistrer
+              </Button>
+            )}
           </div>
         </div>
+      ) : null}
+      {abandoning && moves.length > 1 ? (
+        <ConfirmPanel
+          question={`Abandonner les ${moves.length} modifications non enregistrées\u202f? Le planning en place reste tel quel.`}
+          confirmLabel="Oui, abandonner le brouillon"
+          keepLabel="Garder le brouillon"
+          onKeep={closeAbandon}
+          onConfirm={() => {
+            closeAbandon();
+            draft.cancel();
+          }}
+          className="bg-white"
+        />
       ) : null}
       {open && moves.length > 0 ? (
         <div id={detailId} className="max-h-48 space-y-1.5 overflow-y-auto rounded-md border border-brand-200 bg-white px-2.5 py-2 text-xs text-slate-700">
@@ -145,7 +170,7 @@ export function DraftBar({
               <ul className="list-disc pl-5">
                 {view.shifted.map((s) => (
                   <li key={s.tripId}>
-                    {nameOf(s.tripId)} ({vehicleLabel(s.vehicleId)})&nbsp;: {formatMinute(s.fromPickup)} → {formatMinute(s.toPickup)}
+                    {nameOf(s.tripId)} ({vehicleLabel(s.vehicleId)})&nbsp;: {formatMinute(s.fromPickupMinute)} → {formatMinute(s.toPickupMinute)}
                   </li>
                 ))}
               </ul>

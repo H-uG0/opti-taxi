@@ -83,6 +83,20 @@ const NO_FLASH: ReadonlySet<string> = new Set();
 
 const routeStarted = (row: Pick<VehicleRowView, "route"> | null | undefined) => row?.route?.stops.some((s) => s.completed) === true;
 
+/**
+ * Brings `element` into the window when it is out of it (the timeline far below a tall banner): the
+ * page scrolls, not the timeline's own box (its selection effect has shown the trip there already).
+ */
+function revealOnPage(element: HTMLElement) {
+  const rect = element.getBoundingClientRect();
+  // Not laid out (a test, a folded part): nothing to bring into view.
+  if (rect.width === 0 && rect.height === 0) return;
+  // In view with room around it (not squeezed under a banner at the top, nor against the bottom edge): left as it is.
+  if (rect.top >= 48 && rect.bottom <= window.innerHeight - 96) return;
+  const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  window.scrollBy({ top: rect.top + rect.height / 2 - window.innerHeight / 2, behavior: reduce ? "auto" : "smooth" });
+}
+
 /** A link seen only when it has the focus (« Passer la frise »). */
 const SKIP_LINK =
   "sr-only z-40 rounded-md bg-white text-sm font-medium text-brand-800 shadow-md ring-2 ring-brand-600 focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:px-3 focus:py-2 focus:outline-none";
@@ -215,13 +229,33 @@ export function PlanningBoard({
     [displayTripsById, reveal],
   );
 
+  // « Changements » sits above the board: the trip it links to is brought into the window, then highlighted
+  // there (a flash played below the window's edge would be over before the regulator scrolled to it).
+  const timelineCard = useRef<HTMLElement>(null);
+  const revealTrip = useRef<string | null>(null);
   const showTripHere = useCallback(
     (tripId: string) => {
+      revealTrip.current = tripId;
       selectTrip(tripId);
       flashTrip(tripId);
     },
     [selectTrip, flashTrip],
   );
+  useEffect(() => {
+    const tripId = revealTrip.current;
+    if (!tripId || !flash.has(tripId)) return;
+    revealTrip.current = null;
+    // Once the timeline has drawn the selection (a folded depot opened, its box scrolled to the trip).
+    const frame = requestAnimationFrame(() => {
+      const card = timelineCard.current;
+      if (!card) return;
+      const target = Array.from(card.querySelectorAll<HTMLElement>("[data-trip-ids]")).find((t) =>
+        (t.dataset.tripIds ?? "").split(" ").includes(tripId),
+      );
+      revealOnPage(target ?? card);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [flash]);
   // A link of « Changements » (the plan waiting for confirmation, above the board): the trip is shown here.
   const { subscribe } = useTripLink();
   useEffect(
@@ -481,7 +515,7 @@ export function PlanningBoard({
         {announce}
       </p>
       <div className="grid gap-3 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[minmax(0,1fr)_26rem]">
-        <Card aria-label="Frise par véhicule" className="relative flex h-[75dvh] min-h-0 flex-col xl:h-auto">
+        <Card ref={timelineCard} aria-label="Frise par véhicule" className="relative flex h-[75dvh] min-h-0 flex-col xl:h-auto">
           {/* One Tab stop for the whole timeline (arrows inside), and this link to go straight past it. */}
           <a href="#planning-panneau" className={SKIP_LINK}>
             Passer la frise

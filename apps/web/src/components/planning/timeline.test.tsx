@@ -545,6 +545,48 @@ describe("Timeline: drag and drop into the draft (INS-03)", () => {
     expect(drag.onDrop).toHaveBeenCalledWith("trip-a", "vsl-1");
   });
 
+  it("shows a keyboard move as well as it says it: the label under the row aimed at, why a row is refused", () => {
+    renderTimeline({ drag: api() });
+    const target = tripTarget("trip-a");
+    target.focus();
+    const label = () => document.querySelector("[data-drag-label]")?.textContent ?? "";
+    fireEvent.keyDown(target, { key: "m" });
+    expect(label()).toBe("Monique Aubert↑ ↓ : choisir la ligne · Entrée : déposer · Échap : annuler");
+    fireEvent.keyDown(target, { key: "ArrowDown" });
+    expect(label()).toBe("Monique Aubert→ VSL 1 (Marseille) : Entrée pour déposer, Échap pour annuler");
+    fireEvent.keyDown(target, { key: "ArrowDown" });
+    expect(label()).toBe("Monique Aubert→ Ambulance 1 (Marseille) : Véhicule non autorisé par la prescription.");
+    // Entrée on a refused row: nothing moves, the label says it was refused.
+    fireEvent.keyDown(target, { key: "Enter" });
+    expect(label()).toContain("impossible, Véhicule non autorisé par la prescription.");
+    fireEvent.keyDown(target, { key: "Escape" });
+    expect(document.querySelector("[data-drag-label]")).toBeNull();
+  });
+
+  it("gives the focus to the trip on its new row once a keyboard drop is drawn there", () => {
+    const drag = api();
+    const data = planningFixture();
+    const groupsOf = (d: typeof data) => depotGroupViews("2026-11-10", d.vehicles, d.vehicles, Object.values(d.trips), d.trips);
+    const base = { range: RANGE, selectedTripId: null, selectedVehicleId: null, onSelectTrip: vi.fn(), onSelectVehicle: vi.fn(), drag };
+    const { rerender } = render(<Timeline {...base} groups={groupsOf(data)} trips={data.trips} />);
+    const target = tripTarget("trip-a");
+    target.focus();
+    fireEvent.keyDown(target, { key: "m" });
+    for (let i = 0; i < 4; i++) fireEvent.keyDown(target, { key: "ArrowUp" });
+    fireEvent.keyDown(target, { key: "Enter" });
+    expect(drag.onDrop).toHaveBeenCalledWith("trip-a", null);
+    // The draft checked: trip-a leaves the taxi's route for « À placer ».
+    const taxi = data.vehicles[0]!;
+    const moved = {
+      trips: { ...data.trips, "trip-a": { ...data.trips["trip-a"]!, vehicleId: null, plannedPickupMinute: null, plannedDropoffMinute: null } },
+      vehicles: [{ ...taxi, route: { ...taxi.route!, stops: taxi.route!.stops.filter((s) => s.tripId !== "trip-a") } }, ...data.vehicles.slice(1)],
+    };
+    rerender(<Timeline {...base} groups={groupsOf(moved)} trips={moved.trips} unassignedTripIds={["trip-a"]} />);
+    const now = document.activeElement as HTMLElement;
+    expect((now.dataset.tripIds ?? "").split(" ")).toContain("trip-a");
+    expect(now.closest("[data-pinned-row]")).not.toBeNull();
+  });
+
   it("drops a trip on « À placer », shown as a drop zone while it moves, and cancels with Échap", () => {
     const drag = api();
     renderTimeline({ drag });

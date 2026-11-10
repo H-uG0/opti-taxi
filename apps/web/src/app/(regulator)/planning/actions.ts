@@ -524,14 +524,14 @@ export async function confirmPlan(
 /**
  * « Vérifier la sélection » (INS-02): the day a pending re-optimization makes when the vehicles of
  * `refusedVehicleIds` keep their route in place, re-checked by the optimizer's /evaluate; nothing
- * written. Read only: it names trips the page already traced (plan.view).
+ * written. Read only; its answer names patients: traced as plan.view of the run's date.
  */
 export async function previewPlanSelection(runId: string, refusedVehicleIds: string[]): Promise<PreviewOutcome> {
-  await requireUser("REGULATOR");
+  const user = await requireUser("REGULATOR");
   const args = z.object({ runId: idSchema, refused: z.array(idSchema).min(1).max(300) }).safeParse({ runId, refused: refusedVehicleIds });
   if (!args.success) return { ok: false, error: "Sélection invalide\u00a0: rechargez la page.", stale: true };
   try {
-    return await previewPendingSelection(args.data.runId, args.data.refused);
+    return await previewPendingSelection(args.data.runId, args.data.refused, user);
   } catch (error) {
     unstable_rethrow(error);
     logError("[planning] previewPlanSelection failed", error);

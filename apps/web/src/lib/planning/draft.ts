@@ -156,7 +156,7 @@ export type DraftView = {
   /** Violations the draft day has that the plan in place has not (codes, trips and vehicles by id). */
   newViolations: { code: string; message: string; tripId: string | null; vehicleId: string | null }[];
   /** Other patients whose pickup the draft moves by 10 min or more (lib/planning/plan-changes.ts). */
-  shifted: { tripId: string; vehicleId: string; fromPickup: number; toPickup: number }[];
+  shifted: { tripId: string; vehicleId: string; fromPickupMinute: number; toPickupMinute: number }[];
   /** Asked before saving on a validated or started day (null otherwise). */
   question: string | null;
 };

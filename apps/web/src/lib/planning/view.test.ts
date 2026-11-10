@@ -319,7 +319,7 @@ describe("buildPlanningView", () => {
           review: true,
           question: "Ce calcul change 1 course du planning en place\u00a0: 1 course change de véhicule.",
           changes: {
-            trips: [{ tripId: "a", kind: "vehicle", from: "v1", to: "gone", fromPickup: 420, toPickup: 425 }],
+            trips: [{ tripId: "a", kind: "vehicle", from: "v1", to: "gone", fromPickupMinute: 420, toPickupMinute: 425 }],
             routes: [
               { vehicleId: "v1", before: { trips: 2, km: 50, margin: 30 }, after: { trips: 1, km: 30, margin: 20 } },
               { vehicleId: "gone", before: { trips: 1, km: 20, margin: 10 }, after: { trips: 2, km: 40, margin: 35 } },
@@ -337,8 +337,8 @@ describe("buildPlanningView", () => {
         kind: "vehicle",
         from: "v1",
         to: "gone",
-        fromPickup: 420,
-        toPickup: 425,
+        fromPickupMinute: 420,
+        toPickupMinute: 425,
         trip: "A Patient (aller, RDV 08:00)",
         fromLabel: "Taxi 1",
         toLabel: "Véhicule supprimé",

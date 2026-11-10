@@ -15,7 +15,19 @@ export type TripDragApi = {
 /** The row the dragged trip is over: a vehicle's, or « À placer » (`unassignedRowId`), and why it cannot go there. */
 export type DropTarget = { rowId: string; issue: string | null };
 
-export type DragState = { tripId: string; fromRowId: string; x: number; y: number; target: DropTarget | null; keyboard: boolean };
+/**
+ * A drag under way. `x`, `y`: the pointer (mouse), or for the keyboard where its label goes (under
+ * the row aimed at, at the trip's left edge). `refused`: Entrée was pressed on a row the trip cannot go to.
+ */
+export type DragState = {
+  tripId: string;
+  fromRowId: string;
+  x: number;
+  y: number;
+  target: DropTarget | null;
+  keyboard: boolean;
+  refused?: boolean;
+};
 
 const SINGLE_TRIP = /^\S+$/;
 
@@ -25,7 +37,8 @@ const SINGLE_TRIP = /^\S+$/;
  * under the pointer is the target (the box scrolls near its top and bottom edges), the release
  * drops, Échap cancels. A touch press is left alone (it scrolls the box). The keyboard does the
  * same from a trip of the timeline: « M », then ↑ ↓ to choose the row, Entrée to drop, Échap to
- * cancel; each row is said with whether the trip can go there.
+ * cancel; each row is said with whether the trip can go there, and shown in a label under it (the
+ * same as the pointer's). After a keyboard drop that holds, the focus follows the trip to its new row.
  */
 export function useTripDrag({
   api,
@@ -52,6 +65,9 @@ export function useTripDrag({
   const suppressClick = useRef(false);
   const endGesture = useRef<(() => void) | null>(null);
   const tickRef = useRef<() => void>(() => {});
+  /** The trip of a keyboard drop, whose button takes the focus again once drawn on its new row. */
+  const refocus = useRef<string | null>(null);
+  const disarmRefocus = useRef<(() => void) | null>(null);
   const apiRef = useRef(api);
   useEffect(() => {
     apiRef.current = api;
@@ -99,7 +115,11 @@ export function useTripDrag({
     const box = scrollerRef.current;
     if (!state || state.keyboard || !at || !box) return;
     const rect = box.getBoundingClientRect();
-    const step = autoScrollStep(at.y, rect.top, rect.bottom);
+    // The axis and the « À placer » row stay pinned at the top: the band that scrolls up starts below them.
+    const pinnedPx =
+      (box.querySelector<HTMLElement>("[data-timeline-axis]")?.offsetHeight ?? 0) +
+      (box.querySelector<HTMLElement>("[data-pinned-row]")?.offsetHeight ?? 0);
+    const step = autoScrollStep(at.y, rect.top, rect.bottom, pinnedPx);
     if (step === 0) return;
     box.scrollTop += step;
     update({ ...state, target: targetOf(state.tripId, state.fromRowId, hitTest(at.x, at.y)) });
@@ -110,7 +130,51 @@ export function useTripDrag({
   }, [tick]);
 
   // Unmounted during a drag (another date…): the window listeners go with it.
-  useEffect(() => () => endGesture.current?.(), []);
+  useEffect(
+    () => () => {
+      endGesture.current?.();
+      disarmRefocus.current?.();
+    },
+    [],
+  );
+
+  /**
+   * After a keyboard drop: the trip's button, once the check has drawn it on its new row, takes the
+   * focus its old one lost (never taken from anything else: the regulator moved on, or 15 s went by).
+   */
+  const armRefocus = useCallback((tripId: string) => {
+    disarmRefocus.current?.();
+    const onFocusIn = (e: FocusEvent) => {
+      const ids = e.target instanceof HTMLElement ? (e.target.dataset.tripIds ?? "").split(" ") : [];
+      if (!ids.includes(tripId)) disarm();
+    };
+    const timer = window.setTimeout(disarm, 15_000);
+    function disarm() {
+      document.removeEventListener("focusin", onFocusIn);
+      window.clearTimeout(timer);
+      refocus.current = null;
+      disarmRefocus.current = null;
+    }
+    document.addEventListener("focusin", onFocusIn);
+    refocus.current = tripId;
+    disarmRefocus.current = disarm;
+  }, []);
+
+  /** Called by the timeline after each render: gives the focus back to the trip dropped by keyboard. */
+  const restoreFocus = useCallback(() => {
+    const tripId = refocus.current;
+    const grid = gridRef.current;
+    if (!tripId || !grid) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const button = Array.from(grid.querySelectorAll<HTMLElement>("[data-trip-ids]")).find((t) =>
+      (t.dataset.tripIds ?? "").split(" ").includes(tripId),
+    );
+    if (!button) return;
+    disarmRefocus.current?.();
+    reveal(button);
+    button.focus({ preventScroll: true });
+  }, [gridRef, reveal]);
 
   const onPointerDown = useCallback(
     (e: PointerEvent<HTMLElement>) => {
@@ -217,10 +281,13 @@ export function useTripDrag({
               return;
             }
             if (target.issue) {
+              // Said, and shown: the label under the row says why, marked as refused.
+              update({ ...state, refused: true });
               setAnnounce(`${rowLabel(target.rowId)} : impossible, ${target.issue}`);
               return;
             }
             apiRef.current?.onDrop(state.tripId, target.rowId === unassignedRowId ? null : target.rowId);
+            armRefocus(state.tripId);
             setAnnounce(`Course déposée sur ${rowLabel(target.rowId)} : vérification du brouillon…`);
             stop();
             return;
@@ -244,14 +311,16 @@ export function useTripDrag({
         const rowId = ids[next] ?? "";
         const row = rows[next];
         if (row) reveal(row);
+        // The label goes under the row aimed at (read once the box has scrolled to it).
+        const y = row ? row.getBoundingClientRect().bottom : state.y;
         if (rowId === state.fromRowId) {
           // Its own row: aimed at (the arrows go on from it), never a target.
-          update({ ...state, target: { rowId, issue: "la course y est déjà" } });
+          update({ ...state, y, refused: false, target: { rowId, issue: "la course y est déjà" } });
           setAnnounce(`${rowLabel(rowId)} : la course y est déjà.`);
           return;
         }
         const target = targetOf(state.tripId, state.fromRowId, rowId);
-        update({ ...state, target });
+        update({ ...state, y, refused: false, target });
         if (target) sayTarget(target);
         return;
       }
@@ -268,12 +337,13 @@ export function useTripDrag({
       }
       const fromRowId = dropRowIdOf(button, unassignedRowId);
       if (fromRowId === undefined) return;
-      update({ tripId, fromRowId, x: 0, y: 0, target: null, keyboard: true });
+      const at = button.getBoundingClientRect();
+      update({ tripId, fromRowId, x: at.left, y: at.bottom, target: null, keyboard: true });
       setAnnounce(
         `Déplacement de la course de ${tripName(tripId)} : flèches haut et bas pour choisir la ligne, Entrée pour déposer, Échap pour annuler.`,
       );
     },
-    [gridRef, unassignedRowId, targetOf, update, reveal, rowLabel, sayTarget, stop, tripName],
+    [gridRef, unassignedRowId, targetOf, update, reveal, rowLabel, sayTarget, stop, tripName, armRefocus],
   );
 
   // A keyboard move ends when the focus leaves the timeline.
@@ -289,5 +359,5 @@ export function useTripDrag({
     return () => grid?.removeEventListener("focusout", onFocusOut);
   }, [keyboard, gridRef, stop]);
 
-  return { drag, announce, onPointerDown, onClickCapture, onKeyDownCapture };
+  return { drag, announce, onPointerDown, onClickCapture, onKeyDownCapture, restoreFocus };
 }

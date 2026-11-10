@@ -10,7 +10,7 @@
  */
 import "server-only";
 import type { Prisma, StopKind } from "@prisma/client";
-import { audit } from "@/lib/audit";
+import { audit, auditRead } from "@/lib/audit";
 import type { SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getSettings } from "@/lib/domain/settings";
@@ -1075,8 +1075,9 @@ async function selectableRun(
  * changed vehicle but `refusedIds` (they keep their route in place), re-timed and re-checked by
  * /evaluate, nothing written: its figures beside those of the plan in place and of the full
  * computation, the trips kept on a refused vehicle, those left without one, and its violations.
+ * The answer names patients, of the run's date: traced as a read of that day's plan (plan.view).
  */
-export async function previewPendingSelection(runId: string, refusedIds: readonly string[]): Promise<PreviewOutcome> {
+export async function previewPendingSelection(runId: string, refusedIds: readonly string[], user: Actor): Promise<PreviewOutcome> {
   const found = await selectableRun(runId);
   if (!found.ok) return found;
   const { isoDate, pending, changes, build } = found;
@@ -1086,6 +1087,7 @@ export async function previewPendingSelection(runId: string, refusedIds: readonl
   const chosen = evaluated.selection;
   if (!chosen) return { ok: false, error: "Aucun véhicule ne garde sa tournée\u00a0: enregistrez le calcul en entier («\u202fTout accepter\u202f»)." };
   const { merge, response } = chosen;
+  await auditRead(user, { action: "plan.view", entity: "Route", entityId: null, serviceDate: isoDate });
   const line = await tripLines([
     ...merge.keptOnRefused.map((k) => k.tripId),
     ...merge.leftOut.map((l) => l.tripId),
@@ -1169,16 +1171,15 @@ export async function confirmPendingRun(runId: string, user: Actor, selection?: 
     // The routes in place are read outside the transaction: savePlan's check below refuses them if they changed since.
     const evaluated = await evaluateSelection(isoDate, pending, details.changes, build, selection.refusedVehicleIds);
     if (!evaluated.ok) return { ok: false, error: evaluated.error };
-    if (evaluated.selection) {
-      if (evaluated.selection.key !== selection.key) return { ok: false, error: SELECTION_CHANGED_ERROR };
-      // The day is the computation's, re-timed for the vehicles kept: the run keeps its solver's status and time.
-      const checked = evaluated.selection.response;
-      response = {
-        ...checked,
-        meta: { ...checked.meta, solverStatus: pending.response.meta.solverStatus, wallTimeMs: pending.response.meta.wallTimeMs, objective: null },
-      };
-      refused = evaluated.selection.refused;
-    }
+    // Vehicles asked to keep their route, none of which can now: never the whole plan saved instead.
+    if (!evaluated.selection || evaluated.selection.key !== selection.key) return { ok: false, error: SELECTION_CHANGED_ERROR };
+    // The day is the computation's, re-timed for the vehicles kept: the run keeps its solver's status and time.
+    const checked = evaluated.selection.response;
+    response = {
+      ...checked,
+      meta: { ...checked.meta, solverStatus: pending.response.meta.solverStatus, wallTimeMs: pending.response.meta.wallTimeMs, objective: null },
+    };
+    refused = evaluated.selection.refused;
   }
 
   let saved: SavePlanResult;

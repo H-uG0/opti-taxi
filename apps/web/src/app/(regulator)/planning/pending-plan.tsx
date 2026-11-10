@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/form";
 import { formatEurosRounded, formatKmRounded, pluralize } from "@/lib/planning/format";
 import { CHANGE_GROUP_TITLES, changeCounts, changesText, routeChangeText } from "@/lib/planning/plan-changes";
 import { figuresLine, type PlanFigures } from "@/lib/planning/plan-compare";
+import { listing } from "@/lib/planning/plan-selection";
 import { signedDurationText } from "@/lib/planning/place-view";
 import type { SelectionPreview } from "@/lib/planning/run-optimization";
 import type { PlanChangesView, RunView } from "@/lib/planning/types";
@@ -72,16 +73,16 @@ type TripChangeView = NonNullable<PlanChangesView>["trips"][number];
 /** « Taxi 1 → VSL 2 · 08:05 → 08:12 », « Taxi 3 · 09:10 → 09:25 (+15 min) », « Taxi 1 → sans véhicule ». */
 function changeDetail(change: TripChangeView): string {
   const pickup =
-    change.fromPickup !== null && change.toPickup !== null && change.fromPickup !== change.toPickup
-      ? `prise en charge ${formatMinute(change.fromPickup)} → ${formatMinute(change.toPickup)}`
-      : change.toPickup !== null
-        ? `prise en charge ${formatMinute(change.toPickup)}`
+    change.fromPickupMinute !== null && change.toPickupMinute !== null && change.fromPickupMinute !== change.toPickupMinute
+      ? `prise en charge ${formatMinute(change.fromPickupMinute)} → ${formatMinute(change.toPickupMinute)}`
+      : change.toPickupMinute !== null
+        ? `prise en charge ${formatMinute(change.toPickupMinute)}`
         : null;
   switch (change.kind) {
     case "vehicle":
       return [`${change.fromLabel} → ${change.toLabel}`, pickup].filter(Boolean).join(" · ");
     case "time": {
-      const shift = (change.toPickup ?? 0) - (change.fromPickup ?? 0);
+      const shift = (change.toPickupMinute ?? 0) - (change.fromPickupMinute ?? 0);
       return `${change.toLabel} · ${pickup} (${signedDurationText(shift)})`;
     }
     case "unassigned":
@@ -108,7 +109,7 @@ function ChangesList({ changes }: { changes: PlanChangesView }) {
         Changements ({changes.trips.length})
         <span className="min-w-0 truncate font-normal text-amber-900">· {changesText(counts)}</span>
       </summary>
-      <div className="max-h-56 space-y-2 overflow-y-auto border-t border-amber-200 px-2.5 py-2">
+      <div className="space-y-2 border-t border-amber-200 px-2.5 py-2">
         {CHANGE_ORDER.map((kind) => {
           const items = changes.trips.filter((change) => change.kind === kind);
           if (items.length === 0) return null;
@@ -157,8 +158,10 @@ function VehicleChoice({
   disabled: boolean;
 }) {
   const refusable = routes.filter((route) => route.refusable);
+  // Opened and closed by the regulator only: « Tout cocher » never folds it under the pointer (nor the focus).
+  const [open, setOpen] = useState(refused.size > 0);
   return (
-    <details className="group rounded-md border border-amber-200 bg-white/70" open={refused.size > 0}>
+    <details className="group rounded-md border border-amber-200 bg-white/70" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary className="flex cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-amber-950 hover:bg-amber-100/60">
         <ChevronRight aria-hidden className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
         Accepter véhicule par véhicule ({pluralize(routes.length, "tournée change", "tournées changent")})
@@ -189,7 +192,7 @@ function VehicleChoice({
             Tout décocher
           </button>
         </div>
-        <ul className="mt-1.5 max-h-48 space-y-1 overflow-y-auto">
+        <ul className="mt-1.5 space-y-1">
           {routes.map((route) => (
             <li key={route.vehicleId}>
               <Checkbox
@@ -300,8 +303,11 @@ export function PendingPlanBanner({ run }: { run: RunView & { pending: NonNullab
       size="sm"
       disabled={busy}
       onClick={() =>
-        runAction("Enregistrement de la sélection…", () =>
-          confirmPlan(run.id, { refusedVehicleIds: [...refused], key: shownPreview.key }),
+        runAction(
+          "Enregistrement de la sélection…",
+          () => confirmPlan(run.id, { refusedVehicleIds: [...refused], key: shownPreview.key }),
+          // Refused (the selection or the routes in place changed since): « Vérifier la sélection » comes back.
+          { onResult: (result) => (result.ok ? undefined : setPreview(null)) },
         )
       }
     >
@@ -316,124 +322,127 @@ export function PendingPlanBanner({ run }: { run: RunView & { pending: NonNullab
       role="alertdialog"
       aria-labelledby="pending-plan-title"
       aria-describedby="pending-plan-question"
-      className="max-h-[60dvh] shrink-0 overflow-y-auto rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 focus-visible:outline-2 focus-visible:outline-amber-600"
+      // The banner scrolls in its own box (the board stays in view below it), and only it (no list
+      // inside has its own scroll): its title stays at the top, its buttons at the bottom.
+      className="max-h-[60dvh] shrink-0 overflow-y-auto overscroll-contain rounded-lg border border-amber-300 bg-amber-50 text-sm text-amber-950 focus-visible:outline-2 focus-visible:outline-amber-600"
     >
-      <div className="flex items-start gap-2">
+      <div className="sticky top-0 z-10 flex items-start gap-2 bg-amber-50 px-4 pt-3 pb-1.5">
         {review ? (
           <ListChecks aria-hidden className="mt-0.5 size-4 shrink-0 text-amber-700" />
         ) : (
           <Scale aria-hidden className="mt-0.5 size-4 shrink-0 text-amber-700" />
         )}
-        <div className="min-w-0 flex-1 space-y-2">
-          <p id="pending-plan-title" className="font-semibold">
-            {when}{" "}
-            {review
-              ? "n'est pas encore enregistré : vérifiez ce qu'il change"
-              : current
-                ? "n'a pas remplacé le planning en place"
-                : "n'a pas été enregistré"}
-          </p>
-          <p id="pending-plan-question">{question}</p>
-          <table className="w-full max-w-2xl text-left text-xs">
-            <thead>
-              <tr className="text-amber-800">
-                <th scope="col" className="py-1 pr-3 font-medium">
-                  <span className="sr-only">Indicateur</span>
+        <p id="pending-plan-title" className="min-w-0 flex-1 font-semibold">
+          {when}{" "}
+          {review
+            ? "n'est pas encore enregistré : vérifiez ce qu'il change"
+            : current
+              ? "n'a pas remplacé le planning en place"
+              : "n'a pas été enregistré"}
+        </p>
+      </div>
+      <div className="space-y-2 pr-4 pb-2 pl-10">
+        <p id="pending-plan-question">{question}</p>
+        <table className="w-full max-w-2xl text-left text-xs">
+          <thead>
+            <tr className="text-amber-800">
+              <th scope="col" className="py-1 pr-3 font-medium">
+                <span className="sr-only">Indicateur</span>
+              </th>
+              <th scope="col" className="py-1 pr-3 text-right font-medium">
+                {current ? "Planning en place" : "Aucun planning en place"}
+              </th>
+              <th scope="col" className="py-1 pr-3 text-right font-medium">
+                {restore ? "Planning précédent" : "Nouveau calcul"}
+              </th>
+              {shownPreview ? (
+                <th scope="col" className="py-1 text-right font-medium">
+                  Sélection
                 </th>
-                <th scope="col" className="py-1 pr-3 text-right font-medium">
-                  {current ? "Planning en place" : "Aucun planning en place"}
+              ) : null}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-amber-200/70">
+            {rows(current, comparison.next, shownPreview?.selection ?? null).map((row) => (
+              <tr key={row.label}>
+                <th scope="row" className="py-1 pr-3 font-normal text-amber-900">
+                  {row.label}
                 </th>
-                <th scope="col" className="py-1 pr-3 text-right font-medium">
-                  {restore ? "Planning précédent" : "Nouveau calcul"}
-                </th>
-                {shownPreview ? (
-                  <th scope="col" className="py-1 text-right font-medium">
-                    Sélection
-                  </th>
+                <td className="tabular py-1 pr-3 text-right">{row.current}</td>
+                <td className={cn("tabular py-1 pr-3 text-right", row.worse && "font-semibold text-red-700")}>{row.next}</td>
+                {row.selection !== null ? (
+                  <td className={cn("tabular py-1 text-right", row.selectionWorse && "font-semibold text-red-700")}>{row.selection}</td>
                 ) : null}
               </tr>
-            </thead>
-            <tbody className="divide-y divide-amber-200/70">
-              {rows(current, comparison.next, shownPreview?.selection ?? null).map((row) => (
-                <tr key={row.label}>
-                  <th scope="row" className="py-1 pr-3 font-normal text-amber-900">
-                    {row.label}
-                  </th>
-                  <td className="tabular py-1 pr-3 text-right">{row.current}</td>
-                  <td className={cn("tabular py-1 pr-3 text-right", row.worse && "font-semibold text-red-700")}>{row.next}</td>
-                  {row.selection !== null ? (
-                    <td className={cn("tabular py-1 text-right", row.selectionWorse && "font-semibold text-red-700")}>{row.selection}</td>
-                  ) : null}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {changes && changes.trips.length > 0 ? <ChangesList changes={changes} /> : null}
-          {lostTrips.length > 0 && current && !review ? (
-            <NamedList
-              title={`${pluralize(lostTrips.length, "course servie", "courses servies")} actuellement ${
-                lostTrips.length > 1 ? "resteraient" : "resterait"
-              } sans véhicule :`}
-              items={lostTrips}
+            ))}
+          </tbody>
+        </table>
+        {changes && changes.trips.length > 0 ? <ChangesList changes={changes} /> : null}
+        {/* Listed once: in « Changements » (« Resteraient sans véhicule ») when the plan has that list. */}
+        {lostTrips.length > 0 && current && !review && !(changes && changes.trips.length > 0) ? (
+          <NamedList
+            title={`${pluralize(lostTrips.length, "course servie", "courses servies")} actuellement ${
+              lostTrips.length > 1 ? "resteraient" : "resterait"
+            } sans véhicule :`}
+            items={lostTrips}
+          />
+        ) : null}
+        {violations.length > 0 ? (
+          <NamedList
+            title={`${restore ? "Violations du planning précédent" : "Violations du nouveau calcul"} (${violations.length}) :`}
+            items={violations}
+          />
+        ) : null}
+        {selectable && changes ? (
+          <div className="space-y-2">
+            <VehicleChoice
+              routes={changes.routes}
+              refused={refused}
+              onChange={(next) => {
+                setRefused(next);
+                setPreviewError(null);
+              }}
+              disabled={busy}
             />
-          ) : null}
-          {violations.length > 0 ? (
-            <NamedList
-              title={`${restore ? "Violations du planning précédent" : "Violations du nouveau calcul"} (${violations.length}) :`}
-              items={violations}
-            />
-          ) : null}
-          {selectable && changes ? (
-            <div className="space-y-2">
-              <VehicleChoice
-                routes={changes.routes}
-                refused={refused}
-                onChange={(next) => {
-                  setRefused(next);
-                  setPreviewError(null);
-                }}
-                disabled={busy}
-              />
-              {choosing ? (
-                <div className="space-y-1.5 rounded-md border border-amber-200 bg-white/70 px-2.5 py-2">
-                  {shownPreview ? (
-                    <SelectionResult preview={shownPreview} />
-                  ) : (
-                    <p className="text-xs text-amber-900">
-                      {pluralize(refused.size, "véhicule garde sa tournée", "véhicules gardent leur tournée")}&nbsp;: vérifiez la
-                      journée que fait cette sélection avant de l&apos;enregistrer.
-                    </p>
-                  )}
-                  {previewError ? (
-                    <p role="alert" className="text-xs text-red-700">
-                      {previewError}
-                    </p>
-                  ) : null}
-                  {shownPreview ? null : (
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      onClick={check}
-                      disabled={busy}
-                      aria-disabled={checking || undefined}
-                      aria-busy={checking}
-                      className="aria-disabled:cursor-wait aria-disabled:opacity-50"
-                    >
-                      {checking ? <LoaderCircle aria-hidden className="size-3.5 motion-safe:animate-spin" /> : null}
-                      {checking ? "Vérification…" : "Vérifier la sélection"}
-                    </Button>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          {/* « Placer les non affectées » promised to leave the planning as it is but for the trips placed:
-              keeping it is the first choice there. */}
-          <div className="flex flex-wrap gap-2 pt-1">
-            {saveSelection}
-            {keepFirst ? [keep, replace] : [replace, keep]}
+            {choosing ? (
+              <div className="space-y-1.5 rounded-md border border-amber-200 bg-white/70 px-2.5 py-2">
+                {shownPreview ? (
+                  <SelectionResult preview={shownPreview} />
+                ) : (
+                  <p className="text-xs text-amber-900">
+                    {pluralize(refused.size, "véhicule garde sa tournée", "véhicules gardent leur tournée")}&nbsp;: vérifiez la
+                    journée que fait cette sélection avant de l&apos;enregistrer.
+                  </p>
+                )}
+                {previewError ? (
+                  <p role="alert" className="text-xs text-red-700">
+                    {previewError}
+                  </p>
+                ) : null}
+                {shownPreview ? null : (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={check}
+                    disabled={busy}
+                    aria-disabled={checking || undefined}
+                    aria-busy={checking}
+                    className="aria-disabled:cursor-wait aria-disabled:opacity-50"
+                  >
+                    {checking ? <LoaderCircle aria-hidden className="size-3.5 motion-safe:animate-spin" /> : null}
+                    {checking ? "Vérification…" : "Vérifier la sélection"}
+                  </Button>
+                )}
+              </div>
+            ) : null}
           </div>
-        </div>
+        ) : null}
+      </div>
+      {/* « Placer les non affectées » promised to leave the planning as it is but for the trips placed:
+          keeping it is the first choice there. */}
+      <div className="sticky bottom-0 z-10 flex flex-wrap gap-2 border-t border-amber-200 bg-amber-50 py-2 pr-4 pl-10">
+        {saveSelection}
+        {keepFirst ? [keep, replace] : [replace, keep]}
       </div>
     </section>
   );
@@ -444,8 +453,8 @@ function SelectionResult({ preview }: { preview: SelectionPreview }) {
   return (
     <div className="space-y-1.5">
       <p className="text-xs font-medium text-amber-950">
-        Sélection vérifiée par l&apos;optimiseur ({preview.refused.join(", ")}{" "}
-        {preview.refused.length > 1 ? "gardent leur tournée" : "garde sa tournée"})&nbsp;: {figuresLine(preview.selection)}.
+        Sélection vérifiée par l&apos;optimiseur&nbsp;: {listing(preview.refused)}{" "}
+        {preview.refused.length > 1 ? "gardent leur tournée" : "garde sa tournée"} · {figuresLine(preview.selection)}.
       </p>
       {preview.question ? <p className="text-xs font-medium text-red-800">{preview.question}</p> : null}
       {preview.hint ? <p className="text-xs text-amber-950">{preview.hint}</p> : null}

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanningMapProps } from "@/components/map/planning-map";
 import { DISPLAY_PALETTE } from "@/lib/planning/colors";
@@ -265,6 +265,65 @@ describe("PlanningBoard: the drag-and-drop draft (INS-03)", () => {
     );
     expect(screen.getByRole("region", { name: "Brouillon de la frise" }).textContent).not.toContain("modification");
     expect(window.sessionStorage.getItem("opti-taxi:brouillon:2026-11-10")).toBeNull();
+  });
+
+  /** « M », the arrows (each press a row up), Entrée: the trip dropped from the keyboard. */
+  async function dropByKeyboard(tripId: string, ups: number, downs = 0) {
+    const trip = document.querySelector<HTMLElement>(`[data-trip-ids='${tripId}']`)!;
+    trip.focus();
+    fireEvent.keyDown(trip, { key: "m" });
+    for (let i = 0; i < ups; i++) fireEvent.keyDown(trip, { key: "ArrowUp" });
+    for (let i = 0; i < downs; i++) fireEvent.keyDown(trip, { key: "ArrowDown" });
+    await act(async () => {
+      fireEvent.keyDown(trip, { key: "Enter" });
+    });
+  }
+
+  it("goes back to the last draft checked when a check does not answer: never a move saved unseen", async () => {
+    renderBoard();
+    await dropByKeyboard("trip-a", 0, 1);
+    expect((await screen.findByRole("region", { name: "Brouillon de la frise" })).textContent).toContain("1 modification non enregistrée");
+    actions.checkDraft.mockResolvedValue({ ok: false, error: "Le service d'optimisation ne répond pas." });
+    await dropByKeyboard("trip-b", 4);
+    expect(actions.checkDraft).toHaveBeenLastCalledWith("2026-11-10", [
+      { tripId: "trip-a", toVehicleId: "vsl-1" },
+      { tripId: "trip-b", toVehicleId: null },
+    ]);
+    const bar = screen.getByRole("region", { name: "Brouillon de la frise" });
+    expect(screen.getByRole("alert").textContent).toBe("Le service d'optimisation ne répond pas. Le brouillon revient à sa dernière vérification.");
+    expect(bar.textContent).toContain("1 modification non enregistrée");
+    expect(JSON.parse(window.sessionStorage.getItem("opti-taxi:brouillon:2026-11-10") ?? "[]")).toEqual([{ tripId: "trip-a", toVehicleId: "vsl-1" }]);
+  });
+
+  it("drops silently a move that no longer changes anything (the trip is already there)", async () => {
+    actions.checkDraft.mockResolvedValue({ ok: true, view: { ...draftView, moves: [], routes: [], trips: [] } });
+    renderBoard();
+    await dropByKeyboard("trip-a", 0, 1);
+    await waitFor(() => expect(actions.checkDraft).toHaveBeenCalled());
+    expect(screen.queryByRole("region", { name: "Brouillon de la frise" })).toBeNull();
+    expect(window.sessionStorage.getItem("opti-taxi:brouillon:2026-11-10")).toBeNull();
+  });
+
+  it("brings a trip shown from a list into the window before highlighting it", async () => {
+    renderBoard();
+    await dropByKeyboard("trip-a", 0, 1);
+    fireEvent.click(await screen.findByRole("button", { name: "Détail" }));
+    const scrollBy = vi.fn();
+    const original = { scrollBy: window.scrollBy, rect: HTMLElement.prototype.getBoundingClientRect, into: HTMLElement.prototype.scrollIntoView };
+    window.scrollBy = scrollBy as typeof window.scrollBy;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    // The timeline far below the window's edge (a tall banner above it).
+    HTMLElement.prototype.getBoundingClientRect = () => ({ top: 1200, bottom: 1220, height: 20, width: 40, left: 0, right: 40, x: 0, y: 1200, toJSON: () => ({}) });
+    try {
+      const bar = screen.getByRole("region", { name: "Brouillon de la frise" });
+      fireEvent.click(within(bar).getByRole("button", { name: "Monique Aubert (aller, RDV 07:30)" }));
+      await waitFor(() => expect(scrollBy).toHaveBeenCalledWith({ top: 1210 - window.innerHeight / 2, behavior: "smooth" }));
+    } finally {
+      window.scrollBy = original.scrollBy;
+      HTMLElement.prototype.getBoundingClientRect = original.rect;
+      HTMLElement.prototype.scrollIntoView = original.into;
+    }
+    expect(document.querySelector("[data-trip-block='trip-a']")?.className).toContain("ring-amber-400");
   });
 
   it("checks again the draft kept for the date when the page opens", async () => {

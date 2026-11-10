@@ -16,11 +16,12 @@ export const AUTO_SCROLL_MAX_PX = 18;
 /**
  * Pixels to scroll the box by this frame for a pointer at `y` (viewport coordinates) in a box from
  * `top` to `bottom`: negative near the top, positive near the bottom, faster closer to the edge, 0
- * elsewhere. The top band starts below the pinned axis and « À placer » row (`pinnedPx`).
+ * elsewhere. The top band starts below the pinned axis and « À placer » row (`pinnedPx`): over them
+ * nothing scrolls (« À placer » is a drop zone, the rows must stay still under it).
  */
 export function autoScrollStep(y: number, top: number, bottom: number, pinnedPx = 0): number {
   const upper = top + pinnedPx;
-  if (y < upper + AUTO_SCROLL_EDGE_PX && y >= top) {
+  if (y < upper + AUTO_SCROLL_EDGE_PX && y >= upper) {
     const depth = Math.min(1, (upper + AUTO_SCROLL_EDGE_PX - y) / AUTO_SCROLL_EDGE_PX);
     return -Math.ceil(depth * AUTO_SCROLL_MAX_PX);
   }

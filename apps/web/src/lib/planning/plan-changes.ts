@@ -42,8 +42,8 @@ export type TripChange = {
   from: string | null;
   /** Vehicle of the new plan (null: without a vehicle). */
   to: string | null;
-  fromPickup: number | null;
-  toPickup: number | null;
+  fromPickupMinute: number | null;
+  toPickupMinute: number | null;
 };
 
 /** A route's figures as the per-vehicle choice shows them. */
@@ -99,14 +99,14 @@ export function planChanges(before: PlanSide, after: PlanSide, considered: Reado
       kind,
       from: was?.vehicleId ?? null,
       to: now?.vehicleId ?? null,
-      fromPickup: was?.pickupMinute ?? null,
-      toPickup: now?.pickupMinute ?? null,
+      fromPickupMinute: was?.pickupMinute ?? null,
+      toPickupMinute: now?.pickupMinute ?? null,
     });
   }
   trips.sort(
     (a, b) =>
       KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
-      (a.toPickup ?? a.fromPickup ?? 0) - (b.toPickup ?? b.fromPickup ?? 0) ||
+      (a.toPickupMinute ?? a.fromPickupMinute ?? 0) - (b.toPickupMinute ?? b.fromPickupMinute ?? 0) ||
       a.tripId.localeCompare(b.tripId),
   );
 
@@ -185,11 +185,20 @@ export function otherChanges(changes: PlanChanges, ignored: (change: TripChange)
 /**
  * The question of a plan held for review: « Ce calcul change 6 courses du planning en place : 3
  * changent de véhicule, … Vérifiez la liste « Changements », puis enregistrez tout, ou véhicule par
- * véhicule. » (`perVehicle`: the choice is offered).
+ * véhicule. » (`perVehicle`: the choice is offered). The trips it only places were not in the plan
+ * in place: « Ce calcul place 1 course de plus. », « … : 2 courses changent de véhicule, et place
+ * 1 course de plus. »
  */
 export function reviewQuestion(changes: Pick<PlanChanges, "trips">, subject: string, perVehicle: boolean): string {
-  const count = changes.trips.length;
-  const what = `${subject} change ${plural(count, "course", "courses")} du planning en place\u00a0: ${changesText(changeCounts(changes))}.`;
+  const counts = changeCounts(changes);
+  const inPlace = changes.trips.length - counts.assigned;
+  const more = plural(counts.assigned, "course de plus", "courses de plus");
+  const what =
+    inPlace === 0
+      ? `${subject} place ${more}.`
+      : `${subject} change ${plural(inPlace, "course", "courses")} du planning en place\u00a0: ${changesText({ ...counts, assigned: 0 })}${
+          counts.assigned > 0 ? `, et place ${more}` : ""
+        }.`;
   const next = perVehicle
     ? "Vérifiez la liste «\u202fChangements\u202f», puis enregistrez tout ou véhicule par véhicule."
     : "Vérifiez la liste «\u202fChangements\u202f» avant de l'enregistrer.";

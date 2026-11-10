@@ -80,7 +80,12 @@ function dayFields(day: PlaceDay) {
   return { date, settings, vehicles, trips, tariffs };
 }
 
-/** Replays `moves` on the plan of `day`: each one placed (by /insert) or refused, then both plans evaluated. */
+/**
+ * Replays `moves` on the plan of `day`: each one placed (by /insert) or refused, then both plans
+ * evaluated. A move that holds takes the trip's lock to where the save writes it (its new vehicle,
+ * none for « À placer »): the later /insert calls and the draft's /evaluate see that lock, never the
+ * old one (a trip figée on A then dragged onto B is no « LOCK » violation of the draft).
+ */
 async function computeDraft(day: PlaceDay, moves: readonly DraftMove[]): Promise<{ ok: true; computed: Computed } | { ok: false; error: string }> {
   const fields = dayFields(day);
   const original: DraftSequence[] = routesInPlace(day.stored, day.build.request) ?? [];
@@ -89,6 +94,10 @@ async function computeDraft(day: PlaceDay, moves: readonly DraftMove[]): Promise
   const labels = new Map(day.build.request.vehicles.map((v) => [v.id, v.label]));
   const nowMinute = nowMinuteOn(day.isoDate);
   let routes = original;
+  let trips = fields.trips;
+  const relock = (tripId: string, vehicleId: string | null) => {
+    trips = trips.map((t) => (t.id === tripId ? { ...t, lockedVehicleId: vehicleId } : t));
+  };
   const results: DraftMoveResult[] = [];
   for (const move of moves.slice(0, DRAFT_MAX_MOVES)) {
     const from = vehicleOfTrip(routes, move.tripId);
@@ -111,10 +120,11 @@ async function computeDraft(day: PlaceDay, moves: readonly DraftMove[]): Promise
       refuse(issue.error);
       continue;
     }
-    // Dropped where the draft already has it: nothing to do.
+    // Already where the move puts it (the plan changed meanwhile): nothing to do, no result, the browser drops the move.
     if (move.toVehicleId === from) continue;
     if (move.toVehicleId === null) {
       routes = withoutTrip(routes, move.tripId);
+      relock(move.tripId, null);
       results.push({ ...move, fromVehicleId: from, ok: true, pickupMinute: null, dropoffMinute: null, deltaKm: null, deltaMargin: null });
       continue;
     }
@@ -133,7 +143,7 @@ async function computeDraft(day: PlaceDay, moves: readonly DraftMove[]): Promise
       refuse(`${label} ${crewTakenReason(taken)}.`);
       continue;
     }
-    const answer = await insert({ ...fields, routes, tripId: move.tripId, vehicleIds: [move.toVehicleId] });
+    const answer = await insert({ ...fields, trips, routes, tripId: move.tripId, vehicleIds: [move.toVehicleId] });
     if (!answer.ok) return { ok: false, error: answer.error };
     const option = answer.data.options.find((o) => o.vehicleId === move.toVehicleId);
     if (!option) {
@@ -147,6 +157,7 @@ async function computeDraft(day: PlaceDay, moves: readonly DraftMove[]): Promise
       continue;
     }
     routes = withOptionRoutes(routes, option, answer.data.fromVehicleId);
+    relock(move.tripId, move.toVehicleId);
     results.push({
       ...move,
       fromVehicleId: from,
@@ -157,7 +168,7 @@ async function computeDraft(day: PlaceDay, moves: readonly DraftMove[]): Promise
       deltaMargin: option.deltaMargin,
     });
   }
-  const [before, after] = await Promise.all([beforeCall, evaluate({ ...fields, routes })]);
+  const [before, after] = await Promise.all([beforeCall, evaluate({ ...fields, trips, routes })]);
   if (!before.ok) return { ok: false, error: before.error };
   if (!after.ok) return { ok: false, error: after.error };
   return { ok: true, computed: { results, original, routes, before: before.data, after: after.data, changed: changedVehicles(original, routes) } };
@@ -228,8 +239,8 @@ function viewOf(day: PlaceDay, computed: Computed): DraftView {
     { routes: before.routes, placements: placementsOf(before.routes, (id) => pickupBefore.get(id) ?? null) },
     { routes: after.routes, placements: placementsOf(after.routes, (id) => pickupAfter.get(id) ?? null) },
   ).trips.flatMap((change) =>
-    change.kind === "time" && !moved.has(change.tripId) && change.to && change.fromPickup !== null && change.toPickup !== null
-      ? [{ tripId: change.tripId, vehicleId: change.to, fromPickup: change.fromPickup, toPickup: change.toPickup }]
+    change.kind === "time" && !moved.has(change.tripId) && change.to && change.fromPickupMinute !== null && change.toPickupMinute !== null
+      ? [{ tripId: change.tripId, vehicleId: change.to, fromPickupMinute: change.fromPickupMinute, toPickupMinute: change.toPickupMinute }]
       : [],
   );
   const labels = new Map(day.build.request.vehicles.map((v) => [v.id, v.label]));
@@ -344,7 +355,8 @@ export async function saveDraftPlan(
       recheck: true,
     };
   }
-  if (computed.changed.size === 0) return { ok: false, error: DRAFT_EMPTY_ERROR };
+  // Every move does nothing now (the trips are already where the draft puts them): checked again, the browser drops them.
+  if (computed.changed.size === 0) return { ok: false, error: DRAFT_EMPTY_ERROR, recheck: true };
   const view = viewOf(day, computed);
   if (view.question !== null && confirmed !== view.question) return { ok: false, needsConfirmation: true, error: view.question };
 

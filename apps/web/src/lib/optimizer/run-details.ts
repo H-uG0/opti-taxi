@@ -121,8 +121,8 @@ const changesSchema = z.object({
       kind: z.enum(["unassigned", "vehicle", "time", "assigned"]),
       from: z.string().nullable(),
       to: z.string().nullable(),
-      fromPickup: z.number().nullable(),
-      toPickup: z.number().nullable(),
+      fromPickupMinute: z.number().nullable(),
+      toPickupMinute: z.number().nullable(),
     }),
   ),
   routes: z.array(z.object({ vehicleId: z.string(), before: routeSummarySchema.nullable(), after: routeSummarySchema.nullable() })),
@@ -148,7 +148,8 @@ const detailsSchema = z.object({
   evaluatedAt: z.string().optional(),
   question: z.string().optional(),
   lockChange: lockChangeSchema.optional(),
-  changes: changesSchema.optional(),
+  // Unreadable (a run kept before a field was renamed): the plan waits without its « Changements », its details stay readable.
+  changes: changesSchema.optional().catch(undefined),
   review: z.boolean().optional(),
   refusedVehicleIds: z.array(z.string()).optional(),
 });

@@ -16,7 +16,8 @@
  *   recurrence.view (edit forms, on the Patient: a prescription can be
  *   deleted), facility.view (patients treated there), trip_list.view
  *   (/courses), plan.view (/planning: the day's patients, addresses, phones,
- *   access notes and trip notes), roadmap.view (driver, today or
+ *   access notes and trip notes; « Vérifier la sélection » of a plan waiting
+ *   for confirmation, which names the patients it leaves out), roadmap.view (driver, today or
  *   tomorrow), shared_arrivals.view (Facility when a facility's sheet is
  *   opened), driver.view (/chauffeurs/[id]: absences), day_crew.view
  *   (/equipages: everyone's absences of the day), staff_list.view
@@ -35,7 +36,10 @@
  *   cette course ? »: details.mode "insert", details.vehicleId and
  *   details.lockedVehicleId as { from, to }, and on a validated or started day
  *   details.confirmed with details.validated and details.started: the
- *   drivers' roadmaps rewritten after the question was answered),
+ *   drivers' roadmaps rewritten after the question was answered; the
+ *   drag-and-drop draft of the timeline, « Enregistrer »: one event per trip
+ *   moved, details.mode "draft" with the same fields, `to` null for a trip
+ *   put in « À placer », taken out of its route and unlocked),
  *   trip.lock, trip.unlock, trip.toll (details: old and new toll),
  *   trip.exceptional_ambulance (a seated trip proposed in an ambulance,
  *   details.vehicleId and details.reason, a fixed text) and
@@ -43,7 +47,9 @@
  *   serve it there or did not answer; or no longer in force: unlocked, moved
  *   off the ambulance, the plan computed with it discarded);
  * - planning: plan.optimize (details.confirmed when the regulator replaced the
- *   routes in place with a plan that waited for confirmation; details.mode
+ *   routes in place with a plan that waited for confirmation;
+ *   details.refusedVehicleIds when it was accepted vehicle by vehicle: the
+ *   vehicles that kept their route in place; details.mode
  *   "place_unassigned" for « Placer les non affectées »), plan.restore
  *   (« Revenir au planning précédent »), plan.discard (a waiting plan not
  *   kept), plan.validate, plan.reopen, plan.lock and plan.unlock (« Figer » or

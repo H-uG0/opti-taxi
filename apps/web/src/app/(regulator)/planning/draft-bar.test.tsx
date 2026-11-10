@@ -24,7 +24,7 @@ function view(overrides: Partial<DraftView> = {}): DraftView {
     before: figures(10, 400, 300),
     after: figures(9, 445.4, 288),
     newViolations: [],
-    shifted: [{ tripId: "trip-b", vehicleId: "vsl-1", fromPickup: 600, toPickup: 615 }],
+    shifted: [{ tripId: "trip-b", vehicleId: "vsl-1", fromPickupMinute: 600, toPickupMinute: 615 }],
     question: null,
     ...overrides,
   };
@@ -44,6 +44,7 @@ function draft(overrides: Partial<PlanningDraft> = {}): PlanningDraft {
     remove: vi.fn(),
     cancel: vi.fn(),
     save: vi.fn(),
+    retry: vi.fn(),
     dismissRefusal: vi.fn(),
     dismissQuestion: vi.fn(),
     ...overrides,
@@ -85,10 +86,36 @@ describe("DraftBar", () => {
     const bar = screen.getByRole("region", { name: "Brouillon de la frise" });
     expect(bar.textContent).toContain("2 modifications non enregistrées");
     expect(bar.textContent).toContain("marge +45 €");
-    fireEvent.click(within(bar).getByRole("button", { name: "Annuler" }));
-    expect(value.cancel).toHaveBeenCalled();
     fireEvent.click(within(bar).getByRole("button", { name: "Enregistrer" }));
     expect(value.save).toHaveBeenCalledWith(null);
+  });
+
+  it("asks before « Annuler » throws away two moves or more, not for one", () => {
+    const value = draft();
+    renderBar(value);
+    const bar = screen.getByRole("region", { name: "Brouillon de la frise" });
+    fireEvent.click(within(bar).getByRole("button", { name: "Annuler" }));
+    expect(value.cancel).not.toHaveBeenCalled();
+    expect(bar.textContent).toContain("Abandonner les 2 modifications non enregistrées");
+    fireEvent.click(within(bar).getByRole("button", { name: "Garder le brouillon" }));
+    expect(value.cancel).not.toHaveBeenCalled();
+    expect(within(bar).getByRole("button", { name: "Annuler" })).toBe(document.activeElement);
+    fireEvent.click(within(bar).getByRole("button", { name: "Annuler" }));
+    fireEvent.click(within(bar).getByRole("button", { name: "Oui, abandonner le brouillon" }));
+    expect(value.cancel).toHaveBeenCalledTimes(1);
+    cleanup();
+    const one = draft({ moves: [{ tripId: "trip-a", toVehicleId: "vsl-1" }] });
+    renderBar(one);
+    fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
+    expect(one.cancel).toHaveBeenCalled();
+  });
+
+  it("offers « Vérifier de nouveau », not « Enregistrer », for a draft whose check did not answer", () => {
+    const value = draft({ view: null, refusal: "Le service d'optimisation ne répond pas." });
+    renderBar(value);
+    expect(screen.queryByRole("button", { name: "Enregistrer" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Vérifier de nouveau" }));
+    expect(value.retry).toHaveBeenCalled();
   });
 
   it("lists each move in « Détail », with the patients it delays; a move can be removed, a trip shown", () => {

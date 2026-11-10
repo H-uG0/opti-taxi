@@ -30,12 +30,13 @@ const fake = vi.hoisted(() => ({
   evaluate: vi.fn(),
   savePlan: vi.fn(),
   audit: vi.fn(),
+  auditRead: vi.fn(),
   completeTrips: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db", () => ({ db: fake.db }));
-vi.mock("@/lib/audit", () => ({ audit: fake.audit }));
+vi.mock("@/lib/audit", () => ({ audit: fake.audit, auditRead: fake.auditRead }));
 vi.mock("@/lib/log", () => ({ logError: vi.fn() }));
 vi.mock("@/lib/domain/settings", () => ({ getSettings: vi.fn() }));
 vi.mock("@/lib/optimizer/client", () => ({ optimize: fake.optimize, evaluate: fake.evaluate }));
@@ -870,7 +871,7 @@ describe("«\u202fPlacer les non affectées\u202f» (runOptimization placeOnly)"
 });
 
 describe("what a re-optimization changes, shown before it is saved (INS-02)", () => {
-  const vehicleChange = (tripId: string, from = "taxi_mrs", to = "vsl_gre") => ({ tripId, kind: "vehicle" as const, from, to, fromPickup: 480, toPickup: 485 });
+  const vehicleChange = (tripId: string, from = "taxi_mrs", to = "vsl_gre") => ({ tripId, kind: "vehicle" as const, from, to, fromPickupMinute: 480, toPickupMinute: 485 });
   const routeChange = (vehicleId: string) => ({ vehicleId, before: { trips: 2, km: 30, margin: 20 }, after: { trips: 1, km: 20, margin: 25 } });
 
   /** savePlan as the guard sees it, with what the new plan changes in the routes in place. */
@@ -908,7 +909,7 @@ describe("what a re-optimization changes, shown before it is saved (INS-02)", ()
   });
 
   it("keeps the regulator's question when the plan is worse, with its changes", async () => {
-    const changes = { trips: [{ ...vehicleChange("t2"), kind: "unassigned" as const, to: null, toPickup: null }], routes: [routeChange("taxi_mrs")] };
+    const changes = { trips: [{ ...vehicleChange("t2"), kind: "unassigned" as const, to: null, toPickupMinute: null }], routes: [routeChange("taxi_mrs")] };
     savePlanChanging(changes, { current: figures(2), next: figures(1), lostTripIds: ["t2"] });
     const outcome = await runOptimization(DATE, REGULATOR);
     expect((outcome as { error: string }).error).toMatch(/^Ce calcul sert 1 course contre 2/);
@@ -919,7 +920,7 @@ describe("what a re-optimization changes, shown before it is saved (INS-02)", ()
 
   it("reviews a move for the other trips only, a placement for the trips already placed, never a restoration", () => {
     const changes = {
-      trips: [vehicleChange("t1"), vehicleChange("t2"), { ...vehicleChange("t9"), kind: "assigned" as const, from: null, fromPickup: null }],
+      trips: [vehicleChange("t1"), vehicleChange("t2"), { ...vehicleChange("t9"), kind: "assigned" as const, from: null, fromPickupMinute: null }],
       routes: [],
     };
     expect(reviewedChanges("optimize", changes)?.trips.map((c) => c.tripId)).toEqual(["t1", "t2", "t9"]);
@@ -987,8 +988,8 @@ describe("« accepter véhicule par véhicule » (INS-02)", () => {
       comparison: { current: figures(2), next: figures(2), lostTripIds: [] },
       changes: {
         trips: [
-          { tripId: "t1", kind: "vehicle", from: "taxi_mrs", to: "vsl_gre", fromPickup: 480, toPickup: 480 },
-          { tripId: "t2", kind: "vehicle", from: "vsl_gre", to: "taxi_mrs", fromPickup: 480, toPickup: 480 },
+          { tripId: "t1", kind: "vehicle", from: "taxi_mrs", to: "vsl_gre", fromPickupMinute: 480, toPickupMinute: 480 },
+          { tripId: "t2", kind: "vehicle", from: "vsl_gre", to: "taxi_mrs", fromPickupMinute: 480, toPickupMinute: 480 },
         ],
         routes: [
           { vehicleId: "taxi_mrs", before: { trips: 1, km: 20, margin: 20 }, after: { trips: 1, km: 20, margin: 20 } },
@@ -1035,7 +1036,7 @@ describe("« accepter véhicule par véhicule » (INS-02)", () => {
   });
 
   it("checks the day a selection makes with /evaluate: the refused vehicle keeps its route, a trip on none is said", async () => {
-    const outcome = await previewPendingSelection("run-p", ["vsl_gre"]);
+    const outcome = await previewPendingSelection("run-p", ["vsl_gre"], REGULATOR);
     const sent = fake.evaluate.mock.calls[0]![0] as { routes: { vehicleId: string; stops: { tripId: string; kind: string }[] }[] };
     // VSL Grenoble keeps t2; t2 leaves the taxi's new route; t1, on the VSL in the new plan only, is left out.
     expect(sent.routes).toEqual([
@@ -1051,13 +1052,20 @@ describe("« accepter véhicule par véhicule » (INS-02)", () => {
     });
     expect(outcome.preview.selection.served).toBe(1);
     expect(outcome.preview.question).toMatch(/^Cette sélection sert 1 course contre 2/);
+    // Its answer names patients of the run's date: traced as a read of that day's plan.
+    expect(fake.auditRead).toHaveBeenCalledWith(REGULATOR, { action: "plan.view", entity: "Route", entityId: null, serviceDate: DATE });
   });
 
   it("saves the day checked, the refused vehicles noted, and refuses a selection changed since", async () => {
-    const checked = await previewPendingSelection("run-p", ["vsl_gre"]);
+    const checked = await previewPendingSelection("run-p", ["vsl_gre"], REGULATOR);
     const key = checked.ok ? checked.preview.key : "";
     savePlanComparing({ current: figures(2), next: figures(1), lostTripIds: ["t1"] }, planVersionToken(versionParts));
     expect(await confirmPendingRun("run-p", REGULATOR, { refusedVehicleIds: ["vsl_gre"], key: "other" })).toEqual({
+      ok: false,
+      error: SELECTION_CHANGED_ERROR,
+    });
+    // Vehicles none of which can keep their route: refused, never the whole plan saved instead.
+    expect(await confirmPendingRun("run-p", REGULATOR, { refusedVehicleIds: ["taxi_nowhere"], key })).toEqual({
       ok: false,
       error: SELECTION_CHANGED_ERROR,
     });
@@ -1072,10 +1080,10 @@ describe("« accepter véhicule par véhicule » (INS-02)", () => {
 
   it("is offered for a re-optimization only, and on the plan it was computed on", async () => {
     fake.db.optimizationRun.findUnique.mockResolvedValue({ ...pending(), details: { ...pending().details, kind: "move" } });
-    expect(await previewPendingSelection("run-p", ["vsl_gre"])).toMatchObject({ ok: false, error: expect.stringMatching(/s'enregistre en entier/) });
+    expect(await previewPendingSelection("run-p", ["vsl_gre"], REGULATOR)).toMatchObject({ ok: false, error: expect.stringMatching(/s'enregistre en entier/) });
     fake.db.optimizationRun.findUnique.mockResolvedValue(pending());
     fake.db.$queryRaw.mockResolvedValue([{ ...versionParts, stops: 6 }]);
-    expect(await previewPendingSelection("run-p", ["vsl_gre"])).toMatchObject({ ok: false, stale: true });
+    expect(await previewPendingSelection("run-p", ["vsl_gre"], REGULATOR)).toMatchObject({ ok: false, stale: true });
     expect(fake.evaluate).not.toHaveBeenCalled();
   });
 });

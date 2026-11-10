@@ -83,7 +83,8 @@ export function selectionKeySource(routes: readonly StopSequence[]): string {
     .join("|");
 }
 
-function listing(items: readonly string[]): string {
+/** « Taxi 1 », « Taxi 1 et VSL 2 », « Taxi 1, Taxi 3 et VSL 2 ». */
+export function listing(items: readonly string[]): string {
   if (items.length <= 1) return items.join("");
   return `${items.slice(0, -1).join(", ")} et ${items[items.length - 1]}`;
 }

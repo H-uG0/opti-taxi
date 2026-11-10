@@ -50,8 +50,8 @@ function reviewRun(overrides: Partial<NonNullable<RunView["pending"]>> = {}): Ru
       selectable: true,
       changes: {
         trips: [
-          { tripId: "t1", kind: "vehicle", from: "taxi-1", to: "vsl-2", fromPickup: 450, toPickup: 470, trip: "MARTIN Jeanne (aller, RDV 08:30)", fromLabel: "Taxi 1", toLabel: "VSL 2" },
-          { tripId: "t9", kind: "assigned", from: null, to: "vsl-2", fromPickup: null, toPickup: 600, trip: "DURAND Paul (retour, fin 10:00)", fromLabel: null, toLabel: "VSL 2" },
+          { tripId: "t1", kind: "vehicle", from: "taxi-1", to: "vsl-2", fromPickupMinute: 450, toPickupMinute: 470, trip: "MARTIN Jeanne (aller, RDV 08:30)", fromLabel: "Taxi 1", toLabel: "VSL 2" },
+          { tripId: "t9", kind: "assigned", from: null, to: "vsl-2", fromPickupMinute: null, toPickupMinute: 600, trip: "DURAND Paul (retour, fin 10:00)", fromLabel: null, toLabel: "VSL 2" },
         ],
         routes: [
           { vehicleId: "vsl-2", label: "VSL 2", before: { trips: 3, km: 90, margin: 40 }, after: { trips: 5, km: 120, margin: 70 }, refusable: true, tripChanges: 2 },
@@ -133,11 +133,41 @@ describe("PendingPlanBanner, a re-optimization held for review (INS-02)", () => 
       fireEvent.click(within(banner).getByRole("button", { name: "Vérifier la sélection" }));
     });
     expect(actions.previewPlanSelection).toHaveBeenCalledWith("run-p", ["taxi-1"]);
-    expect(banner.textContent).toContain("Sélection vérifiée par l'optimiseur (Taxi 1 garde sa tournée)");
+    expect(banner.textContent).toContain("Sélection vérifiée par l'optimiseur\u00a0: Taxi 1 garde sa tournée · 61 courses servies");
     expect(banner.textContent).toContain("Pour qu'elle garde un véhicule, décochez VSL 2.");
     expect(within(banner).getByRole("columnheader", { name: "Sélection" })).toBeTruthy();
     fireEvent.click(within(banner).getByRole("button", { name: "Enregistrer la sélection quand même" }));
     await waitFor(() => expect(actions.confirmPlan).toHaveBeenCalledWith("run-p", { refusedVehicleIds: ["taxi-1"], key: "key-1" }));
+  });
+
+  it("offers « Vérifier la sélection » again when saving the selection is refused", async () => {
+    actions.previewPlanSelection.mockResolvedValue({
+      ok: true,
+      preview: { key: "key-1", current: figures(62, 1073), next: figures(63, 1208), selection: figures(62, 1150), refused: ["Taxi 1"], keptOnRefused: [], leftOut: [], violations: [], question: null, hint: null },
+    });
+    actions.confirmPlan.mockResolvedValueOnce({ ok: false, error: "La sélection a changé depuis sa vérification : vérifiez-la de nouveau." } as never);
+    const { banner } = renderBanner();
+    fireEvent.click(within(banner).getByRole("checkbox", { name: /^Taxi 1/ }));
+    await act(async () => {
+      fireEvent.click(within(banner).getByRole("button", { name: "Vérifier la sélection" }));
+    });
+    fireEvent.click(within(banner).getByRole("button", { name: "Enregistrer la sélection" }));
+    await waitFor(() => expect(within(banner).getByRole("button", { name: "Vérifier la sélection" })).toBeTruthy());
+    expect(within(banner).queryByRole("button", { name: "Enregistrer la sélection" })).toBeNull();
+  });
+
+  it("keeps « Accepter véhicule par véhicule » open once every box is ticked again", () => {
+    const { banner } = renderBanner();
+    const details = within(banner).getByText(/^Accepter véhicule par véhicule/).closest("details") as HTMLDetailsElement;
+    // Opened by the regulator.
+    act(() => {
+      details.open = true;
+      details.dispatchEvent(new Event("toggle"));
+    });
+    fireEvent.click(within(banner).getByRole("checkbox", { name: /^Taxi 1/ }));
+    expect(details.open).toBe(true);
+    fireEvent.click(within(banner).getByRole("button", { name: "Tout cocher" }));
+    expect(details.open).toBe(true);
   });
 
   it("asks to check again once the selection changed, and keeps the old banner for a worse plan", () => {
@@ -157,5 +187,17 @@ describe("PendingPlanBanner, a re-optimization held for review (INS-02)", () => 
     expect(dialog.textContent).toContain("n'a pas remplacé le planning en place");
     expect(within(dialog).getByRole("button", { name: "Remplacer quand même" })).toBeTruthy();
     expect(dialog.textContent).toContain("1 course servie actuellement resterait sans véhicule");
+    cleanup();
+    // With « Changements », the trips that would lose their vehicle are listed there only, not twice.
+    renderBanner({
+      ...worse,
+      pending: {
+        ...worse.pending,
+        changes: { trips: [{ tripId: "t1", kind: "unassigned", from: "taxi-1", to: null, fromPickupMinute: 450, toPickupMinute: null, trip: "MARTIN Jeanne (aller, RDV 08:30)", fromLabel: "Taxi 1", toLabel: null }], routes: [] },
+      },
+    });
+    const listed = screen.getByRole("alertdialog");
+    expect(within(listed).getByRole("region", { name: "Resteraient sans véhicule" })).toBeTruthy();
+    expect(listed.textContent).not.toContain("actuellement resterait sans véhicule");
   });
 });

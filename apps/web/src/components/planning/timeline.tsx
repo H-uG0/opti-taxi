@@ -606,6 +606,58 @@ const PinnedUnassignedRow = memo(function PinnedUnassignedRow({
   );
 });
 
+/**
+ * The label of a drag: the trip, where it would go and, when it cannot, why. Beside the pointer for
+ * a mouse drag; for a keyboard move, under the row aimed at, with the keys (WCAG 3.3.1: why a row is
+ * refused is shown, not only said), kept inside the window.
+ */
+function DragLabel({
+  drag,
+  tripName,
+  rowLabel,
+  unassigned,
+}: {
+  drag: DragState;
+  tripName: (tripId: string) => string;
+  rowLabel: (rowId: string) => string;
+  unassigned: boolean;
+}) {
+  const { target } = drag;
+  const issue = target?.issue ?? null;
+  const at = drag.keyboard
+    ? {
+        left: Math.max(8, Math.min(drag.x, (typeof window === "undefined" ? 1440 : window.innerWidth) - 300)),
+        top: Math.min(drag.y + 4, (typeof window === "undefined" ? 900 : window.innerHeight) - 72),
+      }
+    : { left: drag.x + 14, top: drag.y + 14 };
+  let line: string;
+  if (!target) {
+    line = drag.keyboard
+      ? "\u2191 \u2193\u00a0: choisir la ligne · Entrée\u00a0: déposer · Échap\u00a0: annuler"
+      : "Déposez sur une autre ligne, ou sur «\u202fÀ placer\u202f»";
+  } else if (issue) {
+    line = `\u2192 ${rowLabel(target.rowId)}\u00a0: ${drag.refused ? "impossible, " : ""}${issue}`;
+  } else {
+    const what = unassigned ? "retirer la course de sa tournée" : "déposer";
+    line = `\u2192 ${rowLabel(target.rowId)}${drag.keyboard ? `\u00a0: Entrée pour ${what}, Échap pour annuler` : ""}`;
+  }
+  return (
+    <div
+      aria-hidden
+      data-drag-label
+      className={cn(
+        "pointer-events-none fixed z-[60] max-w-72 rounded-md px-2 py-1 text-xs font-medium shadow-lg",
+        issue ? "bg-red-700 text-white" : "bg-slate-900 text-white",
+        drag.refused && "ring-2 ring-red-300",
+      )}
+      style={at}
+    >
+      {tripName(drag.tripId)}
+      <span className={cn("block font-normal", !target && "opacity-80")}>{line}</span>
+    </div>
+  );
+}
+
 /** The visible part of the scrolling box left free by its pinned parts (axis, « À placer », depot header, vehicle column). */
 function revealInBox(scroller: HTMLElement, element: HTMLElement) {
   const box = scroller.getBoundingClientRect();
@@ -744,6 +796,9 @@ export function Timeline({
   const tripName = useCallback((tripId: string) => trips[tripId]?.patientName ?? "la course", [trips]);
   const dragging = useTripDrag({ api: dragApi, scrollerRef: scroller, gridRef: grid, unassignedRowId: UNASSIGNED_ROW_ID, rowLabel, tripName, reveal });
   const drag = dragging.drag;
+  const { restoreFocus } = dragging;
+  // After a keyboard drop, the trip's button on its new row takes the focus its old one lost.
+  useLayoutEffect(() => restoreFocus());
   const canDrag = dragApi?.canDrag;
   // While a trip is dragged, « À placer » is a drop zone even when no trip is without a vehicle.
   const showPinned = unassignedTripIds.length > 0 || drag !== null;
@@ -1050,27 +1105,9 @@ export function Timeline({
           </div>
         ) : null}
       </div>
-      {/* The dragged trip follows the pointer, with where it would go (the keyboard's move is said instead). */}
-      {drag && !drag.keyboard ? (
-        <div
-          aria-hidden
-          className={cn(
-            "pointer-events-none fixed z-[60] max-w-72 rounded-md px-2 py-1 text-xs font-medium shadow-lg",
-            drag.target?.issue ? "bg-red-700 text-white" : "bg-slate-900 text-white",
-          )}
-          style={{ left: drag.x + 14, top: drag.y + 14 }}
-        >
-          {tripName(drag.tripId)}
-          {drag.target ? (
-            <span className="block font-normal">
-              → {rowLabel(drag.target.rowId)}
-              {drag.target.issue ? `\u00a0: ${drag.target.issue}` : ""}
-            </span>
-          ) : (
-            <span className="block font-normal opacity-80">Déposez sur une autre ligne, ou sur «&#x202F;À placer&#x202F;»</span>
-          )}
-        </div>
-      ) : null}
+      {/* The dragged trip follows the pointer, with where it would go; a keyboard move shows the same label under
+          the row aimed at (and says it: the live region below). */}
+      {drag ? <DragLabel drag={drag} tripName={tripName} rowLabel={rowLabel} unassigned={drag.target?.rowId === UNASSIGNED_ROW_ID} /> : null}
       <p aria-live="assertive" className="sr-only">
         {dragging.announce}
       </p>

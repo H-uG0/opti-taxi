@@ -18,6 +18,9 @@ describe("autoScrollStep", () => {
   it("starts the top band below the pinned rows", () => {
     expect(autoScrollStep(100 + 60 + AUTO_SCROLL_EDGE_PX + 1, 100, 900, 60)).toBe(0);
     expect(autoScrollStep(100 + 60, 100, 900, 60)).toBe(-AUTO_SCROLL_MAX_PX);
+    // Over the pinned rows themselves (the « À placer » drop zone): still.
+    expect(autoScrollStep(100 + 30, 100, 900, 60)).toBe(0);
+    expect(autoScrollStep(100, 100, 900, 60)).toBe(0);
   });
 });
 

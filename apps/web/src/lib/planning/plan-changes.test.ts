@@ -37,10 +37,10 @@ describe("planChanges", () => {
     });
     const changes = planChanges(before, after);
     expect(changes.trips).toEqual([
-      { tripId: "d", kind: "unassigned", from: "vsl1", to: null, fromPickup: 700, toPickup: null },
-      { tripId: "b", kind: "vehicle", from: "taxi1", to: "vsl1", fromPickup: 500, toPickup: 505 },
-      { tripId: "c", kind: "time", from: "taxi1", to: "taxi1", fromPickup: 600, toPickup: 610 },
-      { tripId: "e", kind: "assigned", from: null, to: "vsl1", fromPickup: null, toPickup: 720 },
+      { tripId: "d", kind: "unassigned", from: "vsl1", to: null, fromPickupMinute: 700, toPickupMinute: null },
+      { tripId: "b", kind: "vehicle", from: "taxi1", to: "vsl1", fromPickupMinute: 500, toPickupMinute: 505 },
+      { tripId: "c", kind: "time", from: "taxi1", to: "taxi1", fromPickupMinute: 600, toPickupMinute: 610 },
+      { tripId: "e", kind: "assigned", from: null, to: "vsl1", fromPickupMinute: null, toPickupMinute: 720 },
     ]);
     expect(changeCounts(changes)).toEqual({ unassigned: 1, vehicle: 1, time: 1, assigned: 1 });
   });
@@ -85,11 +85,22 @@ describe("texts", () => {
   });
 
   it("asks to review, with or without the per-vehicle choice", () => {
-    const changes = { trips: [{ tripId: "a", kind: "vehicle" as const, from: "x", to: "y", fromPickup: 1, toPickup: 2 }] };
+    const changes = { trips: [{ tripId: "a", kind: "vehicle" as const, from: "x", to: "y", fromPickupMinute: 1, toPickupMinute: 2 }] };
     expect(reviewQuestion(changes, "Ce calcul", true)).toBe(
       "Ce calcul change 1 course du planning en place\u00a0: 1 course change de véhicule. Vérifiez la liste «\u202fChangements\u202f», puis enregistrez tout ou véhicule par véhicule.",
     );
     expect(reviewQuestion(changes, "Ce placement", false)).toMatch(/avant de l'enregistrer\.$/);
+  });
+
+  it("does not count a trip it only places as a change of the plan in place", () => {
+    const placed = { tripId: "p", kind: "assigned" as const, from: null, to: "y", fromPickupMinute: null, toPickupMinute: 600 };
+    const moved = { tripId: "a", kind: "vehicle" as const, from: "x", to: "y", fromPickupMinute: 1, toPickupMinute: 2 };
+    expect(reviewQuestion({ trips: [placed] }, "Ce calcul", false)).toBe(
+      "Ce calcul place 1 course de plus. Vérifiez la liste «\u202fChangements\u202f» avant de l'enregistrer.",
+    );
+    expect(reviewQuestion({ trips: [moved, placed, { ...placed, tripId: "q" }] }, "Ce calcul", false)).toMatch(
+      /^Ce calcul change 1 course du planning en place\u00a0: 1 course change de véhicule, et place 2 courses de plus\. /,
+    );
   });
 
   it("sums up a vehicle's route before and after", () => {
