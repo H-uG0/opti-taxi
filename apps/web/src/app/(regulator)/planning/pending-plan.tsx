@@ -72,10 +72,33 @@ export function PendingPlanBanner({ run }: { run: RunView & { pending: NonNullab
   const { comparison, question, lostTrips, violations } = run.pending;
   const current = comparison.current;
   const restore = run.kind === "restore";
+  const keepFirst = run.kind === "place" && current !== null;
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     ref.current?.focus();
   }, []);
+  const replace = (
+    <Button
+      key="replace"
+      size="sm"
+      variant={keepFirst ? "secondary" : "primary"}
+      disabled={busy}
+      onClick={() => runAction("Enregistrement du nouveau planning…", () => confirmPlan(run.id))}
+    >
+      {current ? "Remplacer quand même" : "Enregistrer quand même"}
+    </Button>
+  );
+  const keep = (
+    <Button
+      key="keep"
+      size="sm"
+      variant={keepFirst ? "primary" : "secondary"}
+      disabled={busy}
+      onClick={() => runAction("Abandon du calcul…", () => discardPlan(run.id))}
+    >
+      {current ? "Garder le planning actuel" : "Abandonner ce calcul"}
+    </Button>
+  );
   return (
     <section
       ref={ref}
@@ -134,18 +157,10 @@ export function PendingPlanBanner({ run }: { run: RunView & { pending: NonNullab
               items={violations}
             />
           ) : null}
+          {/* « Placer les non affectées » promised to leave the planning as it is but for the trips placed:
+              keeping it is the first choice there. */}
           <div className="flex flex-wrap gap-2 pt-1">
-            <Button size="sm" disabled={busy} onClick={() => runAction("Enregistrement du nouveau planning…", () => confirmPlan(run.id))}>
-              {current ? "Remplacer quand même" : "Enregistrer quand même"}
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={busy}
-              onClick={() => runAction("Abandon du calcul…", () => discardPlan(run.id))}
-            >
-              {current ? "Garder le planning actuel" : "Abandonner ce calcul"}
-            </Button>
+            {keepFirst ? [keep, replace] : [replace, keep]}
           </div>
         </div>
       </div>

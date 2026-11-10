@@ -11,13 +11,19 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
-import { CircleCheck, LoaderCircle, RefreshCw, X, CircleX } from "lucide-react";
+import { CircleAlert, CircleCheck, LoaderCircle, RefreshCw, X, CircleX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import type { PlanningActionResult } from "./actions";
 
 type Activity = { label: string; startedAt: number; expectedSec: number | null };
-type Feedback = { tone: "success" | "error"; text: string; reload?: boolean };
+type Feedback = {
+  tone: "success" | "warning" | "error";
+  text: string;
+  reload?: boolean;
+  /** A short confirmation (a lock, an unlock…) goes by itself; a computation's result stays until closed. */
+  autoClose?: boolean;
+};
 
 type RunOptions = {
   /** Long action (optimizer call): show elapsed time against the solver time limit. */
@@ -76,7 +82,12 @@ export function PlanningActivityProvider({ timeLimitSec, children }: { timeLimit
           const result: PlanningActionResult | undefined = await task();
           // A redirect (expired session) resolves without a result: the router navigates.
           if (!result) return;
-          if (result.ok) setFeedback({ tone: "success", text: result.message });
+          if (result.ok) {
+            // A computation's result (it may have run while the regulator looked away) and anything left to
+            // look at stay until closed; only a short confirmation goes by itself.
+            const warning = result.warning === true;
+            setFeedback({ tone: warning ? "warning" : "success", text: result.message, autoClose: !warning && !options?.long });
+          }
           // Errors shown next to the fields of the form that sent them: the banner, far above, stays quiet.
           else if (!result.needsConfirmation && !result.fieldErrors) {
             setFeedback({ tone: "error", text: result.error, reload: result.stale === true });
@@ -135,7 +146,10 @@ function Elapsed({ startedAt, expectedSec }: { startedAt: number; expectedSec: n
   );
 }
 
-/** A success stays this long on screen, unless the pointer or the focus is on it; an error stays until closed. */
+/**
+ * A short confirmation stays this long on screen, unless the pointer or the
+ * focus is on it; a computation's result, a warning and an error stay until closed.
+ */
 const SUCCESS_TOAST_MS = 12_000;
 
 /**
@@ -151,9 +165,9 @@ export function PlanningActivityBanner({ className }: { className?: string }) {
   const router = useRouter();
   const [held, setHeld] = useState(false);
 
-  // A success goes away by itself (an error waits to be read and closed).
+  // A short confirmation goes away by itself (anything else waits to be read and closed).
   useEffect(() => {
-    if (!feedback || feedback.tone !== "success" || held) return;
+    if (!feedback || !feedback.autoClose || held) return;
     const id = window.setTimeout(dismiss, SUCCESS_TOAST_MS);
     return () => window.clearTimeout(id);
   }, [feedback, held, dismiss]);
@@ -182,11 +196,11 @@ export function PlanningActivityBanner({ className }: { className?: string }) {
   }
 
   if (!feedback) return <div role="status" aria-live="polite" className="sr-only" />;
-  const success = feedback.tone === "success";
-  const Icon = success ? CircleCheck : CircleX;
+  const error = feedback.tone === "error";
+  const Icon = feedback.tone === "success" ? CircleCheck : feedback.tone === "warning" ? CircleAlert : CircleX;
   return (
     <div
-      role={success ? "status" : "alert"}
+      role={error ? "alert" : "status"}
       onPointerEnter={() => setHeld(true)}
       onPointerLeave={() => setHeld(false)}
       onFocus={() => setHeld(true)}
@@ -194,7 +208,11 @@ export function PlanningActivityBanner({ className }: { className?: string }) {
       className={cn(
         TOAST,
         "flex items-start gap-3 rounded-lg border px-4 py-3 text-sm",
-        success ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900",
+        feedback.tone === "success"
+          ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+          : feedback.tone === "warning"
+            ? "border-amber-300 bg-amber-50 text-amber-950"
+            : "border-red-200 bg-red-50 text-red-900",
         className,
       )}
     >

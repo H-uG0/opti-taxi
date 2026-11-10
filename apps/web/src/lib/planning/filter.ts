@@ -148,7 +148,9 @@ export function filterRows(
  * Vehicles with something to handle, as « À traiter » lists them: a violation
  * of the vehicle or of one of its trips, a route planned before a change of
  * crew or vehicle (route-issues.ts), a trip to review on its route (cancelled
- * or absent but still there, locked elsewhere), a return to check.
+ * or absent but still there, locked elsewhere), a return to check, a lock
+ * ignored because its vehicle cannot take the trip. Trips without a vehicle
+ * are in « À traiter » too, but on no vehicle.
  */
 export function issueVehicleIds(args: {
   trips: Readonly<Record<string, TripView>>;
@@ -156,6 +158,7 @@ export function issueVehicleIds(args: {
   vehicleIssues: ReadonlyArray<{ vehicleId: string }>;
   staleTrips: ReadonlyArray<{ tripId: string }>;
   returnsToCheck: readonly string[];
+  droppedLocks?: ReadonlyArray<{ vehicleId: string }>;
 }): Set<string> {
   const ids = new Set<string>();
   const vehicleOf = (tripId: string | null) => (tripId ? (args.trips[tripId]?.vehicleId ?? null) : null);
@@ -172,6 +175,7 @@ export function issueVehicleIds(args: {
     const id = vehicleOf(tripId);
     if (id) ids.add(id);
   }
+  for (const dropped of args.droppedLocks ?? []) ids.add(dropped.vehicleId);
   return ids;
 }
 
@@ -184,30 +188,20 @@ export function lockedTripCount(row: VehicleRowView, trips: Readonly<Record<stri
   return count;
 }
 
-/** Trips of the row's route that « Figer la tournée » would lock: active, not locked yet. */
-export function lockableTripCount(row: VehicleRowView, trips: Readonly<Record<string, TripView>>): number {
-  if (!row.route) return 0;
-  const ids = new Set(row.route.stops.map((s) => s.tripId));
-  let count = 0;
-  for (const id of ids) {
-    const trip = trips[id];
-    if (trip && trip.lockedVehicleId === null && trip.status !== "CANCELLED" && trip.status !== "NO_SHOW") count += 1;
-  }
-  return count;
-}
-
 /**
  * Indicators of a set of vehicles with the dashboard formulas (@/lib/kpis), as
  * the planning's KPI strip computes them for the whole day: trips served by
  * these vehicles, km, empty km, shared rate, money. `tripsTotal` is the trips
  * they serve (an unassigned trip belongs to no depot); `violations` those of
- * these vehicles and their trips.
+ * these vehicles and their trips, null when the day's violations cannot be
+ * read (`violationsKnown` false: a filter never turns « ? » into « 0 »).
  */
 export function subsetKpis(
   date: string,
   rows: readonly VehicleRowView[],
   trips: readonly TripView[],
   violations: readonly ViolationView[],
+  violationsKnown = true,
 ): DayKpis {
   const routeIdOf = new Map<string, string>();
   const routes: KpiRoute[] = [];
@@ -262,7 +256,7 @@ export function subsetKpis(
     sharedTripRatio: day.sharedRate,
     revenue: day.revenue,
     margin: day.margin,
-    violations: ownViolations,
+    violations: violationsKnown ? ownViolations : null,
   };
 }
 

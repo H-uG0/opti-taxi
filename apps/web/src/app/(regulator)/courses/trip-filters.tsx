@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { buttonClasses } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/form";
 import { DIRECTION_LABELS, SHARING_STATUS_LABELS, TRIP_STATUS_LABELS } from "@/lib/labels";
@@ -9,11 +9,31 @@ const STATUS_OPTIONS = Object.entries(TRIP_STATUS_LABELS);
 const SHARING_OPTIONS = Object.entries(SHARING_STATUS_LABELS);
 const DIRECTION_OPTIONS = Object.entries(DIRECTION_LABELS);
 
-/** Filters of the trips list as a GET form: the URL stays shareable and the page needs no JavaScript. */
-export function TripFiltersForm({ date, filters }: { date: string; filters: TripFilters }) {
+/**
+ * Filters of the trips list as a GET form: the URL stays shareable and the page needs no JavaScript.
+ * `patientLabel`: the patient a link from the planning filtered on (?patient=, by id), shown as a removable chip.
+ */
+export function TripFiltersForm({ date, filters, patientLabel = null }: { date: string; filters: TripFilters; patientLabel?: string | null }) {
   return (
     <form action="/courses" method="get" role="search" aria-label="Filtrer les courses" className="flex flex-wrap items-end gap-3">
       <input type="hidden" name="date" value={date} />
+      {filters.patient ? (
+        <div className="space-y-1">
+          <input type="hidden" name="patient" value={filters.patient} />
+          <span className="block text-xs font-medium text-slate-600">Patient choisi</span>
+          <span className="inline-flex h-10 items-center gap-1.5 rounded-md border border-brand-200 bg-brand-50 pl-2.5 pr-1 text-sm text-brand-900">
+            {patientLabel ?? "Aucune course ce jour"}
+            <Link
+              href={coursesHref(date, { ...filters, patient: null })}
+              aria-label="Retirer le filtre sur ce patient"
+              title="Retirer le filtre sur ce patient"
+              className="grid size-6 place-items-center rounded text-brand-700 hover:bg-brand-100 focus-visible:outline-2 focus-visible:outline-brand-600"
+            >
+              <X aria-hidden className="size-3.5" />
+            </Link>
+          </span>
+        </div>
+      ) : null}
       <div className="w-56 space-y-1">
         <label htmlFor="filter-q" className="block text-xs font-medium text-slate-600">
           Patient

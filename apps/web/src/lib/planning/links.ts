@@ -10,11 +10,15 @@ export function planningTripHref(date: string, tripId: string): string {
   return `/planning?${new URLSearchParams({ date, trip: tripId }).toString()}`;
 }
 
-/** Courses of the date filtered on the patient (and the leg when given), the same filters as its search form. */
-export function coursesTripHref(date: string, patientName: string, direction: TripDirection | null = null): string {
+/**
+ * Courses of the date filtered on the patient (and the leg when given), by the
+ * patient's id: a name never goes into a URL (proxy access logs, browser
+ * history, Referer).
+ */
+export function coursesTripHref(date: string, patientId: string, direction: TripDirection | null = null): string {
   const params = new URLSearchParams({ date });
   if (direction) params.set("sens", direction);
-  params.set("q", patientName.slice(0, 80));
+  params.set("patient", patientId);
   return `/courses?${params.toString()}`;
 }
 

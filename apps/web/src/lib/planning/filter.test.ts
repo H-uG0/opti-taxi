@@ -9,7 +9,6 @@ import {
   groupByDepot,
   isFiltering,
   issueVehicleIds,
-  lockableTripCount,
   lockedTripCount,
   matchesFilter,
   parseFilter,
@@ -105,8 +104,10 @@ describe("which vehicles a filter keeps", () => {
       vehicleIssues: [{ vehicleId: "x-1" }],
       staleTrips: [{ tripId: "trip-v" }],
       returnsToCheck: ["trip-r", "trip-c"],
+      // « Verrous ignorés » of « À traiter »: the vehicle the lock pointed at.
+      droppedLocks: [{ vehicleId: "off-1" }],
     });
-    expect([...ids].sort()).toEqual(["amb-1", "taxi-1", "vsl-1", "vsl-2", "x-1"]);
+    expect([...ids].sort()).toEqual(["amb-1", "off-1", "taxi-1", "vsl-1", "vsl-2", "x-1"]);
   });
 });
 
@@ -130,15 +131,16 @@ describe("depot groups and their subtotals", () => {
     expect(marseille?.totals.emptyKmRatio).toBeCloseTo(6.2 / 18.4);
   });
 
-  it("counts the trips a route lock would change", () => {
+  it("counts the trips of a row's route locked on it", () => {
     const { vehicles, trips } = planningFixture();
     const taxi = vehicles[0]!;
-    expect(lockableTripCount(taxi, trips)).toBe(2);
+    expect(lockedTripCount(taxi, trips)).toBe(0);
     const one = { ...trips, "trip-a": { ...trips["trip-a"]!, lockedVehicleId: "taxi-1" } };
-    expect([lockedTripCount(taxi, one), lockableTripCount(taxi, one)]).toEqual([1, 1]);
-    const cancelled = { ...trips, "trip-b": { ...trips["trip-b"]!, status: "CANCELLED" as const } };
-    expect(lockableTripCount(taxi, cancelled)).toBe(1);
-    expect(lockableTripCount(vehicles[1]!, trips)).toBe(0);
+    expect(lockedTripCount(taxi, one)).toBe(1);
+    // Locked on another vehicle: not « figée » on this row.
+    const elsewhere = { ...trips, "trip-a": { ...trips["trip-a"]!, lockedVehicleId: "vsl-1" } };
+    expect(lockedTripCount(taxi, elsewhere)).toBe(0);
+    expect(lockedTripCount(vehicles[1]!, trips)).toBe(0);
   });
 });
 
@@ -185,5 +187,12 @@ describe("indicators of the vehicles shown", () => {
     expect(vsl).toMatchObject({ tripsServed: 0, tripsTotal: 0, vehiclesUsed: 0, totalKm: 0, violations: 1 });
     const taxi = subsetKpis("2026-11-10", [vehicles[0]!], Object.values(trips), violations);
     expect(taxi).toMatchObject({ tripsServed: 2, vehiclesUsed: 1, sharedTrips: 2, violations: 1 });
+  });
+
+  it("keep the violations unknown when the day's cannot be read, whatever the filter", () => {
+    const { vehicles, trips } = planningFixture();
+    expect(subsetKpis("2026-11-10", [vehicles[0]!], Object.values(trips), [], false).violations).toBeNull();
+    expect(subsetKpis("2026-11-10", [], Object.values(trips), [], false).violations).toBeNull();
+    expect(subsetKpis("2026-11-10", [vehicles[0]!], Object.values(trips), []).violations).toBe(0);
   });
 });

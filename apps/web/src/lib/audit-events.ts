@@ -34,10 +34,11 @@ export type AuditEntity =
 type DetailValue = string | number | boolean | null;
 
 /**
- * Non-medical context of an event: a value, or a change `{ from, to }`. Never
- * a patient's name, address or note, nor any free text typed by a user.
+ * Non-medical context of an event: a value, a list of record ids (the trips a
+ * bulk lock changed), or a change `{ from, to }`. Never a patient's name,
+ * address or note, nor any free text typed by a user.
  */
-export type AuditDetails = Record<string, DetailValue | { from: DetailValue; to: DetailValue }>;
+export type AuditDetails = Record<string, DetailValue | readonly string[] | { from: DetailValue; to: DetailValue }>;
 
 export type AuditEntry = {
   action: `${string}.${string}`;

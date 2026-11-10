@@ -32,6 +32,8 @@ export type TimelineProps = {
   groupActions?: (group: TimelineGroup) => ReactNode;
   /** 28 px rows on one line. */
   compact?: boolean;
+  /** Said when no row is left (« Aucun véhicule ne correspond aux filtres. » by default). */
+  emptyText?: string;
   className?: string;
 };
 
@@ -437,6 +439,7 @@ export function Timeline({
   onToggleGroup,
   groupActions,
   compact = false,
+  emptyText = "Aucun véhicule ne correspond aux filtres.",
   className,
 }: TimelineProps) {
   const scroller = useRef<HTMLDivElement>(null);
@@ -576,7 +579,7 @@ export function Timeline({
         {groups.length === 0 ? (
           <div role="row" className={ROW}>
             <div role="cell" className="col-span-full px-4 py-8 text-center text-sm text-slate-500">
-              Aucun véhicule ne correspond aux filtres.
+              {emptyText}
             </div>
           </div>
         ) : null}

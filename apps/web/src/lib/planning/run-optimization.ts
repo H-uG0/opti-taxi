@@ -72,7 +72,13 @@ import {
 import { loadPlanVersion, requestHash } from "./version";
 
 export type RunOutcome =
-  | { ok: true; message: string; runId: string }
+  | {
+      ok: true;
+      message: string;
+      runId: string;
+      /** The plan was saved but leaves something to look at (violations, trips not placed, trips that changed vehicle). */
+      warning?: boolean;
+    }
   | {
       ok: false;
       error: string;
@@ -110,6 +116,78 @@ export const NOTHING_TO_PLACE_ERROR = "Aucune course sans véhicule à placer : 
 
 function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
   return `${count} ${count > 1 ? pluralForm : singular}`;
+}
+
+/** « Placer les non affectées » when every trip without a vehicle is incomplete (never sent to the optimizer). */
+export function incompleteOnlyError(count: number): string {
+  return count > 1
+    ? `Aucune course à placer : les ${count} courses sans véhicule restantes sont incomplètes (voir « À traiter ») et ne peuvent pas être calculées.`
+    : "Aucune course à placer : la course sans véhicule restante est incomplète (voir « À traiter ») et ne peut pas être calculée.";
+}
+
+/** « Placer les non affectées » : what the computation was asked to do. */
+type Placement = {
+  /** Trips without a vehicle it was asked to place. */
+  toPlace: ReadonlySet<string>;
+  /** Trips in a route when it started, with the vehicle of that route. */
+  assignments: ReadonlyMap<string, string>;
+};
+
+/** How a placement went: trips placed out of those asked, and trips already placed that changed vehicle. */
+type PlacementOutcome = { placed: number; asked: number; moved: number };
+
+function placementOutcome(plan: Pick<PlanResponse, "routes">, placement: Placement): PlacementOutcome {
+  const vehicleOf = new Map<string, string>();
+  for (const route of plan.routes) for (const stop of route.stops) vehicleOf.set(stop.tripId, route.vehicleId);
+  const placed = [...placement.toPlace].filter((id) => vehicleOf.has(id)).length;
+  let moved = 0;
+  for (const [tripId, before] of placement.assignments) {
+    const after = vehicleOf.get(tripId);
+    if (after !== undefined && after !== before) moved += 1;
+  }
+  return { placed, asked: placement.toPlace.size, moved };
+}
+
+/**
+ * « 2 courses placées sur 3 non affectées, les autres courses restent sur leur
+ * véhicule ». A trip already placed changes vehicle only when its route's
+ * vehicle can no longer take it (its pin is dropped) or when the regulator
+ * locked it on another vehicle: said, never hidden behind « restent ».
+ */
+function placementText({ placed, asked, moved }: PlacementOutcome): string {
+  const what =
+    placed > 0
+      ? `${plural(placed, "course placée", "courses placées")} sur ${plural(asked, "non affectée", "non affectées")}`
+      : asked > 1
+        ? `Aucune des ${asked} courses non affectées n'a trouvé de place`
+        : "La course non affectée n'a pas trouvé de place";
+  const others =
+    moved > 0
+      ? `${plural(moved, "course déjà placée change", "courses déjà placées changent")} de véhicule (figée ailleurs ou véhicule indisponible)`
+      : "les autres courses restent sur leur véhicule";
+  return `${what}, ${others}`;
+}
+
+/** The plan leaves something to look at: trips not placed, trips that changed vehicle. */
+function placementWarning({ placed, asked, moved }: PlacementOutcome): boolean {
+  return placed < asked || moved > 0;
+}
+
+/**
+ * Trips served in place (and still to plan) that a placement would leave
+ * without a vehicle: « Placer les non affectées » promises the others stay on
+ * their vehicle, so such a plan is never saved, nor offered for confirmation.
+ */
+function placementLoss(lostTripIds: readonly string[], request: OptimizeRequest): string | null {
+  const sent = new Set(request.trips.map((t) => t.id));
+  const lost = lostTripIds.filter((id) => sent.has(id));
+  if (lost.length === 0) return null;
+  const named = lost.slice(0, 3).map(tripRef).join(", ");
+  const more = lost.length > 3 ? ` et ${lost.length - 3} autre${lost.length > 4 ? "s" : ""}` : "";
+  return (
+    `ce placement aurait retiré ${plural(lost.length, "course déjà placée", "courses déjà placées")} de ${lost.length > 1 ? "leur" : "son"} ` +
+    `véhicule (${named}${more}). Placez les courses non affectées une à une avec « Déplacer vers… », ou réoptimisez la journée.`
+  );
 }
 
 function seconds(ms: number): string {
@@ -228,7 +306,7 @@ export async function withdrawLapsedProposals(tx: Prisma.TransactionClient, user
 /** Why savePlan's guard kept the routes in place. */
 class ReplaceRefused extends Error {
   constructor(
-    readonly reason: "confirm" | "move" | "gone" | "stale",
+    readonly reason: "confirm" | "place" | "gone" | "stale",
     message: string,
     readonly comparison: PlanComparison | null = null,
     readonly version: string | null = null,
@@ -461,7 +539,11 @@ export async function dropPendingRuns(
   }
 }
 
-async function failRun(runId: string, error: string, extra: { matrixSource?: string; wallTimeMs?: number } = {}) {
+async function failRun(
+  runId: string,
+  error: string,
+  extra: { matrixSource?: string; wallTimeMs?: number; details?: Prisma.InputJsonObject } = {},
+) {
   await db.optimizationRun.update({
     where: { id: runId },
     data: { status: "FAILED", finishedAt: new Date(), error, ...extra },
@@ -504,7 +586,7 @@ function successMessage(
   plan: PlanResponse,
   build: BuildResult,
   changes: RouteChanges | null = null,
-  place: ReadonlySet<string> | null = null,
+  placement: PlacementOutcome | null = null,
 ): string {
   const kept = kind === "optimize" && changes !== null && changes.changed === 0 && changes.removed === 0 && changes.total > 0;
   let routes = plural(saved.routes, "tournée");
@@ -519,15 +601,7 @@ function successMessage(
   if (tariffNote) parts.push(tariffNote);
   const violations = plan.validation.violations.length;
   if (violations > 0) parts.push(`${plural(violations, "violation")} à vérifier`);
-  if (kind === "place" && place) {
-    const left = new Set(plan.unassigned.map((u) => u.tripId));
-    const placed = [...place].filter((id) => !left.has(id)).length;
-    const what =
-      placed === 0
-        ? `Aucune des ${plural(place.size, "course non affectée", "courses non affectées")} n'a trouvé de place, les autres courses restent sur leur véhicule`
-        : `${plural(placed, "course placée", "courses placées")} sur ${plural(place.size, "non affectée", "non affectées")}, les autres courses restent sur leur véhicule`;
-    return `${what} : ${parts.join(" · ")}.`;
-  }
+  if (kind === "place" && placement) return `${placementText(placement)} : ${parts.join(" · ")}.`;
   const what =
     kind === "restore" ? "Planning précédent rétabli" : kept ? "Planning en place conservé, aucun meilleur trouvé" : "Planning optimisé";
   return `${what} : ${parts.join(" · ")}.`;
@@ -540,7 +614,9 @@ function successMessage(
  * waits too, the question naming those trips: a full re-solve often swaps a
  * trip or two, and refusing every such move made « Déplacer vers… » fail most
  * of the time (local insertion, which does not touch the other routes, is the
- * real cure: feat/deplacement-rapide).
+ * real cure: feat/deplacement-rapide). « Placer les non affectées » that would
+ * take a trip served in place off its vehicle is refused outright (the run is
+ * closed as not kept, the planning stays): the mode promises the others stay.
  */
 async function finishRun(args: {
   kind: RunKind;
@@ -559,13 +635,14 @@ async function finishRun(args: {
   lock?: { change: LockChange; written: boolean } | null;
   /** The routes in place when the computation started, as stored: the message says how many it changed. */
   inPlace?: RouteSequences | null;
-  /** « Placer les non affectées » : the trips without a vehicle it was asked to place. */
-  place?: ReadonlySet<string> | null;
+  /** « Placer les non affectées » : the trips it was asked to place, and those already in a route. */
+  placement?: Placement | null;
   /** Locks set by the regulator when the request also carries the pins of « Placer les non affectées ». */
   lockedCount?: number;
 }): Promise<RunOutcome> {
   const { kind, isoDate, user, runId, build, plan, move } = args;
   const lock = args.lock ?? null;
+  const placement = args.placement ?? null;
   const { request } = build;
   const meta = { matrixSource: plan.meta.matrixSource, wallTimeMs: plan.meta.wallTimeMs };
   // Messages name trips by id (stored as is); the regulator reads the patients' names.
@@ -619,6 +696,10 @@ async function finishRun(args: {
       ...(args.lockedCount !== undefined ? { lockedCount: args.lockedCount } : {}),
       onTrafficReset: (tx) => auditTrafficReset(tx, user, runId, isoDate),
       check: ({ comparison, version }) => {
+        if (placement) {
+          const loss = placementLoss(comparison.lostTripIds, request);
+          if (loss) throw new ReplaceRefused("place", loss);
+        }
         // A move that would leave other trips without a vehicle is never applied silently: the question
         // names them. A trip the computation was not given (left out of the request since) is not lost by
         // the move, and routes that can no longer be driven are not counted at all.
@@ -634,7 +715,8 @@ async function finishRun(args: {
         }
         const concerns = replaceConcerns(comparison, thresholds);
         if (concerns.length > 0 || lostByMove) {
-          const question = comparisonQuestion(comparison, concerns, kind === "restore" ? "Le planning précédent" : "Ce calcul");
+          const subject = kind === "restore" ? "Le planning précédent" : kind === "place" ? "Ce placement" : "Ce calcul";
+          const question = comparisonQuestion(comparison, concerns, subject);
           const asked = move
             ? `Déplacement de ${tripRef(move.tripId)} vers ${move.vehicleLabel} : ${lostByMove}${lostByMove ? question : lowerFirst(question)}`
             : question;
@@ -643,10 +725,10 @@ async function finishRun(args: {
       },
     });
   } catch (error) {
-    if (error instanceof ReplaceRefused && error.reason === "move") {
-      await failRun(runId, error.message, meta);
-      await undoMove();
-      return { ok: false, error: await shown(error.message), moveRejected: true };
+    if (error instanceof ReplaceRefused && error.reason === "place") {
+      // Not a failure of the computation: its plan is not kept (the banner says « Placement … non retenu », from its kind).
+      await failRun(runId, `${NOT_KEPT_PREFIX} : ${error.message}`, { ...meta, details: runDetailsJson(plan, { kind }) });
+      return { ok: false, error: await shown(`Planning inchangé : ${error.message}`) };
     }
     if (error instanceof ReplaceRefused && error.comparison && error.version) {
       const { comparison, version: compared, message } = error;
@@ -693,7 +775,14 @@ async function finishRun(args: {
     return failRun(runId, "Le planning calculé n'a pas pu être enregistré (erreur de base de données). Relancez l'optimisation.", meta);
   }
   const changes = args.inPlace ? changedRoutes(args.inPlace, plan.routes) : null;
-  return { ok: true, runId, message: successMessage(kind, saved, plan, build, changes, args.place ?? null) };
+  const placed = placement ? placementOutcome(plan, placement) : null;
+  const warning = plan.validation.violations.length > 0 || (placed !== null && placementWarning(placed));
+  return {
+    ok: true,
+    runId,
+    message: successMessage(kind, saved, plan, build, changes, placed),
+    ...(warning ? { warning: true } : {}),
+  };
 }
 
 /**
@@ -725,7 +814,11 @@ export async function runOptimization(isoDate: string, user: Actor, options: Run
   const { input, build } = prepared;
   const { move } = options;
   const toPlace = assignments ? new Set(build.request.trips.filter((t) => !assignments.has(t.id)).map((t) => t.id)) : null;
-  if (toPlace && toPlace.size === 0) return { ok: false, error: NOTHING_TO_PLACE_ERROR };
+  if (assignments && toPlace && toPlace.size === 0) {
+    // Trips without a vehicle never sent to the optimizer (incomplete): nothing this computation could place.
+    const incomplete = build.excludedTrips.filter((t) => !assignments.has(t.tripId)).length;
+    return { ok: false, error: incomplete > 0 ? incompleteOnlyError(incomplete) : NOTHING_TO_PLACE_ERROR };
+  }
   const moveLock = moveLockChange(move);
   if (move) {
     const issue = moveRequestIssue(build, move);
@@ -754,7 +847,7 @@ export async function runOptimization(isoDate: string, user: Actor, options: Run
     move,
     lock: moveLock ? { change: moveLock, written: true } : null,
     inPlace: inPlace?.stored,
-    place: toPlace,
+    placement: assignments && toPlace ? { toPlace, assignments } : null,
     ...(toPlace ? { lockedCount: ownLocks } : {}),
   });
 }
@@ -874,22 +967,44 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
       ...(assignments ? { lockedCount: build.request.trips.filter((t) => t.lockedVehicleId && !pinned.has(t.id)).length } : {}),
       onTrafficReset: (tx) => auditTrafficReset(tx, user, run.id, isoDate),
       // Under the planning lock of the date, which discardPendingRun takes too: never both confirmed and discarded.
-      check: async ({ tx, version }) => {
+      check: async ({ tx, comparison, version }) => {
         const still = await tx.optimizationRun.findUnique({ where: { id: run.id }, select: { status: true } });
         if (still?.status !== "AWAITING_CONFIRMATION") throw new ReplaceRefused("gone", NOT_PENDING_ERROR);
         if (version !== pending.basedOnVersion) throw new ReplaceRefused("stale", PLAN_CHANGED_SINCE_ERROR);
+        // A placement is never confirmed into taking trips off their vehicle (a plan held before this rule).
+        const loss = assignments ? placementLoss(comparison.lostTripIds, build.request) : null;
+        if (loss) throw new ReplaceRefused("place", `${NOT_KEPT_PREFIX} : ${loss}`);
       },
     });
   } catch (error) {
     if (error instanceof ReplaceRefused && error.reason === "gone") return { ok: false, error: error.message, stale: true };
+    if (error instanceof ReplaceRefused && error.reason === "place") {
+      await dropPendingRun(run.id, run.details, error.message);
+      return { ok: false, error: await shownMessage(error.message) };
+    }
     if (error instanceof ReplaceRefused) return dropPendingRun(run.id, run.details, error.message);
     if (error instanceof PlanBlockedError) return dropPendingRun(run.id, run.details, `${NOT_KEPT_PREFIX} : ${error.message}`);
     logError("[planning] saving a confirmed plan failed", error, { runId: run.id, serviceDate: isoDate });
     return { ok: false, error: "Le planning n'a pas pu être enregistré (erreur de base de données). Réessayez." };
   }
-  const what =
-    kind === "restore" ? "Planning précédent rétabli" : kind === "place" ? "Courses non affectées placées" : "Nouveau planning enregistré";
-  return { ok: true, runId: run.id, message: `${what} : ${saved.served}/${saved.served + saved.unassigned} courses servies · ${plural(saved.routes, "tournée")}.` };
+  const placement = assignments
+    ? placementOutcome(pending.response, {
+        toPlace: new Set(build.request.trips.filter((t) => !assignments.has(t.id)).map((t) => t.id)),
+        assignments,
+      })
+    : null;
+  const what = placement
+    ? placementText(placement)
+    : kind === "restore"
+      ? "Planning précédent rétabli"
+      : "Nouveau planning enregistré";
+  const warning = pending.response.validation.violations.length > 0 || (placement !== null && placementWarning(placement));
+  return {
+    ok: true,
+    runId: run.id,
+    message: `${what} : ${saved.served}/${saved.served + saved.unassigned} courses servies · ${plural(saved.routes, "tournée")}.`,
+    ...(warning ? { warning: true } : {}),
+  };
 }
 
 /** Closes a pending run that can no longer be saved (FAILED, its plan dropped), with why. */

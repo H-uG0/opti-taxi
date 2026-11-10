@@ -3,19 +3,20 @@ import { lockRoutes, placeUnassigned, unlockRoutes } from "./actions";
 
 // « Figer » / « Défiger » a route, a depot or the day against a fake Prisma
 // client: which trips are written (conditionally), one audit event per
-// action, a stale page refused, a past date refused.
+// action naming the trips changed, a stale page, a past date and a running
+// computation refused.
 const fake = vi.hoisted(() => {
   const models = {
     route: { findFirst: vi.fn() },
     depot: { findUnique: vi.fn() },
-    trip: { findMany: vi.fn(), updateMany: vi.fn() },
+    trip: { findMany: vi.fn(), updateManyAndReturn: vi.fn() },
     auditEvent: { createMany: vi.fn() },
     $executeRaw: vi.fn(),
   };
   return { ...models, $transaction: vi.fn(async (fn: (tx: typeof models) => unknown) => fn(models)) };
 });
 const version = vi.hoisted(() => ({ current: "v1" }));
-const run = vi.hoisted(() => ({ runOptimization: vi.fn() }));
+const run = vi.hoisted(() => ({ runOptimization: vi.fn(), optimizationInProgress: vi.fn() }));
 const cache = vi.hoisted(() => ({ revalidatePath: vi.fn() }));
 
 vi.mock("server-only", () => ({}));
@@ -26,7 +27,7 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/db", () => ({ db: fake }));
 vi.mock("@/lib/planning/run-optimization", () => ({
   replanBlocker: vi.fn(async () => null),
-  optimizationInProgress: vi.fn(async () => false),
+  optimizationInProgress: run.optimizationInProgress,
   runOptimization: run.runOptimization,
   PLANNING_TX_OPTIONS: {},
   OPTIMIZATION_IN_PROGRESS_ERROR: "Calcul en cours.",
@@ -56,7 +57,11 @@ beforeEach(() => {
   version.current = "v1";
   fake.route.findFirst.mockResolvedValue({ id: "route_t1", vehicle: { label: "Taxi 1" } });
   fake.depot.findUnique.mockResolvedValue({ name: "Gap", vehicles: [{ id: "t1" }, { id: "v1" }] });
-  fake.trip.updateMany.mockImplementation(async ({ where }: { where: { id: { in: string[] } } }) => ({ count: where.id.in.length }));
+  // Every trip asked is written (the conditions hold), returned as the ids changed.
+  fake.trip.updateManyAndReturn.mockImplementation(async ({ where }: { where: { id: { in: string[] } } }) =>
+    where.id.in.map((id) => ({ id })),
+  );
+  run.optimizationInProgress.mockResolvedValue(false);
   fake.auditEvent.createMany.mockResolvedValue({ count: 1 });
   fake.$executeRaw.mockResolvedValue(1);
 });
@@ -78,16 +83,17 @@ describe("lockRoutes", () => {
         "La tournée de Taxi 1 : 2 courses figées, elles resteront sur leur véhicule à la prochaine optimisation. 1 course figée sur un autre véhicule garde ce verrou.",
     });
     // Conditional: still unlocked and still on that vehicle's route when written.
-    expect(fake.trip.updateMany).toHaveBeenCalledWith({
+    expect(fake.trip.updateManyAndReturn).toHaveBeenCalledWith({
       where: { id: { in: ["a", "b"] }, lockedVehicleId: null, route: { is: { vehicleId: "t1" } } },
       data: { lockedVehicleId: "t1" },
+      select: { id: true },
     });
     expect(events()).toHaveLength(1);
     expect(events()[0]).toMatchObject({
       action: "plan.lock",
       entity: "Route",
       entityId: "route_t1",
-      details: { scope: "route", vehicleId: "t1", trips: 2 },
+      details: { scope: "route", vehicleId: "t1", trips: 2, tripIds: ["a", "b"], vehicleIds: ["t1", "t1"] },
     });
     // The trips read are those of the vehicle's route or locked on it, on the date.
     expect(fake.trip.findMany.mock.calls[0]![0].where).toMatchObject({
@@ -101,17 +107,30 @@ describe("lockRoutes", () => {
     fake.trip.findMany.mockResolvedValue([trip("a", "t1"), trip("b", "v1"), trip("c", "v1")]);
     const result = await lockRoutes(DATE, { kind: "depot", depotId: "dep_gap" }, "v1");
     expect(result).toMatchObject({ ok: true, message: expect.stringMatching(/^Les tournées du dépôt Gap : 3 courses figées/) });
-    expect(fake.trip.updateMany).toHaveBeenCalledTimes(2);
+    expect(fake.trip.updateManyAndReturn).toHaveBeenCalledTimes(2);
     expect(events()).toEqual([
-      expect.objectContaining({ action: "plan.lock", entity: "Depot", entityId: "dep_gap", details: { scope: "depot", trips: 3 } }),
+      expect.objectContaining({
+        action: "plan.lock",
+        entity: "Depot",
+        entityId: "dep_gap",
+        details: { scope: "depot", trips: 3, tripIds: ["a", "b", "c"], vehicleIds: ["t1", "v1", "v1"] },
+      }),
     ]);
+  });
+
+  it("traces only the trips actually written (a lock changed meanwhile is left out)", async () => {
+    fake.trip.findMany.mockResolvedValue([trip("a", "t1"), trip("b", "t1")]);
+    fake.trip.updateManyAndReturn.mockResolvedValue([{ id: "b" }]);
+    const result = await lockRoutes(DATE, { kind: "day" }, "v1");
+    expect(result).toMatchObject({ ok: true, message: expect.stringMatching(/^Toutes les tournées du jour : 1 course figée/) });
+    expect(events()[0]).toMatchObject({ details: { scope: "day", trips: 1, tripIds: ["b"], vehicleIds: ["t1"] } });
   });
 
   it("says when there is nothing to lock, and writes no event", async () => {
     fake.trip.findMany.mockResolvedValue([trip("c", "t1", "t1")]);
     const result = await lockRoutes(DATE, { kind: "day" }, "v1");
-    expect(result).toEqual({ ok: true, message: "Rien à figer dans toutes les tournées du jour : ses courses sont déjà figées." });
-    expect(fake.trip.updateMany).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: true, message: "Toutes les courses du jour sont déjà figées." });
+    expect(fake.trip.updateManyAndReturn).not.toHaveBeenCalled();
     expect(fake.auditEvent.createMany).not.toHaveBeenCalled();
     expect(cache.revalidatePath).not.toHaveBeenCalled();
   });
@@ -126,7 +145,22 @@ describe("lockRoutes", () => {
 
     expect(await lockRoutes("2020-01-06", { kind: "day" }, "v1")).toMatchObject({ ok: false, error: expect.stringMatching(/est passé/) });
     expect(await lockRoutes(DATE, { kind: "everything" } as never, "v1")).toMatchObject({ ok: false });
-    expect(fake.trip.updateMany).not.toHaveBeenCalled();
+    expect(fake.trip.updateManyAndReturn).not.toHaveBeenCalled();
+    expect(fake.auditEvent.createMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses while a computation of the date runs (it would not see the locks), checked under the planning lock", async () => {
+    fake.trip.findMany.mockResolvedValue([trip("a", "t1")]);
+    run.optimizationInProgress.mockResolvedValue(true);
+    expect(await lockRoutes(DATE, { kind: "day" }, "v1")).toEqual({ ok: false, error: "Calcul en cours." });
+    expect(await unlockRoutes(DATE, { kind: "day" }, "v1")).toEqual({ ok: false, error: "Calcul en cours." });
+    // Asked inside the transaction (its client, not the database's), after the planning lock of the date.
+    const [date, client] = run.optimizationInProgress.mock.calls[0]!;
+    expect(date).toBe(DATE);
+    expect(client).toHaveProperty("trip", fake.trip);
+    expect(client).not.toHaveProperty("$transaction");
+    expect(fake.$executeRaw).toHaveBeenCalled();
+    expect(fake.trip.updateManyAndReturn).not.toHaveBeenCalled();
     expect(fake.auditEvent.createMany).not.toHaveBeenCalled();
   });
 });
@@ -140,25 +174,34 @@ describe("unlockRoutes", () => {
       trip("amb", "a1", "a1", { exceptional: true }),
     ]);
     const result = await unlockRoutes(DATE, { kind: "day" }, "v1");
+    // The exceptional ambulance left locked asks for an action: the message stays on screen (warning).
     expect(result).toEqual({
       ok: true,
       message:
         "Toutes les tournées du jour : 2 courses défigées, la prochaine optimisation pourra les changer de véhicule. 1 recours exceptionnel à une ambulance reste figé : défigez-le depuis la course.",
+      warning: true,
     });
-    expect(fake.trip.updateMany).toHaveBeenCalledWith({
+    expect(fake.trip.updateManyAndReturn).toHaveBeenCalledWith({
       where: { id: { in: ["a", "b"] }, lockedVehicleId: { not: null }, exceptionalAmbulanceAt: null },
       data: { lockedVehicleId: null },
+      select: { id: true },
     });
     expect(fake.trip.findMany.mock.calls[0]![0].where).toEqual({ serviceDate: new Date(`${DATE}T00:00:00.000Z`) });
+    // Each trip unlocked, with the vehicle its lock pointed at.
     expect(events()).toEqual([
-      expect.objectContaining({ action: "plan.unlock", entity: "Route", entityId: null, details: { scope: "day", trips: 2 } }),
+      expect.objectContaining({
+        action: "plan.unlock",
+        entity: "Route",
+        entityId: null,
+        details: { scope: "day", trips: 2, tripIds: ["a", "b"], vehicleIds: ["t1", "v1"] },
+      }),
     ]);
   });
 
   it("unlocks a route's trips and those locked on its vehicle elsewhere", async () => {
     fake.trip.findMany.mockResolvedValue([trip("a", "t1", "v9"), trip("b", null, "t1"), trip("c", "v9", "v9")]);
     await unlockRoutes(DATE, { kind: "route", vehicleId: "t1" }, "v1");
-    expect(fake.trip.updateMany.mock.calls[0]![0].where.id).toEqual({ in: ["a", "b"] });
+    expect(fake.trip.updateManyAndReturn.mock.calls[0]![0].where.id).toEqual({ in: ["a", "b"] });
   });
 });
 

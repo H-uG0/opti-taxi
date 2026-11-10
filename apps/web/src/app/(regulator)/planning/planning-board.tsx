@@ -11,16 +11,9 @@ import { KpiStrip } from "@/components/planning/kpi-strip";
 import { Timeline } from "@/components/planning/timeline";
 import { VehiclePanel } from "@/components/planning/vehicle-panel";
 import type { DroppedLock } from "@/lib/optimizer/build-request";
-import {
-  depotChoices,
-  depotGroupViews,
-  filterRows,
-  isFiltering,
-  issueVehicleIds,
-  lockableTripCount,
-  lockedTripCount,
-  subsetKpis,
-} from "@/lib/planning/filter";
+import { scopeLockCounts, scopeTripOf } from "@/lib/planning/bulk-lock";
+import { depotChoices, depotGroupViews, filterRows, isFiltering, issueVehicleIds, subsetKpis } from "@/lib/planning/filter";
+import { pluralize } from "@/lib/planning/format";
 import type { TimeRange } from "@/lib/planning/timeline";
 import type { VehicleIssue } from "@/lib/planning/route-issues";
 import type { DayKpis, TripView, UnassignedView, VehicleRowView, ViolationView } from "@/lib/planning/types";
@@ -107,8 +100,8 @@ export function PlanningBoard({
   );
   const returnsToCheck = useMemo(() => trips.filter((t) => t.outboundNoShow).map((t) => t.id), [trips]);
   const issueIds = useMemo(
-    () => issueVehicleIds({ trips: tripsById, violations, vehicleIssues, staleTrips, returnsToCheck }),
-    [tripsById, violations, vehicleIssues, staleTrips, returnsToCheck],
+    () => issueVehicleIds({ trips: tripsById, violations, vehicleIssues, staleTrips, returnsToCheck, droppedLocks }),
+    [tripsById, violations, vehicleIssues, staleTrips, returnsToCheck, droppedLocks],
   );
   const depots = useMemo(() => depotChoices(vehicles), [vehicles]);
   const depotIds = useMemo(() => new Set(depots.map((d) => d.id)), [depots]);
@@ -208,18 +201,23 @@ export function PlanningBoard({
       }),
     [filter, setFilter],
   );
-  const shownKpis = useMemo(() => (filtering ? subsetKpis(date, kept, trips, violations) : kpis), [filtering, date, kept, trips, violations, kpis]);
+  const shownKpis = useMemo(
+    () => (filtering ? subsetKpis(date, kept, trips, violations, violationsKnown) : kpis),
+    [filtering, date, kept, trips, violations, violationsKnown, kpis],
+  );
   const availableVehicles = useMemo(() => vehicles.filter((v) => v.available).length, [vehicles]);
 
-  // Locks of a depot and of the day: counted on every vehicle of the scope (the server locks them all).
+  // Locks of a route, a depot and the day: counted by the server's rules (bulk-lock.ts) on every vehicle of the
+  // scope, whatever the filter: the buttons, their confirmation and the action agree.
+  const scopeTrips = useMemo(() => trips.map(scopeTripOf), [trips]);
   const lockCounts = useCallback(
-    (rows: readonly VehicleRowView[]) => ({
-      lockable: rows.reduce((sum, row) => sum + lockableTripCount(row, tripsById), 0),
-      locked: rows.reduce((sum, row) => sum + lockedTripCount(row, tripsById), 0),
-    }),
-    [tripsById],
+    (vehicleIds: ReadonlySet<string> | null) => {
+      const counts = scopeLockCounts(scopeTrips, (id) => vehicleIds === null || vehicleIds.has(id));
+      return { lockable: counts.lockable, locked: counts.unlockable };
+    },
+    [scopeTrips],
   );
-  const dayCounts = useMemo(() => lockCounts(vehicles), [lockCounts, vehicles]);
+  const dayCounts = useMemo(() => lockCounts(null), [lockCounts]);
 
   const visibleIds = useMemo(() => new Set(shown.map((v) => v.id)), [shown]);
   const mapVehicles = useMemo<MapVehicle[]>(
@@ -258,7 +256,12 @@ export function PlanningBoard({
   // The map frames the vehicles kept again when the filter changes.
   const mapKey = `${date}|${filter.depots.join(",")}|${filter.types.join(",")}|${filter.states.join(",")}|${filter.hideFree}`;
 
-  const lockedLabel = selectedVehicle ? lockCounts([selectedVehicle]) : null;
+  const lockedLabel = selectedVehicle ? lockCounts(new Set([selectedVehicle.id])) : null;
+  // « À traiter » as a state lists vehicles: say where the rest of « À traiter » is when none is left.
+  const emptyText =
+    filter.states.includes("issue") && unassigned.length > 0
+      ? `Aucun véhicule à traiter avec ces filtres. ${pluralize(unassigned.length, "course sans véhicule reste", "courses sans véhicule restent")} dans « À traiter ».`
+      : undefined;
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
@@ -307,10 +310,11 @@ export function PlanningBoard({
             collapsed={collapsed}
             onToggleGroup={toggleGroup}
             compact={filter.compact}
+            emptyText={emptyText}
             groupActions={
               planned
                 ? (group) => {
-                    const counts = lockCounts(vehicles.filter((v) => v.depot.id === group.id));
+                    const counts = lockCounts(new Set(vehicles.filter((v) => v.depot.id === group.id).map((v) => v.id)));
                     return (
                       <LockScopeButtons
                         date={date}
@@ -404,7 +408,14 @@ export function PlanningBoard({
               onSelectVehicle={showVehicle}
             />
           </div>
-          <Card className="h-80 shrink-0 overflow-hidden xl:h-[38%] xl:min-h-44">
+          {/* With a trip or a vehicle selected, the map gives height to its panel: the actions stay in view on a
+              1 280 × 800 screen whatever the banners above. */}
+          <Card
+            className={cn(
+              "h-80 shrink-0 overflow-hidden",
+              selectedTrip || selectedVehicle ? "xl:h-[30%] xl:min-h-32" : "xl:h-[38%] xl:min-h-44",
+            )}
+          >
             <PlanningMapLazy
               vehicles={mapVehicles}
               trips={mapTrips}

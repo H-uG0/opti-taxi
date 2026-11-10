@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { planningTripHref } from "@/lib/planning/links";
-import { ArrowLeft, Building2, Info, Phone, Printer, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Building2, CalendarClock, Info, Phone, Printer, TriangleAlert } from "lucide-react";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
 import { Card, EmptyState, PageHeader } from "@/components/ui/layout";
@@ -399,12 +399,14 @@ function GroupTable({
                 <ul className="space-y-1">
                   {group.patients.map((patient) => (
                     <li key={patient.tripId}>
+                      {/* Marked as a link (colour, dotted underline, the planning's icon as in Courses), never by hover alone. */}
                       <Link
                         href={planningTripHref(date, patient.tripId)}
-                        className="font-medium text-slate-900 underline-offset-2 hover:text-brand-800 hover:underline focus-visible:outline-2 focus-visible:outline-brand-600 print:no-underline"
+                        className="inline-flex items-center gap-1 font-medium text-brand-800 underline decoration-brand-300 decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-2 focus-visible:outline-brand-600 print:text-slate-900 print:no-underline"
                         title="Voir la course sur le planning"
                       >
                         {patient.patientName}
+                        <CalendarClock aria-hidden className="size-3.5 shrink-0 print:hidden" />
                       </Link>{" "}
                       <span className="tabular text-xs text-slate-600">
                         {plannedLabel} {formatMinute(patient.plannedMinute)} · {referenceLabel}{" "}

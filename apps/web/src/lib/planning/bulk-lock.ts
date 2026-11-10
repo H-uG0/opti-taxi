@@ -5,6 +5,7 @@
  * (planning/actions.ts lockRoutes / unlockRoutes) loads and writes.
  */
 import type { TripStatus } from "@prisma/client";
+import type { TripView } from "./types";
 
 export type LockScope = { kind: "route"; vehicleId: string } | { kind: "depot"; depotId: string } | { kind: "day" };
 
@@ -74,6 +75,31 @@ export function tripsToUnlock(trips: readonly ScopeTrip[], inScope: (vehicleId: 
   return { ids, keptExceptional };
 }
 
+/** A trip of the planning page as the bulk lock rules read it (the server reads the same fields from the database). */
+export function scopeTripOf(
+  trip: Pick<TripView, "id" | "status" | "lockedVehicleId" | "vehicleId" | "exceptionalAmbulance">,
+): ScopeTrip {
+  return {
+    id: trip.id,
+    status: trip.status,
+    lockedVehicleId: trip.lockedVehicleId,
+    routeVehicleId: trip.vehicleId,
+    exceptionalAmbulance: trip.exceptionalAmbulance === true,
+  };
+}
+
+/**
+ * What « Figer » and « Défiger » of a scope would change, by the same rules as
+ * the server (tripsToLock, tripsToUnlock): the buttons' counts, their
+ * confirmation and whether they are enabled never disagree with the action.
+ */
+export function scopeLockCounts(
+  trips: readonly ScopeTrip[],
+  inScope: (vehicleId: string) => boolean,
+): { lockable: number; unlockable: number } {
+  return { lockable: tripsToLock(trips, inScope).count, unlockable: tripsToUnlock(trips, inScope).ids.length };
+}
+
 function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
   return `${count} ${count > 1 ? pluralForm : singular}`;
 }
@@ -89,12 +115,19 @@ function capitalized(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/** Nothing left to lock in the scope: « ses » courses of a route, « leurs » courses of a depot's routes, the whole day. */
+function nothingToLock(scope: LockScope, name: string | null): string {
+  if (scope.kind === "day") return "Toutes les courses du jour sont déjà figées.";
+  const what = scopeText(scope, name);
+  return `Rien à figer dans ${what} : ${scope.kind === "route" ? "ses" : "leurs"} courses sont déjà figées.`;
+}
+
 export function lockMessage(scope: LockScope, name: string | null, locked: number, plan: Pick<LockPlan, "lockedElsewhere">): string {
   const what = scopeText(scope, name);
   const parts = [
     locked > 0
       ? `${capitalized(what)} : ${plural(locked, "course figée", "courses figées")}, ${locked > 1 ? "elles resteront" : "elle restera"} sur ${locked > 1 ? "leur" : "son"} véhicule à la prochaine optimisation.`
-      : `Rien à figer dans ${what} : ses courses sont déjà figées.`,
+      : nothingToLock(scope, name),
   ];
   if (plan.lockedElsewhere > 0) {
     parts.push(
@@ -109,7 +142,9 @@ export function unlockMessage(scope: LockScope, name: string | null, unlocked: n
   const parts = [
     unlocked > 0
       ? `${capitalized(what)} : ${plural(unlocked, "course défigée", "courses défigées")}, la prochaine optimisation pourra ${unlocked > 1 ? "les" : "la"} changer de véhicule.`
-      : `Rien à défiger dans ${what}.`,
+      : scope.kind === "day"
+        ? "Aucune course du jour n'est figée."
+        : `Rien à défiger dans ${what}.`,
   ];
   if (plan.keptExceptional > 0) {
     parts.push(

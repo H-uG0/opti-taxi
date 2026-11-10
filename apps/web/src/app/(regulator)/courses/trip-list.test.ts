@@ -17,7 +17,7 @@ import {
   summarizeTrips,
 } from "./trip-list";
 
-type T = Parameters<typeof summarizeTrips>[0][number] & Parameters<typeof sortTrips>[0][number];
+type T = Parameters<typeof summarizeTrips>[0][number] & Parameters<typeof sortTrips>[0][number] & { patientId?: string };
 
 function trip(overrides: Partial<T> & { id: string }): T {
   return {
@@ -41,6 +41,7 @@ describe("parseTripFilters", () => {
       direction: "RETURN",
       sharing: "SHARED",
       q: "dupont",
+      patient: null,
     });
     expect(parseTripFilters({ statut: "RETURN_TO_CHECK" }).status).toBe("RETURN_TO_CHECK");
     expect(parseTripFilters({ statut: "DROP TABLE", sens: ["OUTBOUND", "RETURN"], partage: "nope" })).toEqual({
@@ -48,9 +49,14 @@ describe("parseTripFilters", () => {
       direction: "OUTBOUND",
       sharing: null,
       q: "",
+      patient: null,
     });
     expect(hasActiveFilters(EMPTY_FILTERS)).toBe(false);
     expect(hasActiveFilters({ ...EMPTY_FILTERS, q: "x" })).toBe(true);
+    // A patient by id (the planning's links), never anything else.
+    expect(parseTripFilters({ patient: "cm9patient_1" }).patient).toBe("cm9patient_1");
+    expect(parseTripFilters({ patient: "Hélène Dupré" }).patient).toBeNull();
+    expect(hasActiveFilters({ ...EMPTY_FILTERS, patient: "p1" })).toBe(true);
   });
 });
 
@@ -77,6 +83,12 @@ describe("filterTrips", () => {
     expect(ids(filterTrips(trips, { ...EMPTY_FILTERS, direction: "RETURN" }))).toEqual(["b"]);
     expect(ids(filterTrips(trips, { ...EMPTY_FILTERS, sharing: "SHARED" }))).toEqual(["c"]);
     expect(ids(filterTrips(trips, { ...EMPTY_FILTERS, sharing: "REFUSED" }))).toEqual(["b"]);
+  });
+
+  it("filters on one patient by id", () => {
+    const mine = [trip({ id: "a", patientId: "p1" }), trip({ id: "b", patientId: "p2" }), trip({ id: "c", patientId: "p1", direction: "RETURN" })];
+    expect(ids(filterTrips(mine, { ...EMPTY_FILTERS, patient: "p1" }))).toEqual(["a", "c"]);
+    expect(ids(filterTrips(mine, { ...EMPTY_FILTERS, patient: "p1", direction: "RETURN" }))).toEqual(["c"]);
   });
 
   it("searches patient names without case or accents, in both orders", () => {
@@ -156,9 +168,10 @@ describe("summarizeTrips", () => {
 describe("coursesHref", () => {
   it("keeps only the filters in use", () => {
     expect(coursesHref("2026-11-03")).toBe("/courses?date=2026-11-03");
-    expect(coursesHref("2026-11-03", { status: "ACTIVE", direction: null, sharing: "REFUSED", q: "Le Gall" })).toBe(
+    expect(coursesHref("2026-11-03", { status: "ACTIVE", direction: null, sharing: "REFUSED", q: "Le Gall", patient: null })).toBe(
       "/courses?date=2026-11-03&statut=ACTIVE&partage=REFUSED&q=Le+Gall",
     );
+    expect(coursesHref("2026-11-03", { ...EMPTY_FILTERS, direction: "RETURN", patient: "p1" })).toBe("/courses?date=2026-11-03&sens=RETURN&patient=p1");
   });
 });
 

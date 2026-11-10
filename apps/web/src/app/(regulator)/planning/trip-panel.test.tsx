@@ -46,7 +46,7 @@ const optionLabels = () => Array.from(moveSelect().options).map((o) => o.textCon
 describe("TripPanel (panneau course)", () => {
   it("offers only the available vehicles of an allowed type, other than the trip's own", () => {
     renderPanel(planningFixture().trips["trip-a"]!);
-    expect(optionLabels()).toEqual(["Choisir un véhicule", "VSL 1 (Marseille) — libre"]);
+    expect(optionLabels()).toEqual(["Déplacer vers…", "VSL 1 (Marseille) — libre"]);
   });
 
   it("offers nothing to an ambulance trip without another ambulance, and says so", () => {
@@ -148,7 +148,8 @@ describe("TripPanel (panneau course)", () => {
     expect(screen.getByText("3e étage sans ascenseur, digicode 4512")).toBeTruthy();
     expect(screen.getByText("Prévoir la rampe")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Fiche patient" }).getAttribute("href")).toBe("/patients/patient-a");
-    const courses = "/courses?date=2026-11-10&sens=OUTBOUND&q=Monique+Aubert";
+    // By the patient's id: the name never goes into a URL.
+    const courses = "/courses?date=2026-11-10&sens=OUTBOUND&patient=patient-a";
     expect(screen.getByRole("link", { name: "Voir dans Courses" }).getAttribute("href")).toBe(courses);
     // « Accord du patient » opens the same line, not the whole day.
     expect(screen.getByRole("link", { name: "Accord du patient" }).getAttribute("href")).toBe(courses);
@@ -157,6 +158,15 @@ describe("TripPanel (panneau course)", () => {
     renderPanel({ ...planningFixture().trips["trip-a"]!, patientPhone: null, mobility: null });
     expect(screen.getByText("Non renseigné")).toBeTruthy();
     expect(screen.queryByText("Mobilité")).toBeNull();
+  });
+
+  it("puts the trip's actions before its details (the panel scrolls in a short box)", () => {
+    renderPanel(planningFixture().trips["trip-a"]!);
+    const actions = screen.getByRole("group", { name: "Actions sur la course" });
+    const phone = screen.getByText("Téléphone");
+    expect(actions.compareDocumentPosition(phone) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(actions.contains(screen.getByRole("button", { name: /Figer/ }))).toBe(true);
+    expect(actions.contains(moveSelect())).toBe(true);
   });
 
   it("closes from its button", () => {

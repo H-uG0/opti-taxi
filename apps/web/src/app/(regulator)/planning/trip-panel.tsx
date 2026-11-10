@@ -69,6 +69,9 @@ function PhoneLink({ phone, label }: { phone: string; label: string }) {
   );
 }
 
+const MOVE_HELP =
+  "La course est figée sur ce véhicule, puis le reste de la journée est réoptimisé. Si ce véhicule ne peut pas la prendre, le planning reste inchangé ; si d'autres courses perdaient leur véhicule, le nouveau planning attend votre confirmation.";
+
 const PANEL_LINK =
   "inline-flex min-h-6 items-center gap-1 rounded text-xs font-medium text-brand-700 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-brand-600";
 
@@ -114,7 +117,7 @@ export function TripPanel({
   const ambulanceValid = ambulances.some((v) => v.id === ambulance);
   const sharingAnswerLine = trip.sharingAnswer ? sharingAnswerText(trip.sharingAnswer, trip.sharingStatus) : null;
   // The trip's line in Courses (patient and leg): phone, sharing answer, cancellation, toll.
-  const coursesHref = coursesTripHref(date, trip.patientName, trip.direction);
+  const coursesHref = coursesTripHref(date, trip.patientId, trip.direction);
 
   return (
     <Card aria-labelledby="trip-panel-title">
@@ -160,7 +163,7 @@ export function TripPanel({
             <p className="text-sm font-semibold">{OUTBOUND_NO_SHOW_LABEL}</p>
             <p className="text-xs text-red-800">{OUTBOUND_NO_SHOW_ADVICE}</p>
             <Link
-              href={coursesTripHref(date, trip.patientName, "RETURN")}
+              href={coursesTripHref(date, trip.patientId, "RETURN")}
               className="inline-flex items-center gap-1 text-xs font-medium underline underline-offset-2"
             >
               Téléphone du patient et annulation dans Courses
@@ -170,6 +173,147 @@ export function TripPanel({
         </div>
       ) : null}
 
+      {/* The trip's actions come first: the panel scrolls in a short box beside the map, and each selection shows
+          it from its top (planning-board.tsx). */}
+      <div aria-label="Actions sur la course" role="group" className="space-y-2.5 border-b border-slate-200 bg-slate-50/60 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+          <p className="min-w-0 text-slate-700">
+            {current ? (
+              <>
+                Sur <span className="font-medium text-slate-900">{current.label}</span>
+              </>
+            ) : (
+              <span className="text-amber-800">Non affectée</span>
+            )}
+            {locked ? (
+              <span className="ml-1.5 inline-flex items-center gap-1 text-xs font-medium text-slate-700">
+                <Lock aria-hidden className="size-3" /> figée sur {locked.label}
+              </span>
+            ) : trip.lockedVehicleId ? (
+              <span className="ml-1.5 text-xs text-amber-800">figée sur un véhicule indisponible</span>
+            ) : null}
+            {trip.exceptionalAmbulance ? (
+              <span className="mt-0.5 block text-xs text-slate-500">« Défiger » retire le recours exceptionnel à l&apos;ambulance.</span>
+            ) : null}
+          </p>
+          {trip.lockedVehicleId ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy || lockBlocked !== null}
+              onClick={() => run("Défigeage de la course…", () => unlockTrip(trip.id))}
+              title={
+                lockBlocked ??
+                (trip.exceptionalAmbulance
+                  ? "Retire le recours exceptionnel : la prochaine optimisation confiera la course à un taxi ou un VSL, ou la laissera sans véhicule"
+                  : "L'optimisation pourra de nouveau changer la course de véhicule")
+              }
+            >
+              <LockOpen aria-hidden className="size-3.5" />
+              Défiger
+            </Button>
+          ) : trip.vehicleId && !cancelled ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy || lockBlocked !== null}
+              onClick={() => run("Verrouillage de la course…", () => lockTrip(trip.id, trip.vehicleId ?? ""))}
+              title={lockBlocked ?? "La course restera sur ce véhicule à la prochaine optimisation"}
+            >
+              <Lock aria-hidden className="size-3.5" />
+              Figer
+            </Button>
+          ) : null}
+        </div>
+
+        <form
+          className="space-y-1"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!targetValid) return;
+            const label = vehicleById.get(target)?.label ?? "";
+            run(`Déplacement vers ${label} et réoptimisation…`, () => moveTrip(trip.id, target), { long: true });
+            setTarget("");
+          }}
+        >
+          <label htmlFor={selectId} className="sr-only">
+            Déplacer vers…
+          </label>
+          <div className="flex gap-2">
+            <Select
+              id={selectId}
+              value={targetValid ? target : ""}
+              onChange={(e) => setTarget(e.currentTarget.value)}
+              disabled={busy || moveBlocked !== null || options.length === 0}
+              className="min-w-0 flex-1"
+            >
+              <option value="">{options.length === 0 ? "Aucun véhicule compatible disponible" : "Déplacer vers…"}</option>
+              {options.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.label}
+                  {v.route ? ` — ${v.route.tripCount} course${v.route.tripCount > 1 ? "s" : ""}` : " — libre"}
+                </option>
+              ))}
+            </Select>
+            <Button type="submit" disabled={busy || moveBlocked !== null || !targetValid} title={MOVE_HELP}>
+              <MoveRight aria-hidden className="size-4" />
+              Déplacer
+            </Button>
+          </div>
+          <p className="text-xs text-slate-500">{moveBlocked ?? "Fige la course sur le véhicule choisi et réoptimise le reste."}</p>
+        </form>
+
+        {exceptionalOffer ? (
+          <form
+            aria-labelledby={`${ambulanceSelectId}-title`}
+            className="space-y-1.5 border-t border-slate-200 pt-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!ambulanceValid) return;
+              const label = vehicleById.get(ambulance)?.label ?? "";
+              run(`Recours exceptionnel à ${label} et réoptimisation…`, () => proposeExceptionalAmbulance(trip.id, ambulance), { long: true });
+              setAmbulance("");
+            }}
+          >
+            <p id={`${ambulanceSelectId}-title`} className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
+              <Ambulance aria-hidden className="size-4 text-slate-500" />
+              Recours exceptionnel à une ambulance
+            </p>
+            <p className="text-xs text-slate-500">
+              Aucun taxi ni VSL ne peut la prendre ? Une ambulance peut faire ce transport assis, facturé au tarif VSL. À
+              réserver aux cas sans autre solution : le motif est tracé sur la course et compté au tableau de bord.
+            </p>
+            <div className="flex gap-2">
+              <label htmlFor={ambulanceSelectId} className="sr-only">
+                Ambulance proposée
+              </label>
+              <Select
+                id={ambulanceSelectId}
+                value={ambulanceValid ? ambulance : ""}
+                onChange={(e) => setAmbulance(e.currentTarget.value)}
+                disabled={busy || moveBlocked !== null || ambulances.length === 0}
+                className="min-w-0 flex-1"
+              >
+                <option value="">{ambulances.length === 0 ? "Aucune ambulance disponible ce jour" : "Choisir une ambulance"}</option>
+                {ambulances.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                    {v.route ? ` — ${v.route.tripCount} course${v.route.tripCount > 1 ? "s" : ""}` : " — libre"}
+                  </option>
+                ))}
+              </Select>
+              <Button type="submit" variant="secondary" disabled={busy || moveBlocked !== null || !ambulanceValid}>
+                Proposer
+              </Button>
+            </div>
+          </form>
+        ) : exceptionalEligible ? (
+          <p className="flex items-start gap-1.5 border-t border-slate-200 pt-3 text-xs text-slate-500">
+            <Ambulance aria-hidden className="mt-0.5 size-3.5 shrink-0 text-slate-400" />
+            <span>{OPTIMIZE_FIRST_ISSUE}</span>
+          </p>
+        ) : null}
+      </div>
       <dl className="divide-y divide-slate-100 px-4 py-2 text-sm">
         <div className="pb-1">
           <Row label="Téléphone">
@@ -288,148 +432,6 @@ export function TripPanel({
         ) : null}
       </dl>
 
-      <div className="space-y-3 border-t border-slate-200 bg-slate-50/60 px-4 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-          <p className="min-w-0 text-slate-700">
-            {current ? (
-              <>
-                Sur <span className="font-medium text-slate-900">{current.label}</span>
-              </>
-            ) : (
-              <span className="text-amber-800">Non affectée</span>
-            )}
-            {locked ? (
-              <span className="ml-1.5 inline-flex items-center gap-1 text-xs font-medium text-slate-700">
-                <Lock aria-hidden className="size-3" /> figée sur {locked.label}
-              </span>
-            ) : trip.lockedVehicleId ? (
-              <span className="ml-1.5 text-xs text-amber-800">figée sur un véhicule indisponible</span>
-            ) : null}
-            {trip.exceptionalAmbulance ? (
-              <span className="mt-0.5 block text-xs text-slate-500">« Défiger » retire le recours exceptionnel à l&apos;ambulance.</span>
-            ) : null}
-          </p>
-          {trip.lockedVehicleId ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={busy || lockBlocked !== null}
-              onClick={() => run("Défigeage de la course…", () => unlockTrip(trip.id))}
-              title={
-                lockBlocked ??
-                (trip.exceptionalAmbulance
-                  ? "Retire le recours exceptionnel : la prochaine optimisation confiera la course à un taxi ou un VSL, ou la laissera sans véhicule"
-                  : "L'optimisation pourra de nouveau changer la course de véhicule")
-              }
-            >
-              <LockOpen aria-hidden className="size-3.5" />
-              Défiger
-            </Button>
-          ) : trip.vehicleId && !cancelled ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={busy || lockBlocked !== null}
-              onClick={() => run("Verrouillage de la course…", () => lockTrip(trip.id, trip.vehicleId ?? ""))}
-              title={lockBlocked ?? "La course restera sur ce véhicule à la prochaine optimisation"}
-            >
-              <Lock aria-hidden className="size-3.5" />
-              Figer
-            </Button>
-          ) : null}
-        </div>
-
-        <form
-          className="space-y-1.5"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!targetValid) return;
-            const label = vehicleById.get(target)?.label ?? "";
-            run(`Déplacement vers ${label} et réoptimisation…`, () => moveTrip(trip.id, target), { long: true });
-            setTarget("");
-          }}
-        >
-          <label htmlFor={selectId} className="block text-sm font-medium text-slate-700">
-            Déplacer vers…
-          </label>
-          <div className="flex gap-2">
-            <Select
-              id={selectId}
-              value={targetValid ? target : ""}
-              onChange={(e) => setTarget(e.currentTarget.value)}
-              disabled={busy || moveBlocked !== null || options.length === 0}
-              className="min-w-0 flex-1"
-            >
-              <option value="">{options.length === 0 ? "Aucun véhicule compatible disponible" : "Choisir un véhicule"}</option>
-              {options.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.label}
-                  {v.route ? ` — ${v.route.tripCount} course${v.route.tripCount > 1 ? "s" : ""}` : " — libre"}
-                </option>
-              ))}
-            </Select>
-            <Button type="submit" disabled={busy || moveBlocked !== null || !targetValid}>
-              <MoveRight aria-hidden className="size-4" />
-              Déplacer
-            </Button>
-          </div>
-          <p className="text-xs text-slate-500">
-            {moveBlocked ??
-              "La course est figée sur ce véhicule, puis le reste de la journée est réoptimisé. Si ce véhicule ne peut pas la servir, ou si d'autres courses restaient sans véhicule, le planning reste inchangé."}
-          </p>
-        </form>
-
-        {exceptionalOffer ? (
-          <form
-            aria-labelledby={`${ambulanceSelectId}-title`}
-            className="space-y-1.5 border-t border-slate-200 pt-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!ambulanceValid) return;
-              const label = vehicleById.get(ambulance)?.label ?? "";
-              run(`Recours exceptionnel à ${label} et réoptimisation…`, () => proposeExceptionalAmbulance(trip.id, ambulance), { long: true });
-              setAmbulance("");
-            }}
-          >
-            <p id={`${ambulanceSelectId}-title`} className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
-              <Ambulance aria-hidden className="size-4 text-slate-500" />
-              Recours exceptionnel à une ambulance
-            </p>
-            <p className="text-xs text-slate-500">
-              Aucun taxi ni VSL ne peut la prendre ? Une ambulance peut faire ce transport assis, facturé au tarif VSL. À
-              réserver aux cas sans autre solution : le motif est tracé sur la course et compté au tableau de bord.
-            </p>
-            <div className="flex gap-2">
-              <label htmlFor={ambulanceSelectId} className="sr-only">
-                Ambulance proposée
-              </label>
-              <Select
-                id={ambulanceSelectId}
-                value={ambulanceValid ? ambulance : ""}
-                onChange={(e) => setAmbulance(e.currentTarget.value)}
-                disabled={busy || moveBlocked !== null || ambulances.length === 0}
-                className="min-w-0 flex-1"
-              >
-                <option value="">{ambulances.length === 0 ? "Aucune ambulance disponible ce jour" : "Choisir une ambulance"}</option>
-                {ambulances.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.label}
-                    {v.route ? ` — ${v.route.tripCount} course${v.route.tripCount > 1 ? "s" : ""}` : " — libre"}
-                  </option>
-                ))}
-              </Select>
-              <Button type="submit" variant="secondary" disabled={busy || moveBlocked !== null || !ambulanceValid}>
-                Proposer
-              </Button>
-            </div>
-          </form>
-        ) : exceptionalEligible ? (
-          <p className="flex items-start gap-1.5 border-t border-slate-200 pt-3 text-xs text-slate-500">
-            <Ambulance aria-hidden className="mt-0.5 size-3.5 shrink-0 text-slate-400" />
-            <span>{OPTIMIZE_FIRST_ISSUE}</span>
-          </p>
-        ) : null}
-      </div>
     </Card>
   );
 }

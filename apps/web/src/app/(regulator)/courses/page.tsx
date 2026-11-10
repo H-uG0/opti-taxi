@@ -137,6 +137,9 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
   const coPassengers = coPassengersFromStops(stops);
   const shortNames = new Map(trips.map((trip) => [trip.id, shortPatientName(trip.patient)]));
   const visible = sortTrips(filterTrips(dayTrips, filters));
+  // A link from the planning filters on a patient by id: the form names that patient.
+  const filteredPatient = filters.patient ? trips.find((trip) => trip.patientId === filters.patient)?.patient : undefined;
+  const patientLabel = filteredPatient ? patientDisplayName(filteredPatient) : null;
   const returns = pairedReturns(trips);
   // Same patient, same day: a trip on the same leg, or during another care session (two vehicles for one patient?).
   const conflicts = new Map(
@@ -335,7 +338,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       <Card className="mb-4">
         <CardBody className="py-3">
           {/* Keyed by the URL: uncontrolled fields must show the filters in use after a client navigation (e.g. « Réinitialiser »). */}
-          <TripFiltersForm key={coursesHref(date, filters)} date={date} filters={filters} />
+          <TripFiltersForm key={coursesHref(date, filters)} date={date} filters={filters} patientLabel={patientLabel} />
         </CardBody>
       </Card>
 

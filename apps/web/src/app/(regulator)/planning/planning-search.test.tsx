@@ -65,6 +65,18 @@ describe("PlanningSearch (« / »)", () => {
     expect((input as HTMLInputElement).value).toBe("");
   });
 
+  it("closes the list when the focus leaves it (Tab), and the list is no Tab stop", () => {
+    const { input } = renderSearch();
+    fireEvent.change(input, { target: { value: "marseille" } });
+    expect(screen.getByRole("listbox").getAttribute("tabindex")).toBe("-1");
+    const other = screen.getByLabelText("Autre champ");
+    fireEvent.blur(input, { relatedTarget: other });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    // Back in the field: the list shows again.
+    fireEvent.focus(input);
+    expect(screen.getByRole("listbox")).toBeTruthy();
+  });
+
   it("chooses with the pointer", () => {
     const { input, onSelectTrip } = renderSearch();
     fireEvent.change(input, { target: { value: "blanc" } });

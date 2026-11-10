@@ -42,8 +42,9 @@
  *   (« Revenir au planning précédent »), plan.discard (a waiting plan not
  *   kept), plan.validate, plan.reopen, plan.lock and plan.unlock (« Figer » or
  *   « Défiger » a route, a depot or the whole day: one event per action, on
- *   the Route, the Depot or the day, details.scope and details.trips, the
- *   number of trips changed);
+ *   the Route, the Depot or the day, details.scope, details.trips (the number
+ *   of trips changed), details.tripIds and, in the same order,
+ *   details.vehicleIds: the vehicle each trip was locked on or unlocked from);
  * - field, on the Trip (stops are deleted by re-optimizations): stop.pickup,
  *   stop.dropoff, stop.no_show, stop.undo_pickup, stop.undo_dropoff
  *   (details.observedAt: the time of the gesture, when the status was sent

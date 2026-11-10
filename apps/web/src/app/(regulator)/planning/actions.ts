@@ -43,7 +43,12 @@ import { VEHICLE_TYPE_SHORT } from "@/lib/labels";
 import { formatLongDate, fromIsoDate, isIsoDate, todayIso, toIsoDate } from "@/lib/time";
 
 export type PlanningActionResult =
-  | { ok: true; message: string }
+  | {
+      ok: true;
+      message: string;
+      /** Done, but something is left to look at (violations, trips not placed, locks kept): the toast stays, in amber. */
+      warning?: boolean;
+    }
   | {
       ok: false;
       error: string;
@@ -94,7 +99,7 @@ async function guarded(action: string, body: () => Promise<PlanningActionResult>
 
 /** The action's answer to a computation's outcome. */
 function toResult(outcome: RunOutcome): PlanningActionResult {
-  if (outcome.ok) return { ok: true, message: outcome.message };
+  if (outcome.ok) return { ok: true, message: outcome.message, ...(outcome.warning ? { warning: true } : {}) };
   if (outcome.needsConfirmation) return { ok: false, error: outcome.error, needsConfirmation: true };
   return outcome.stale ? { ok: false, error: outcome.error, stale: true } : { ok: false, error: outcome.error };
 }
@@ -235,7 +240,11 @@ export async function moveTrip(tripId: string, vehicleId: string): Promise<Plann
     refreshPages();
     if (!outcome.ok && (outcome.moveRejected || outcome.needsConfirmation)) return toResult(outcome);
     if (!outcome.ok) return { ok: false, error: `${lockedThere} : ${outcome.error}` };
-    return { ok: true, message: `Course de ${who} déplacée et figée sur ${target.label}. ${outcome.message}` };
+    return {
+      ok: true,
+      message: `Course de ${who} déplacée et figée sur ${target.label}. ${outcome.message}`,
+      ...(outcome.warning ? { warning: true } : {}),
+    };
   });
 }
 
@@ -383,6 +392,7 @@ export async function proposeExceptionalAmbulance(tripId: string, vehicleId: str
     return {
       ok: true,
       message: `Course de ${who} confiée à ${target.label} : recours exceptionnel, facturé au tarif VSL. ${outcome.message}`,
+      ...(outcome.warning ? { warning: true } : {}),
     };
   });
 }
@@ -580,21 +590,32 @@ async function loadLockScope(
   };
 }
 
-/** The audit event of a bulk lock or unlock: one per action, on the route, the depot or the day. */
+/**
+ * The audit event of a bulk lock or unlock: one per action, on the route, the
+ * depot or the day, naming the trips actually changed (details.tripIds) and,
+ * in the same order, the vehicle each was locked on or unlocked from
+ * (details.vehicleIds): the trail answers « who locked or unlocked this trip »
+ * once the route is gone.
+ */
 function lockScopeEvent(
   action: "plan.lock" | "plan.unlock",
   isoDate: string,
   scope: LockScope,
   routeId: string | null,
-  trips: number,
+  changed: ReadonlyArray<{ tripId: string; vehicleId: string }>,
 ): AuditEntry {
+  const trips = {
+    trips: changed.length,
+    tripIds: changed.map((c) => c.tripId),
+    vehicleIds: changed.map((c) => c.vehicleId),
+  };
   if (scope.kind === "route") {
-    return { action, entity: "Route", entityId: routeId, serviceDate: isoDate, details: { scope: "route", vehicleId: scope.vehicleId, trips } };
+    return { action, entity: "Route", entityId: routeId, serviceDate: isoDate, details: { scope: "route", vehicleId: scope.vehicleId, ...trips } };
   }
   if (scope.kind === "depot") {
-    return { action, entity: "Depot", entityId: scope.depotId, serviceDate: isoDate, details: { scope: "depot", trips } };
+    return { action, entity: "Depot", entityId: scope.depotId, serviceDate: isoDate, details: { scope: "depot", ...trips } };
   }
-  return { action, entity: "Route", entityId: null, serviceDate: isoDate, details: { scope: "day", trips } };
+  return { action, entity: "Route", entityId: null, serviceDate: isoDate, details: { scope: "day", ...trips } };
 }
 
 /**
@@ -602,7 +623,7 @@ function lockScopeEvent(
  * active trip of the scope's routes not locked yet is locked on the vehicle of
  * its route, in one transaction and one audit event (plan.lock). A trip already
  * locked keeps its lock. Under the planning lock of the date, on the version
- * the regulator saw.
+ * the regulator saw, and never while a computation of the date runs.
  */
 export async function lockRoutes(date: string, scope: LockScope, shownVersion: string): Promise<PlanningActionResult> {
   const user = await requireUser("REGULATOR");
@@ -616,22 +637,26 @@ export async function lockRoutes(date: string, scope: LockScope, shownVersion: s
 
     const outcome = await db.$transaction(async (tx) => {
       await lockPlanningDay(tx, isoDate);
+      // The computation running would not see these locks: its plan could put the trips elsewhere.
+      if (await optimizationInProgress(isoDate, tx)) return "running" as const;
       if ((await loadPlanVersion(tx, isoDate)) !== shownVersion) return "stale" as const;
       const loaded = await loadLockScope(tx, isoDate, parsed.data.scope);
       if (!loaded) return "stale" as const;
       const plan = tripsToLock(loaded.trips, loaded.inScope);
-      let locked = 0;
+      const changed: { tripId: string; vehicleId: string }[] = [];
       for (const [vehicleId, ids] of plan.byVehicle) {
         // Still unlocked and still on that vehicle's route when written.
-        const { count } = await tx.trip.updateMany({
+        const rows = await tx.trip.updateManyAndReturn({
           where: { id: { in: ids }, lockedVehicleId: null, route: { is: { vehicleId } } },
           data: { lockedVehicleId: vehicleId },
+          select: { id: true },
         });
-        locked += count;
+        for (const row of rows) changed.push({ tripId: row.id, vehicleId });
       }
-      if (locked > 0) await audit(tx, user, lockScopeEvent("plan.lock", isoDate, parsed.data.scope, loaded.routeId, locked));
-      return { message: lockMessage(parsed.data.scope, loaded.name, locked, plan), changed: locked > 0 };
+      if (changed.length > 0) await audit(tx, user, lockScopeEvent("plan.lock", isoDate, parsed.data.scope, loaded.routeId, changed));
+      return { message: lockMessage(parsed.data.scope, loaded.name, changed.length, plan), changed: changed.length > 0 };
     }, PLANNING_TX_OPTIONS);
+    if (outcome === "running") return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
     if (outcome === "stale") return STALE_PLAN;
     if (outcome.changed) refreshPages();
     return { ok: true, message: outcome.message };
@@ -644,7 +669,7 @@ export async function lockRoutes(date: string, scope: LockScope, shownVersion: s
  * routes, is removed in one transaction and one audit event (plan.unlock).
  * An exceptional ambulance stays locked (« Défiger » withdraws it: its own
  * panel does it). Under the planning lock of the date, on the version the
- * regulator saw.
+ * regulator saw, and never while a computation of the date runs.
  */
 export async function unlockRoutes(date: string, scope: LockScope, shownVersion: string): Promise<PlanningActionResult> {
   const user = await requireUser("REGULATOR");
@@ -658,23 +683,34 @@ export async function unlockRoutes(date: string, scope: LockScope, shownVersion:
 
     const outcome = await db.$transaction(async (tx) => {
       await lockPlanningDay(tx, isoDate);
+      // The computation running was sent these locks: its plan would keep the trips where they were locked.
+      if (await optimizationInProgress(isoDate, tx)) return "running" as const;
       if ((await loadPlanVersion(tx, isoDate)) !== shownVersion) return "stale" as const;
       const loaded = await loadLockScope(tx, isoDate, parsed.data.scope);
       if (!loaded) return "stale" as const;
       const plan = tripsToUnlock(loaded.trips, loaded.inScope);
-      const { count } =
+      const rows =
         plan.ids.length > 0
-          ? await tx.trip.updateMany({
+          ? await tx.trip.updateManyAndReturn({
               where: { id: { in: plan.ids }, lockedVehicleId: { not: null }, exceptionalAmbulanceAt: null },
               data: { lockedVehicleId: null },
+              select: { id: true },
             })
-          : { count: 0 };
-      if (count > 0) await audit(tx, user, lockScopeEvent("plan.unlock", isoDate, parsed.data.scope, loaded.routeId, count));
-      return { message: unlockMessage(parsed.data.scope, loaded.name, count, plan), changed: count > 0 };
+          : [];
+      // The lock each trip had, as read under the planning lock of the date.
+      const lockedOn = new Map(loaded.trips.map((t) => [t.id, t.lockedVehicleId ?? ""]));
+      const changed = rows.map((row) => ({ tripId: row.id, vehicleId: lockedOn.get(row.id) ?? "" }));
+      if (changed.length > 0) await audit(tx, user, lockScopeEvent("plan.unlock", isoDate, parsed.data.scope, loaded.routeId, changed));
+      return {
+        message: unlockMessage(parsed.data.scope, loaded.name, changed.length, plan),
+        changed: changed.length > 0,
+        warning: plan.keptExceptional > 0,
+      };
     }, PLANNING_TX_OPTIONS);
+    if (outcome === "running") return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
     if (outcome === "stale") return STALE_PLAN;
     if (outcome.changed) refreshPages();
-    return { ok: true, message: outcome.message };
+    return { ok: true, message: outcome.message, ...(outcome.warning ? { warning: true } : {}) };
   });
 }
 

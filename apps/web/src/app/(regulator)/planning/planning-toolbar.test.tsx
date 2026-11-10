@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PlanningActivityBanner, PlanningActivityProvider } from "./planning-activity";
 import { PlanningToolbar, type ToolbarProps } from "./planning-toolbar";
@@ -18,7 +18,10 @@ vi.mock("./actions", () => actions);
 // The toast's « Recharger » uses the router.
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 beforeEach(() => vi.clearAllMocks());
 
 function renderToolbar(props: Partial<ToolbarProps> = {}) {
@@ -100,6 +103,34 @@ describe("PlanningToolbar (barre d'outils)", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(document.activeElement).toBe(validateButton);
     expect(actions.validateDay).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a computation's result and anything left to look at until closed; a short confirmation goes by itself", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderToolbar({ canValidate: false, canReopen: true });
+    fireEvent.click(screen.getByRole("button", { name: /Optimiser demain/ }));
+    expect(await screen.findByText("10 tournées enregistrées.")).toBeTruthy();
+    // The toast's effects (its timer, if any) run before the clock moves.
+    await act(async () => {});
+    act(() => vi.advanceTimersByTime(60_000));
+    // Run while the regulator may have looked away: still there.
+    expect(screen.getByText("10 tournées enregistrées.")).toBeTruthy();
+
+    actions.placeUnassigned.mockResolvedValueOnce({ ok: true, message: "Aucune des 2 courses non affectées n'a trouvé de place.", warning: true } as never);
+    cleanup();
+    renderToolbar({ unassignedCount: 2 });
+    fireEvent.click(screen.getByRole("button", { name: /Placer les non affectées/ }));
+    const warning = await screen.findByText("Aucune des 2 courses non affectées n'a trouvé de place.");
+    // Amber, not the green of a success.
+    expect(warning.closest("[role='status']")?.className).toContain("bg-amber-50");
+
+    cleanup();
+    renderToolbar({ canValidate: false, canReopen: true });
+    fireEvent.click(screen.getByRole("button", { name: /Rouvrir/ }));
+    expect(await screen.findByText("Planning rouvert.")).toBeTruthy();
+    await act(async () => {});
+    act(() => vi.advanceTimersByTime(13_000));
+    await waitFor(() => expect(screen.queryByText("Planning rouvert.")).toBeNull());
   });
 
   it("offers « Rouvrir » on a validated day instead of « Valider »", async () => {

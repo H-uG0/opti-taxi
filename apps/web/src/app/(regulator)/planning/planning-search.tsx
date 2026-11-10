@@ -76,7 +76,14 @@ export function PlanningSearch({
   };
 
   return (
-    <div ref={wrapper} className={cn("relative", className)}>
+    <div
+      ref={wrapper}
+      className={cn("relative", className)}
+      // Leaving with Tab (or a click elsewhere) closes the list: it never covers the timeline behind the focus.
+      onBlur={(e) => {
+        if (!wrapper.current?.contains(e.relatedTarget as Node | null)) setOpen(false);
+      }}
+    >
       <label htmlFor={inputId} className="sr-only">
         Rechercher un patient, un véhicule, un chauffeur ou un établissement (raccourci : barre oblique)
       </label>
@@ -134,6 +141,8 @@ export function PlanningSearch({
         <ul
           id={listId}
           role="listbox"
+          // Not a Tab stop (Chrome makes a scrolling box focusable): the arrows of the field move in it.
+          tabIndex={-1}
           aria-label="Résultats de la recherche"
           className="absolute left-0 right-0 top-full z-50 mt-1 max-h-80 min-w-72 overflow-y-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg"
         >

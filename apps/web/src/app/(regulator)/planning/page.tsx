@@ -122,6 +122,9 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   const optimizeLabel = hasRoutes ? "Réoptimiser" : date === tomorrow ? "Optimiser demain" : `Optimiser le ${formatDayMonth(date)}`;
   const relativeDay = date === today ? "Aujourd'hui" : date === tomorrow ? "J+1" : null;
   const initialTripId = requestedTrip && view.trips.some((t) => t.id === requestedTrip) ? requestedTrip : null;
+  // « Placer les non affectées » places only the trips the optimizer is sent (incomplete ones never are).
+  const incomplete = new Set(view.excludedTrips.map((t) => t.tripId));
+  const placeable = view.unassigned.filter((u) => !incomplete.has(u.tripId)).length;
 
   return (
     // Keyed by date: an action's progress or result never shows on another date.
@@ -157,7 +160,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
                 runningReason={runningReason}
                 canValidate={!past && (view.dayStatus === "PROPOSED" || view.dayStatus === "MIXED")}
                 canReopen={!past && (view.dayStatus === "VALIDATED" || view.dayStatus === "MIXED")}
-                unassignedCount={hasRoutes && !past ? view.unassigned.length : 0}
+                unassignedCount={hasRoutes && !past ? placeable : 0}
               />
             </>
           }

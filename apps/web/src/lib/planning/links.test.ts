@@ -6,9 +6,9 @@ describe("links between the planning and the other screens", () => {
     expect(planningTripHref("2026-11-10", "cmw1")).toBe("/planning?date=2026-11-10&trip=cmw1");
   });
 
-  it("filters Courses on the patient and the leg", () => {
-    expect(coursesTripHref("2026-11-10", "Hélène Martin", "RETURN")).toBe("/courses?date=2026-11-10&sens=RETURN&q=H%C3%A9l%C3%A8ne+Martin");
-    expect(coursesTripHref("2026-11-10", "Paul Durand")).toBe("/courses?date=2026-11-10&q=Paul+Durand");
+  it("filters Courses on the patient (by id, never by name) and the leg", () => {
+    expect(coursesTripHref("2026-11-10", "cm9p1", "RETURN")).toBe("/courses?date=2026-11-10&sens=RETURN&patient=cm9p1");
+    expect(coursesTripHref("2026-11-10", "cm9p2")).toBe("/courses?date=2026-11-10&patient=cm9p2");
   });
 
   it("opens the patient's record and calls a phone number as typed", () => {

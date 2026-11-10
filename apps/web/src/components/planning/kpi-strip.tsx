@@ -41,6 +41,8 @@ export function KpiStrip({
 }) {
   const unassigned = scope ? scope.unassignedDay : kpis.tripsTotal - kpis.tripsServed;
   const unassignedHint = unassigned > 0 ? pluralize(unassigned, "non affectée", "non affectées") : "toutes affectées";
+  // No vehicle shown: nothing to judge (never « conforme » in green over an empty timeline).
+  const noVehicle = scope !== null && scope.vehicles === 0;
   return (
     <section
       aria-label={scope ? `Indicateurs des ${pluralize(scope.vehicles, "véhicule affiché", "véhicules affichés")}` : "Indicateurs du jour"}
@@ -92,13 +94,17 @@ export function KpiStrip({
         hint="coûts variables"
         tone={kpis.margin < 0 ? "bad" : "default"}
       />
-      <Figure
-        label="Violations"
-        value={kpis.violations ?? "?"}
-        title={kpis.violations === null ? "Détail indisponible : réoptimisez" : "Contraintes dures non respectées (horaires, capacité, détour, attente…)"}
-        hint={kpis.violations === null ? "à réoptimiser" : kpis.violations > 0 ? "contraintes dures" : "conforme"}
-        tone={kpis.violations === null ? "warn" : kpis.violations > 0 ? "bad" : "good"}
-      />
+      {noVehicle ? (
+        <Figure label="Violations" value="—" title="Aucun véhicule affiché avec ces filtres" hint="aucun véhicule" />
+      ) : (
+        <Figure
+          label="Violations"
+          value={kpis.violations ?? "?"}
+          title={kpis.violations === null ? "Détail indisponible : réoptimisez" : "Contraintes dures non respectées (horaires, capacité, détour, attente…)"}
+          hint={kpis.violations === null ? "à réoptimiser" : kpis.violations > 0 ? "contraintes dures" : "conforme"}
+          tone={kpis.violations === null ? "warn" : kpis.violations > 0 ? "bad" : "good"}
+        />
+      )}
     </section>
   );
 }

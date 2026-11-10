@@ -55,6 +55,7 @@ vi.mock("@/lib/optimizer/persist", () => ({
 const {
   confirmPendingRun,
   discardPendingRun,
+  incompleteOnlyError,
   NO_ROUTES_TO_KEEP_ERROR,
   NOTHING_TO_PLACE_ERROR,
   restorePreviousPlan,
@@ -733,15 +734,84 @@ describe("« Placer les non affectées » (runOptimization placeOnly)", () => {
 
     fake.db.trip.findMany.mockResolvedValue([...assigned, { id: "t1", route: { vehicleId: "vsl_gre" } }]);
     expect(await runOptimization(DATE, REGULATOR, { placeOnly: true })).toEqual({ ok: false, error: NOTHING_TO_PLACE_ERROR });
+
+    // The only trip without a vehicle is incomplete (never sent to the optimizer): said as such.
+    fake.db.trip.findMany.mockImplementation(async (args: { where: { routeId?: unknown } }) => (args.where.routeId ? assigned : []));
+    fake.build.mockImplementation((day: { trips: Array<{ id: string; lockedVehicleId: string | null }> }) => ({
+      ...buildFromInput({ trips: day.trips.filter((t) => t.id !== "t1") }),
+      excludedTrips: [{ tripId: "t1", reason: "Aller sans heure de rendez-vous" }],
+    }));
+    const incomplete = await runOptimization(DATE, REGULATOR, { placeOnly: true });
+    expect(incomplete).toEqual({ ok: false, error: incompleteOnlyError(1) });
+    expect((incomplete as { error: string }).error).toMatch(/est incomplète \(voir « À traiter »\)/);
     expect(fake.db.optimizationRun.create).not.toHaveBeenCalled();
     expect(fake.optimize).not.toHaveBeenCalled();
   });
 
+  it("never takes a trip served in place off its vehicle: the run fails, the planning stays, the trip is named", async () => {
+    // t1 placed, but pinned t2 dropped: as many trips served as before, so no other rule would object.
+    const route = (vehicleId: string, tripId: string) => ({ vehicleId, stops: [{ tripId, kind: "PICKUP" }, { tripId, kind: "DROPOFF" }] });
+    fake.optimize.mockResolvedValue({
+      ok: true,
+      data: { ...planIgnoringTheMove(), routes: [route("vsl_gre", "t1")], unassigned: [{ tripId: "t2", reason: "Hors horaires." }] },
+    });
+    savePlanComparing({ current: figures(1), next: figures(1), lostTripIds: ["t2"] });
+    fake.db.trip.findMany.mockImplementation(async (args: { where: { routeId?: unknown; id?: unknown } }) =>
+      args.where.routeId ? assigned : [{ id: "t2", direction: "RETURN", patient: { firstName: "Paul", lastName: "Durand" } }],
+    );
+
+    const outcome = await runOptimization(DATE, REGULATOR, { placeOnly: true });
+
+    expect(outcome).toEqual({
+      ok: false,
+      error:
+        "Planning inchangé : ce placement aurait retiré 1 course déjà placée de son véhicule (le retour de Paul Durand). " +
+        "Placez les courses non affectées une à une avec « Déplacer vers… », ou réoptimisez la journée.",
+    });
+    // Not offered for confirmation either: the run is closed as not kept, with the trip by id only.
+    const stored = fake.db.optimizationRun.update.mock.calls.at(-1)![0] as { data: { status: string; error: string; details: { kind: string } } };
+    expect(stored.data.status).toBe("FAILED");
+    expect(stored.data.error).toMatch(/^Calcul non retenu : ce placement aurait retiré 1 course déjà placée/);
+    // Its kind is kept: the page says « Placement des non affectées … non retenu ».
+    expect(stored.data.details.kind).toBe("place");
+    expect(stored.data.error).toContain(tripRef("t2"));
+    expect(stored.data.error).not.toContain("Durand");
+    expect(fake.db.optimizationRun.update.mock.calls.some((call) => (call[0] as { data: { status: string } }).data.status === "AWAITING_CONFIRMATION")).toBe(
+      false,
+    );
+  });
+
+  it("says when a trip already placed changed vehicle, or a trip found no place, and flags it to look at", async () => {
+    const route = (vehicleId: string, ...tripIds: string[]) => ({
+      vehicleId,
+      stops: tripIds.flatMap((tripId) => [
+        { tripId, kind: "PICKUP" },
+        { tripId, kind: "DROPOFF" },
+      ]),
+    });
+    // t2's route vehicle could no longer take it (its pin dropped): it went to vsl_gre; t1 found no place.
+    fake.optimize.mockResolvedValue({
+      ok: true,
+      data: { ...planIgnoringTheMove(), routes: [route("vsl_gre", "t2")], unassigned: [{ tripId: "t1", reason: "Hors horaires." }] },
+    });
+    savePlanComparing({ current: figures(1), next: figures(1), lostTripIds: [] });
+    const outcome = await runOptimization(DATE, REGULATOR, { placeOnly: true });
+    expect(outcome).toMatchObject({
+      ok: true,
+      warning: true,
+      message: expect.stringMatching(
+        /^La course non affectée n'a pas trouvé de place, 1 course déjà placée change de véhicule \(figée ailleurs ou véhicule indisponible\) : /,
+      ),
+    });
+  });
+
   it("waits for confirmation like any computation, and is confirmed with the same pins", async () => {
     fake.optimize.mockResolvedValue({ ok: true, data: { ...planIgnoringTheMove(), routes: [] } });
-    savePlanComparing({ current: figures(2), next: figures(1), lostTripIds: ["t2"] });
+    // Nothing lost, but a much lower margin: the regulator decides, keeping the planning being the first choice.
+    savePlanComparing({ current: figures(2), next: { ...figures(2), margin: 10 }, lostTripIds: [] });
     const outcome = await runOptimization(DATE, REGULATOR, { placeOnly: true });
     expect(outcome).toMatchObject({ ok: false, needsConfirmation: true });
+    expect((outcome as { error: string }).error).toMatch(/^Ce placement dégage une marge de/);
     const stored = fake.db.optimizationRun.update.mock.calls.at(-1)![0] as {
       data: { details: Record<string, unknown> & { kind: string; pending: { placeOnly?: boolean; requestHash: string } } };
     };
@@ -770,14 +840,28 @@ describe("« Placer les non affectées » (runOptimization placeOnly)", () => {
           }
         : { status: "AWAITING_CONFIRMATION" },
     );
-    savePlanComparing({ current: figures(2), next: figures(1), lostTripIds: ["t2"] });
+    savePlanComparing({ current: figures(2), next: { ...figures(2), margin: 10 }, lostTripIds: [] });
     const confirmed = await confirmPendingRun("run-1", REGULATOR);
-    expect(confirmed).toMatchObject({ ok: true, message: expect.stringMatching(/^Courses non affectées placées : /) });
+    // Said as it is: the plan confirmed placed nothing.
+    expect(confirmed).toMatchObject({
+      ok: true,
+      warning: true,
+      message: expect.stringMatching(/^La course non affectée n'a pas trouvé de place, les autres courses restent sur leur véhicule : /),
+    });
     expect(fake.savePlan.mock.calls.at(-1)![1]).toMatchObject({ kind: "place", lockedCount: 0 });
     expect(fake.audit).toHaveBeenLastCalledWith(
       expect.anything(),
       REGULATOR,
       expect.objectContaining({ action: "plan.optimize", details: { confirmed: true, mode: "place_unassigned" } }),
+    );
+
+    // A placement held before the rule, that would take a trip off its vehicle, is dropped, never confirmed.
+    fake.savePlan.mockClear();
+    savePlanComparing({ current: figures(2), next: figures(1), lostTripIds: ["t2"] });
+    const refused = await confirmPendingRun("run-1", REGULATOR);
+    expect(refused).toMatchObject({ ok: false, error: expect.stringMatching(/^Calcul non retenu : ce placement aurait retiré 1 course déjà placée/) });
+    expect(fake.db.optimizationRun.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: { id: "run-1", status: "AWAITING_CONFIRMATION" }, data: expect.objectContaining({ status: "FAILED" }) }),
     );
   });
 });

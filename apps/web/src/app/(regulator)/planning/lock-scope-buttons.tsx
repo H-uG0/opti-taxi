@@ -16,9 +16,9 @@ type Props = {
   scope: LockScope;
   /** Vehicle label or depot name, for the messages. */
   name: string | null;
-  /** Active trips of the scope's routes not locked yet. */
+  /** Active trips of the scope's routes not locked yet (bulk-lock.ts scopeLockCounts). */
   lockable: number;
-  /** Trips of the scope locked on their vehicle. */
+  /** Locks « Défiger » would remove: on the scope's vehicles or on its routes' trips (scopeLockCounts). */
   locked: number;
   /** Why locks cannot change (past date), or null. */
   blocked: string | null;
@@ -31,8 +31,12 @@ type Props = {
  * Unlocking a depot or the day asks first: the locks a regulator set one by
  * one would be lost.
  */
-export function LockScopeButtons({ date, version, scope, name, lockable, locked, blocked, variant = "panel" }: Props) {
-  const { busy, run } = usePlanningActivity();
+const RUNNING = "Une optimisation de cette date est en cours : attendez la fin du calcul.";
+
+export function LockScopeButtons({ date, version, scope, name, lockable, locked, blocked: blockedBy, variant = "panel" }: Props) {
+  const { busy, run, remoteRunning } = usePlanningActivity();
+  // A computation running (here or on another workstation) would not see the change: the server refuses it too.
+  const blocked = blockedBy ?? (remoteRunning ? RUNNING : null);
   const [confirming, setConfirming] = useState(false);
   const what = scopeText(scope, name);
   const lockLabel = `Figer ${what}`;
@@ -46,9 +50,13 @@ export function LockScopeButtons({ date, version, scope, name, lockable, locked,
   const lockTitle =
     blocked ??
     (lockable > 0
-      ? `${pluralize(lockable, "course restera", "courses resteront")} sur leur véhicule à la prochaine optimisation`
+      ? `${pluralize(lockable, "course restera sur son véhicule", "courses resteront sur leur véhicule")} à la prochaine optimisation`
       : "Toutes les courses sont déjà figées");
-  const unlockTitle = blocked ?? (locked > 0 ? `${pluralize(locked, "course figée", "courses figées")} : l'optimisation pourra de nouveau les déplacer` : "Aucune course figée");
+  const unlockTitle =
+    blocked ??
+    (locked > 0
+      ? pluralize(locked, "course figée : l'optimisation pourra de nouveau la déplacer", "courses figées : l'optimisation pourra de nouveau les déplacer")
+      : "Aucune course figée");
 
   if (confirming) {
     return (

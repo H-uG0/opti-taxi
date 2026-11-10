@@ -25,9 +25,14 @@ export type TripFilters = {
   direction: TripDirection | null;
   sharing: SharingFilter | null;
   q: string;
+  /**
+   * One patient, by id (?patient=): the links from the planning use it, so a
+   * patient's name never travels in a URL (access logs, history, Referer).
+   */
+  patient: string | null;
 };
 
-export const EMPTY_FILTERS: TripFilters = { status: null, direction: null, sharing: null, q: "" };
+export const EMPTY_FILTERS: TripFilters = { status: null, direction: null, sharing: null, q: "", patient: null };
 
 type SearchParamValue = string | string[] | undefined;
 
@@ -40,18 +45,20 @@ function pick<T extends string>(value: SearchParamValue, allowed: readonly T[]):
   return v !== undefined && (allowed as readonly string[]).includes(v) ? (v as T) : null;
 }
 
-/** Reads ?statut=&sens=&partage=&q= ; unknown values are ignored. */
+/** Reads ?statut=&sens=&partage=&q=&patient= ; unknown values are ignored. */
 export function parseTripFilters(params: Record<string, SearchParamValue>): TripFilters {
+  const patient = (firstValue(params.patient) ?? "").trim();
   return {
     status: pick<StatusFilter>(params.statut, [...TRIP_STATUSES, "ACTIVE", "RETURN_TO_CHECK"]),
     direction: pick<TripDirection>(params.sens, DIRECTIONS),
     sharing: pick<SharingFilter>(params.partage, [...SHARING_STATUSES, "SHARED"]),
     q: (firstValue(params.q) ?? "").trim().slice(0, 80),
+    patient: /^[\w-]{1,64}$/.test(patient) ? patient : null,
   };
 }
 
 export function hasActiveFilters(filters: TripFilters): boolean {
-  return filters.status !== null || filters.direction !== null || filters.sharing !== null || filters.q !== "";
+  return filters.status !== null || filters.direction !== null || filters.sharing !== null || filters.q !== "" || filters.patient !== null;
 }
 
 /** Lowercase, accents removed: "Hélène" and "helene" match. */
@@ -65,6 +72,7 @@ export function normalizeSearch(value: string): string {
 }
 
 export type FilterableTrip = {
+  patientId?: string;
   status: TripStatus;
   direction: TripDirection;
   sharingStatus: SharingStatus;
@@ -82,6 +90,7 @@ export function matchesFilters(trip: FilterableTrip, filters: TripFilters): bool
   } else if (filters.status !== null && trip.status !== filters.status) {
     return false;
   }
+  if (filters.patient !== null && trip.patientId !== filters.patient) return false;
   if (filters.direction !== null && trip.direction !== filters.direction) return false;
   if (filters.sharing === "SHARED") {
     if (!trip.shared) return false;
@@ -204,6 +213,7 @@ export function filtersToParams(filters: TripFilters): Record<string, string> {
   if (filters.direction) params.sens = filters.direction;
   if (filters.sharing) params.partage = filters.sharing;
   if (filters.q) params.q = filters.q;
+  if (filters.patient) params.patient = filters.patient;
   return params;
 }
 
