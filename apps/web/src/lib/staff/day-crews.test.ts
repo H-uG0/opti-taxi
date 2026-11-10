@@ -411,10 +411,10 @@ describe("replacement ranking (depots, shifts, versatility)", () => {
     const result = plan({ vehicles: [vehicle("Amb", "AMBULANCE", "dea1", "aux1")], people });
     const crew = crewOf(result, "Amb");
     expect(crew).toMatchObject({ driverId: "dea1", crewMateId: "aux2", blocked: null, shift: { start: 420, end: 840 } });
-    expect(crew.issues[0]?.message).toBe("Équipier attitré indisponible (AUX1 aux1\u00a0: 1\u00a0h 00 d'horaire commun avec le chauffeur, 4\u00a0h 00 au moins)");
+    expect(crew.issues[0]?.message).toBe("Équipier attitré indisponible (AUX1 aux1\u00a0: 1\u00a0h\u00a000 d'horaire commun avec le chauffeur, 4\u00a0h\u00a000 au moins)");
     // Fixed by the regulator: refused with the numbers.
     const fixed = plan({ vehicles: [vehicle("Amb", "AMBULANCE", "dea1", "aux1")], people, saved: [{ vehicleId: "Amb", driverId: "dea1", crewMateId: "aux1" }] });
-    expect(crewOf(fixed, "Amb").blocked).toBe("DEA1 dea1 et AUX1 aux1 n'ont que 1\u00a0h 00 d'horaire commun (4\u00a0h 00 au moins, Paramètres)");
+    expect(crewOf(fixed, "Amb").blocked).toBe("DEA1 dea1 et AUX1 aux1 n'ont que 1\u00a0h\u00a000 d'horaire commun (4\u00a0h\u00a000 au moins, Paramètres)");
   });
 
   it("keeps a reserve per depot before staffing a spare vehicle", () => {
@@ -508,8 +508,8 @@ describe("work time of the crew (art. L. 3121-16)", () => {
       people: [withBreak("a", 0), withBreak("b", 30), withBreak("c", 0, [480, 840])],
     });
     const taxiA = crewOf(result, "Taxi A");
-    expect(taxiA.blocked).toMatch(/^Horaire de 13\u00a0h 00 sans pause\u00a0: .*art\. L\. 3121-16/);
-    expect(workTimeBlock(taxiA)).toBe("Pause de 20\u00a0min requise\u00a0: horaire de 13\u00a0h 00 sans pause (art. L. 3121-16)");
+    expect(taxiA.blocked).toMatch(/^Horaire de 13\u00a0h\u00a000 sans pause\u00a0: .*art\. L\. 3121-16/);
+    expect(workTimeBlock(taxiA)).toBe("Pause de 20\u00a0min requise\u00a0: horaire de 13\u00a0h\u00a000 sans pause (art. L. 3121-16)");
     expect(crewOf(result, "Taxi B").blocked).toBeNull();
     expect(crewOf(result, "Taxi C").blocked).toBeNull(); // 6 hours: no break owed
     // People without break settings (older callers) are not checked.

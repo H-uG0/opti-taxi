@@ -45,6 +45,8 @@ function NumberInput({
   placeholder,
   value,
   onChange,
+  "aria-describedby": describedBy,
+  "aria-invalid": invalid,
 }: {
   name: string;
   unit: string;
@@ -56,6 +58,9 @@ function NumberInput({
   placeholder?: string;
   value?: string;
   onChange?: (value: string) => void;
+  /** Given by Field: the hint or the error of the field. */
+  "aria-describedby"?: string;
+  "aria-invalid"?: boolean;
 }) {
   const binding =
     value !== undefined
@@ -71,7 +76,8 @@ function NumberInput({
       autoComplete="off"
       unit={unit}
       className="sm:max-w-44"
-      aria-invalid={Boolean(errors[name])}
+      aria-invalid={invalid ?? Boolean(errors[name])}
+      aria-describedby={describedBy}
       {...binding}
     />
   );

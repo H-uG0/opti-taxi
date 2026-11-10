@@ -43,8 +43,8 @@ describe("zoom", () => {
     expect(axisTicks({ start: 300, end: 1260 }, "day").map((t) => t.minute)).toEqual([360, 480, 600, 720, 840, 960, 1080, 1200]);
     expect(axisTicks({ start: 360, end: 1080 }, "day")).toHaveLength(13);
     expect(axisTicks(RANGE, "4h")).toHaveLength(15);
-    expect(axisTicks({ start: 420, end: 540 }, "2h").map((t) => t.label)).toEqual(["7\u00a0h", "7\u00a0h 30", "8\u00a0h", "8\u00a0h 30", "9\u00a0h"]);
-    expect(tickLabel(1470)).toBe("0\u00a0h 30");
+    expect(axisTicks({ start: 420, end: 540 }, "2h").map((t) => t.label)).toEqual(["7\u00a0h", "7\u00a0h\u00a030", "8\u00a0h", "8\u00a0h\u00a030", "9\u00a0h"]);
+    expect(tickLabel(1470)).toBe("0\u00a0h\u00a030");
     // Labels that would touch on a narrow track: every 2 h, then 3 h.
     expect(axisTicks({ start: 360, end: 1140 }, "day", 0.6).map((t) => t.minute)).toEqual([360, 480, 600, 720, 840, 960, 1080]);
     expect(axisTicks({ start: 360, end: 1140 }, "day", 0.3).map((t) => t.label)).toEqual(["6\u00a0h", "9\u00a0h", "12\u00a0h", "15\u00a0h", "18\u00a0h"]);

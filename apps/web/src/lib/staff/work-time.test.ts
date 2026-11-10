@@ -21,7 +21,7 @@ describe("break owed after 6 hours of work (art. L. 3121-16)", () => {
   it("explains why a longer shift cannot be worked", () => {
     const none: BreakSettings = { breakWindowStartMinute: null, breakWindowEndMinute: null, breakMinutes: 0 };
     expect(workTimeIssue(none, { start: 480, end: 841 }, "Julien Marchetti")).toBe(
-      "Horaire de 6\u00a0h 01 sans pause\u00a0: au-delà de 6\u00a0h de travail, une pause d'au moins 20\u00a0min est obligatoire " +
+      "Horaire de 6\u00a0h\u00a001 sans pause\u00a0: au-delà de 6\u00a0h de travail, une pause d'au moins 20\u00a0min est obligatoire " +
         "(Code du travail, art. L. 3121-16). Réglez la pause de Julien Marchetti (fiche du chauffeur) ou raccourcissez son horaire",
     );
     expect(workTimeIssue({ ...lunch, breakMinutes: 15 }, day, "J")).toContain("avec une pause de 15\u00a0min");
@@ -31,10 +31,10 @@ describe("break owed after 6 hours of work (art. L. 3121-16)", () => {
   it("sums the problem up in a few words for the lists", () => {
     const none: BreakSettings = { breakWindowStartMinute: null, breakWindowEndMinute: null, breakMinutes: 0 };
     expect(workTimeSummary(none, { start: 360, end: 1110 })).toBe(
-      "Pause de 20\u00a0min requise\u00a0: horaire de 12\u00a0h 30 sans pause (art. L. 3121-16)",
+      "Pause de 20\u00a0min requise\u00a0: horaire de 12\u00a0h\u00a030 sans pause (art. L. 3121-16)",
     );
     expect(workTimeSummary({ ...lunch, breakMinutes: 15 }, day)).toBe(
-      "Pause de 20\u00a0min requise\u00a0: horaire de 13\u00a0h 00 avec une pause de 15\u00a0min (art. L. 3121-16)",
+      "Pause de 20\u00a0min requise\u00a0: horaire de 13\u00a0h\u00a000 avec une pause de 15\u00a0min (art. L. 3121-16)",
     );
     expect(workTimeSummary(lunch, day)).toBeNull();
     expect(workTimeSummary(none, { start: 480, end: 840 })).toBeNull();

@@ -97,7 +97,7 @@ describe("vehicleIssues", () => {
   it("flags a crew of the day that can no longer work, in a few words for the work-time rule", () => {
     const breakless = { breakWindowStartMinute: null, breakWindowEndMinute: null, breakMinutes: 0 };
     const [issue] = issuesAfter({ people: PEOPLE.map((p) => (p.id === "taxi1" ? { ...p, ...breakless } : p)) });
-    expect(issue?.changes).toEqual(["Pause de 20\u00a0min requise\u00a0: horaire de 13\u00a0h 00 sans pause (art. L. 3121-16)"]);
+    expect(issue?.changes).toEqual(["Pause de 20\u00a0min requise\u00a0: horaire de 13\u00a0h\u00a000 sans pause (art. L. 3121-16)"]);
     const blocked = issuesAfter({ saved: [{ vehicleId: "A", driverId: "dea1", crewMateId: null }] }).find((i) => i.vehicleId === "A");
     expect(blocked?.changes).toContain("Équipage du jour bloqué\u00a0: X dea1 n'a pas la qualification requise pour ce poste");
   });

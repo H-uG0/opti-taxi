@@ -47,7 +47,7 @@ export type AxisTick = { minute: number; label: string };
 export function tickLabel(minute: number): string {
   const hours = Math.floor(minute / 60) % 24;
   const minutes = minute % 60;
-  return minutes === 0 ? `${hours}\u00a0h` : `${hours}\u00a0h ${String(minutes).padStart(2, "0")}`;
+  return minutes === 0 ? `${hours}\u00a0h` : `${hours}\u00a0h\u00a0${String(minutes).padStart(2, "0")}`;
 }
 
 /** Room a label of the axis needs (« 10 h 30 » at 11 px, and a gap). */

@@ -40,7 +40,7 @@ const TONES = {
   strong: "font-medium text-slate-900",
   bad: "font-semibold text-red-700",
   warn: "text-amber-700",
-  muted: "text-slate-500",
+  muted: "text-slate-600",
 } as const;
 type Tone = keyof typeof TONES;
 

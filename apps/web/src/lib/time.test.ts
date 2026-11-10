@@ -93,15 +93,15 @@ describe("formatDuration", () => {
   it("uses minutes below one hour and hours above", () => {
     expect(formatDuration(0)).toBe("0\u00a0min");
     expect(formatDuration(45)).toBe("45\u00a0min");
-    expect(formatDuration(60)).toBe("1\u00a0h 00");
-    expect(formatDuration(65)).toBe("1\u00a0h 05");
-    expect(formatDuration(245)).toBe("4\u00a0h 05");
+    expect(formatDuration(60)).toBe("1\u00a0h\u00a000");
+    expect(formatDuration(65)).toBe("1\u00a0h\u00a005");
+    expect(formatDuration(245)).toBe("4\u00a0h\u00a005");
   });
 
   it("keeps the sign and rounds", () => {
     expect(formatDuration(-30)).toBe("-30\u00a0min");
-    expect(formatDuration(-90)).toBe("-1\u00a0h 30");
-    expect(formatDuration(59.6)).toBe("1\u00a0h 00");
+    expect(formatDuration(-90)).toBe("-1\u00a0h\u00a030");
+    expect(formatDuration(59.6)).toBe("1\u00a0h\u00a000");
   });
 });
 

@@ -85,14 +85,14 @@ describe("driverSchema", () => {
   it("requires a break of 20\u00a0min or more over 6 hours (art. L. 3121-16)", () => {
     const blank = { breakWindowStart: "", breakWindowEnd: "", breakMinutes: "" };
     expect(errorsOf({ ...valid, ...blank }).breakWindowStart).toBe(
-      "Pause obligatoire pour un horaire de 11\u00a0h 30\u00a0: au moins 20\u00a0min au-delà de 6\u00a0h de travail (Code du travail, art. L. 3121-16).",
+      "Pause obligatoire pour un horaire de 11\u00a0h\u00a030\u00a0: au moins 20\u00a0min au-delà de 6\u00a0h de travail (Code du travail, art. L. 3121-16).",
     );
     expect(errorsOf({ ...valid, breakMinutes: "15" }).breakMinutes).toBe(
-      "Au moins 20\u00a0min pour un horaire de 11\u00a0h 30 (au-delà de 6\u00a0h de travail, Code du travail, art. L. 3121-16).",
+      "Au moins 20\u00a0min pour un horaire de 11\u00a0h\u00a030 (au-delà de 6\u00a0h de travail, Code du travail, art. L. 3121-16).",
     );
     expect(errorsOf({ ...valid, breakMinutes: "20" })).toEqual({});
     const short = { breakWindowEnd: "13:00", breakMinutes: "15" };
-    expect(errorsOf({ ...valid, ...short, shiftEnd: "13:01" }).breakMinutes).toMatch(/^Au moins 20\u00a0min pour un horaire de 6\u00a0h 01/);
+    expect(errorsOf({ ...valid, ...short, shiftEnd: "13:01" }).breakMinutes).toMatch(/^Au moins 20\u00a0min pour un horaire de 6\u00a0h\u00a001/);
     expect(errorsOf({ ...valid, ...short, shiftEnd: "13:00" })).toEqual({});
   });
 

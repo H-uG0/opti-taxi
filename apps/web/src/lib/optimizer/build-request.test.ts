@@ -291,8 +291,8 @@ describe("vehicle availability", () => {
   });
 
   it("gives a vehicle left out for the work-time rule its short reason", () => {
-    const long = "Horaire de 12\u00a0h 30 sans pause\u00a0: au-delà de 6\u00a0h de travail… Réglez la pause de Julien Marchetti";
-    const short = "Pause de 20\u00a0min requise\u00a0: horaire de 12\u00a0h 30 sans pause (art. L. 3121-16)";
+    const long = "Horaire de 12\u00a0h\u00a030 sans pause\u00a0: au-delà de 6\u00a0h de travail… Réglez la pause de Julien Marchetti";
+    const short = "Pause de 20\u00a0min requise\u00a0: horaire de 12\u00a0h\u00a030 sans pause (art. L. 3121-16)";
     const [taxi] = applyDayCrewPlan(
       [vehicle("t")],
       {
@@ -355,7 +355,7 @@ describe("vehicle availability", () => {
     expect(available.map((v) => v.id)).toEqual(["v4"]);
     expect(skipped.map((s) => s.reason)).toEqual([
       // In a few words: the list of vehicles left out has little room, Équipages gives the remedy.
-      "Pause de 20\u00a0min requise\u00a0: horaire de 13\u00a0h 00 sans pause (art. L. 3121-16)",
+      "Pause de 20\u00a0min requise\u00a0: horaire de 13\u00a0h\u00a000 sans pause (art. L. 3121-16)",
       expect.stringContaining("avec une pause de 15\u00a0min"),
       expect.stringContaining("fenêtre de pause qui ne laisse pas 45\u00a0min dans l'horaire"),
     ]);

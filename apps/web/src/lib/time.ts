@@ -31,12 +31,12 @@ export function parseMinute(value: string): number | null {
   return h * 60 + m;
 }
 
-/** Duration in minutes -> "1 h 05" / "45 min". */
+/** Duration in minutes -> "1 h 05" / "45 min", with no-break spaces (never split over two lines). */
 export function formatDuration(minutes: number): string {
   const sign = minutes < 0 ? "-" : "";
   const abs = Math.abs(Math.round(minutes));
   if (abs < 60) return `${sign}${abs}\u00a0min`;
-  return `${sign}${Math.floor(abs / 60)}\u00a0h ${String(abs % 60).padStart(2, "0")}`;
+  return `${sign}${Math.floor(abs / 60)}\u00a0h\u00a0${String(abs % 60).padStart(2, "0")}`;
 }
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;

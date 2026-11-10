@@ -124,7 +124,7 @@ describe("checkRouteCrewChange", () => {
     const people = new Map([...PEOPLE, ["drv", person("drv", ["AUXILIARY"], [360, 1080])], ["eve", person("eve", ["DEA"], [900, 1140])]]);
     const late = { people, current: { driverId: "drv", crewMateId: "dea1" }, remaining: { start: 930, end: 1070 } };
     expect(check({ ...late, next: { driverId: "drv", crewMateId: "eve" } }).errors.crewMate).toBe(
-      "DRV drv et EVE eve n'ont que 3\u00a0h 00 d'horaire commun (4\u00a0h 00 au moins, Paramètres).",
+      "DRV drv et EVE eve n'ont que 3\u00a0h\u00a000 d'horaire commun (4\u00a0h\u00a000 au moins, Paramètres).",
     );
     expect(check({ ...late, next: { driverId: "drv", crewMateId: "eve" }, rules: { minPairOverlapMin: 180 } }).errors).toEqual({});
     // Every change accepted gives a crew of the day (DayCrew) that resolves without a blocking problem.
@@ -162,7 +162,7 @@ describe("checkRouteCrewChange", () => {
     const aux = person("aux1", ["AUXILIARY"]);
     expect(pairProblem(aux, person("aux2", ["AUXILIARY"]), "AMBULANCE", DEFAULT_CREW_RULES)).toMatch(/^Il faut au moins un ambulancier DE/);
     expect(pairProblem(aux, person("dea", ["DEA"], [960, 1140]), "AMBULANCE", DEFAULT_CREW_RULES)).toBe(
-      "AUX1 aux1 et DEA dea n'ont que 3\u00a0h 00 d'horaire commun (4\u00a0h 00 au moins, Paramètres).",
+      "AUX1 aux1 et DEA dea n'ont que 3\u00a0h\u00a000 d'horaire commun (4\u00a0h\u00a000 au moins, Paramètres).",
     );
     // Exactly the minimum is enough.
     expect(pairProblem(aux, person("dea", ["DEA"], [900, 1140]), "AMBULANCE", DEFAULT_CREW_RULES)).toBeNull();

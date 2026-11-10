@@ -122,7 +122,7 @@ describe("changeRouteCrew", () => {
     const result = await changeRouteCrew(ROUTE, "drv", "eve", "v1");
     expect(result).toMatchObject({
       ok: false,
-      fieldErrors: { crewMate: "DRV drv et EVE eve n'ont que 3\u00a0h 00 d'horaire commun (4\u00a0h 00 au moins, Paramètres)." },
+      fieldErrors: { crewMate: "DRV drv et EVE eve n'ont que 3\u00a0h\u00a000 d'horaire commun (4\u00a0h\u00a000 au moins, Paramètres)." },
     });
     expect(fake.route.updateMany).not.toHaveBeenCalled();
     expect(fake.dayCrew.upsert).not.toHaveBeenCalled();

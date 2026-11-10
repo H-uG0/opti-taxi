@@ -317,7 +317,7 @@ export default async function VehiclesPage({
                             {vehicle.defaultDriver ? (
                               <Link
                                 href={`/chauffeurs/${vehicle.defaultDriver.id}`}
-                                className="block underline-offset-2 hover:text-brand-700 hover:underline"
+                                className="flex min-h-6 w-fit items-center underline-offset-2 hover:text-brand-700 hover:underline"
                               >
                                 {crewMemberName(vehicle.defaultDriver)}
                               </Link>

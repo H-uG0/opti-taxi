@@ -20,6 +20,13 @@ export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
   return <textarea className={cn(controlClasses, "min-h-20 py-2", className)} {...props} />;
 }
 
+/** Room on the right of a unit field for its unit, so a value never runs under it (« 0 courses », « 1,35 × »). */
+function unitPadding(unit: string): string {
+  if (unit.length <= 2) return "pr-10";
+  if (unit.length <= 4) return "pr-14";
+  return "pr-24";
+}
+
 /**
  * Numeric input with its unit shown inside, right-aligned. The unit is also read with the field
  * (an sr-only description), so a label without its unit is never ambiguous for a screen reader.
@@ -28,8 +35,9 @@ export function UnitInput({ unit, className, id, ...props }: ComponentProps<"inp
   const unitId = id ? `${id}-unit` : undefined;
   const describedBy = [props["aria-describedby"], unitId].filter(Boolean).join(" ") || undefined;
   return (
-    <div className="relative">
-      <Input id={id} className={cn("tabular pr-14 text-right", className)} {...props} aria-describedby={describedBy} />
+    // The width classes go on the wrapper: the unit stays inside the field however narrow it is.
+    <div className={cn("relative", className)}>
+      <Input id={id} className={cn("tabular text-right", unitPadding(unit))} {...props} aria-describedby={describedBy} />
       <span aria-hidden className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-slate-600">
         {unit}
       </span>
@@ -56,13 +64,14 @@ export function fieldIds(htmlFor: string) {
   return { hint: `${htmlFor}-hint`, error: `${htmlFor}-error` };
 }
 
-type ControlProps = { id?: string; "aria-describedby"?: string; "aria-invalid"?: unknown };
+type ControlProps = { id?: string; name?: string; "aria-describedby"?: string; "aria-invalid"?: unknown };
 
 /**
  * Label + control + optional hint and error. `htmlFor` must match the control id.
  *
  * The hint and the error get ids derived from `htmlFor` (fieldIds); the control
- * whose id is `htmlFor` (the single child, as `<Input id=…>` or `<UnitInput id=…>`)
+ * whose id is `htmlFor` (the single child, as `<Input id=…>` or `<UnitInput id=…>`,
+ * or a helper without id whose `name` is `htmlFor` and that forwards the two props)
  * receives `aria-describedby` (its own ids first) and `aria-invalid` when there is
  * an error. A control nested deeper (in a wrapper) is left alone: link it with fieldIds.
  */
@@ -88,7 +97,9 @@ export function Field({
 
   let control = children;
   const only = Children.count(children) === 1 ? Children.only(children) : null;
-  if (ids && isValidElement<ControlProps>(only) && only.props.id === htmlFor) {
+  // The control itself (id = htmlFor), or a form's own input helper whose id is its name (it forwards both props).
+  const isControl = (props: ControlProps) => props.id === htmlFor || (props.id === undefined && props.name === htmlFor);
+  if (ids && isValidElement<ControlProps>(only) && isControl(only.props)) {
     const own = only.props["aria-describedby"];
     control = cloneElement(only as ReactElement<ControlProps>, {
       "aria-describedby": [own, describedBy].filter(Boolean).join(" ") || undefined,

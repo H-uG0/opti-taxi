@@ -34,6 +34,18 @@ describe("Field", () => {
     expect(document.getElementById("quantity-unit")?.textContent).toBe("en L");
   });
 
+  it("links a form's own input helper keyed by its name, which forwards the two props", () => {
+    function Minutes({ name, ...aria }: { name: string; "aria-describedby"?: string; "aria-invalid"?: boolean }) {
+      return <UnitInput id={name} name={name} unit="min" {...aria} />;
+    }
+    render(
+      <Field label="Marge (min)" htmlFor="margin" hint="Avant le rendez-vous">
+        <Minutes name="margin" />
+      </Field>,
+    );
+    expect(screen.getByLabelText("Marge (min)").getAttribute("aria-describedby")).toBe("margin-hint margin-unit");
+  });
+
   it("leaves a control nested in a wrapper alone, its ids still available", () => {
     render(
       <Field label="Ville" htmlFor="city" error="Ville obligatoire">

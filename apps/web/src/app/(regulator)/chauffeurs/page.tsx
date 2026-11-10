@@ -287,7 +287,7 @@ export default async function DriversPage({
                           {driver.phone ? (
                             <a
                               href={`tel:${driver.phone.replace(/[^\d+]/g, "")}`}
-                              className="tabular block text-xs text-slate-500 underline-offset-2 hover:text-brand-700 hover:underline"
+                              className="tabular flex min-h-6 w-fit items-center text-xs text-slate-600 underline-offset-2 hover:text-brand-700 hover:underline"
                             >
                               {driver.phone}
                             </a>
