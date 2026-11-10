@@ -11,6 +11,7 @@
  */
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
+import type { PlanChanges } from "@/lib/planning/plan-changes";
 import type { PlanComparison, PlanSnapshot } from "@/lib/planning/plan-compare";
 import { planResponseSchema, unassignedSchema, violationSchema, type PlanResponse, type Violation } from "./contract";
 
@@ -50,6 +51,15 @@ export type RunDetails = {
   question?: string;
   /** The trip lock changed with this plan (a move, or the restoration of the plan a move replaced). */
   lockChange?: LockChange;
+  /**
+   * What the plan changes in the routes it was compared with (lib/planning/plan-changes.ts): kept
+   * while it waits for confirmation, for the « Changements » list.
+   */
+  changes?: PlanChanges;
+  /** Held only for the regulator to review its changes (not a worse plan): « Vérifier les changements ». */
+  review?: boolean;
+  /** Saved for some vehicles only (« accepter véhicule par véhicule »): the vehicles that kept their route in place. */
+  refusedVehicleIds?: string[];
 };
 
 /**
@@ -102,6 +112,22 @@ const comparisonSchema = z.object({
 
 const lockChangeSchema = z.object({ tripId: z.string(), from: z.string().nullable(), to: z.string().nullable() });
 
+const routeSummarySchema = z.object({ trips: z.number(), km: z.number(), margin: z.number() });
+
+const changesSchema = z.object({
+  trips: z.array(
+    z.object({
+      tripId: z.string(),
+      kind: z.enum(["unassigned", "vehicle", "time", "assigned"]),
+      from: z.string().nullable(),
+      to: z.string().nullable(),
+      fromPickup: z.number().nullable(),
+      toPickup: z.number().nullable(),
+    }),
+  ),
+  routes: z.array(z.object({ vehicleId: z.string(), before: routeSummarySchema.nullable(), after: routeSummarySchema.nullable() })),
+});
+
 const stopKindSchema = z.enum(["PICKUP", "DROPOFF"]);
 
 const snapshotSchema = z.object({
@@ -122,6 +148,9 @@ const detailsSchema = z.object({
   evaluatedAt: z.string().optional(),
   question: z.string().optional(),
   lockChange: lockChangeSchema.optional(),
+  changes: changesSchema.optional(),
+  review: z.boolean().optional(),
+  refusedVehicleIds: z.array(z.string()).optional(),
 });
 
 const pendingSchema = z.object({
@@ -143,6 +172,9 @@ export type RunDetailsExtra = {
   question?: string;
   pending?: PendingPlan;
   lockChange?: LockChange;
+  changes?: PlanChanges;
+  review?: boolean;
+  refusedVehicleIds?: string[];
 };
 
 /** JSON written to OptimizationRun.details. */

@@ -83,6 +83,15 @@ export function planFigures(
   };
 }
 
+/** The figures of an optimizer's plan (routes, trip results, violations), as planFigures reads them. */
+export function figuresOfPlan(plan: {
+  routes: ReadonlyArray<Pick<RouteFigures, "revenue" | "margin" | "distanceKm">>;
+  trips: ReadonlyArray<{ vehicleId: string | null }>;
+  validation: { violations: readonly unknown[] };
+}): PlanFigures {
+  return planFigures(plan.routes, plan.trips.filter((t) => t.vehicleId !== null).length, plan.validation.violations.length);
+}
+
 /** The crew a route is saved with (persist.ts planRoutes): its driver, and the crew mate of an ambulance. */
 export type RouteCrew = { driverId: string | null; crewMateId: string | null };
 

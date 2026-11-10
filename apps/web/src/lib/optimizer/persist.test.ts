@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
+import type { PlanChanges } from "@/lib/planning/plan-changes";
 import { optimizeRequestSchema, planResponseSchema, type PlanResponse, type PlanRoute, type TripResult } from "./contract";
 import {
   nextSharingState,
@@ -551,6 +552,32 @@ describe("contract fixtures", () => {
         routes: [{ vehicleId: taxi.id, stops: [{ tripId: "old_trip", kind: "PICKUP" }, { tripId: "old_trip", kind: "DROPOFF" }] }],
       },
     });
+  });
+
+  it("gives the guard what the new plan changes, trip by trip and route by route, and notes the vehicles kept", async () => {
+    const { prisma, runWrites } = fakeClient([inPlaceRoute]);
+    let seen: PlanChanges | null | undefined;
+    await savePlan(prisma, {
+      runId: "run_1",
+      isoDate: request.date,
+      request,
+      response,
+      refusedVehicleIds: ["veh_x"],
+      check: (context) => {
+        seen = context.changes;
+      },
+      now: NOW,
+    });
+    const placed = response.routes.flatMap((r) => r.stops.filter((st) => st.kind === "PICKUP").map((st) => st.tripId));
+    // The trip of the old plan is not part of the new request: not « left without a vehicle » by it.
+    expect(seen?.trips.every((c) => c.kind === "assigned" && c.from === null)).toBe(true);
+    expect(seen?.trips.map((c) => c.tripId).sort()).toEqual([...placed].sort());
+    expect(seen?.routes.find((r) => r.vehicleId === taxi.id)?.before).toEqual({ trips: 1, km: 120, margin: 200 });
+    expect(runWrites[0]?.data.details).toMatchObject({ refusedVehicleIds: ["veh_x"] });
+    // A first computation has nothing in place to compare with.
+    const first = fakeClient();
+    await savePlan(first.prisma, { runId: "run_2", isoDate: request.date, request, response, check: (c) => void (seen = c.changes), now: NOW });
+    expect(seen).toBeNull();
   });
 
   it("does not count the routes in place that can no longer be driven (vehicle gone, crew changed)", async () => {

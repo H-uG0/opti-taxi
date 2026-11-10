@@ -15,6 +15,7 @@ import {
   type PlanComparison,
   type TodayCrew,
 } from "@/lib/planning/plan-compare";
+import { placementsOf, planChanges, type PlanChanges } from "@/lib/planning/plan-changes";
 import { loadPlanVersion } from "@/lib/planning/version";
 import { formatLongDate, fromIsoDate } from "@/lib/time";
 import type { OptimizeRequest, PlanResponse } from "./contract";
@@ -285,6 +286,11 @@ export type SavePlanCheck = {
   comparison: PlanComparison;
   /** Version of the routes in place (lib/planning/version.ts). */
   version: string;
+  /**
+   * What the new plan changes in the routes in place, trip by trip and route by route
+   * (lib/planning/plan-changes.ts); null when the date has no routes in place.
+   */
+  changes?: PlanChanges | null;
 };
 
 /**
@@ -314,7 +320,7 @@ async function readPlanInPlace(tx: Prisma.TransactionClient, serviceDate: Date, 
     }),
     tx.trip.findMany({
       where: { serviceDate, routeId: { not: null }, status: { notIn: [...OFF_ROUTE_STATUSES] } },
-      select: { id: true, routeId: true },
+      select: { id: true, routeId: true, plannedPickupMinute: true },
     }),
     tx.optimizationRun.findFirst({
       where: { serviceDate, status: "SUCCESS" },
@@ -329,8 +335,14 @@ async function readPlanInPlace(tx: Prisma.TransactionClient, serviceDate: Date, 
   const drivableIds = new Set(drivable.map((route) => route.id));
   const servedTripIds = served.filter((t) => t.routeId !== null && drivableIds.has(t.routeId)).map((t) => t.id);
   const undrivable = routes.filter((route) => !drivableIds.has(route.id));
+  const pickupOf = new Map(served.map((t) => [t.id, t.plannedPickupMinute]));
   return {
     routes,
+    /** Where each trip served in place is picked up, on any route in place (the timeline shows them all). */
+    placements: placementsOf(
+      routes.map((route) => ({ ...route, stops: [...route.stops].sort((a, b) => a.sequence - b.sequence) })),
+      (tripId) => pickupOf.get(tripId) ?? null,
+    ),
     servedTripIds,
     figures: planFigures(drivable, servedTripIds.length, violations),
     undrivable: {
@@ -389,6 +401,8 @@ export async function savePlan(
     check?: (context: SavePlanCheck) => Promise<void> | void;
     /** The trip lock changed with this plan, kept in the run's details (restoring the plan replaced undoes it). */
     lockChange?: LockChange;
+    /** Saved for some vehicles only: those that kept their route in place, kept in the run's details. */
+    refusedVehicleIds?: readonly string[];
     /**
      * Locks set by the regulator, when the request carries others (« Placer les non affectées » pins
      * every trip in a route for that computation only); by default, the locks of the request.
@@ -445,7 +459,15 @@ export async function savePlan(
         figures: planFigures(routes, servedTripIds.length, response.validation.violations.length),
         servedTripIds,
       });
-      await args.check?.({ tx, comparison, version: await loadPlanVersion(tx, isoDate) });
+      const pickupAfter = new Map(updates.map((u) => [u.tripId, u.data.plannedPickupMinute]));
+      const changes = inPlace
+        ? planChanges(
+            { routes: inPlace.routes, placements: inPlace.placements },
+            { routes, placements: placementsOf(routes, (tripId) => pickupAfter.get(tripId) ?? null) },
+            new Set(tripIds),
+          )
+        : null;
+      await args.check?.({ tx, comparison, version: await loadPlanVersion(tx, isoDate), changes });
 
       // Stops cascade; trips keep their row but lose routeId (onDelete: SetNull).
       await tx.route.deleteMany({ where: { serviceDate } });
@@ -497,6 +519,7 @@ export async function savePlan(
             comparison,
             previous: inPlace ? snapshotOf(inPlace.runId, inPlace.routes, inPlace.figures) : undefined,
             lockChange: args.lockChange,
+            ...(args.refusedVehicleIds && args.refusedVehicleIds.length > 0 ? { refusedVehicleIds: [...args.refusedVehicleIds] } : {}),
           }),
         },
       });

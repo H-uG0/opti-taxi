@@ -58,8 +58,11 @@ const {
   incompleteOnlyError,
   NO_ROUTES_TO_KEEP_ERROR,
   NOTHING_TO_PLACE_ERROR,
+  previewPendingSelection,
   restorePreviousPlan,
+  reviewedChanges,
   runOptimization,
+  SELECTION_CHANGED_ERROR,
   withdrawLapsedProposals,
 } = await import("./run-optimization");
 const { planVersionToken, requestHash } = await import("./version");
@@ -863,5 +866,216 @@ describe("«\u202fPlacer les non affectées\u202f» (runOptimization placeOnly)"
     expect(fake.db.optimizationRun.updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({ where: { id: "run-1", status: "AWAITING_CONFIRMATION" }, data: expect.objectContaining({ status: "FAILED" }) }),
     );
+  });
+});
+
+describe("what a re-optimization changes, shown before it is saved (INS-02)", () => {
+  const vehicleChange = (tripId: string, from = "taxi_mrs", to = "vsl_gre") => ({ tripId, kind: "vehicle" as const, from, to, fromPickup: 480, toPickup: 485 });
+  const routeChange = (vehicleId: string) => ({ vehicleId, before: { trips: 2, km: 30, margin: 20 }, after: { trips: 1, km: 20, margin: 25 } });
+
+  /** savePlan as the guard sees it, with what the new plan changes in the routes in place. */
+  function savePlanChanging(changes: unknown, comparison: unknown = { current: figures(2), next: figures(2), lostTripIds: [] }) {
+    fake.savePlan.mockImplementation(async (client: Client, args: { check?: (c: unknown) => unknown }) =>
+      client.$transaction(async (tx) => {
+        await args.check?.({ tx, comparison, version: "v1", changes });
+        return { routes: 2, served: 2, unassigned: 0, comparison };
+      }),
+    );
+  }
+
+  it("holds a re-optimization that changes trips, with its changes kept for the « Changements » list", async () => {
+    const changes = { trips: [vehicleChange("t2")], routes: [routeChange("taxi_mrs"), routeChange("vsl_gre")] };
+    savePlanChanging(changes);
+    const outcome = await runOptimization(DATE, REGULATOR);
+    expect(outcome).toEqual({
+      ok: false,
+      needsConfirmation: true,
+      error:
+        "Ce calcul change 1 course du planning en place\u00a0: 1 course change de véhicule. Vérifiez la liste «\u202fChangements\u202f», puis enregistrez tout ou véhicule par véhicule.",
+    });
+    const stored = fake.db.optimizationRun.update.mock.calls.at(-1)![0] as { data: { status: string; details: Record<string, unknown> } };
+    expect(stored.data.status).toBe("AWAITING_CONFIRMATION");
+    expect(stored.data.details).toMatchObject({ review: true, changes, kind: "optimize" });
+    expect(stored.data.details.pending).toMatchObject({ basedOnVersion: "v1", lockChange: null });
+  });
+
+  it("saves at once when no trip changes vehicle, moves by 10 min or more, nor loses its vehicle", async () => {
+    savePlanChanging({ trips: [], routes: [routeChange("taxi_mrs")] });
+    expect(await runOptimization(DATE, REGULATOR)).toMatchObject({ ok: true });
+    // First computation of the day: nothing in place to compare with.
+    savePlanChanging(null);
+    expect(await runOptimization(DATE, REGULATOR)).toMatchObject({ ok: true });
+  });
+
+  it("keeps the regulator's question when the plan is worse, with its changes", async () => {
+    const changes = { trips: [{ ...vehicleChange("t2"), kind: "unassigned" as const, to: null, toPickup: null }], routes: [routeChange("taxi_mrs")] };
+    savePlanChanging(changes, { current: figures(2), next: figures(1), lostTripIds: ["t2"] });
+    const outcome = await runOptimization(DATE, REGULATOR);
+    expect((outcome as { error: string }).error).toMatch(/^Ce calcul sert 1 course contre 2/);
+    const stored = fake.db.optimizationRun.update.mock.calls.at(-1)![0] as { data: { details: Record<string, unknown> } };
+    expect(stored.data.details.changes).toEqual(changes);
+    expect(stored.data.details).not.toHaveProperty("review");
+  });
+
+  it("reviews a move for the other trips only, a placement for the trips already placed, never a restoration", () => {
+    const changes = {
+      trips: [vehicleChange("t1"), vehicleChange("t2"), { ...vehicleChange("t9"), kind: "assigned" as const, from: null, fromPickup: null }],
+      routes: [],
+    };
+    expect(reviewedChanges("optimize", changes)?.trips.map((c) => c.tripId)).toEqual(["t1", "t2", "t9"]);
+    expect(reviewedChanges("move", changes, { movedTripId: "t1" })?.trips.map((c) => c.tripId)).toEqual(["t2", "t9"]);
+    expect(reviewedChanges("place", changes, { toPlace: new Set(["t9"]) })?.trips.map((c) => c.tripId)).toEqual(["t1", "t2"]);
+    expect(reviewedChanges("restore", changes)).toBeNull();
+  });
+
+  it("holds a move whose computation changes other trips, naming them as « Changements »", async () => {
+    const stop = (kind: "PICKUP" | "DROPOFF") => ({ tripId: "t1", kind });
+    fake.optimize.mockResolvedValue({
+      ok: true,
+      data: { ...planIgnoringTheMove(), routes: [{ vehicleId: "vsl_gre", stops: [stop("PICKUP"), stop("DROPOFF")] }] },
+    });
+    savePlanChanging({ trips: [vehicleChange("t1")], routes: [routeChange("vsl_gre")] });
+    expect(await runOptimization(DATE, REGULATOR, { move: MOVE })).toMatchObject({ ok: true });
+    savePlanChanging({ trips: [vehicleChange("t1"), vehicleChange("t2")], routes: [routeChange("vsl_gre")] });
+    const outcome = await runOptimization(DATE, REGULATOR, { move: MOVE });
+    expect(outcome).toMatchObject({ ok: false, needsConfirmation: true });
+    expect((outcome as { error: string }).error).toBe(
+      `Déplacement de la course de ${PATIENT} vers VSL Grenoble\u00a0: le nouveau calcul change aussi 1 autre course du planning en place (1 course change de véhicule). Vérifiez la liste «\u202fChangements\u202f» avant de l'enregistrer.`,
+    );
+  });
+});
+
+describe("« accepter véhicule par véhicule » (INS-02)", () => {
+  const stop = (tripId: string, kind: "PICKUP" | "DROPOFF") => ({
+    tripId,
+    kind,
+    location: { lat: 45.1, lng: 5.7 },
+    arrivalMin: 480,
+    startMin: 480,
+    departureMin: 482,
+    loadAfter: kind === "PICKUP" ? 1 : 0,
+  });
+  const route = (vehicleId: string, trips: string[]) => ({
+    vehicleId,
+    startMin: 470,
+    endMin: 540,
+    distanceKm: 20,
+    emptyKm: 5,
+    loadedKm: 15,
+    durationMin: 70,
+    revenue: 40,
+    cost: 20,
+    margin: 20,
+    break: null,
+    stops: trips.flatMap((t) => [stop(t, "PICKUP"), stop(t, "DROPOFF")]),
+  });
+  const versionParts = { routes: 2, routesAt: new Date("2026-11-09T08:00:00Z"), stops: 4, trips: 2, tripsAt: new Date("2026-11-09T08:00:00Z") };
+  // In place: taxi_mrs t1, vsl_gre t2. The computation swaps them.
+  const pending = () => ({
+    finishedAt: null,
+    id: "run-p",
+    serviceDate: new Date(`${DATE}T00:00:00Z`),
+    status: "AWAITING_CONFIRMATION",
+    kpis: null,
+    details: {
+      solverStatus: "OK",
+      violations: [],
+      warnings: [],
+      unassigned: [],
+      kind: "optimize",
+      review: true,
+      comparison: { current: figures(2), next: figures(2), lostTripIds: [] },
+      changes: {
+        trips: [
+          { tripId: "t1", kind: "vehicle", from: "taxi_mrs", to: "vsl_gre", fromPickup: 480, toPickup: 480 },
+          { tripId: "t2", kind: "vehicle", from: "vsl_gre", to: "taxi_mrs", fromPickup: 480, toPickup: 480 },
+        ],
+        routes: [
+          { vehicleId: "taxi_mrs", before: { trips: 1, km: 20, margin: 20 }, after: { trips: 1, km: 20, margin: 20 } },
+          { vehicleId: "vsl_gre", before: { trips: 1, km: 20, margin: 20 }, after: { trips: 1, km: 20, margin: 20 } },
+        ],
+      },
+      pending: {
+        response: planResponse([route("taxi_mrs", ["t2"]), route("vsl_gre", ["t1"])]),
+        requestHash: requestHash(build().request),
+        basedOnVersion: planVersionToken(versionParts),
+        lockChange: null,
+      },
+    },
+  });
+  const storedStops = (trips: string[]) => trips.flatMap((t, i) => [
+    { tripId: t, kind: "PICKUP", sequence: 2 * i },
+    { tripId: t, kind: "DROPOFF", sequence: 2 * i + 1 },
+  ]);
+
+  beforeEach(() => {
+    // Values queued by earlier tests (the plan version around a move's undo) are not this test's.
+    fake.db.$queryRaw.mockReset();
+    fake.db.optimizationRun.findUnique.mockReset();
+    fake.db.optimizationRun.findUnique.mockImplementation(async (args: { select: { serviceDate?: boolean } }) =>
+      args.select.serviceDate ? pending() : { status: "AWAITING_CONFIRMATION" },
+    );
+    fake.db.route.findMany.mockResolvedValue([
+      { vehicleId: "taxi_mrs", stops: storedStops(["t1"]) },
+      { vehicleId: "vsl_gre", stops: storedStops(["t2"]) },
+    ]);
+    fake.db.$queryRaw.mockResolvedValue([versionParts]);
+    fake.db.trip.findMany.mockResolvedValue([
+      { id: "t1", direction: "OUTBOUND", appointmentMinute: 540, readyMinute: null, patient: { firstName: "Jeanne", lastName: "Martin" } },
+      { id: "t2", direction: "RETURN", appointmentMinute: null, readyMinute: 660, patient: { firstName: "Paul", lastName: "Durand" } },
+    ]);
+    // /evaluate gives back the routes it is given, timed.
+    fake.evaluate.mockImplementation(async (request: { routes: { vehicleId: string; stops: { tripId: string }[] }[] }) => ({
+      ok: true,
+      data: {
+        ...planResponse(request.routes.map((r) => route(r.vehicleId, [...new Set(r.stops.map((s) => s.tripId))]))),
+        trips: ["t1", "t2"].map((id) => ({ tripId: id, vehicleId: request.routes.find((r) => r.stops.some((s) => s.tripId === id))?.vehicleId ?? null })),
+      },
+    }));
+  });
+
+  it("checks the day a selection makes with /evaluate: the refused vehicle keeps its route, a trip on none is said", async () => {
+    const outcome = await previewPendingSelection("run-p", ["vsl_gre"]);
+    const sent = fake.evaluate.mock.calls[0]![0] as { routes: { vehicleId: string; stops: { tripId: string; kind: string }[] }[] };
+    // VSL Grenoble keeps t2; t2 leaves the taxi's new route; t1, on the VSL in the new plan only, is left out.
+    expect(sent.routes).toEqual([
+      { vehicleId: "vsl_gre", stops: [{ tripId: "t2", kind: "PICKUP" }, { tripId: "t2", kind: "DROPOFF" }] },
+    ]);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.preview).toMatchObject({
+      refused: ["VSL Grenoble"],
+      keptOnRefused: ["DURAND Paul (retour, fin 11:00) reste sur VSL Grenoble (au lieu de Taxi Marseille 1)"],
+      leftOut: ["MARTIN Jeanne (aller, RDV 09:00) (sur Taxi Marseille 1 actuellement, sur VSL Grenoble dans le calcul)"],
+      hint: "Pour qu'elle garde un véhicule, cochez aussi VSL Grenoble, ou décochez Taxi Marseille 1.",
+    });
+    expect(outcome.preview.selection.served).toBe(1);
+    expect(outcome.preview.question).toMatch(/^Cette sélection sert 1 course contre 2/);
+  });
+
+  it("saves the day checked, the refused vehicles noted, and refuses a selection changed since", async () => {
+    const checked = await previewPendingSelection("run-p", ["vsl_gre"]);
+    const key = checked.ok ? checked.preview.key : "";
+    savePlanComparing({ current: figures(2), next: figures(1), lostTripIds: ["t1"] }, planVersionToken(versionParts));
+    expect(await confirmPendingRun("run-p", REGULATOR, { refusedVehicleIds: ["vsl_gre"], key: "other" })).toEqual({
+      ok: false,
+      error: SELECTION_CHANGED_ERROR,
+    });
+    expect(fake.savePlan).not.toHaveBeenCalled();
+    const outcome = await confirmPendingRun("run-p", REGULATOR, { refusedVehicleIds: ["vsl_gre"], key });
+    expect(outcome).toMatchObject({ ok: true, message: expect.stringMatching(/^Sélection enregistrée\u00a0: 1 véhicule garde sa tournée · /) });
+    const saved = fake.savePlan.mock.calls[0]![1] as { response: { routes: { vehicleId: string }[] }; refusedVehicleIds: string[] };
+    expect(saved.response.routes.map((r) => r.vehicleId)).toEqual(["vsl_gre"]);
+    expect(saved.refusedVehicleIds).toEqual(["vsl_gre"]);
+    expect(fake.audit.mock.calls[0]![2]).toMatchObject({ action: "plan.optimize", details: { confirmed: true, refusedVehicleIds: ["vsl_gre"] } });
+  });
+
+  it("is offered for a re-optimization only, and on the plan it was computed on", async () => {
+    fake.db.optimizationRun.findUnique.mockResolvedValue({ ...pending(), details: { ...pending().details, kind: "move" } });
+    expect(await previewPendingSelection("run-p", ["vsl_gre"])).toMatchObject({ ok: false, error: expect.stringMatching(/s'enregistre en entier/) });
+    fake.db.optimizationRun.findUnique.mockResolvedValue(pending());
+    fake.db.$queryRaw.mockResolvedValue([{ ...versionParts, stops: 6 }]);
+    expect(await previewPendingSelection("run-p", ["vsl_gre"])).toMatchObject({ ok: false, stale: true });
+    expect(fake.evaluate).not.toHaveBeenCalled();
   });
 });

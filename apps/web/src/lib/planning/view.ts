@@ -30,8 +30,9 @@ import { returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
 import { halfServedPairs } from "./half-served";
 import { computeDayKpis as computeDashboardDayKpis, type KpiRoute, type KpiTrip } from "@/lib/kpis";
 import { VIOLATION_LABELS } from "@/lib/labels";
+import { tripLineText, violationLineText } from "./naming";
+import { changesOfVehicle, type PlanChanges } from "./plan-changes";
 import { remainingPart } from "@/lib/staff/route-crew";
-import { formatMinute } from "@/lib/time";
 import { vehicleShade } from "./colors";
 import { resolveTripRefs, type TripName } from "./move";
 import type { VehicleIssue } from "./route-issues";
@@ -41,6 +42,7 @@ import type {
   DayKpis,
   DayStatus,
   FieldRecordView,
+  PlanChangesView,
   PlanningDayView,
   RecordedByView,
   RouteView,
@@ -251,10 +253,32 @@ type RunNaming = {
  * Taxi 1, Jeanne Martin (aller, RDV 08:30) ».
  */
 function violationLine(v: RunDetails["violations"][number], naming: RunNaming): string {
-  const vehicle = v.vehicleId ? naming.vehicleLabel(v.vehicleId) : null;
-  const where = [vehicle, v.tripId ? naming.tripLine(v.tripId) : null].filter((part): part is string => part !== null);
-  const label = VIOLATION_LABELS[v.code] ?? v.code;
-  return where.length > 0 ? `${label} — ${where.join(", ")}` : label;
+  return violationLineText(v, naming.tripLine, naming.vehicleLabel);
+}
+
+/**
+ * The « Changements » of a plan waiting for confirmation, named (INS-02). A vehicle refused keeps
+ * its route in place: never one off the road today (`sent`: the vehicles of today's request), whose
+ * route can no longer be driven; a new route can always be refused.
+ */
+function changesView(changes: PlanChanges, naming: RunNaming, sent: ReadonlySet<string>): PlanChangesView {
+  const label = (vehicleId: string | null) => (vehicleId ? (naming.vehicleLabel(vehicleId) ?? "Véhicule supprimé") : null);
+  return {
+    trips: changes.trips.map((change) => ({
+      ...change,
+      trip: naming.tripLine(change.tripId),
+      fromLabel: label(change.from),
+      toLabel: label(change.to),
+    })),
+    routes: changes.routes
+      .map((route) => ({
+        ...route,
+        label: label(route.vehicleId) ?? "Véhicule supprimé",
+        refusable: route.before === null || sent.has(route.vehicleId),
+        tripChanges: changesOfVehicle(changes, route.vehicleId).length,
+      }))
+      .sort((a, b) => b.tripChanges - a.tripChanges || a.label.localeCompare(b.label, "fr")),
+  };
 }
 
 function runView(
@@ -263,6 +287,7 @@ function runView(
   configuredSec: number,
   now: Date,
   naming: RunNaming,
+  sent: ReadonlySet<string> = new Set(),
 ): RunView | null {
   if (!run) return null;
   const found = details.get(run.id);
@@ -296,6 +321,10 @@ function runView(
             lostTrips: found.comparison.lostTripIds.map(naming.tripLine),
             // The details of a waiting run are those of the plan it would save.
             violations: found.violations.map((v) => violationLine(v, naming)),
+            review: found.review === true,
+            changes: found.changes ? changesView(found.changes, naming, sent) : null,
+            // A re-optimization only: a move's lock and the pins of « Placer les non affectées » go with the whole plan.
+            selectable: (found.kind ?? "optimize") === "optimize" && !found.lockChange && (found.changes?.routes.length ?? 0) > 1,
           }
         : null,
     previous: found?.previous && found.previous.routes.length > 0 ? found.previous.figures : null,
@@ -414,10 +443,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     },
     tripLine: (tripId) => {
       const trip = rawTripById.get(tripId);
-      if (!trip) return "Course supprimée";
-      const when =
-        trip.direction === "OUTBOUND" ? `aller, RDV ${formatMinute(trip.appointmentMinute)}` : `retour, fin ${formatMinute(trip.readyMinute)}`;
-      return `${personName(trip.patient)} (${when})`;
+      return trip ? tripLineText({ ...trip, patientName: personName(trip.patient) }) : "Course supprimée";
     },
     vehicleLabel: (vehicleId) => vehicleById.get(vehicleId)?.label ?? null,
   };
@@ -608,8 +634,8 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     tariffGaps: build.tariffGaps,
     staleTrips,
     vehicleIssues: input.vehicleIssues ?? [],
-    lastRun: runView(input.lastRun, input.details, input.settings.solverTimeLimitSec, now, naming),
-    planRun: runView(input.planRun, input.details, input.settings.solverTimeLimitSec, now, naming),
+    lastRun: runView(input.lastRun, input.details, input.settings.solverTimeLimitSec, now, naming, new Set(availableById.keys())),
+    planRun: runView(input.planRun, input.details, input.settings.solverTimeLimitSec, now, naming, new Set(availableById.keys())),
     // The windows of the trips without a vehicle too: one left out because no shift covers its time is drawn.
     timeRange: computeTimeRange(
       rows,

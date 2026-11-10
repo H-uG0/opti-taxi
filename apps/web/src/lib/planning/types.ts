@@ -15,6 +15,7 @@ import type {
 } from "@prisma/client";
 import type { TariffGap } from "@/lib/domain/tariffs";
 import type { DroppedLock, ExcludedTrip, SkippedVehicle } from "@/lib/optimizer/build-request";
+import type { RouteChange, TripChange } from "./plan-changes";
 import type { PlanComparison, PlanFigures } from "./plan-compare";
 import type { VehicleIssue } from "./route-issues";
 
@@ -195,6 +196,16 @@ export type DayKpis = {
   violations: number | null;
 };
 
+/**
+ * The « Changements » of a plan waiting for confirmation (INS-02), named: each trip that changes
+ * vehicle, whose pickup moves by 10 min or more, that loses or gets a vehicle; each vehicle whose
+ * route changes, with whether it may keep its route in place (« accepter véhicule par véhicule »).
+ */
+export type PlanChangesView = {
+  trips: (TripChange & { trip: string; fromLabel: string | null; toLabel: string | null })[];
+  routes: (RouteChange & { label: string; refusable: boolean; tripChanges: number })[];
+};
+
 export type RunView = {
   id: string;
   status: OptimizationRunStatus;
@@ -230,7 +241,17 @@ export type RunView = {
    * and its violations (« Jeanne Martin (aller, RDV 08:30) », « Hors fenêtre
    * horaire — Taxi 1, … »).
    */
-  pending: { question: string; comparison: PlanComparison; lostTrips: string[]; violations: string[] } | null;
+  pending: {
+    question: string;
+    comparison: PlanComparison;
+    lostTrips: string[];
+    violations: string[];
+    /** Held only for the regulator to review what it changes (not a worse plan). Absent: false. */
+    review?: boolean;
+    changes?: PlanChangesView | null;
+    /** « Accepter véhicule par véhicule » is offered (a re-optimization changing two routes or more). Absent: false. */
+    selectable?: boolean;
+  } | null;
   /** Figures of the routes this run replaced, when they can be brought back (« Revenir au planning précédent »). */
   previous: PlanFigures | null;
   /** When /evaluate last re-checked the plan's violations (a trip left a route), ISO; null if never. */

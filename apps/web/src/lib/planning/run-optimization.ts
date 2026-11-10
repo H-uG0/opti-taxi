@@ -9,7 +9,7 @@
  * replaces the routes with it (« Remplacer quand même ») or keeps them.
  */
 import "server-only";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, StopKind } from "@prisma/client";
 import { audit } from "@/lib/audit";
 import type { SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -37,6 +37,7 @@ import {
   runDetailsJson,
   withoutPending,
   type LockChange,
+  type PendingPlan,
   type RunKind,
 } from "@/lib/optimizer/run-details";
 import { formatLongDate, fromIsoDate, todayIso, tomorrowIso, toIsoDate } from "@/lib/time";
@@ -71,6 +72,17 @@ import {
 } from "./plan-compare";
 import { loadPlanVersion, requestHash } from "./version";
 import { formatPersonName } from "@/lib/names";
+import { tripLineText, violationLineText } from "./naming";
+import { changeCounts, changesText, otherChanges, reviewQuestion, type PlanChanges } from "./plan-changes";
+import {
+  mergeSelection,
+  refusableVehicles,
+  selectionHint,
+  selectionKeySource,
+  type SelectionMerge,
+  type StopSequence,
+} from "./plan-selection";
+import { figuresOfPlan, type PlanFigures } from "./plan-compare";
 
 export type RunOutcome =
   | {
@@ -311,6 +323,10 @@ class ReplaceRefused extends Error {
     message: string,
     readonly comparison: PlanComparison | null = null,
     readonly version: string | null = null,
+    /** What the plan changes in the routes in place, kept with it for the « Changements » list. */
+    readonly changes: PlanChanges | null = null,
+    /** Held only to review its changes: the plan is not worse. */
+    readonly review = false,
   ) {
     super(message);
     this.name = "ReplaceRefused";
@@ -570,10 +586,52 @@ const AUDIT_ACTION: Record<RunKind, "plan.optimize" | "plan.restore"> = {
   place: "plan.optimize",
 };
 
-/** Audit details of a saved plan: how it was computed when not a plain optimization. */
-function auditDetails(kind: RunKind, confirmed: boolean): { details?: { confirmed?: boolean; mode?: string } } {
-  const details = { ...(confirmed ? { confirmed: true } : {}), ...(kind === "place" ? { mode: "place_unassigned" } : {}) };
+/** Audit details of a saved plan: how it was computed when not a plain optimization, and the vehicles that kept their route. */
+function auditDetails(
+  kind: RunKind,
+  confirmed: boolean,
+  refusedVehicleIds: readonly string[] = [],
+): { details?: { confirmed?: boolean; mode?: string; refusedVehicleIds?: string[] } } {
+  const details = {
+    ...(confirmed ? { confirmed: true } : {}),
+    ...(kind === "place" ? { mode: "place_unassigned" } : {}),
+    ...(refusedVehicleIds.length > 0 ? { refusedVehicleIds: [...refusedVehicleIds] } : {}),
+  };
   return Object.keys(details).length > 0 ? { details } : {};
+}
+
+/**
+ * The changes the regulator reviews before a computation replaces the routes in place (INS-02):
+ * every one of a re-optimization; for a move, those of the other trips (the trip moved is what was
+ * asked); for « Placer les non affectées », those of the trips already placed (the trips it places
+ * are what was asked). A restoration was asked for as a whole (« Rétablir »): none.
+ */
+export function reviewedChanges(
+  kind: RunKind,
+  changes: PlanChanges,
+  asked: { movedTripId?: string; toPlace?: ReadonlySet<string> } = {},
+): PlanChanges | null {
+  if (kind === "restore") return null;
+  if (kind === "move" && asked.movedTripId) return otherChanges(changes, (change) => change.tripId === asked.movedTripId);
+  if (kind === "place" && asked.toPlace) {
+    const toPlace = asked.toPlace;
+    return otherChanges(changes, (change) => change.kind === "assigned" && toPlace.has(change.tripId));
+  }
+  return changes;
+}
+
+/** The question of a plan held for review; a move names its trip by tripRef (resolved when shown). */
+function reviewText(kind: RunKind, listed: PlanChanges, changes: PlanChanges, move: MoveTarget | undefined): string {
+  if (kind === "move" && move) {
+    const count = listed.trips.length;
+    return (
+      `Déplacement de ${tripRef(move.tripId)} vers ${move.vehicleLabel}\u00a0: le nouveau calcul change aussi ` +
+      `${plural(count, "autre course", "autres courses")} du planning en place (${changesText(changeCounts(listed))}). ` +
+      "Vérifiez la liste «\u202fChangements\u202f» avant de l'enregistrer."
+    );
+  }
+  const subject = kind === "place" ? "Ce placement" : "Ce calcul";
+  return reviewQuestion(listed, subject, kind === "optimize" && changes.routes.length > 1);
 }
 
 /**
@@ -696,7 +754,7 @@ async function finishRun(args: {
       lockChange: lock?.change,
       ...(args.lockedCount !== undefined ? { lockedCount: args.lockedCount } : {}),
       onTrafficReset: (tx) => auditTrafficReset(tx, user, runId, isoDate),
-      check: ({ comparison, version }) => {
+      check: ({ comparison, version, changes }) => {
         if (placement) {
           const loss = placementLoss(comparison.lostTripIds, request);
           if (loss) throw new ReplaceRefused("place", loss);
@@ -721,7 +779,12 @@ async function finishRun(args: {
           const asked = move
             ? `Déplacement de ${tripRef(move.tripId)} vers ${move.vehicleLabel}\u00a0: ${lostByMove}${lostByMove ? question : lowerFirst(question)}`
             : question;
-          throw new ReplaceRefused("confirm", asked, comparison, version);
+          throw new ReplaceRefused("confirm", asked, comparison, version, changes ?? null);
+        }
+        // Not worse, but trips change vehicle, time or lose their vehicle: the regulator sees which before it is saved.
+        const listed = changes ? reviewedChanges(kind, changes, { movedTripId: move?.tripId, toPlace: placement?.toPlace }) : null;
+        if (changes && listed && listed.trips.length > 0) {
+          throw new ReplaceRefused("confirm", reviewText(kind, listed, changes, move), comparison, version, changes, true);
         }
       },
     });
@@ -732,7 +795,7 @@ async function finishRun(args: {
       return { ok: false, error: await shown(`Planning inchangé\u00a0: ${error.message}`) };
     }
     if (error instanceof ReplaceRefused && error.comparison && error.version) {
-      const { comparison, version: compared, message } = error;
+      const { comparison, version: compared, message, changes, review } = error;
       // Kept in its run until the regulator decides (confirmPendingRun / discardPendingRun). A move's lock
       // is undone meanwhile, in the same transaction, and set again when the plan is confirmed.
       await db.$transaction(async (tx) => {
@@ -758,6 +821,8 @@ async function finishRun(args: {
               kind,
               comparison,
               question: message,
+              ...(changes ? { changes } : {}),
+              ...(review ? { review: true } : {}),
               pending: {
                 response: plan,
                 requestHash: requestHash(request),
@@ -902,14 +967,170 @@ export async function restorePreviousPlan(isoDate: string, user: Actor): Promise
   });
 }
 
+export const SELECTION_CHANGED_ERROR =
+  "La sélection a changé depuis sa vérification (ou le planning en place)\u00a0: vérifiez-la de nouveau avant de l'enregistrer.";
+export const SELECTION_NOT_OFFERED_ERROR =
+  "Ce calcul s'enregistre en entier\u00a0: le choix véhicule par véhicule n'est offert que pour une réoptimisation de la journée.";
+
+/** « Accepter véhicule par véhicule » : the vehicles refused (keeping their route in place) and the key of the routes checked. */
+export type PlanSelection = { refusedVehicleIds: readonly string[]; key: string };
+
+type EvaluatedSelection = { merge: SelectionMerge; response: PlanResponse; key: string; refused: string[] };
+
+/**
+ * The plan of a pending re-optimization taken for every changed vehicle but `refusedIds`, which keep
+ * their route in place (plan-selection.ts), re-timed and re-checked by /evaluate on today's request.
+ * Only vehicles whose route changes and that are sent today can keep theirs; null: none is refused,
+ * the plan is the pending one as computed.
+ */
+async function evaluateSelection(
+  isoDate: string,
+  pending: { response: PlanResponse },
+  changes: PlanChanges,
+  build: BuildResult,
+  refusedIds: readonly string[],
+): Promise<{ ok: true; selection: EvaluatedSelection | null } | { ok: false; error: string }> {
+  const vehicleIds = new Set(build.request.vehicles.map((v) => v.id));
+  const allowed = refusableVehicles(changes.routes, vehicleIds);
+  const refused = new Set(refusedIds.filter((id) => allowed.has(id)));
+  if (refused.size === 0) return { ok: true, selection: null };
+  const stored = await db.route.findMany({
+    where: { serviceDate: fromIsoDate(isoDate) },
+    select: { vehicleId: true, stops: { select: { tripId: true, kind: true, sequence: true } } },
+  });
+  const sequence = (vehicleId: string, stops: ReadonlyArray<{ tripId: string; kind: StopKind }>): StopSequence => ({
+    vehicleId,
+    stops: stops.map(({ tripId, kind }) => ({ tripId, kind })),
+  });
+  const merge = mergeSelection({
+    inPlace: stored.map((route) => sequence(route.vehicleId, [...route.stops].sort((a, b) => a.sequence - b.sequence))),
+    next: pending.response.routes.map((route) => sequence(route.vehicleId, route.stops)),
+    refused,
+    vehicleIds,
+    tripIds: new Set(build.request.trips.map((t) => t.id)),
+  });
+  const result = await evaluate({ ...build.request, routes: merge.routes });
+  if (!result.ok) return { ok: false, error: result.error };
+  return { ok: true, selection: { merge, response: result.data, key: requestHash(selectionKeySource(merge.routes)), refused: [...refused] } };
+}
+
+/** « MARTIN Jeanne (aller, RDV 08:30) » for each trip of `ids` (« une course » when gone). */
+async function tripLines(ids: readonly string[]): Promise<(tripId: string) => string> {
+  const rows =
+    ids.length === 0
+      ? []
+      : await db.trip.findMany({
+          where: { id: { in: [...new Set(ids)] } },
+          select: { id: true, direction: true, appointmentMinute: true, readyMinute: true, patient: { select: { firstName: true, lastName: true } } },
+        });
+  const lines = new Map(rows.map((row) => [row.id, tripLineText({ ...row, patientName: formatPersonName(row.patient) })]));
+  return (tripId) => lines.get(tripId) ?? "une course";
+}
+
+/** What « Vérifier la sélection » shows before anything is saved. */
+export type SelectionPreview = {
+  /** Key of the routes checked: « Enregistrer la sélection » saves these, or refuses. */
+  key: string;
+  current: PlanFigures | null;
+  next: PlanFigures;
+  selection: PlanFigures;
+  /** Vehicles keeping their route in place. */
+  refused: string[];
+  keptOnRefused: string[];
+  leftOut: string[];
+  violations: string[];
+  /** Asked before saving a selection worse than the plan in place (fewer trips, more violations, much less margin); null otherwise. */
+  question: string | null;
+  /** How to keep the trips left without a vehicle (selectionHint); null when none is. */
+  hint: string | null;
+};
+
+export type PreviewOutcome = { ok: true; preview: SelectionPreview } | { ok: false; error: string; stale?: boolean };
+
+/** The pending run of a re-optimization the per-vehicle choice applies to, with its request rebuilt as when it was computed. */
+async function selectableRun(
+  runId: string,
+): Promise<
+  | { ok: true; isoDate: string; pending: PendingPlan; changes: PlanChanges; comparison: PlanComparison | null; build: BuildResult; input: OptimizeInput }
+  | { ok: false; error: string; stale?: boolean }
+> {
+  const run = await db.optimizationRun.findUnique({
+    where: { id: runId },
+    select: { id: true, serviceDate: true, status: true, details: true, kpis: true },
+  });
+  if (!run || run.status !== "AWAITING_CONFIRMATION") return { ok: false, error: NOT_PENDING_ERROR, stale: true };
+  const isoDate = toIsoDate(run.serviceDate);
+  const pending = readPendingPlan(run.details);
+  const details = readRunDetails(run);
+  if (!pending || !details?.changes) return { ok: false, error: SELECTION_NOT_OFFERED_ERROR };
+  if ((details.kind ?? "optimize") !== "optimize" || pending.lockChange || pending.placeOnly) return { ok: false, error: SELECTION_NOT_OFFERED_ERROR };
+  const prepared = await prepareRequest(isoDate);
+  if (!prepared.ok) return { ok: false, error: prepared.error };
+  if (requestHash(prepared.build.request) !== pending.requestHash) return { ok: false, error: INPUT_CHANGED_ERROR, stale: true };
+  return { ok: true, isoDate, pending, changes: details.changes, comparison: details.comparison ?? null, build: prepared.build, input: prepared.input };
+}
+
+/**
+ * « Vérifier la sélection » (INS-02): the day the pending re-optimization makes once taken for every
+ * changed vehicle but `refusedIds` (they keep their route in place), re-timed and re-checked by
+ * /evaluate, nothing written: its figures beside those of the plan in place and of the full
+ * computation, the trips kept on a refused vehicle, those left without one, and its violations.
+ */
+export async function previewPendingSelection(runId: string, refusedIds: readonly string[]): Promise<PreviewOutcome> {
+  const found = await selectableRun(runId);
+  if (!found.ok) return found;
+  const { isoDate, pending, changes, build } = found;
+  if ((await loadPlanVersion(db, isoDate)) !== pending.basedOnVersion) return { ok: false, error: PLAN_CHANGED_SINCE_ERROR, stale: true };
+  const evaluated = await evaluateSelection(isoDate, pending, changes, build, refusedIds);
+  if (!evaluated.ok) return evaluated;
+  const chosen = evaluated.selection;
+  if (!chosen) return { ok: false, error: "Aucun véhicule ne garde sa tournée\u00a0: enregistrez le calcul en entier («\u202fTout accepter\u202f»)." };
+  const { merge, response } = chosen;
+  const line = await tripLines([
+    ...merge.keptOnRefused.map((k) => k.tripId),
+    ...merge.leftOut.map((l) => l.tripId),
+    ...response.validation.violations.flatMap((v) => (v.tripId ? [v.tripId] : [])),
+  ]);
+  const labels = new Map(build.request.vehicles.map((v) => [v.id, v.label]));
+  const label = (id: string | null) => (id ? (labels.get(id) ?? "un véhicule indisponible") : null);
+  const current = found.comparison?.current ?? null;
+  const selection = figuresOfPlan(response);
+  const comparison: PlanComparison = { current, next: selection, lostTripIds: [] };
+  const concerns = replaceConcerns(comparison, found.input.replan ?? DEFAULT_REPLACE_THRESHOLDS);
+  return {
+    ok: true,
+    preview: {
+      key: chosen.key,
+      current,
+      next: found.comparison?.next ?? figuresOfPlan(pending.response),
+      selection,
+      refused: chosen.refused.map((id) => label(id) ?? "Véhicule"),
+      keptOnRefused: merge.keptOnRefused.map((k) => `${line(k.tripId)} reste sur ${label(k.vehicleId)} (au lieu de ${label(k.insteadOf)})`),
+      leftOut: merge.leftOut.map((l) => {
+        const where = [
+          l.inPlace ? `sur ${label(l.inPlace)} actuellement` : "sans véhicule actuellement",
+          l.next ? `sur ${label(l.next)} dans le calcul` : "sans véhicule dans le calcul",
+        ];
+        return `${line(l.tripId)} (${where.join(", ")})`;
+      }),
+      violations: response.validation.violations.map((v) => violationLineText(v, line, (id) => labels.get(id) ?? null)),
+      question: concerns.length > 0 ? comparisonQuestion(comparison, concerns, "Cette sélection") : null,
+      hint: selectionHint(merge.leftOut, new Set(chosen.refused), (id) => label(id) ?? "un véhicule"),
+    },
+  };
+}
+
 /**
  * « Remplacer quand même » : saves the plan of run `runId`, waiting for
  * confirmation, if the day's data still builds the same request and the
  * routes in place are still those it was compared with. The lock the plan
  * was computed with (a move's, a restored one) is written in the same
- * transaction.
+ * transaction. With `selection` (« accepter véhicule par véhicule », a
+ * re-optimization only), the refused vehicles keep their route in place: the
+ * merged day is evaluated again and saved only if it is the one the regulator
+ * checked (same key).
  */
-export async function confirmPendingRun(runId: string, user: Actor): Promise<RunOutcome> {
+export async function confirmPendingRun(runId: string, user: Actor, selection?: PlanSelection): Promise<RunOutcome> {
   const run = await db.optimizationRun.findUnique({
     where: { id: runId },
     select: { id: true, serviceDate: true, status: true, finishedAt: true, details: true, kpis: true },
@@ -940,6 +1161,26 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
   const { build } = prepared;
   if (requestHash(build.request) !== pending.requestHash) return dropPendingRun(run.id, run.details, INPUT_CHANGED_ERROR);
 
+  let response = pending.response;
+  let refused: string[] = [];
+  if (selection && selection.refusedVehicleIds.length > 0) {
+    const details = readRunDetails(run);
+    if (kind !== "optimize" || lockChange || assignments || !details?.changes) return { ok: false, error: SELECTION_NOT_OFFERED_ERROR };
+    // The routes in place are read outside the transaction: savePlan's check below refuses them if they changed since.
+    const evaluated = await evaluateSelection(isoDate, pending, details.changes, build, selection.refusedVehicleIds);
+    if (!evaluated.ok) return { ok: false, error: evaluated.error };
+    if (evaluated.selection) {
+      if (evaluated.selection.key !== selection.key) return { ok: false, error: SELECTION_CHANGED_ERROR };
+      // The day is the computation's, re-timed for the vehicles kept: the run keeps its solver's status and time.
+      const checked = evaluated.selection.response;
+      response = {
+        ...checked,
+        meta: { ...checked.meta, solverStatus: pending.response.meta.solverStatus, wallTimeMs: pending.response.meta.wallTimeMs, objective: null },
+      };
+      refused = evaluated.selection.refused;
+    }
+  }
+
   let saved: SavePlanResult;
   try {
     const traced = withBeforeCommit(db, async (tx) => {
@@ -948,7 +1189,7 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
         entity: "OptimizationRun",
         entityId: run.id,
         serviceDate: isoDate,
-        ...auditDetails(kind, true),
+        ...auditDetails(kind, true, refused),
       });
       if (lockChange) {
         await writeLockChange(tx, user, isoDate, lockChange, kind === "move" ? "trip.move" : lockAction(lockChange.to));
@@ -959,9 +1200,10 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
       runId: run.id,
       isoDate,
       request: build.request,
-      response: pending.response,
+      response,
       crews: build.crews,
       kind,
+      refusedVehicleIds: refused,
       // The computation ended when it was put on hold, not when the regulator confirmed it.
       finishedAt: run.finishedAt ?? undefined,
       lockChange: lockChange ?? undefined,
@@ -999,11 +1241,12 @@ export async function confirmPendingRun(runId: string, user: Actor): Promise<Run
     : kind === "restore"
       ? "Planning précédent rétabli"
       : "Nouveau planning enregistré";
-  const warning = pending.response.validation.violations.length > 0 || (placement !== null && placementWarning(placement));
+  const warning = response.validation.violations.length > 0 || (placement !== null && placementWarning(placement));
+  const kept = refused.length > 0 ? `${plural(refused.length, "véhicule garde sa tournée", "véhicules gardent leur tournée")} · ` : "";
   return {
     ok: true,
     runId: run.id,
-    message: `${what}\u00a0: ${saved.served}/${saved.served + saved.unassigned} courses servies · ${plural(saved.routes, "tournée")}.`,
+    message: `${refused.length > 0 ? "Sélection enregistrée" : what}\u00a0: ${kept}${saved.served}/${saved.served + saved.unassigned} courses servies · ${plural(saved.routes, "tournée")}.`,
     ...(warning ? { warning: true } : {}),
   };
 }

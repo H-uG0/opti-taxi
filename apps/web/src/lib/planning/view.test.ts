@@ -290,10 +290,65 @@ describe("buildPlanningView", () => {
       // Named, with the leg and time, as the page shows them; the violation's raw message is not shown.
       lostTrips: ["B Patient (aller, RDV 08:00)"],
       violations: ["Hors fenêtre horaire — Taxi 1, B Patient (aller, RDV 08:00)"],
+      review: false,
+      changes: null,
+      selectable: false,
     });
     expect(view.lastRun?.kind).toBe("move");
     expect(view.planRun).toMatchObject({ kind: "restore", previous: comparison.current, pending: null });
     expect(buildPlanningView(input()).planRun?.previous).toBeNull();
+  });
+
+  it("names the « Changements » of a re-optimization held for review, and which vehicles may keep their route", () => {
+    const comparison = {
+      current: { served: 2, violations: 0, revenue: 150, margin: 60, km: 100 },
+      next: { served: 2, violations: 0, revenue: 160, margin: 75, km: 90 },
+      lostTripIds: [],
+    };
+    const details = new Map<string, RunDetails>([
+      [
+        "run2",
+        {
+          runId: "run2",
+          solverStatus: "OK",
+          violations: [],
+          warnings: [],
+          unassigned: [],
+          kind: "optimize",
+          comparison,
+          review: true,
+          question: "Ce calcul change 1 course du planning en place\u00a0: 1 course change de véhicule.",
+          changes: {
+            trips: [{ tripId: "a", kind: "vehicle", from: "v1", to: "gone", fromPickup: 420, toPickup: 425 }],
+            routes: [
+              { vehicleId: "v1", before: { trips: 2, km: 50, margin: 30 }, after: { trips: 1, km: 30, margin: 20 } },
+              { vehicleId: "gone", before: { trips: 1, km: 20, margin: 10 }, after: { trips: 2, km: 40, margin: 35 } },
+            ],
+          },
+        },
+      ],
+    ]);
+    const view = buildPlanningView(input({ lastRun: run({ id: "run2", status: "AWAITING_CONFIRMATION" }), details }));
+    const pending = view.lastRun?.pending;
+    expect(pending).toMatchObject({ review: true, selectable: true });
+    expect(pending?.changes?.trips).toEqual([
+      {
+        tripId: "a",
+        kind: "vehicle",
+        from: "v1",
+        to: "gone",
+        fromPickup: 420,
+        toPickup: 425,
+        trip: "A Patient (aller, RDV 08:00)",
+        fromLabel: "Taxi 1",
+        toLabel: "Véhicule supprimé",
+      },
+    ]);
+    // A vehicle not sent today cannot keep its route in place.
+    expect(pending?.changes?.routes.map((r) => [r.vehicleId, r.label, r.refusable, r.tripChanges])).toEqual([
+      ["v1", "Taxi 1", true, 1],
+      ["gone", "Véhicule supprimé", false, 1],
+    ]);
   });
 
   it("flags the available vehicles no tariff grid covers that day", () => {
