@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
-import Form from "next/form";
 import Link from "next/link";
 import type { Prisma } from "@prisma/client";
-import { Plus, Search } from "lucide-react";
+import { Plus } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { FACILITY_TYPE_LABELS } from "@/lib/labels";
 import { Badge } from "@/components/ui/badge";
-import { Button, LinkButton } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/form";
+import { LinkButton } from "@/components/ui/button";
+import { FilterBar, FilterSearch, FilterSelect } from "@/components/ui/filter-bar";
 import { EmptyState, PageHeader } from "@/components/ui/layout";
 import { Table, TBody, Td, Th, THead } from "@/components/ui/table";
 import { FACILITY_TYPES } from "./_lib/options";
@@ -88,47 +87,25 @@ export default async function FacilitiesPage({
         }
       />
 
-      <Form
-        key={`${q}|${type ?? ""}|${status}`}
-        action="/etablissements"
-        role="search"
-        className="mb-4 flex flex-wrap items-end gap-3"
-      >
-        <Field label="Rechercher" htmlFor="q" className="w-full sm:w-72">
-          <Input id="q" name="q" type="search" defaultValue={q} placeholder="Nom ou ville" maxLength={100} />
-        </Field>
-        <Field label="Type" htmlFor="type" className="w-52">
-          <Select id="type" name="type" defaultValue={type ?? ""}>
-            <option value="">Tous les types</option>
-            {FACILITY_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {FACILITY_TYPE_LABELS[t]}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Statut" htmlFor="statut" className="w-36">
-          <Select id="statut" name="statut" defaultValue={status}>
-            {Object.entries(STATUS_FILTERS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Button type="submit" variant="secondary">
-          <Search aria-hidden className="size-4" />
-          Filtrer
-        </Button>
-        {filtered ? (
-          <Link
-            href="/etablissements"
-            className="pb-2.5 text-sm text-slate-600 underline-offset-2 hover:text-slate-900 hover:underline"
-          >
-            Réinitialiser
-          </Link>
-        ) : null}
-      </Form>
+      <FilterBar action="/etablissements" label="Filtrer les établissements" resetHref="/etablissements" filtered={filtered} className="mb-4">
+        <FilterSearch defaultValue={q} placeholder="Nom ou ville" />
+        <FilterSelect
+          name="type"
+          label="Type"
+          value={type ?? ""}
+          allLabel="Tous les types"
+          options={FACILITY_TYPES.map((t) => ({ value: t, label: FACILITY_TYPE_LABELS[t] }))}
+          className="w-52"
+        />
+        <FilterSelect
+          name="statut"
+          label="Statut"
+          value={status}
+          defaultChoice="actifs"
+          options={Object.entries(STATUS_FILTERS).map(([value, label]) => ({ value, label }))}
+          className="w-36"
+        />
+      </FilterBar>
 
       {facilities.length === 0 ? (
         <EmptyState

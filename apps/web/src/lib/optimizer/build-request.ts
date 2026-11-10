@@ -72,10 +72,10 @@ import {
   type OptimizerTrip,
   type OptimizerVehicle,
 } from "./contract";
+import { compareVehicles, VEHICLE_TYPE_ORDER } from "@/lib/fleet/order";
 
 const MAX_DAY_MINUTE = 2 * 24 * 60;
 const MAX_CAPACITY = 8;
-const VEHICLE_TYPE_ORDER: Record<VehicleType, number> = { TAXI: 0, VSL: 1, AMBULANCE: 2 };
 
 /** Trip statuses that never reach the optimizer. */
 export const EXCLUDED_TRIP_STATUSES: readonly TripStatus[] = ["CANCELLED", "NO_SHOW"];
@@ -349,13 +349,8 @@ function worksOn(person: DriverInput, weekday: number): boolean {
   return person.workDays.includes(weekday);
 }
 
-/** Display order: type (taxi, VSL, ambulance), then label. */
-export function compareVehicles(
-  a: { type: VehicleType; label: string },
-  b: { type: VehicleType; label: string },
-): number {
-  return VEHICLE_TYPE_ORDER[a.type] - VEHICLE_TYPE_ORDER[b.type] || a.label.localeCompare(b.label, "fr", { numeric: true });
-}
+/** Display order: type (taxi, VSL, ambulance), then label in numeric order (lib/fleet/order.ts). */
+export { compareVehicles };
 
 type VehicleDecision =
   | { ok: true; vehicle: OptimizerVehicle; people: string[]; notes: string[] }

@@ -6,6 +6,7 @@ import { ConfirmAction } from "@/components/ui/confirm-action";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { compareVehicles } from "@/lib/fleet/order";
 import { BackLink } from "@/app/(regulator)/vehicules/_lib/ui";
 import { setDepotActive, updateDepot } from "../actions";
 import { DepotForm } from "../depot-form";
@@ -54,7 +55,8 @@ export default async function EditDepotPage({ params }: { params: Promise<{ id: 
                 <p className="text-slate-500">Aucun véhicule : choisissez ce dépôt dans la fiche d&apos;un véhicule.</p>
               ) : (
                 <ul className="space-y-1">
-                  {depot.vehicles.map((v) => (
+                  {/* Active first, then the order of every list: type, then number (« Taxi 2 » before « Taxi 10 »). */}
+                  {[...depot.vehicles].sort((a, b) => Number(b.active) - Number(a.active) || compareVehicles(a, b)).map((v) => (
                     <li key={v.id} className="flex items-center gap-2">
                       <VehicleTypeBadge type={v.type} />
                       <Link href={`/vehicules/${v.id}`} className="underline-offset-2 hover:text-brand-700 hover:underline">
