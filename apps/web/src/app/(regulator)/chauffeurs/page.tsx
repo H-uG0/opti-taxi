@@ -31,6 +31,9 @@ import { describeBreak, ISO_WEEKDAYS, QUALIFICATION_SHORT, QUALIFICATIONS } from
 export const metadata: Metadata = { title: "Chauffeurs" };
 
 const DAY_LETTERS: Record<number, string> = { 1: "L", 2: "M", 3: "M", 4: "J", 5: "V", 6: "S", 7: "D" };
+
+/** The « Jours » column from 1 440 px; below, the days are shown under the hours (the table fits at 1 280 px). */
+const WIDE_ONLY = "hidden min-[1440px]:table-cell";
 const COLUMNS = 8;
 
 export default async function DriversPage({
@@ -208,8 +211,15 @@ export default async function DriversPage({
           </FilterBar>
 
           <p className="mb-2 text-sm text-slate-600" aria-live="polite">
+            {/* Out of the people of the status chosen (active by default, as the header counts them). */}
             {filtered
-              ? `${plural(visible.length, "personne affichée", "personnes affichées")} sur ${drivers.length}`
+              ? `${plural(visible.length, "personne affichée", "personnes affichées")} sur ${
+                  filter.status === "actifs"
+                    ? plural(activeCount, "active", "actives")
+                    : filter.status === "inactifs"
+                      ? plural(inactiveCount, "désactivée", "désactivées")
+                      : drivers.length
+                }`
               : plural(visible.length, "personne", "personnes")}
             , par dépôt et par nom.
           </p>
@@ -226,8 +236,11 @@ export default async function DriversPage({
                 <tr>
                   <Th>Nom</Th>
                   <Th>Qualifications</Th>
-                  <Th>Jours</Th>
-                  <Th>Horaires et pause</Th>
+                  <Th className={WIDE_ONLY}>Jours</Th>
+                  <Th>
+                    <span className="min-[1440px]:hidden">Jours, horaires et pause</span>
+                    <span className="hidden min-[1440px]:inline">Horaires et pause</span>
+                  </Th>
                   <Th title={`Situation du ${formatShortDate(tomorrow)} (page Équipages)`}>Demain</Th>
                   <Th>Véhicule par défaut</Th>
                   <Th>Compte</Th>
@@ -288,27 +301,12 @@ export default async function DriversPage({
                             ))}
                           </div>
                         </Td>
-                        <Td>
-                          <span className="sr-only">{driver.workDays.map((d) => WEEKDAY_LABELS[d]).join(", ") || "Aucun jour"}</span>
-                          <span aria-hidden className="flex gap-0.5 font-mono text-xs">
-                            {ISO_WEEKDAYS.map((weekday) => {
-                              const works = driver.workDays.includes(weekday);
-                              return (
-                                <span
-                                  key={weekday}
-                                  title={WEEKDAY_LABELS[weekday]}
-                                  className={cn(
-                                    "inline-flex size-4.5 items-center justify-center rounded-sm text-[11px]",
-                                    works ? "bg-brand-100 font-semibold text-brand-800" : "text-slate-300",
-                                  )}
-                                >
-                                  {DAY_LETTERS[weekday]}
-                                </span>
-                              );
-                            })}
-                          </span>
+                        <Td className={WIDE_ONLY}>
+                          <WorkDays days={driver.workDays} />
                         </Td>
                         <Td className="tabular whitespace-nowrap">
+                          {/* Under 1 440 px the days go under the hours: the table fits at 1 280 px. */}
+                          <WorkDays days={driver.workDays} className="mb-1 min-[1440px]:hidden" />
                           {formatMinute(driver.shiftStartMinute)} – {formatMinute(driver.shiftEndMinute)}
                           <span className="block text-xs text-slate-500">{breakText ? `Pause ${breakText.replace(/ entre (\S+) et (\S+)$/, ", $1–$2")}` : "Sans pause"}</span>
                           {workTimeText ? (
@@ -370,6 +368,32 @@ export default async function DriversPage({
         </>
       )}
     </>
+  );
+}
+
+/** The working days of a person: one letter per day, the days worked highlighted (named for screen readers). */
+function WorkDays({ days, className }: { days: readonly number[]; className?: string }) {
+  return (
+    <span className={cn("block", className)}>
+      <span className="sr-only">{days.map((d) => WEEKDAY_LABELS[d]).join(", ") || "Aucun jour"}</span>
+      <span aria-hidden className="flex gap-0.5 font-mono text-xs">
+        {ISO_WEEKDAYS.map((weekday) => {
+          const works = days.includes(weekday);
+          return (
+            <span
+              key={weekday}
+              title={WEEKDAY_LABELS[weekday]}
+              className={cn(
+                "inline-flex size-4.5 items-center justify-center rounded-sm text-[11px]",
+                works ? "bg-brand-100 font-semibold text-brand-800" : "text-slate-300",
+              )}
+            >
+              {DAY_LETTERS[weekday]}
+            </span>
+          );
+        })}
+      </span>
+    </span>
   );
 }
 

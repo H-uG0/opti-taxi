@@ -8,13 +8,14 @@ import { INITIAL_ACTION_RESULT } from "./trip-form";
 const fake = vi.hoisted(() => {
   const models = {
     trip: { findUnique: vi.fn(), updateMany: vi.fn(), findMany: vi.fn() },
-    routeStop: { findMany: vi.fn() },
+    routeStop: { findMany: vi.fn(), deleteMany: vi.fn(), update: vi.fn() },
     appSettings: { upsert: vi.fn(), findUnique: vi.fn() },
     auditEvent: { createMany: vi.fn() },
   };
+  const client = { ...models, $queryRaw: vi.fn() };
   return {
-    ...models,
-    $transaction: vi.fn(async (fn: (tx: typeof models) => unknown) => fn(models)),
+    ...client,
+    $transaction: vi.fn(async (fn: (tx: typeof client) => unknown) => fn(client)),
     completeTrips: vi.fn(),
   };
 });
@@ -27,6 +28,10 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/db", () => ({ db: fake }));
 vi.mock("@/lib/optimizer/client", () => ({ evaluate: vi.fn() }));
+vi.mock("@/lib/planning/refresh-routes", async (original) => {
+  const actual = await original<typeof import("@/lib/planning/refresh-routes")>();
+  return { ...actual, refreshRoutes: vi.fn(async () => actual.NOTHING_REFRESHED) };
+});
 vi.mock("@/lib/trips/completion", async (original) => ({
   ...(await original<typeof import("@/lib/trips/completion")>()),
   completeTrips: fake.completeTrips,
@@ -217,6 +222,47 @@ describe("cancelTrips (« Annuler la sélection »)", () => {
     expect(result.message).toMatch(
       /^2 courses annulées \(séance annulée ou déplacée par l'établissement\), dont 1 retirée de sa tournée\. 2 courses non annulées : déjà commencées, terminées ou modifiées entre-temps\./,
     );
+  });
+
+  it("locks the routes of the batch first, and does not call a co-passenger cancelled in the batch alone", async () => {
+    // t1 and t2 share route r1; both are ticked.
+    let stops = [
+      { id: "s0", routeId: "r1", tripId: "t1", kind: "PICKUP", sequence: 0, loadAfter: 1 },
+      { id: "s1", routeId: "r1", tripId: "t2", kind: "PICKUP", sequence: 1, loadAfter: 2 },
+      { id: "s2", routeId: "r1", tripId: "t1", kind: "DROPOFF", sequence: 2, loadAfter: 1 },
+      { id: "s3", routeId: "r1", tripId: "t2", kind: "DROPOFF", sequence: 3, loadAfter: 0 },
+    ];
+    const steps: string[] = [];
+    fake.routeStop.findMany.mockImplementation(async ({ where }: { where: { tripId?: string | { in: string[] }; routeId?: { in: string[] } } }) => {
+      const { tripId } = where;
+      if (typeof tripId === "object") return stops.filter((s) => tripId.in.includes(s.tripId));
+      return stops.filter((s) => (tripId !== undefined ? s.tripId === tripId : where.routeId?.in.includes(s.routeId)));
+    });
+    fake.routeStop.deleteMany.mockImplementation(async ({ where }: { where: { tripId: string } }) => {
+      stops = stops.filter((s) => s.tripId !== where.tripId);
+      return { count: 2 };
+    });
+    fake.routeStop.update.mockResolvedValue({});
+    fake.$queryRaw.mockImplementation(async () => {
+      steps.push("lock");
+      return [{ id: "r1" }];
+    });
+    fake.trip.updateMany.mockImplementation(async ({ where }: { where: { id: string | { in: string[] } } }) => {
+      steps.push(typeof where.id === "string" ? `cancel ${where.id}` : `unshare ${where.id.in.join(",")}`);
+      return { count: 1 };
+    });
+    const routed = { routeId: "r1", route: { status: "PROPOSED" }, status: "ASSIGNED" };
+    fake.trip.findMany.mockResolvedValueOnce([tripRow("t1", "OUTBOUND", routed), tripRow("t2", "OUTBOUND", { ...routed, patientId: "p2" })]);
+
+    const result = await cancelTrips(INITIAL_ACTION_RESULT, bulk(["t1", "t2"], { reason: "FACILITY" }));
+
+    // The batch's routes are locked before the first trip is written.
+    expect(steps[0]).toBe("lock");
+    expect(steps.indexOf("cancel t1")).toBeGreaterThan(0);
+    // t2 was left alone by t1's removal, then cancelled too: not « travelling alone ».
+    expect(steps).toContain("unshare t2");
+    expect(result.ok).toBe(true);
+    expect(result.message).not.toMatch(/seul/);
   });
 
   it("says so when nothing could be cancelled", async () => {

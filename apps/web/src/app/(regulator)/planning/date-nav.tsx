@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react";
 import { LinkButton } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
+import { confirmLeave } from "@/components/ui/leave-guard";
 import { isShortcutKey } from "@/lib/planning/shortcuts";
 import { addDays, isIsoDate } from "@/lib/time";
 
@@ -53,6 +54,7 @@ export function DateNav({
     const onKey = (e: KeyboardEvent) => {
       if ((e.key !== "[" && e.key !== "]") || !isShortcutKey(e)) return;
       e.preventDefault();
+      if (!confirmLeave()) return;
       const params = new URLSearchParams({ date: addDays(date, e.key === "[" ? -1 : 1) });
       const current = new URLSearchParams(window.location.search);
       for (const key of keepParams) {
@@ -92,6 +94,11 @@ export function DateNav({
         onChange={(e) => {
           const value = e.currentTarget.value;
           if (isIsoDate(value) && value >= "2000-01-01" && value <= "2100-12-31" && value !== date) {
+            // Unsaved changes of the page (Équipages): kept on the date shown unless the user agrees to lose them.
+            if (!confirmLeave()) {
+              e.currentTarget.value = date;
+              return;
+            }
             startTransition(() => router.push(href(value)));
           }
         }}

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   coPassengersFromStops,
   isConcurrentWriteError,
+  lockRoutesOfTrips,
   NOTHING_DETACHED,
   planDetach,
   removeTripStops,
@@ -148,9 +149,14 @@ function fakeTx(rows: RouteStopForDetach[], existingRoutes: string[]) {
   let stops = [...rows];
   const tx = {
     routeStop: {
-      findMany: async ({ where }: { where: { tripId?: string; routeId?: { in: string[] } } }) => {
-        calls.push(where.tripId !== undefined ? `read own stops ${where.tripId}` : `read stops ${where.routeId?.in.join(",")}`);
-        return stops.filter((s) => (where.tripId !== undefined ? s.tripId === where.tripId : where.routeId?.in.includes(s.routeId)));
+      findMany: async ({ where }: { where: { tripId?: string | { in: string[] }; routeId?: { in: string[] } } }) => {
+        const { tripId } = where;
+        if (typeof tripId === "object") {
+          calls.push(`read stops of trips ${tripId.in.join(",")}`);
+          return stops.filter((s) => tripId.in.includes(s.tripId));
+        }
+        calls.push(tripId !== undefined ? `read own stops ${tripId}` : `read stops ${where.routeId?.in.join(",")}`);
+        return stops.filter((s) => (tripId !== undefined ? s.tripId === tripId : where.routeId?.in.includes(s.routeId)));
       },
       deleteMany: async ({ where }: { where: { tripId: string } }) => {
         calls.push(`delete ${where.tripId}`);
@@ -186,7 +192,7 @@ describe("removeTripStops", () => {
 
   it("locks the routes before reading their stops, then deletes, renumbers and unshares", async () => {
     const { tx, calls } = fakeTx(rows, ["r1"]);
-    expect(await removeTripStops(tx, "A")).toEqual({ nowAlone: 1, routeIds: ["r1"] });
+    expect(await removeTripStops(tx, "A")).toEqual({ nowAlone: ["B"], routeIds: ["r1"] });
     expect(calls).toEqual([
       "read own stops A",
       `lock SELECT "id" FROM "Route" WHERE "id" = ANY(?) ORDER BY "id" FOR UPDATE [r1]`,
@@ -209,14 +215,39 @@ describe("removeTripStops", () => {
   });
 });
 
+describe("lockRoutesOfTrips", () => {
+  it("locks every route of a batch in one statement, in id order", async () => {
+    const rows = [stop("r2", 0, "A", "PICKUP", 1), stop("r2", 1, "A", "DROPOFF", 0), stop("r1", 0, "B", "PICKUP", 1), stop("r1", 1, "B", "DROPOFF", 0)];
+    const { tx, calls } = fakeTx(rows, ["r1", "r2"]);
+    await lockRoutesOfTrips(tx, ["A", "B", "C"]);
+    expect(calls).toEqual([
+      "read stops of trips A,B,C",
+      `lock SELECT "id" FROM "Route" WHERE "id" = ANY(?) ORDER BY "id" FOR UPDATE [r2,r1]`,
+    ]);
+  });
+
+  it("locks nothing for trips outside any route", async () => {
+    const { tx, calls } = fakeTx([], []);
+    await lockRoutesOfTrips(tx, ["A"]);
+    await lockRoutesOfTrips(tx, []);
+    expect(calls).toEqual(["read stops of trips A"]);
+  });
+});
+
 describe("isConcurrentWriteError", () => {
-  const known = (code: string) => new Prisma.PrismaClientKnownRequestError("conflict", { code, clientVersion: "6.19.3" });
+  const known = (code: string, meta?: Record<string, unknown>) =>
+    new Prisma.PrismaClientKnownRequestError("conflict", { code, clientVersion: "6.19.3", meta });
 
   it("recognizes a lost race (taken key, missing row, write conflict or deadlock)", () => {
     for (const code of ["P2002", "P2025", "P2034"]) expect(isConcurrentWriteError(known(code))).toBe(true);
+    // A deadlock or a serialization failure on a row lock taken with $queryRaw.
+    expect(isConcurrentWriteError(known("P2010", { code: "40P01", message: "ERROR: deadlock detected" }))).toBe(true);
+    expect(isConcurrentWriteError(known("P2010", { code: "40001", message: "ERROR: could not serialize access" }))).toBe(true);
   });
 
   it("lets every other error through", () => {
+    expect(isConcurrentWriteError(known("P2010", { code: "22012", message: "ERROR: division by zero" }))).toBe(false);
+    expect(isConcurrentWriteError(known("P2010"))).toBe(false);
     expect(isConcurrentWriteError(known("P2003"))).toBe(false);
     expect(isConcurrentWriteError(new Error("P2034"))).toBe(false);
     expect(isConcurrentWriteError(null)).toBe(false);

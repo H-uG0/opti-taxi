@@ -57,15 +57,42 @@ export function formQuery(entries: Iterable<[string, string]>, defaults: Readonl
   return query.toString();
 }
 
-/** Lowercase, accents and ligatures removed, spaces collapsed: « Hélène Œuvray » → « helene oeuvray ». */
+/**
+ * Letters that keep their shape under Unicode decomposition, written as
+ * PostgreSQL's unaccent writes them (the search key of the patients,
+ * migration patient_search): « Søren Łukasz » is found as « soren lukasz ».
+ */
+const UNACCENT_LETTERS: Readonly<Record<string, string>> = {
+  æ: "ae",
+  œ: "oe",
+  ß: "ss",
+  ø: "o",
+  ł: "l",
+  ŀ: "l",
+  đ: "d",
+  ð: "d",
+  þ: "th",
+  ħ: "h",
+  ı: "i",
+  ŧ: "t",
+  ŋ: "n",
+  "\u2019": "'",
+  "\u2018": "'",
+  "\u02bc": "'",
+};
+const UNACCENT_PATTERN = new RegExp(`[${Object.keys(UNACCENT_LETTERS).join("")}]`, "g");
+
+/**
+ * Lowercase, accents and ligatures removed, spaces collapsed, as the
+ * patients' search key in the database (unaccent): « Hélène Œuvray » →
+ * « helene oeuvray », « Lætitia N’Diaye » → « laetitia n'diaye ».
+ */
 export function normalizeSearch(value: string): string {
   return value
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
-    .replace(/œ/g, "oe")
-    .replace(/æ/g, "ae")
-    .replace(/ß/g, "ss")
+    .replace(UNACCENT_PATTERN, (letter) => UNACCENT_LETTERS[letter] ?? letter)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }

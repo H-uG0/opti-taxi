@@ -214,6 +214,7 @@ export default async function CrewsPage({ searchParams }: { searchParams: Search
           garder le remplaçant proposé.
         </p>
 
+        {/* Keyed by its date inside (crew-form.tsx): the seats of one day never show on the next. */}
         <CrewForm date={date} rows={rows} people={people} depots={crewDepots} locked={locked} hasSavedCrews={hasSavedCrews} />
 
         <div className="grid gap-6 md:grid-cols-2">

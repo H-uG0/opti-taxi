@@ -1,11 +1,17 @@
 import type { ComponentProps, ReactNode } from "react";
 import { cn } from "./cn";
+import { StickyHeaderFrame } from "./table-frame";
+
+// relative: an absolutely placed element of a cell (sr-only text) stays inside the frame instead of widening the page.
+const FRAME = "relative overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-xs";
 
 /**
  * A table in a bordered frame that scrolls sideways when too wide. With
- * `stickyHeader`, the frame is never taller than the screen and scrolls
- * inside: the column headers stay visible over a long list (a sticky header
- * cannot follow the page through a frame that scrolls sideways).
+ * `stickyHeader`, the frame is never taller than the screen and, once its
+ * top has reached the top of the screen, scrolls inside: the column headers
+ * stay visible over a long list (a sticky header cannot follow the page
+ * through a frame that scrolls sideways). Before that, the page scrolls
+ * (table-frame.tsx).
  */
 export function Table({
   className,
@@ -13,18 +19,18 @@ export function Table({
   frameClassName,
   ...props
 }: ComponentProps<"table"> & { stickyHeader?: boolean; frameClassName?: string }) {
+  const table = <table className={cn("min-w-full divide-y divide-slate-200 text-sm", className)} {...props} />;
+  if (!stickyHeader) return <div className={cn(FRAME, frameClassName)}>{table}</div>;
   return (
-    <div
-      // relative: an absolutely placed element of a cell (sr-only text) stays inside the frame instead of widening the page.
+    <StickyHeaderFrame
       className={cn(
-        "relative overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-xs",
-        stickyHeader &&
-          "max-h-[calc(100dvh-var(--demo-banner-h,0px)-1rem)] overflow-y-auto [&>table>thead]:sticky [&>table>thead]:top-0 [&>table>thead]:z-10 [&>table>thead]:shadow-[0_1px_0_var(--color-slate-200)]",
+        FRAME,
+        "max-h-[calc(100dvh-var(--demo-banner-h,0px)-1rem)] [&>table>thead]:sticky [&>table>thead]:top-0 [&>table>thead]:z-10 [&>table>thead]:shadow-[0_1px_0_var(--color-slate-200)]",
         frameClassName,
       )}
     >
-      <table className={cn("min-w-full divide-y divide-slate-200 text-sm", className)} {...props} />
-    </div>
+      {table}
+    </StickyHeaderFrame>
   );
 }
 

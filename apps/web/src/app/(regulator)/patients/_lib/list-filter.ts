@@ -2,14 +2,15 @@
  * Filters of the Patients list, kept in the URL (FilterBar): search without
  * accents on the name, city and postal code, or on the phone's digits
  * (Patient.searchText, kept by a database trigger); status, prescription to
- * renew or missing, facility of an active recurrence, mobility; sort and
- * page. Pure module: the Prisma `where` and `orderBy` it builds are plain
- * objects, unit-tested.
+ * renew (candidates in SQL, then the renewal rule: awaitingRenewal) or
+ * missing, facility of an active recurrence, mobility; sort and page. Pure
+ * module: the Prisma `where` and `orderBy` it builds are plain objects, unit-tested.
  */
 import type { Mobility, Prisma } from "@prisma/client";
+import type { SeriesPrescription } from "@/lib/domain/renewal";
 import { idParam, normalizeSearch, phoneDigits, pickParam, readParam, type SearchParams } from "@/lib/list-filters";
-import { addDays, fromIsoDate } from "@/lib/time";
-import { EXPIRY_WARNING_DAYS } from "./status";
+import { addDays, fromIsoDate, toIsoDate } from "@/lib/time";
+import { EXPIRY_WARNING_DAYS, findRenewal, needsRenewal, pickCurrentPrescription } from "./status";
 
 export const PATIENT_PAGE_SIZE = 100;
 
@@ -17,7 +18,7 @@ export const STATUS_FILTERS = { actifs: "Actifs", inactifs: "Inactifs", tous: "T
 export type StatusFilter = keyof typeof STATUS_FILTERS;
 
 export const PRESCRIPTION_FILTERS = {
-  "a-renouveler": `Expire sous ${EXPIRY_WARNING_DAYS} jours, sans suite`,
+  "a-renouveler": `Expire sous ${EXPIRY_WARNING_DAYS} jours, non renouvelée`,
   sans: "Sans prescription valide aujourd'hui",
 } as const;
 export type PrescriptionFilter = keyof typeof PRESCRIPTION_FILTERS;
@@ -65,15 +66,18 @@ export function searchTerms(q: string): string[] {
   return normalizeSearch(q).split(" ").filter(Boolean).slice(0, 5);
 }
 
-/** The Prisma filter of the list on `todayIso`. */
+/**
+ * The Prisma filter of the list on `todayIso`. For « à renouveler » it only
+ * picks the candidates (a prescription valid today ending within the warning
+ * period): the page keeps those `awaitingRenewal` says, the same rule as the
+ * row's badge (a renewal has the same mode and the same series of care).
+ */
 export function patientWhere(filter: PatientListFilter, todayIso: string): Prisma.PatientWhereInput {
   const today = fromIsoDate(todayIso);
   const limit = fromIsoDate(addDays(todayIso, EXPIRY_WARNING_DAYS));
   const and: Prisma.PatientWhereInput[] = searchTerms(filter.q).map((term) => ({ searchText: { contains: term } }));
   if (filter.prescription === "a-renouveler") {
-    // A prescription valid today that ends within the warning period, and none that runs beyond it (no renewal yet).
     and.push({ prescriptions: { some: { validFrom: { lte: today }, validTo: { gte: today, lte: limit } } } });
-    and.push({ prescriptions: { none: { validTo: { gt: limit } } } });
   } else if (filter.prescription === "sans") {
     and.push({ prescriptions: { none: { validFrom: { lte: today }, validTo: { gte: today } } } });
   }
@@ -83,6 +87,20 @@ export function patientWhere(filter: PatientListFilter, todayIso: string): Prism
     ...(filter.mobility ? { mobility: filter.mobility } : {}),
     ...(and.length > 0 ? { AND: and } : {}),
   };
+}
+
+/**
+ * « Expire sous 14 jours, non renouvelée »: the patient's current prescription
+ * (the one the list shows) is valid today, ends within the warning period and
+ * nothing renews it (lib/domain/renewal.ts: same mode, same series of care) —
+ * exactly the rows with a red « Expire dans N j » badge.
+ */
+export function awaitingRenewal<T extends SeriesPrescription>(prescriptions: T[], todayIso: string): boolean {
+  const current = pickCurrentPrescription(prescriptions, todayIso);
+  if (!current) return false;
+  const dates = { validFrom: toIsoDate(current.validFrom), validTo: toIsoDate(current.validTo) };
+  if (dates.validFrom > todayIso || dates.validTo < todayIso || !needsRenewal(dates, todayIso)) return false;
+  return findRenewal(current, prescriptions) === null;
 }
 
 /** Sort of the list; the id last, so that a page always holds the same patients. */

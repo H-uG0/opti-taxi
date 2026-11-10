@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/components/ui/cn";
 import { FilterBar, FilterCheckbox, FilterSelect } from "@/components/ui/filter-bar";
 import { FormMessage } from "@/components/ui/form";
+import { useLeaveGuard } from "@/components/ui/leave-guard";
 import { SearchSelect, type SearchSelectOption } from "@/components/ui/search-select";
 import { GroupHeaderRow, TBody, THead, Table, Td, Th } from "@/components/ui/table";
 import { IDLE_STATE, valueOf, type FieldErrors, type FormValues } from "@/lib/forms";
@@ -78,16 +79,12 @@ const ORIGIN_TONES: Record<CrewOrigin, BadgeTone> = {
 
 const COLUMNS = 6;
 
+/** The « Horaire » column from 1 440 px; below, the hours go under the driver's seat (the table fits at 1 280 px). */
+const WIDE_ONLY = "hidden min-[1440px]:table-cell";
+
 type SeatValues = { driver: string; mate: string };
 
-export function CrewForm({
-  date,
-  rows,
-  people,
-  depots,
-  locked,
-  hasSavedCrews,
-}: {
+type CrewFormProps = {
   date: string;
   rows: CrewRow[];
   people: CrewPersonOption[];
@@ -95,7 +92,19 @@ export function CrewForm({
   /** Why the crews of this date can no longer change, or null. */
   locked: string | null;
   hasSavedCrews: boolean;
-}) {
+};
+
+/**
+ * The crews of one date. Keyed by the date: the date arrows navigate on the
+ * client and Next.js keeps the page's state across a change of address, so
+ * without the key the seats chosen (and the last answer) of one day would
+ * show, and be saved, on the next.
+ */
+export function CrewForm(props: CrewFormProps) {
+  return <CrewFormOfDate key={props.date} {...props} />;
+}
+
+function CrewFormOfDate({ date, rows, people, depots, locked, hasSavedCrews }: CrewFormProps) {
   const [state, formAction] = useActionState(saveDayCrews, IDLE_STATE);
   const echoed = state.status === "error" ? state.values : null;
 
@@ -175,6 +184,14 @@ function CrewFormBody({
       ),
   );
   const [confirmingReset, setConfirmingReset] = useState(false);
+  // « Garder les équipages » gives the focus back to the button that asked.
+  const resetButton = useRef<HTMLButtonElement>(null);
+  const refocusReset = useRef(false);
+  useEffect(() => {
+    if (confirmingReset || !refocusReset.current) return;
+    refocusReset.current = false;
+    resetButton.current?.focus();
+  }, [confirmingReset]);
   const dirty = useMemo(() => new Set(rows.filter((row) => isDirty(row, values.get(row.vehicleId))).map((r) => r.vehicleId)), [rows, values]);
   const assignments = useMemo(() => assignmentsOf(rows, values), [rows, values]);
   const summaries = useMemo(() => depotSummaries(rows, values, people, assignments), [rows, values, people, assignments]);
@@ -189,13 +206,12 @@ function CrewFormBody({
   const toHandle = rows.filter((row) => needsAttention(row, flagged, dirty)).length;
   const errorRows = rows.filter(withError);
 
-  // Unsaved changes are not lost by closing or reloading the tab without a warning.
-  useEffect(() => {
-    if (dirty.size === 0) return;
-    const onUnload = (event: BeforeUnloadEvent) => event.preventDefault();
-    window.addEventListener("beforeunload", onUnload);
-    return () => window.removeEventListener("beforeunload", onUnload);
-  }, [dirty.size]);
+  // Unsaved changes are not lost without a warning: closing or reloading the tab, another page or another date.
+  useLeaveGuard(
+    dirty.size === 0
+      ? null
+      : `${dirty.size > 1 ? `Les ${dirty.size} modifications` : "La modification"} des équipages du ${formatShortDate(date)} ${dirty.size > 1 ? "ne sont pas enregistrées et seront perdues" : "n'est pas enregistrée et sera perdue"}. Quitter quand même ?`,
+  );
 
   const setSeat = (vehicleId: string, seat: Seat, value: string) =>
     setValues((previous) => {
@@ -265,7 +281,7 @@ function CrewFormBody({
                   <Th>Véhicule</Th>
                   <Th>Chauffeur</Th>
                   <Th>Équipier</Th>
-                  <Th>Horaire</Th>
+                  <Th className={WIDE_ONLY}>Horaire</Th>
                   <Th>Origine</Th>
                   <Th>Remarques</Th>
                 </tr>
@@ -305,12 +321,15 @@ function CrewFormBody({
                         <span className="font-mono text-xs text-slate-500">{row.registration}</span>
                       </Td>
                       {row.unavailable ? (
-                        <Td colSpan={3} className="text-sm text-slate-500">
-                          Pas d&apos;équipage ce jour.{" "}
-                          <Link href={`/vehicules/${row.vehicleId}`} className="underline">
-                            Voir la fiche
-                          </Link>
-                        </Td>
+                        <>
+                          <Td colSpan={2} className="text-sm text-slate-500">
+                            Pas d&apos;équipage ce jour.{" "}
+                            <Link href={`/vehicules/${row.vehicleId}`} className="underline">
+                              Voir la fiche
+                            </Link>
+                          </Td>
+                          <Td className={WIDE_ONLY} />
+                        </>
                       ) : (
                         <>
                           <Td className="w-52 min-w-48">
@@ -326,6 +345,12 @@ function CrewFormBody({
                             {driverError ? (
                               <p id={`erreur-${row.vehicleId}-driver`} className="mt-1 text-xs font-medium text-red-700">
                                 {driverError}
+                              </p>
+                            ) : null}
+                            {row.shift ? (
+                              <p className="tabular mt-1 text-xs text-slate-600 min-[1440px]:hidden">
+                                <span className="sr-only">Horaire : </span>
+                                {shiftText(row.shift)}
                               </p>
                             ) : null}
                           </Td>
@@ -353,7 +378,7 @@ function CrewFormBody({
                               <span className="text-xs text-slate-400">—</span>
                             )}
                           </Td>
-                          <Td className="tabular text-sm whitespace-nowrap text-slate-700">
+                          <Td className={cn(WIDE_ONLY, "tabular text-sm whitespace-nowrap text-slate-700")}>
                             {row.shift ? shiftText(row.shift) : <span className="text-slate-400">—</span>}
                           </Td>
                         </>
@@ -461,7 +486,13 @@ function CrewFormBody({
                   {dirty.size > 0 ? " Vos modifications non enregistrées seront perdues." : ""} Un équipage qu&apos;un collègue a fixé
                   ou modifié depuis l&apos;affichage de la page est gardé.
                 </p>
-                <Button variant="ghost" onClick={() => setConfirmingReset(false)}>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    refocusReset.current = true;
+                    setConfirmingReset(false);
+                  }}
+                >
                   Garder les équipages
                 </Button>
                 <IntentSubmit intent="reset" variant="danger" pendingLabel="Retour aux propositions…" autoFocus>
@@ -487,7 +518,7 @@ function CrewFormBody({
                   )}
                 </div>
                 {hasSavedCrews ? (
-                  <Button variant="secondary" onClick={() => setConfirmingReset(true)}>
+                  <Button ref={resetButton} variant="secondary" onClick={() => setConfirmingReset(true)}>
                     Revenir aux propositions (tout le jour)
                   </Button>
                 ) : null}

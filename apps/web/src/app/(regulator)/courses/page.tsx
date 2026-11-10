@@ -32,6 +32,7 @@ import {
   formatInstant,
   pairedReturns,
   hasActiveFilters,
+  NO_FACILITY,
   parseTripFilters,
   patientDisplayName,
   plural,
@@ -152,6 +153,20 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
     const vehicle = trip.route?.vehicle;
     if (vehicle) dayVehicles.set(vehicle.id, { id: vehicle.id, label: vehicle.label, type: vehicle.type, depotName: vehicle.depot.name });
   }
+  // The vehicle or facility filtered on stays in its list on a day it has nothing (kept by the date arrows):
+  // the bar shows the filter in force instead of a blank list.
+  const [filteredVehicle, filteredFacility] = await Promise.all([
+    filters.vehicle && filters.vehicle !== UNASSIGNED && !dayVehicles.has(filters.vehicle)
+      ? db.vehicle.findUnique({ where: { id: filters.vehicle }, select: { id: true, label: true, type: true, depot: { select: { name: true } } } })
+      : null,
+    filters.facility && filters.facility !== NO_FACILITY && !facilityNames.has(filters.facility)
+      ? db.facility.findUnique({ where: { id: filters.facility }, select: { id: true, name: true } })
+      : null,
+  ]);
+  if (filteredVehicle) {
+    dayVehicles.set(filteredVehicle.id, { ...filteredVehicle, depotName: filteredVehicle.depot.name });
+  }
+  if (filteredFacility) facilityNames.set(filteredFacility.id, filteredFacility.name);
   const choices: TripFilterChoices = {
     facilities: [...facilityNames].map(([id, name]) => ({ id, name })).sort((a, b) => compareLabels(a.name, b.name)),
     vehicles: [...dayVehicles.values()].sort(compareVehiclesByDepot),
@@ -402,7 +417,8 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
               : plural(rows.length, "course", "courses")}
             , triées par heure de rendez-vous (aller) ou de fin de séance (retour).
           </p>
-          <TripTable rows={rows} caption={`Courses du ${formatLongDate(date)}`} />
+          {/* Keyed by date: the selection and the last answer do not follow the date arrows (client navigation). */}
+          <TripTable key={date} rows={rows} caption={`Courses du ${formatLongDate(date)}`} />
         </>
       )}
     </div>

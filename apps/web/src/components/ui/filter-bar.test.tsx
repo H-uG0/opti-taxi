@@ -22,22 +22,27 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/vehicules");
 });
 
+/** A list page: its filter parsed from the address (an old `inactifs=1` reads as « tous », an unknown type as none). */
 function Bar({ mode, filtered = false }: { mode?: "navigate" | "replace"; filtered?: boolean }) {
+  const params = search.params;
+  const type = params.get("type") === "TAXI" ? "TAXI" : "";
+  const status = params.get("statut") === "tous" || params.get("inactifs") === "1" ? "tous" : "actifs";
   return (
     <FilterBar action="/vehicules" label="Filtrer les véhicules" resetHref="/vehicules" filtered={filtered} mode={mode} hidden={{ date: "2026-11-11" }}>
-      <FilterSearch defaultValue="" placeholder="Libellé" />
-      <FilterSelect name="type" label="Type" value="" allLabel="Tous" options={[{ value: "TAXI", label: "Taxi" }]} />
+      <FilterSearch defaultValue={params.get("q")?.trim() ?? ""} placeholder="Libellé" />
+      <FilterSelect name="type" label="Type" value={type} allLabel="Tous" options={[{ value: "TAXI", label: "Taxi" }]} />
       <FilterSelect
         name="statut"
         label="Statut"
-        value="actifs"
+        value={status}
         defaultChoice="actifs"
         options={[
           { value: "actifs", label: "Actifs" },
           { value: "tous", label: "Tous" },
         ]}
+        className="w-32"
       />
-      <FilterCheckbox name="etat" value="a-traiter" label="À traiter seulement" checked={false} />
+      <FilterCheckbox name="etat" value="a-traiter" label="À traiter seulement" checked={params.get("etat") === "a-traiter"} />
     </FilterBar>
   );
 }
@@ -73,6 +78,39 @@ describe("FilterBar (navigate)", () => {
     rerender(<Bar />);
     expect((screen.getByLabelText("Statut") as HTMLSelectElement).value).toBe("actifs");
     expect((screen.getByLabelText("Rechercher") as HTMLInputElement).value).toBe("");
+  });
+
+  it("shows the filter the page applies, not the raw address", () => {
+    const { rerender } = render(<Bar />);
+    // An old address (?inactifs=1) the page reads as « tous », and a type it does not know.
+    search.params = new URLSearchParams("inactifs=1&type=BUS&etat=a-traiter&q=%20gap%20");
+    rerender(<Bar filtered />);
+    expect((screen.getByLabelText("Statut") as HTMLSelectElement).value).toBe("tous");
+    expect((screen.getByLabelText("Type") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText("À traiter seulement") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Rechercher") as HTMLInputElement).value).toBe("gap");
+  });
+
+  it("applies a list browsed with the arrow keys once the keys stop", () => {
+    vi.useFakeTimers();
+    render(<Bar />);
+    const type = screen.getByLabelText("Type");
+    fireEvent.keyDown(type, { key: "ArrowDown" });
+    fireEvent.change(type, { target: { value: "TAXI" } });
+    fireEvent.keyDown(type, { key: "ArrowUp" });
+    fireEvent.change(type, { target: { value: "" } });
+    fireEvent.keyDown(type, { key: "ArrowDown" });
+    fireEvent.change(type, { target: { value: "TAXI" } });
+    expect(router.push).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(450));
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenLastCalledWith("/vehicules?date=2026-11-11&type=TAXI", { scroll: false });
+  });
+
+  it("gives a field the width asked for instead of the default", () => {
+    render(<Bar />);
+    expect(screen.getByLabelText("Statut").parentElement?.className).toBe("space-y-1 w-32");
+    expect(screen.getByLabelText("Type").parentElement?.className).toBe("space-y-1 w-44");
   });
 });
 

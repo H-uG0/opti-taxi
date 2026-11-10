@@ -122,13 +122,31 @@ export function planDetach(stops: readonly RouteStopForDetach[], tripId: string)
 }
 
 export type DetachResult = {
-  /** Former co-passengers now travelling alone. */
-  nowAlone: number;
+  /**
+   * Former co-passengers now travelling alone (trip ids). A batch counts at
+   * the end those it did not cancel itself (two co-passengers both ticked).
+   */
+  nowAlone: string[];
   /** Routes the trip left: their times and totals must be recomputed (refresh-routes.ts). */
   routeIds: string[];
 };
 
-export const NOTHING_DETACHED: DetachResult = { nowAlone: 0, routeIds: [] };
+export const NOTHING_DETACHED: DetachResult = { nowAlone: [], routeIds: [] };
+
+/**
+ * Locks every route serving one of `tripIds`, in one statement and in id
+ * order, before a batch takes several trips out of their routes: trip by
+ * trip, removeTripStops would lock them in the batch's order, and two batches
+ * (or a batch and a recomputation) crossing the same two routes could
+ * deadlock. Locking again a route already held (removeTripStops) waits for nothing.
+ */
+export async function lockRoutesOfTrips(tx: Prisma.TransactionClient, tripIds: readonly string[]): Promise<void> {
+  if (tripIds.length === 0) return;
+  const stops = await tx.routeStop.findMany({ where: { tripId: { in: [...tripIds] } }, select: { routeId: true } });
+  const routeIds = [...new Set(stops.map((stop) => stop.routeId))];
+  if (routeIds.length === 0) return;
+  await tx.$queryRaw`SELECT "id" FROM "Route" WHERE "id" = ANY(${routeIds}) ORDER BY "id" FOR UPDATE`;
+}
 
 /**
  * Takes the trip's stops out of the route(s) serving it, in the caller's
@@ -172,11 +190,17 @@ export async function removeTripStops(tx: Prisma.TransactionClient, tripId: stri
   if (plan.stillShared.length > 0) {
     await tx.trip.updateMany({ where: { id: { in: plan.stillShared } }, data: { detourKm: null, estimatedRevenue: null } });
   }
-  return { nowAlone: plan.nowAlone.length, routeIds };
+  return { nowAlone: plan.nowAlone, routeIds };
 }
 
 /** Prisma codes of a lost race: unique key taken, row gone, write conflict or deadlock. */
 const CONCURRENT_WRITE_CODES: readonly string[] = ["P2002", "P2025", "P2034"];
+
+/**
+ * PostgreSQL codes of a lost race in a raw query (Prisma P2010, the row
+ * locks taken with $queryRaw): deadlock detected, serialization failure.
+ */
+const CONCURRENT_RAW_CODES: readonly string[] = ["40P01", "40001"];
 
 /**
  * True when a transaction failed because another one changed the same rows
@@ -185,6 +209,9 @@ const CONCURRENT_WRITE_CODES: readonly string[] = ["P2002", "P2025", "P2034"];
  */
 export function isConcurrentWriteError(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
-  const { name, code } = error as { name?: unknown; code?: unknown };
-  return name === "PrismaClientKnownRequestError" && typeof code === "string" && CONCURRENT_WRITE_CODES.includes(code);
+  const { name, code, meta } = error as { name?: unknown; code?: unknown; meta?: unknown };
+  if (name !== "PrismaClientKnownRequestError" || typeof code !== "string") return false;
+  if (CONCURRENT_WRITE_CODES.includes(code)) return true;
+  const rawCode = typeof meta === "object" && meta !== null ? (meta as { code?: unknown }).code : undefined;
+  return code === "P2010" && typeof rawCode === "string" && CONCURRENT_RAW_CODES.includes(rawCode);
 }

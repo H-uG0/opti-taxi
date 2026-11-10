@@ -247,7 +247,16 @@ export default async function VehiclesPage({
           </FilterBar>
 
           <p className="mb-2 text-sm text-slate-600" aria-live="polite">
-            {filtered ? `${plural(visible.length, "véhicule affiché", "véhicules affichés")} sur ${vehicles.length}` : plural(visible.length, "véhicule", "véhicules")}
+            {/* Out of the vehicles of the status chosen (active by default, as the header counts them). */}
+            {filtered
+              ? `${plural(visible.length, "véhicule affiché", "véhicules affichés")} sur ${
+                  filter.status === "actifs"
+                    ? plural(active.length, "actif", "actifs")
+                    : filter.status === "inactifs"
+                      ? plural(inactiveCount, "désactivé", "désactivés")
+                      : vehicles.length
+                }`
+              : plural(visible.length, "véhicule", "véhicules")}
             , par dépôt, type et numéro.
           </p>
 

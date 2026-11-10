@@ -328,22 +328,30 @@ export function plural(count: number, singular: string, pluralForm: string): str
   return `${count} ${count > 1 ? pluralForm : singular}`;
 }
 
-export type PairedReturn = { id: string; keyMinute: number | null };
+/** The return of an outbound trip: its key time, and whether it is in a route (shared or not) for the confirmations. */
+export type PairedReturn = { id: string; keyMinute: number | null; inRoute: boolean; shared: boolean };
 
 /**
  * For each outbound trip still open, the return of the same care that day
  * (same patient, recurrence or facility), still open too: « Annuler la course »
- * offers to cancel it along.
+ * and « Annuler la sélection » offer to cancel it along.
  */
 export function pairedReturns(
-  trips: readonly (LegKey & { id: string; direction: TripDirection; status: TripStatus; readyMinute: number | null })[],
+  trips: readonly (LegKey & {
+    id: string;
+    direction: TripDirection;
+    status: TripStatus;
+    readyMinute: number | null;
+    routeId: string | null;
+    shared: boolean;
+  })[],
 ): Map<string, PairedReturn> {
   const open = (status: TripStatus) => status === "PLANNED" || status === "ASSIGNED";
   const pairs = new Map<string, PairedReturn>();
   for (const outbound of trips) {
     if (outbound.direction !== "OUTBOUND" || !open(outbound.status)) continue;
     const back = trips.find((t) => t.direction === "RETURN" && open(t.status) && isSameEpisode(outbound, t));
-    if (back) pairs.set(outbound.id, { id: back.id, keyMinute: back.readyMinute });
+    if (back) pairs.set(outbound.id, { id: back.id, keyMinute: back.readyMinute, inRoute: back.routeId !== null, shared: back.shared });
   }
   return pairs;
 }

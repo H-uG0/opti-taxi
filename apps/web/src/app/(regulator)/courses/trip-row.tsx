@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useId, useState, type FormEvent } from "react";
+import { useActionState, useId, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useFormStatus } from "react-dom";
 import type { Payer, SharingStatus, TripDirection, TripStatus, VehicleType } from "@prisma/client";
 import { CalendarClock, Check, ChevronDown, Lock, TriangleAlert, Undo2, UserX, Users, X } from "lucide-react";
@@ -13,7 +13,6 @@ import {
   CANCELLATION_NOTE_MAX,
   CANCELLATION_REASON_LABELS,
   USER_CANCELLATION_REASONS,
-  type UserCancellationReason,
 } from "@/lib/domain/cancellation";
 import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_LABEL } from "@/lib/domain/no-show";
 import { EXCEPTIONAL_AMBULANCE_REASON } from "@/lib/planning/exceptional-ambulance";
@@ -27,11 +26,13 @@ import { submitWithoutReset } from "../patients/_components/form-submit";
 import { ActionForm, ActionMessage } from "./action-form";
 import { INITIAL_ACTION_RESULT } from "./trip-form";
 import type { RecordTrace } from "./record-trace";
+import type { PairedReturn } from "./trip-list";
 import {
   canCancel,
   canEditTime,
   canRestore,
   keyMinuteLabel,
+  RETURN_GOES_TOO,
   sharingConflict,
   sharingDecisionsFor,
   SHARING_DECISION_LABELS,
@@ -98,7 +99,7 @@ export type TripRowData = {
   /** Who cancelled the trip and when (null when not cancelled, or not recorded). */
   cancellationTrace: RecordTrace | null;
   /** Outbound trip: the return of the same care, still open, that « Annuler » offers to cancel along. */
-  pairedReturn: { id: string; keyMinute: number | null } | null;
+  pairedReturn: PairedReturn | null;
   /** Another trip of the patient that day on the same leg, or during another session (possible duplicate). */
   conflicts: string[];
   /** The trip opened on the planning of its date (/planning?date=…&trip=…); null when the planning does not show it. */
@@ -114,8 +115,13 @@ export function TripRow({
   selection = null,
 }: {
   trip: TripRowData;
-  /** The box of « Annuler la sélection », for a trip that can still be cancelled. */
-  selection?: { checked: boolean; onChange: (checked: boolean) => void } | null;
+  /** The box of « Annuler la sélection », for a trip that can still be cancelled (Entrée: to the bar, trip-table.tsx). */
+  selection?: {
+    checked: boolean;
+    onChange: (checked: boolean) => void;
+    onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
+    describedBy?: string;
+  } | null;
 }) {
   const [open, setOpen] = useState(false);
   const detailsId = useId();
@@ -135,6 +141,8 @@ export function TripRow({
               type="checkbox"
               checked={selection.checked}
               onChange={(event) => selection.onChange(event.target.checked)}
+              onKeyDown={selection.onKeyDown}
+              aria-describedby={selection.describedBy}
               aria-label={`Sélectionner la course de ${trip.patientName} (${DIRECTION_LABELS[trip.direction].toLowerCase()}, ${formatMinute(trip.keyMinute)})`}
               className="mt-1 size-4 rounded border-slate-300 accent-brand-700"
             />
@@ -410,9 +418,6 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
     </div>
   );
 }
-
-/** Reasons after which the return of the same care is usually not needed: « Annuler aussi le retour » starts ticked. */
-const RETURN_GOES_TOO: ReadonlySet<string> = new Set<UserCancellationReason>(["PATIENT", "FACILITY", "HOSPITALIZATION", "DECEASED"]);
 
 function cancelConfirmMessage(trip: TripRowData, withReturn: boolean): string {
   const back = trip.pairedReturn;

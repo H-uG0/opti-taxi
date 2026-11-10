@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { Prisma } from "@prisma/client";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { auditRead } from "@/lib/audit";
@@ -15,6 +16,7 @@ import { EmptyState, PageHeader } from "@/components/ui/layout";
 import { Pagination } from "@/components/ui/pagination";
 import { Table, TBody, Td, Th, THead } from "@/components/ui/table";
 import {
+  awaitingRenewal,
   isFiltered,
   MOBILITIES,
   parsePatientFilter,
@@ -38,6 +40,16 @@ import {
 } from "./_lib/status";
 
 export const metadata: Metadata = { title: "Patients" };
+
+/** What the badges and the « à renouveler » filter read of each prescription. */
+const PRESCRIPTION_SELECT = {
+  id: true,
+  mode: true,
+  validFrom: true,
+  validTo: true,
+  // Facilities of the active recurrences: another series' PMT is never taken for a renewal.
+  recurrences: { where: { active: true }, select: { facilityId: true } },
+} satisfies Prisma.PrescriptionSelect;
 
 const SORT_PHRASES: Record<keyof typeof SORTS, string> = {
   nom: "par nom",
@@ -64,18 +76,27 @@ export default async function PatientsPage({
   const today = todayIso();
   const where = patientWhere(filter, today);
 
-  const [total, facilities] = await Promise.all([
-    db.patient.count({ where }),
+  const orderBy = patientOrderBy(filter.sort);
+  // « À renouveler »: the candidates SQL picks, kept by the renewal rule of the badges (same mode, same series),
+  // in the order of the list; the page is then a slice of their ids.
+  const [renewalIds, facilities] = await Promise.all([
+    filter.prescription === "a-renouveler"
+      ? db.patient
+          .findMany({ where, orderBy, select: { id: true, prescriptions: { select: PRESCRIPTION_SELECT } } })
+          .then((candidates) => candidates.filter((c) => awaitingRenewal(c.prescriptions, today)).map((c) => c.id))
+      : null,
     db.facility.findMany({ where: { active: true }, select: { id: true, name: true } }),
   ]);
+  const total = renewalIds ? renewalIds.length : await db.patient.count({ where });
   const { page, pageCount, skip } = pageOf(params, total, PATIENT_PAGE_SIZE);
   // Mobility, prescriptions and care schedules of many patients are on screen (auditRead never throws).
   const traced = auditRead(user, { action: "patient_list.view", entity: "Patient", entityId: null });
+  const slice: Pick<Prisma.PatientFindManyArgs, "where" | "skip" | "take"> = renewalIds
+    ? { where: { id: { in: renewalIds.slice(skip, skip + PATIENT_PAGE_SIZE) } } }
+    : { where, skip, take: PATIENT_PAGE_SIZE };
   const patients = await db.patient.findMany({
-    where,
-    orderBy: patientOrderBy(filter.sort),
-    skip,
-    take: PATIENT_PAGE_SIZE,
+    ...slice,
+    orderBy,
     select: {
       id: true,
       firstName: true,
@@ -85,16 +106,7 @@ export default async function PatientsPage({
       postalCode: true,
       mobility: true,
       active: true,
-      prescriptions: {
-        select: {
-          id: true,
-          mode: true,
-          validFrom: true,
-          validTo: true,
-          // Facilities of the active recurrences: another series' PMT is never taken for a renewal.
-          recurrences: { where: { active: true }, select: { facilityId: true } },
-        },
-      },
+      prescriptions: { select: PRESCRIPTION_SELECT },
       recurrences: {
         where: { active: true },
         orderBy: { appointmentMinute: "asc" },
@@ -145,7 +157,7 @@ export default async function PatientsPage({
           value={filter.prescription ?? ""}
           allLabel="Toutes"
           options={Object.entries(PRESCRIPTION_FILTERS).map(([value, label]) => ({ value, label }))}
-          className="w-64"
+          className="w-72"
         />
         <FilterSelect
           name="etablissement"

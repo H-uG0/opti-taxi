@@ -63,6 +63,22 @@ describe("search without accents", () => {
     expect(phoneDigits("04.92.51.00.00")).toBe("0492510000");
     expect(phoneDigits("33 6 12 34 56 78")).toBe("0612345678");
   });
+
+  // The patients' search key is written by a database trigger (migration patient_search: unaccent, phone digits);
+  // the search field reads it with normalizeSearch and phoneDigits. Keys recorded from that trigger on
+  // PostgreSQL 17 (INSERT … RETURNING "searchText"): both sides must give the same words.
+  it.each([
+    [["Łukasz-Œuvray", "Søren", "Gap", "05000", "+33 6 12 34 56 78"], "lukasz-oeuvray soren gap 05000 0612345678"],
+    [["N’Diaye", "Lætitia", "Sisteron", "04200", "0033 4.92.51.00.00"], "n'diaye laetitia sisteron 04200 0492510000"],
+    [["Þórsson", "Đorđe", "Marseille", "13006", "33612345678"], "thorsson dorde marseille 13006 0612345678"],
+    [["STRAẞE", "Hélène", "Manosque", "04100", "06 12 34 56 78"], "strasse helene manosque 04100 0612345678"],
+    [["Ħalil", "Ðan", "Aix-en-Provence", "13100", "(04) 92 51"], "halil dan aix-en-provence 13100 049251"],
+    [["Ångström", "Ŀuís", "Saint-Égrève", "38000", "+41 22 345 67 89"], "angstrom luis saint-egreve 38000 41223456789"],
+    [["ﬁlou", "Ĳsbrand", "L’Argentière-la-Bessée", "05000", null], "filou ijsbrand l'argentiere-la-bessee 05000"],
+  ] as const)("searches %j as the database key %j", ([lastName, firstName, city, postalCode, phone], key) => {
+    const digits = phone ? phoneDigits(phone) : "";
+    expect([normalizeSearch(`${lastName} ${firstName} ${city} ${postalCode}`), digits].filter(Boolean).join(" ")).toBe(key);
+  });
 });
 
 describe("pages of a long list", () => {

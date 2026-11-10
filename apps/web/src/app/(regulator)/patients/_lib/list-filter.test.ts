@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isFiltered, parsePatientFilter, patientOrderBy, patientParams, patientWhere, searchTerms } from "./list-filter";
+import { awaitingRenewal, isFiltered, parsePatientFilter, patientOrderBy, patientParams, patientWhere, searchTerms } from "./list-filter";
 
 const TODAY = "2026-11-10";
 const parse = (query: string) => parsePatientFilter(Object.fromEntries(new URLSearchParams(query)));
@@ -42,9 +42,9 @@ describe("patient list filters", () => {
   it("finds the prescriptions to renew and the patients without a valid one", () => {
     const today = new Date("2026-11-10T00:00:00.000Z");
     const limit = new Date("2026-11-24T00:00:00.000Z");
+    // The candidates only: the page keeps those awaitingRenewal says.
     expect(patientWhere(parse("pmt=a-renouveler"), TODAY).AND).toEqual([
       { prescriptions: { some: { validFrom: { lte: today }, validTo: { gte: today, lte: limit } } } },
-      { prescriptions: { none: { validTo: { gt: limit } } } },
     ]);
     expect(patientWhere(parse("pmt=sans"), TODAY).AND).toEqual([
       { prescriptions: { none: { validFrom: { lte: today }, validTo: { gte: today } } } },
@@ -61,5 +61,39 @@ describe("patient list filters", () => {
       tri: "ville",
     });
     expect(patientOrderBy("recent")).toEqual([{ createdAt: "desc" }, { id: "asc" }]);
+  });
+});
+
+describe("awaitingRenewal (the red « Expire dans N j » badge)", () => {
+  const pmt = (id: string, mode: "TAP" | "AMBULANCE", from: string, to: string, facilities: string[] = []) => ({
+    id,
+    mode,
+    validFrom: new Date(`${from}T00:00:00.000Z`),
+    validTo: new Date(`${to}T00:00:00.000Z`),
+    recurrences: facilities.map((facilityId) => ({ facilityId })),
+  });
+
+  it("keeps a prescription ending within 14 days that nothing renews", () => {
+    expect(awaitingRenewal([pmt("a", "TAP", "2026-08-01", "2026-11-15")], TODAY)).toBe(true);
+    // Not yet within the warning period, or already over: not this filter.
+    expect(awaitingRenewal([pmt("a", "TAP", "2026-08-01", "2026-12-31")], TODAY)).toBe(false);
+    expect(awaitingRenewal([pmt("a", "TAP", "2026-08-01", "2026-11-01")], TODAY)).toBe(false);
+  });
+
+  it("leaves out a prescription renewed with the same mode and series", () => {
+    expect(awaitingRenewal([pmt("a", "TAP", "2026-08-01", "2026-11-15"), pmt("b", "TAP", "2026-11-16", "2027-02-15")], TODAY)).toBe(false);
+  });
+
+  it("keeps it when the later prescription has another mode or serves another series of care", () => {
+    // A TAP PMT ending in 5 days and an ambulance PMT starting later: not a renewal (as the badge says).
+    expect(awaitingRenewal([pmt("a", "TAP", "2026-08-01", "2026-11-15"), pmt("b", "AMBULANCE", "2026-11-20", "2027-02-15")], TODAY)).toBe(true);
+    // Radiotherapy beside dialysis: the later TAP PMT belongs to another facility's series.
+    expect(
+      awaitingRenewal([pmt("a", "TAP", "2026-08-01", "2026-11-15", ["dialyse"]), pmt("b", "TAP", "2026-11-16", "2027-02-15", ["radio"])], TODAY),
+    ).toBe(true);
+  });
+
+  it("follows the prescription the list shows: a longer one valid today hides nothing to renew", () => {
+    expect(awaitingRenewal([pmt("a", "TAP", "2026-08-01", "2026-11-15"), pmt("b", "AMBULANCE", "2026-10-01", "2027-03-01")], TODAY)).toBe(false);
   });
 });

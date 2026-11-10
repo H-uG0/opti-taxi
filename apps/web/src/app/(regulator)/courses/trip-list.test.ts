@@ -264,12 +264,21 @@ describe("pairedReturns", () => {
     recurrenceId: "rec1",
     facilityId: "f1",
     readyMinute: direction === "RETURN" ? 690 : null,
+    routeId: null as string | null,
+    shared: false,
     ...overrides,
   });
 
   it("pairs an open outbound trip with the open return of the same care", () => {
     const pairs = pairedReturns([leg("a1", "OUTBOUND"), leg("r1", "RETURN"), leg("r2", "RETURN", { patientId: "p2" })]);
-    expect(pairs).toEqual(new Map([["a1", { id: "r1", keyMinute: 690 }]]));
+    expect(pairs).toEqual(new Map([["a1", { id: "r1", keyMinute: 690, inRoute: false, shared: false }]]));
+    // In a route, shared: said in the confirmation of « Annuler la sélection ».
+    expect(pairedReturns([leg("a1", "OUTBOUND"), leg("r1", "RETURN", { routeId: "route1", shared: true })]).get("a1")).toEqual({
+      id: "r1",
+      keyMinute: 690,
+      inRoute: true,
+      shared: true,
+    });
   });
 
   it("offers nothing for a return already cancelled or started, nor for an outbound trip already cancelled", () => {

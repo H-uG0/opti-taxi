@@ -25,7 +25,8 @@ export function Pagination({
   if (pageCount <= 1) return null;
   const step = (target: number, children: ReactNode, ariaLabel: string) =>
     target < 1 || target > pageCount ? (
-      <span aria-hidden className={buttonClasses("ghost", "sm", "text-slate-300")}>
+      // Its own classes, not the ghost button's: `cn` does not merge, its text and hover colours would win.
+      <span aria-hidden className="inline-flex h-8 cursor-default items-center justify-center gap-1.5 px-2.5 text-sm font-medium text-slate-300">
         {children}
       </span>
     ) : (

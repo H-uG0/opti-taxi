@@ -16,7 +16,7 @@ import { getSettings } from "@/lib/domain/settings";
 import { allowGeocodeSearch, bestMatch, GEOCODE_THROTTLED_MESSAGE, geocoderEnabled, searchAddress } from "@/lib/geocode";
 import { logError, safeErrorFields } from "@/lib/log";
 import { evaluate } from "@/lib/optimizer/client";
-import { isConcurrentWriteError, NOTHING_DETACHED, removeTripStops, type DetachResult } from "@/lib/planning/detach";
+import { isConcurrentWriteError, lockRoutesOfTrips, NOTHING_DETACHED, removeTripStops, type DetachResult } from "@/lib/planning/detach";
 import {
   refreshAdvice,
   refreshCallsForReoptimization,
@@ -309,8 +309,13 @@ function adviceOf(refresh: RefreshOutcome, routeStatus: RouteStatus | null | und
   return ` ${advice}${refreshCallsForReoptimization(refresh) ? validatedHint(routeStatus) : ""}`;
 }
 
-/** " Son co-passager voyage désormais seul." */
-function aloneMessage(count: number): string {
+/**
+ * " Son co-passager voyage désormais seul." `nowAlone`: the trips left alone
+ * on board; those cancelled in the same transaction (`cancelled`) are not.
+ */
+function aloneMessage(nowAlone: readonly string[], cancelled: readonly { id: string }[] = []): string {
+  const gone = new Set(cancelled.map((t) => t.id));
+  const count = new Set(nowAlone.filter((id) => !gone.has(id))).size;
   if (count === 0) return "";
   return count === 1
     ? " Son co-passager voyage désormais seul (transport non partagé)."
@@ -386,7 +391,9 @@ export async function cancelTrip(_prev: ActionResult, formData: FormData): Promi
   // Guarded on the statuses read above so a concurrent change is not overwritten;
   // the stops are removed only when a trip really leaves its route.
   const detached = await detachInTransaction(async (tx) => {
-    const result: DetachResult = { nowAlone: 0, routeIds: [] };
+    const result: DetachResult = { nowAlone: [], routeIds: [] };
+    // The outbound and return routes locked together, in id order (no deadlock with another batch).
+    await lockRoutesOfTrips(tx, trips.map((t) => t.id));
     for (const t of trips) {
       const updated = await tx.trip.updateMany({
         where: { id: t.id, status: t.status },
@@ -400,7 +407,7 @@ export async function cancelTrip(_prev: ActionResult, formData: FormData): Promi
       // The reason stays on the trip only: « hospitalisation » or « décès » are health data, kept out of the trail.
       await audit(tx, user, tripEvent("trip.cancel", t));
       const removed = await removeTripStops(tx, t.id);
-      result.nowAlone += removed.nowAlone;
+      result.nowAlone.push(...removed.nowAlone);
       result.routeIds.push(...removed.routeIds.filter((id) => !result.routeIds.includes(id)));
     }
     return result;
@@ -417,7 +424,7 @@ export async function cancelTrip(_prev: ActionResult, formData: FormData): Promi
   const left = both ? "Aller et retour annulés et retirés de leur tournée" : "Course annulée et retirée de sa tournée";
   return {
     ok: true,
-    message: `${left}${why}.${late}${aloneMessage(detached.nowAlone)}${noticeOf(refresh)}${adviceOf(refresh, trip.route?.status ?? back?.route?.status)}`,
+    message: `${left}${why}.${late}${aloneMessage(detached.nowAlone, trips)}${noticeOf(refresh)}${adviceOf(refresh, trip.route?.status ?? back?.route?.status)}`,
   };
 }
 
@@ -456,8 +463,10 @@ export async function cancelTrips(_prev: ActionResult, formData: FormData): Prom
   // One transaction: each trip guarded on the status read above, a trip changed meanwhile is skipped.
   const cancelled: CancelledTrip[] = [];
   const detached = await detachInTransaction(async (tx) => {
-    const result: DetachResult = { nowAlone: 0, routeIds: [] };
+    const result: DetachResult = { nowAlone: [], routeIds: [] };
     cancelled.length = 0;
+    // Every route of the batch locked first, in id order: trip by trip, two batches crossing the same routes could deadlock.
+    await lockRoutesOfTrips(tx, open.map((t) => t.id));
     for (const t of open) {
       const updated = await tx.trip.updateMany({
         where: { id: t.id, status: t.status },
@@ -468,7 +477,7 @@ export async function cancelTrips(_prev: ActionResult, formData: FormData): Prom
       // The reason stays on the trip only, as for one trip.
       await audit(tx, user, { ...tripEvent("trip.cancel", t), details: { bulk: true } });
       const removed = await removeTripStops(tx, t.id);
-      result.nowAlone += removed.nowAlone;
+      result.nowAlone.push(...removed.nowAlone);
       result.routeIds.push(...removed.routeIds.filter((id) => !result.routeIds.includes(id)));
     }
     return result;
@@ -488,7 +497,8 @@ export async function cancelTrips(_prev: ActionResult, formData: FormData): Prom
   const routed = cancelled.find((t) => t.route !== null);
   return {
     ok: true,
-    message: `${message}${aloneMessage(detached.nowAlone)}${noticeOf(refresh)}${adviceOf(refresh, routed?.route?.status)}`,
+    // Two co-passengers both ticked: the one cancelled second is not « travelling alone ».
+    message: `${message}${aloneMessage(detached.nowAlone, cancelled)}${noticeOf(refresh)}${adviceOf(refresh, routed?.route?.status)}`,
   };
 }
 

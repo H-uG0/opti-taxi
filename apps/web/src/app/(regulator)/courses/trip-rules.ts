@@ -4,7 +4,14 @@
  */
 import type { SharingStatus, TripDirection, TripStatus } from "@prisma/client";
 import type { BadgeTone } from "@/components/ui/badge";
+import type { UserCancellationReason } from "@/lib/domain/cancellation";
 import { isShareable } from "@/lib/domain/rules";
+
+/**
+ * Reasons after which the return of the same care is usually not needed:
+ * « Annuler aussi le retour » starts ticked (one trip, and « Annuler la sélection »).
+ */
+export const RETURN_GOES_TOO: ReadonlySet<string> = new Set<UserCancellationReason>(["PATIENT", "FACILITY", "HOSPITALIZATION", "DECEASED"]);
 
 /** The time that drives a trip: appointment for an outbound leg, end of session for a return leg. */
 export function keyMinute(trip: {

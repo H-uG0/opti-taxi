@@ -114,5 +114,47 @@ describe("CrewForm", () => {
     expect(submit.getAttribute("value")).toBe("reset");
     fireEvent.click(within(confirm).getByRole("button", { name: "Garder les équipages" }));
     expect(screen.queryByRole("group", { name: "Confirmer le retour aux propositions" })).toBeNull();
+    // The focus goes back to the button that asked.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Revenir aux propositions (tout le jour)" }));
+  });
+
+  it("starts afresh on another date: the seats of the day before are neither shown nor counted as changes", () => {
+    const { rerender } = render(<CrewForm date="2026-11-11" rows={ROWS} people={PEOPLE} depots={DEPOTS} locked={null} hasSavedCrews={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Chauffeur de Taxi 3 : — Aucun chauffeur —" }));
+    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: /CYD/ }));
+    expect(screen.getByRole("button", { name: "Enregistrer la modification" })).toBeTruthy();
+    // « Jour suivant »: the same page with the next day's rows (bob absent, Taxi 3 out of service).
+    const next = [row("Taxi 1", "aix", "ana"), row("Taxi 2", "gap", null), row("Taxi 3", "gap", null, { unavailable: true, issues: [], blocked: null })];
+    rerender(<CrewForm date="2026-11-12" rows={next} people={PEOPLE} depots={DEPOTS} locked={null} hasSavedCrews={false} />);
+    expect(screen.getByRole("button", { name: "Aucune modification" })).toBeTruthy();
+    expect(screen.queryByText("Modifié")).toBeNull();
+    expect(screen.getByRole("button", { name: "Chauffeur de Taxi 2 : — Aucun chauffeur —" })).toBeTruthy();
+    expect(field("driver:Taxi 2")?.value).toBe("");
+  });
+
+  it("asks before leaving the date with unsaved changes", () => {
+    render(<CrewForm date="2026-11-11" rows={ROWS} people={PEOPLE} depots={DEPOTS} locked={null} hasSavedCrews={false} />);
+    const link = document.body.appendChild(document.createElement("a"));
+    link.href = "/equipages?date=2026-11-12";
+    link.textContent = "Jour suivant";
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    // Nothing to lose yet: no question.
+    link.addEventListener("click", (event) => event.preventDefault(), { once: true });
+    fireEvent.click(link);
+    expect(confirm).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Chauffeur de Taxi 3 : — Aucun chauffeur —" }));
+    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: /CYD/ }));
+    // Another date: asked, and refused, the link does not navigate.
+    expect(fireEvent.click(link)).toBe(false);
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("La modification des équipages du"));
+    // The same date (a filter, an anchor): no question.
+    confirm.mockClear();
+    link.href = "/equipages?date=2026-11-11&depot=gap";
+    link.addEventListener("click", (event) => event.preventDefault(), { once: true });
+    fireEvent.click(link);
+    expect(confirm).not.toHaveBeenCalled();
+    link.remove();
+    confirm.mockRestore();
   });
 });
