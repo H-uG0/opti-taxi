@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createPatient, setPatientActive, setRecurrenceActive, updatePatient } from "./actions";
+import { createPatient, createRegularPatient, setPatientActive, setRecurrenceActive, updatePatient } from "./actions";
 import { IDLE_STATE as INITIAL_FORM_STATE, INITIAL_ACTION_RESULT } from "@/lib/forms";
 
 // The server actions run against a fake Prisma client: these tests check which
@@ -9,7 +9,9 @@ import { IDLE_STATE as INITIAL_FORM_STATE, INITIAL_ACTION_RESULT } from "@/lib/f
 const fake = vi.hoisted(() => {
   const models = {
     patient: { findUnique: vi.fn(), updateMany: vi.fn(), update: vi.fn(), findMany: vi.fn(), create: vi.fn() },
-    recurrence: { findFirst: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
+    recurrence: { findFirst: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
+    prescription: { create: vi.fn() },
+    facility: { findUnique: vi.fn() },
     trip: { findMany: vi.fn(), updateMany: vi.fn(), count: vi.fn() },
     auditEvent: { createMany: vi.fn() },
     appSettings: { findUnique: vi.fn(async () => ({ tripHorizonDays: 14 })) },
@@ -308,5 +310,99 @@ describe("createPatient", () => {
     fake.patient.findMany.mockResolvedValue([{ ...existing, firstName: "Paul" }]);
     await createPatient(INITIAL_FORM_STATE, form(fields));
     expect(fake.patient.create).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("createRegularPatient («\u202fNouveau patient régulier\u202f»)", () => {
+  const fields = {
+    lastName: "Dupont",
+    firstName: "Hélène",
+    phone: "06 12 34 56 78",
+    address: "4 avenue Jean Jaurès",
+    postalCode: "04100",
+    city: "Manosque",
+    lat: "43.8297",
+    lng: "5.7864",
+    mobility: "SEATED",
+    accessNotes: "",
+    mode: "TAP",
+    sharing: "BOTH",
+    validFrom: "2099-01-04",
+    validTo: "2099-07-03",
+    isSeries: "on",
+    prescriber: "",
+    facilityId: "f1",
+    label: "Dialyse",
+    appointmentTime: "07:30",
+    sessionMinutes: "240",
+    legs: "BOTH",
+    startDate: "2099-01-05",
+    endDate: "",
+    notes: "Salle 3",
+  };
+  function regularForm(entries: Record<string, string> = {}): FormData {
+    const fd = form({ ...fields, ...entries });
+    for (const day of ["1", "3", "5"]) fd.append("weekdays", day);
+    return fd;
+  }
+
+  beforeEach(() => {
+    fake.patient.findMany.mockResolvedValue([]);
+    fake.patient.create.mockResolvedValue({ id: "new" });
+    fake.prescription.create.mockResolvedValue({ id: "pmt" });
+    fake.recurrence.create.mockResolvedValue({ id: "rec" });
+    fake.facility.findUnique.mockResolvedValue({ id: "f1", active: true });
+    fake.completeTrips.mockResolvedValue({ created: 12, revived: 0, createdByDay: new Map(), skipped: [] });
+  });
+
+  it("creates the patient, the prescription and the recurrence in one save, then the trips of the horizon", async () => {
+    await createRegularPatient(INITIAL_FORM_STATE, regularForm());
+
+    expect(fake.patient.create.mock.calls[0]![0].data).toMatchObject({ lastName: "Dupont", city: "Manosque", mobility: "SEATED" });
+    expect(fake.prescription.create.mock.calls[0]![0].data).toMatchObject({
+      patientId: "new",
+      mode: "TAP",
+      sharing: "BOTH",
+      isSeries: true,
+      validTo: new Date("2099-07-03T00:00:00.000Z"),
+    });
+    expect(fake.recurrence.create.mock.calls[0]![0].data).toMatchObject({
+      patientId: "new",
+      prescriptionId: "pmt",
+      facilityId: "f1",
+      weekdays: [1, 3, 5],
+      appointmentMinute: 450,
+      sessionMinutes: 240,
+      notes: "Salle 3",
+      startDate: new Date("2099-01-05T00:00:00.000Z"),
+      endDate: null,
+    });
+    expect(fake.completeTrips).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), { id: "rec" });
+    expect(recorded()).toEqual([
+      { action: "patient.create", entityId: "new" },
+      { action: "prescription.create", entityId: "pmt" },
+      { action: "recurrence.create", entityId: "rec" },
+    ]);
+    expect(redirect).toHaveBeenCalledWith("/patients/new?cree=regulier&courses=0-0-0-0-12-0");
+  });
+
+  it("shows the records that may be the same patient first, creating nothing", async () => {
+    fake.patient.findMany.mockResolvedValue([
+      { id: "p9", firstName: "Helene", lastName: "DUPONT", phone: null, address: "1 rue A", postalCode: "13001", city: "Marseille", active: true },
+    ]);
+    const state = await createRegularPatient(INITIAL_FORM_STATE, regularForm());
+    expect(state.similar?.map((p) => p.id)).toEqual(["p9"]);
+    expect(fake.patient.create).not.toHaveBeenCalled();
+    expect(state.values?.appointmentTime).toBe("07:30");
+  });
+
+  it("refuses a deactivated facility, and a form with errors, writing nothing", async () => {
+    fake.facility.findUnique.mockResolvedValue({ id: "f1", active: false });
+    const closed = await createRegularPatient(INITIAL_FORM_STATE, regularForm());
+    expect(closed.fieldErrors.facilityId).toMatch(/désactivé/);
+    const invalid = await createRegularPatient(INITIAL_FORM_STATE, regularForm({ validTo: "" }));
+    expect(invalid.fieldErrors.validTo).toMatch(/obligatoire/);
+    expect(fake.patient.create).not.toHaveBeenCalled();
+    expect(fake.auditEvent.createMany).not.toHaveBeenCalled();
   });
 });

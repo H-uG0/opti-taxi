@@ -7,7 +7,7 @@ import { addressShape } from "@/components/address/address-schema";
 import { readAddressForm } from "@/components/address/address-utils";
 import { isIsoDate, parseMinute } from "@/lib/time";
 import { optionalPhone, optionalText, parseForm, type ParseResult } from "./form-parse";
-import { formCheckbox, formString, formStrings, type FormValues } from "@/lib/forms";
+import { errorState, formCheckbox, formString, formStrings, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
 import { MAX_SESSION_MINUTES, MOBILITIES, PRESCRIBED_MODES, RECURRENCE_LEGS, RECURRENCE_NOTES_MAX, SHARING_SCOPES } from "./options";
 
 function requiredDate(label: string) {
@@ -176,4 +176,61 @@ export function readRecurrenceForm(formData: FormData): FormValues {
 export function parseRecurrenceForm(formData: FormData): ParseResult<RecurrenceInput> {
   const values = readRecurrenceForm(formData);
   return parseForm(recurrenceSchema, values, values);
+}
+
+// ---------------------------------------------------------------- regular patient (one screen)
+
+export type RegularPatientInput = {
+  patient: PatientInput;
+  prescription: PrescriptionInput;
+  /** The recurrence, without its prescription (created with it). */
+  recurrence: Omit<RecurrenceInput, "prescriptionId">;
+};
+
+/** Stands for the prescription created in the same save, while the recurrence is checked. */
+const NEW_PRESCRIPTION = "nouvelle";
+
+/**
+ * « Nouveau patient régulier »: identity and home, the prescription (without
+ * notes: the care reason, if any, is added later on the prescription) and the
+ * rhythm, read from one form with the field names of the three forms. Every
+ * error of the three parts is reported at once. The sessions start inside the
+ * prescription's validity (before it, no trip could be generated).
+ */
+export function parseRegularPatientForm(formData: FormData): { success: true; data: RegularPatientInput } | { success: false; state: FormState } {
+  const patient = parsePatientForm(formData);
+  const prescriptionValues: FormValues = {
+    mode: formString(formData, "mode"),
+    sharing: formString(formData, "sharing"),
+    validFrom: formString(formData, "validFrom"),
+    validTo: formString(formData, "validTo"),
+    prescriber: formString(formData, "prescriber"),
+    notes: "",
+  };
+  if (formCheckbox(formData, "isSeries")) prescriptionValues.isSeries = "on";
+  const prescription = parseForm(prescriptionSchema, { ...prescriptionValues, isSeries: formCheckbox(formData, "isSeries") }, prescriptionValues);
+  const recurrenceValues = readRecurrenceForm(formData);
+  const recurrence = parseForm(recurrenceSchema, { ...recurrenceValues, prescriptionId: NEW_PRESCRIPTION }, recurrenceValues);
+
+  const values: FormValues = { ...readPatientForm(formData).values, ...prescriptionValues, ...recurrenceValues };
+  delete values.prescriptionId;
+  const errors: FieldErrors = {
+    ...(patient.success ? {} : patient.state.fieldErrors),
+    ...(prescription.success ? {} : prescription.state.fieldErrors),
+    ...(recurrence.success ? {} : recurrence.state.fieldErrors),
+  };
+  delete errors.prescriptionId;
+  if (prescription.success && recurrence.success) {
+    const { validFrom, validTo } = prescription.data;
+    const { startDate } = recurrence.data;
+    if (startDate < validFrom || startDate > validTo) {
+      errors.startDate ??= "Les séances doivent commencer pendant la validité de la prescription";
+    }
+  }
+  if (!patient.success || !prescription.success || !recurrence.success || Object.keys(errors).length > 0) {
+    return { success: false, state: errorState(errors, values) };
+  }
+  const rhythm: Omit<RecurrenceInput, "prescriptionId"> & { prescriptionId?: string } = { ...recurrence.data };
+  delete rhythm.prescriptionId;
+  return { success: true, data: { patient: patient.data, prescription: prescription.data, recurrence: rhythm } };
 }

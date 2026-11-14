@@ -3,7 +3,7 @@ import Link from "next/link";
 import { FormMessage } from "@/components/ui/form";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import type { TripStatus } from "@prisma/client";
+import type { TripDirection, TripStatus } from "@prisma/client";
 import { Pencil, Plus } from "lucide-react";
 import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
@@ -54,6 +54,7 @@ import { BackLink } from "@/components/ui/back-link";
 import { Notice } from "@/components/ui/notice";
 import { formatPersonName } from "@/lib/names";
 import { DropNoticeParams } from "@/components/ui/notice-params";
+import { placeTripHref } from "@/lib/planning/links";
 
 export const metadata: Metadata = { title: "Fiche patient" };
 
@@ -136,6 +137,8 @@ export default async function PatientPage({
     }),
   ]);
   if (!patient) notFound();
+  // Just created with its rhythm: its new trips on days already planned wait for a place (« Où la placer ? »).
+  const waiting = query.cree === "regulier" ? await tripsOnPlannedDays(patient.id, today) : [];
   // Health data shown: the read is traced (never breaks the page).
   await auditRead(user, { action: "patient.view", entity: "Patient", entityId: patient.id });
   // Read only: a page never creates the settings row.
@@ -242,8 +245,12 @@ export default async function PatientPage({
         />
         <div className="space-y-2">
           {query.cree === "1" ? <FormMessage tone="success">Patient créé. Saisissez maintenant sa prescription, puis ses récurrences.</FormMessage> : null}
+          {query.cree === "regulier" ? (
+            <FormMessage tone="success">Patient régulier créé&nbsp;: sa prescription et sa récurrence sont enregistrées.</FormMessage>
+          ) : null}
           {query.enregistre === "1" ? <FormMessage tone="success">Modifications enregistrées.</FormMessage> : null}
-          {query.cree === "1" || query.enregistre === "1" ? <DropNoticeParams /> : null}
+          {query.cree === "regulier" && waiting.length > 0 ? <PlannedDaysNotice trips={waiting} today={today} /> : null}
+          {query.cree === "1" || query.cree === "regulier" || query.enregistre === "1" ? <DropNoticeParams /> : null}
           <SyncNotice query={query} />
           {todayCancelledBySync > 0 ? (
             <Notice size="sm">
@@ -766,5 +773,59 @@ function Item({ label, className, children }: { label: string; className?: strin
       <dt className="text-xs font-medium tracking-wide text-slate-500 uppercase">{label}</dt>
       <dd className="mt-1 text-slate-900">{children}</dd>
     </div>
+  );
+}
+
+type WaitingTrip = { id: string; date: string; direction: TripDirection };
+
+/**
+ * Open trips of the patient, from tomorrow on, outside any route on a day that
+ * already has routes: the day was planned before they existed.
+ */
+async function tripsOnPlannedDays(patientId: string, today: string): Promise<WaitingTrip[]> {
+  const trips = await db.trip.findMany({
+    where: { patientId, routeId: null, status: { in: ["PLANNED", "ASSIGNED"] }, serviceDate: { gt: fromIsoDate(today) } },
+    orderBy: [{ serviceDate: "asc" }, { direction: "asc" }],
+    select: { id: true, serviceDate: true, direction: true },
+  });
+  if (trips.length === 0) return [];
+  const planned = await db.route.findMany({
+    where: { serviceDate: { in: [...new Set(trips.map((t) => t.serviceDate.getTime()))].map((time) => new Date(time)) } },
+    distinct: ["serviceDate"],
+    select: { serviceDate: true },
+  });
+  const plannedDays = new Set(planned.map((r) => toIsoDate(r.serviceDate)));
+  return trips
+    .map((t) => ({ id: t.id, date: toIsoDate(t.serviceDate), direction: t.direction }))
+    .filter((t) => plannedDays.has(t.date));
+}
+
+/** « Demain est déjà planifié » : the new trips of those days, each with « Où la placer ? ». */
+function PlannedDaysNotice({ trips, today }: { trips: WaitingTrip[]; today: string }) {
+  const days = [...new Set(trips.map((t) => t.date))];
+  const tomorrow = addDays(today, 1);
+  const dayNames = days.map((d) => (d === tomorrow ? "de demain" : `du ${formatShortDate(d)}`));
+  const when = dayNames.length > 1 ? `${dayNames.slice(0, -1).join(", ")} et ${dayNames.at(-1)}` : (dayNames[0] ?? "");
+  const [only] = days;
+  const title =
+    days.length > 1 || !only
+      ? "Ces journées sont déjà planifiées"
+      : only === tomorrow
+        ? "Demain est déjà planifié"
+        : `Le ${formatShortDate(only)} est déjà planifié`;
+  return (
+    <Notice tone="warning" title={title}>
+      <p>
+        {trips.length === 1 ? "Sa course" : `Ses ${trips.length} courses`} {when} {trips.length === 1 ? "n'est" : "ne sont"} dans
+        aucune tournée&nbsp;: placez-{trips.length === 1 ? "la" : "les"} dans une tournée en place, ou réoptimisez la journée.
+      </p>
+      <p className="flex flex-wrap gap-2 pt-1">
+        {trips.map((t) => (
+          <LinkButton key={t.id} href={placeTripHref(t.date, t.id)} size="sm" variant="secondary">
+            Où placer {t.direction === "OUTBOUND" ? "l'aller" : "le retour"} {t.date === tomorrow ? "de demain" : `du ${formatShortDate(t.date)}`}&#x202F;?
+          </LinkButton>
+        ))}
+      </p>
+    </Notice>
   );
 }

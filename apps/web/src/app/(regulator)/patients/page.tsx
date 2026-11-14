@@ -134,10 +134,17 @@ export default async function PatientsPage({
         title="Patients"
         description={describeResults(total, filter.status, filter.q)}
         actions={
-          <LinkButton href="/patients/nouveau" variant="primary">
-            <Plus aria-hidden className="size-4" />
-            Nouveau patient
-          </LinkButton>
+          <>
+            <LinkButton href="/patients/nouveau" variant="secondary">
+              <Plus aria-hidden className="size-4" />
+              Nouveau patient
+            </LinkButton>
+            {/* Patient, prescription and rhythm on one screen: the usual case of a patient calling for a series of care. */}
+            <LinkButton href="/patients/nouveau-regulier" variant="primary">
+              <Plus aria-hidden className="size-4" />
+              Nouveau patient régulier
+            </LinkButton>
+          </>
         }
       />
 

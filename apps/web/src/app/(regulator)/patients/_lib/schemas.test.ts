@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { echoed, echoedCheckbox, echoedList, IDLE_STATE as INITIAL_FORM_STATE, type FormState } from "@/lib/forms";
-import { parsePatientForm, parsePrescriptionForm, parseRecurrenceForm } from "./schemas";
+import { parsePatientForm, parsePrescriptionForm, parseRecurrenceForm, parseRegularPatientForm } from "./schemas";
 
 // The first Date/Intl call of a process initialises ICU time zones, which takes
 // several seconds on slow machines: pay it once here, outside the test timeouts.
@@ -237,5 +237,56 @@ describe("echoed form values", () => {
     expect(echoedCheckbox(rejected, "active", true)).toBe(false);
     expect(echoedList(rejected, "weekdays", ["2"])).toEqual(["1", "3"]);
     expect(echoedList(rejected, "other", [])).toEqual(["x"]);
+  });
+});
+
+describe("parseRegularPatientForm («\u202fNouveau patient régulier\u202f»)", () => {
+  const rhythm: Partial<typeof recurrence> = { ...recurrence };
+  delete rhythm.prescriptionId;
+  const regular = {
+    ...patient,
+    mode: "TAP",
+    sharing: "BOTH",
+    validFrom: "2026-11-01",
+    validTo: "2027-04-30",
+    isSeries: "on",
+    prescriber: "Dr Martin",
+    ...rhythm,
+    notes: "Salle 3",
+  };
+
+  it("reads the patient, the prescription and the rhythm of one form", () => {
+    const result = parseRegularPatientForm(form(regular));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.patient).toMatchObject({ lastName: "Durand", city: "Manosque", accessNotes: "Code 1234B, 2e étage" });
+    expect(result.data.prescription).toMatchObject({ mode: "TAP", validTo: "2027-04-30", isSeries: true, prescriber: "Dr Martin", notes: null });
+    expect(result.data.recurrence).toEqual({
+      facilityId: "fac_1",
+      label: "Dialyse",
+      weekdays: [1, 3, 5],
+      appointmentMinute: 450,
+      sessionMinutes: 240,
+      legs: "BOTH",
+      startDate: "2026-11-02",
+      endDate: null,
+      notes: "Salle 3",
+    });
+  });
+
+  it("reports the errors of the three parts at once, and keeps what was typed", () => {
+    const result = parseRegularPatientForm(form({ ...regular, lastName: "", validTo: "", weekdays: [] }));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(Object.keys(result.state.fieldErrors).sort()).toEqual(["lastName", "validTo", "weekdays"]);
+    expect(result.state.values).toMatchObject({ firstName: "Marie", mode: "TAP", appointmentTime: "07:30" });
+    expect(result.state.fieldErrors).not.toHaveProperty("prescriptionId");
+  });
+
+  it("starts the sessions inside the prescription's validity", () => {
+    const early = parseRegularPatientForm(form({ ...regular, startDate: "2026-10-15" }));
+    expect(!early.success && early.state.fieldErrors.startDate).toMatch(/validité de la prescription/);
+    const late = parseRegularPatientForm(form({ ...regular, startDate: "2027-05-02" }));
+    expect(!late.success && late.state.fieldErrors.startDate).toMatch(/validité de la prescription/);
   });
 });

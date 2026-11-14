@@ -22,9 +22,17 @@ import { completeTrips, currentHorizon, reviveOneOffTrips, type Completion } fro
 import { formatShortDate, fromIsoDate, isIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import { activationEvent, alreadyInStateMessage, renewalEvents } from "./_lib/audit-events";
 import { idSchema } from "./_lib/form-parse";
-import { errorState, formString, messageState, type ActionResult, type FormState } from "@/lib/forms";
+import { errorState, formString, messageState, type ActionResult, type FormState, type FormValues } from "@/lib/forms";
 import type { PatientFormState } from "./_lib/patient-form-state";
-import { parsePatientForm, parsePrescriptionForm, parseRecurrenceForm, readPatientForm, readRecurrenceForm } from "./_lib/schemas";
+import {
+  parsePatientForm,
+  parsePrescriptionForm,
+  parseRecurrenceForm,
+  parseRegularPatientForm,
+  readPatientForm,
+  readRecurrenceForm,
+  type PatientInput,
+} from "./_lib/schemas";
 import { isRenewalOf } from "./_lib/status";
 import { RENEWAL_MAX_GAP_DAYS } from "@/lib/domain/renewal";
 import {
@@ -160,6 +168,40 @@ function skippedNote(completion: Completion): string {
 // Every change below is traced (lib/audit.ts) in the transaction that writes it.
 
 /**
+ * Existing records that may be the same person (same name without accents,
+ * same phone or same address), as the form's answer; null when there is none.
+ * The names and towns shown are a read of other patients' records (traced).
+ */
+async function similarAnswer(
+  user: Awaited<ReturnType<typeof requireUser>>,
+  data: PatientInput,
+  values: FormValues,
+): Promise<PatientFormState | null> {
+  // Few fields of every record, compared in memory: accents and phone formats are not comparable in SQL here.
+  const existing = await db.patient.findMany({
+    select: { id: true, firstName: true, lastName: true, phone: true, address: true, postalCode: true, city: true, active: true },
+  });
+  const similar = similarPatients(data, existing);
+  if (similar.length === 0) return null;
+  await auditRead(user, { action: "patient_list.view", entity: "Patient", entityId: null });
+  return {
+    ...messageState(
+      similar.length === 1
+        ? "Une fiche proche existe déjà\u00a0: vérifiez qu'il ne s'agit pas du même patient."
+        : `${similar.length} fiches proches existent déjà\u00a0: vérifiez qu'il ne s'agit pas du même patient.`,
+      values,
+    ),
+    similar: similar.slice(0, 10).map(({ patient, reasons }) => ({
+      id: patient.id,
+      name: formatPersonName(patient),
+      city: patient.city,
+      active: patient.active,
+      reasons: reasons.map((reason) => SIMILARITY_LABELS[reason]),
+    })),
+  };
+}
+
+/**
  * Creates the patient. Before the first save, existing records that may be
  * the same person (same name without accents, same phone or same address)
  * are shown; « Créer quand même » (confirmSimilar) saves anyway.
@@ -170,30 +212,8 @@ export async function createPatient(_prev: PatientFormState, formData: FormData)
   if (!parsed.success) return parsed.state;
 
   if (formString(formData, "confirmSimilar") !== "1") {
-    // Few fields of every record, compared in memory: accents and phone formats are not comparable in SQL here.
-    const existing = await db.patient.findMany({
-      select: { id: true, firstName: true, lastName: true, phone: true, address: true, postalCode: true, city: true, active: true },
-    });
-    const similar = similarPatients(parsed.data, existing);
-    if (similar.length > 0) {
-      // Names and towns of other patients are shown: a read of their records.
-      await auditRead(user, { action: "patient_list.view", entity: "Patient", entityId: null });
-      return {
-        ...messageState(
-          similar.length === 1
-            ? "Une fiche proche existe déjà\u00a0: vérifiez qu'il ne s'agit pas du même patient."
-            : `${similar.length} fiches proches existent déjà\u00a0: vérifiez qu'il ne s'agit pas du même patient.`,
-          readPatientForm(formData).values,
-        ),
-        similar: similar.slice(0, 10).map(({ patient, reasons }) => ({
-          id: patient.id,
-          name: formatPersonName(patient),
-          city: patient.city,
-          active: patient.active,
-          reasons: reasons.map((reason) => SIMILARITY_LABELS[reason]),
-        })),
-      };
-    }
+    const similar = await similarAnswer(user, parsed.data, readPatientForm(formData).values);
+    if (similar) return similar;
   }
 
   const patient = await db.$transaction(async (tx) => {
@@ -204,6 +224,66 @@ export async function createPatient(_prev: PatientFormState, formData: FormData)
   revalidatePatients();
   // A creation opens the record with a banner; a change comes back to it with a banner (the app's rule).
   redirect(`/patients/${patient.id}?cree=1`);
+}
+
+/**
+ * « Nouveau patient régulier » : the patient, their prescription and their
+ * rhythm in one save (one transaction, three traces), then the trips of the
+ * horizon (tomorrow to D+N, lib/trips/completion.ts), each traced. Fiches
+ * proches are shown first, as « Nouveau patient ». The record opens with a
+ * banner; it says which of those days are already planned (their new trips
+ * wait for a place).
+ */
+export async function createRegularPatient(_prev: PatientFormState, formData: FormData): Promise<PatientFormState> {
+  const user = await requireUser("REGULATOR");
+  const parsed = parseRegularPatientForm(formData);
+  if (!parsed.success) return parsed.state;
+  const { patient: identity, prescription, recurrence } = parsed.data;
+
+  const facility = await db.facility.findUnique({ where: { id: recurrence.facilityId }, select: { id: true, active: true } });
+  if (!facility || !facility.active) {
+    const values = { ...readPatientForm(formData).values, ...readRecurrenceForm(formData) };
+    return errorState({ facilityId: facility ? "Cet établissement est désactivé" : "Établissement introuvable" }, values, "Vérifiez l'établissement.");
+  }
+
+  if (formString(formData, "confirmSimilar") !== "1") {
+    const values = { ...readPatientForm(formData).values, ...readRecurrenceForm(formData) };
+    const similar = await similarAnswer(user, identity, values);
+    if (similar) return similar;
+  }
+
+  const created = await db.$transaction(async (tx) => {
+    const patient = await tx.patient.create({ data: identity, select: { id: true } });
+    const { validFrom, validTo, ...rules } = prescription;
+    const pmt = await tx.prescription.create({
+      data: { ...rules, patientId: patient.id, validFrom: fromIsoDate(validFrom), validTo: fromIsoDate(validTo) },
+      select: { id: true },
+    });
+    const { startDate, endDate, ...rhythm } = recurrence;
+    const rec = await tx.recurrence.create({
+      data: {
+        ...rhythm,
+        patientId: patient.id,
+        prescriptionId: pmt.id,
+        startDate: fromIsoDate(startDate),
+        endDate: endDate ? fromIsoDate(endDate) : null,
+      },
+      select: { id: true },
+    });
+    await audit(tx, user, [
+      { action: "patient.create", entity: "Patient", entityId: patient.id },
+      { action: "prescription.create", entity: "Prescription", entityId: pmt.id },
+      { action: "recurrence.create", entity: "Recurrence", entityId: rec.id },
+    ]);
+    // Its trips of the horizon exist as soon as the recurrence does.
+    const completion = await completeHorizon(tx, user, { id: rec.id });
+    return { id: patient.id, summary: withCompletion(EMPTY_SYNC, completion) };
+  }, SYNC_TX_OPTIONS);
+
+  revalidatePatients();
+  revalidatePath("/(regulator)/etablissements", "layout");
+  revalidateTrips(created.summary);
+  redirect(withSyncNotice(`/patients/${created.id}?cree=regulier`, created.summary));
 }
 
 /**
