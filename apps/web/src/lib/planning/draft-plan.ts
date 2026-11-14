@@ -42,12 +42,23 @@ import {
   type DraftView,
 } from "./draft";
 import { newRouteStatus, pastPlaceReason, placeQuestion, ROUTE_HOLD_REASONS } from "./insertion";
-import { crewOf, crewTakenReason, loadPlaceDay, nowMinuteOn, tripPlaceIssue, writePlacedRoutes, type PlaceDay } from "./place-trip";
+import {
+  crewOf,
+  crewTakenReason,
+  doneKeysOf,
+  doneStopIds,
+  loadPlaceDay,
+  loadPlaceVersion,
+  nowMinuteOn,
+  tripPlaceIssue,
+  writePlacedRoutes,
+  type PlaceDay,
+} from "./place-trip";
+import { keepDoneMinutes } from "./route-writes";
 import { placementsOf, planChanges } from "./plan-changes";
 import { figuresOfPlan, routesInPlace } from "./plan-compare";
 import { relevantViolations } from "./refresh-routes";
 import { optimizationInProgress, OPTIMIZATION_IN_PROGRESS_ERROR, PLANNING_TX_OPTIONS, withdrawLapsedProposals } from "./run-optimization";
-import { loadPlanVersion } from "./version";
 
 export const DRAFT_STALE_ERROR =
   "Le planning a changé depuis la vérification du brouillon\u00a0: il est vérifié de nouveau sur le planning du moment, enregistrez ensuite.";
@@ -76,8 +87,9 @@ const OFF = new Set(["CANCELLED", "NO_SHOW"]);
 
 /** The day's request without a field the optimizer refuses with `routes` (the routes in place are given as `routes`). */
 function dayFields(day: PlaceDay) {
-  const { date, settings, vehicles, trips, tariffs } = day.build.request;
-  return { date, settings, vehicles, trips, tariffs };
+  const { date, settings, vehicles, trips, tariffs, progress } = day.build.request;
+  // A day under way: the stops done stay, nothing is planned before now (contract `progress`).
+  return { date, settings, vehicles, trips, tariffs, ...(progress ? { progress } : {}) };
 }
 
 /**
@@ -370,7 +382,7 @@ export async function saveDraftPlan(
     // Serialized with the computations, validations and other plan writes of the date (day-lock.ts).
     await lockPlanningDay(tx, isoDate);
     if (await optimizationInProgress(isoDate, tx)) return "running" as const;
-    if ((await loadPlanVersion(tx, isoDate)) !== day.version) return "stale" as const;
+    if ((await loadPlaceVersion(tx, isoDate, day.started)) !== day.version) return "stale" as const;
     const routeIds = [...computed.changed].flatMap((id) => storedByVehicle.get(id)?.id ?? []);
     if (routeIds.length > 0) {
       // Same row locks as savePlan and « Appliquer »: a crew's pick-up in flight waits, or is seen below.
@@ -380,12 +392,14 @@ export async function saveDraftPlan(
         where: { id: { in: routeIds } },
         select: { id: true, vehicleId: true, stops: { select: { id: true, sequence: true, completedAt: true } } },
       });
-      const ids = (stops: { id: string; sequence: number }[]) => [...stops].sort((a, b) => a.sequence - b.sequence).map((s) => s.id).join(" ");
+      // Same stops in the same order, none done since they were read (a stop done of a started route stays done).
+      const ids = (stops: { id: string; sequence: number; completedAt: Date | null }[]) =>
+        [...stops].sort((a, b) => a.sequence - b.sequence).map((s) => `${s.id}:${s.completedAt === null ? "" : "done"}`).join(" ");
       const same =
         now.length === routeIds.length &&
         now.every((route) => {
           const read = storedByVehicle.get(route.vehicleId);
-          return read !== undefined && ids(read.stops) === ids(route.stops) && route.stops.every((stop) => stop.completedAt === null);
+          return read !== undefined && ids(read.stops) === ids(route.stops);
         });
       if (!same) return "stale" as const;
     }
@@ -421,7 +435,8 @@ export async function saveDraftPlan(
     const write = {
       routes: rows.map((row) => ({ routeId: storedByVehicle.get(row.vehicleId)?.id ?? null, row })),
       deletedRouteIds: [...computed.changed].filter((id) => !kept.has(id)).flatMap((id) => storedByVehicle.get(id)?.id ?? []),
-      trips: planTripUpdates([...touched], computed.after, rows, current, new Date()),
+      // A trip done keeps the minutes it was planned at.
+      trips: keepDoneMinutes(planTripUpdates([...touched], computed.after, rows, current, new Date()), doneKeysOf(day)),
     };
     // Every moved trip must end where the draft put it: otherwise the plan changed under the draft.
     const servedBy = new Map(write.trips.map((t) => [t.tripId, t.vehicleId]));
@@ -445,6 +460,7 @@ export async function saveDraftPlan(
       planRunId,
       // Placed by the regulator: a later optimization keeps the trip there; one put in « À placer » is unlocked.
       locks: new Map(moved.map((m) => [m.tripId, m.toVehicleId])),
+      frozenStopIds: doneStopIds(day),
     });
     const lockBefore = new Map(day.input.trips.map((t) => [t.id, t.lockedVehicleId]));
     await audit(

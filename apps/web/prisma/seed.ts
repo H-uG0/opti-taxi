@@ -501,7 +501,9 @@ async function seedFleetPlanning(rng: Rng, dates: Dates): Promise<void> {
         kind: "MAINTENANCE",
         startDate: fromIsoDate(addDays(dates.nextMonday, 3)),
         endDate: fromIsoDate(addDays(dates.nextMonday, 3)),
-        note: "Révision au garage de la Valentine.",
+        // From 14:00 only (DAY-03): the taxi works its morning, its shift is cut at the garage time.
+        startMinute: 14 * 60,
+        note: "Révision au garage de la Valentine à 14:00.",
       },
       {
         vehicleId: idOf("Ambulance 2 (Gap)"),

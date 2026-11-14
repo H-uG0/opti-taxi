@@ -20,21 +20,14 @@
  * The answer for one vehicle (`vehicleIds`) is the check of a manual move onto it: the base of the
  * drag-and-drop draft (INS-03).
  */
-import type { RouteStatus, StopKind, TripStatus } from "@prisma/client";
+import type { RouteStatus, StopKind } from "@prisma/client";
 import type { DayRequest, InsertOption, InsertRequest, InsertResponse, Violation } from "@/lib/optimizer/contract";
-import {
-  planRoutes,
-  planTripUpdates,
-  type CurrentTrip,
-  type RouteRow,
-  type StopRow,
-  type TripUpdate,
-  type VehicleCrew,
-} from "@/lib/optimizer/persist";
+import { planRoutes, planTripUpdates, type CurrentTrip, type VehicleCrew } from "@/lib/optimizer/persist";
 import { formatMinute } from "@/lib/time";
 import { isDrivable, routesInPlace, type TodayCrew } from "./plan-compare";
 import { marginText, signedKmText, type PlaceRejectionView, type PlacesView } from "./place-view";
-import { isStopDone, relevantViolations } from "./refresh-routes";
+import { relevantViolations } from "./refresh-routes";
+import type { PlaceWrite } from "./route-writes";
 
 /** A route of the date as « Où placer » reads it. */
 export type StoredPlaceRoute = {
@@ -43,31 +36,43 @@ export type StoredPlaceRoute = {
   status: RouteStatus;
   driverId: string | null;
   crewMateId: string | null;
-  stops: { id: string; tripId: string; kind: StopKind; sequence: number; completedAt: Date | null }[];
+  /** Departure and break as planned (a day under way: the start of a started route, the break taken). */
+  startMinute?: number;
+  breakStartMinute?: number | null;
+  breakEndMinute?: number | null;
+  stops: {
+    id: string;
+    tripId: string;
+    kind: StopKind;
+    sequence: number;
+    completedAt: Date | null;
+    startMinute?: number;
+    departureMinute?: number;
+  }[];
 };
 
-/** Why a stored route cannot be handed to the assistant (neither as source nor as target). */
-export type RouteHold = "STARTED" | "UNAVAILABLE" | "OFF_REQUEST" | "CREW";
+/**
+ * Why a stored route cannot be handed to the assistant (neither as source nor as target). A route
+ * under way is no longer held (DAY-02): the trip goes after its stops done (contract `progress`).
+ */
+export type RouteHold = "UNAVAILABLE" | "OFF_REQUEST" | "CREW";
 
 export const ROUTE_HOLD_REASONS: Record<RouteHold, string> = {
-  STARTED: "a une tournée commencée, qui ne change plus en cours de journée",
   UNAVAILABLE: "est indisponible ce jour\u00a0: seule une réoptimisation de la journée refait sa tournée",
   OFF_REQUEST: "a dans sa tournée une course annulée ou incomplète (réoptimisez la journée d'abord)",
   CREW: "a une tournée prévue avec un autre équipage que celui du jour (voir «\u202fÀ traiter\u202f»)",
 };
 
 /**
- * Why the route cannot change now, or null: a stop done by the crew (or its trip picked up), a
- * vehicle off the road that day (no crew of the day: not sent), a stop of a trip the request does
- * not carry, or a crew that is no longer the vehicle's of the day.
+ * Why the route cannot change now, or null: a vehicle off the road that day (no crew of the day: not
+ * sent), a stop of a trip the request does not carry, or a crew that is no longer the vehicle's of
+ * the day. A route under way can change after its stops done (the optimizer keeps them).
  */
 export function routeHold(
   route: Pick<StoredPlaceRoute, "vehicleId" | "driverId" | "crewMateId" | "stops">,
   sentTripIds: ReadonlySet<string>,
-  statusOf: (tripId: string) => TripStatus | undefined,
   todayCrews: ReadonlyMap<string, TodayCrew>,
 ): RouteHold | null {
-  if (route.stops.some((stop) => isStopDone(stop, statusOf(stop.tripId)))) return "STARTED";
   if (!todayCrews.has(route.vehicleId)) return "UNAVAILABLE";
   if (route.stops.some((stop) => !sentTripIds.has(stop.tripId))) return "OFF_REQUEST";
   if (!isDrivable(route, todayCrews)) return "CREW";
@@ -84,13 +89,15 @@ export function buildInsertRequest(
   tripId: string,
   vehicleIds: readonly string[] | null,
 ): InsertRequest {
-  const { date, settings, vehicles, trips, tariffs } = request;
+  const { date, settings, vehicles, trips, tariffs, progress } = request;
   return {
     date,
     settings,
     vehicles,
     trips,
     tariffs,
+    // A day under way: the trip goes after the stops done, never before now.
+    ...(progress ? { progress } : {}),
     routes: routesInPlace(routes, request) ?? [],
     tripId,
     vehicleIds: vehicleIds ? [...vehicleIds] : null,
@@ -160,44 +167,7 @@ export function placesView(
   };
 }
 
-/**
- * How the stops of a route in place are rewritten: the stops that stay (same trip and kind) are
- * updated in place, so their ids hold (a driver's roadmap on the phone, and the statuses waiting in
- * its offline queue, name stops by id: refresh-routes.ts and detach.ts keep them too); the stops
- * that leave are deleted, those that come are created.
- */
-export type StopWrites = {
-  deleteIds: string[];
-  updates: { id: string; data: StopRow }[];
-  creates: StopRow[];
-};
-
-export function planStopWrites(stored: readonly Pick<StoredPlaceRoute["stops"][number], "id" | "tripId" | "kind">[], rows: readonly StopRow[]): StopWrites {
-  const byKey = new Map(stored.map((stop) => [`${stop.tripId}:${stop.kind}`, stop.id]));
-  const kept = new Set<string>();
-  const updates: StopWrites["updates"] = [];
-  const creates: StopRow[] = [];
-  for (const row of rows) {
-    const id = byKey.get(`${row.tripId}:${row.kind}`);
-    if (id !== undefined && !kept.has(id)) {
-      kept.add(id);
-      updates.push({ id, data: row });
-    } else {
-      creates.push(row);
-    }
-  }
-  return { deleteIds: stored.filter((stop) => !kept.has(stop.id)).map((stop) => stop.id), updates, creates };
-}
-
-/** What « Appliquer » writes: the routes it changes, and the results of their trips. */
-export type PlaceWrite = {
-  /** Rows of the target route and, for a move, of the source route; routeId null: a route to create. */
-  routes: { routeId: string | null; row: RouteRow }[];
-  /** Routes in place left without any stop: deleted (their trips have gone elsewhere). */
-  deletedRouteIds: string[];
-  /** Results of every trip of these routes (persist.ts planTripUpdates). */
-  trips: TripUpdate[];
-};
+export { planStopWrites, type PlaceWrite, type StopWrites } from "./route-writes";
 
 /**
  * The writes of an option: its routes through persist.ts's mapping (stops renumbered, address of

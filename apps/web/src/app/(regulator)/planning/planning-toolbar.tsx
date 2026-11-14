@@ -12,6 +12,8 @@ export type ToolbarProps = {
   /** Version of the plan shown (lib/planning/version.ts): validating a plan changed since is refused. */
   version: string;
   optimizeLabel: string;
+  /** What the optimize button does, when not the default (« Réoptimiser la suite » of a day under way). */
+  optimizeHint?: string;
   /** Why optimizing is not possible right now, or null. */
   optimizeBlocked: string | null;
   /** A computation of the date was running when the page was rendered, or null. */
@@ -31,6 +33,7 @@ export function PlanningToolbar({
   date,
   version,
   optimizeLabel,
+  optimizeHint,
   optimizeBlocked,
   runningReason,
   canValidate,
@@ -68,7 +71,7 @@ export function PlanningToolbar({
       <Button
         onClick={() => run("Optimisation en cours…", () => optimizeDay(date), { long: true })}
         disabled={busy || optimizeOff !== null}
-        title={optimizeOff ?? "Calcule les tournées\u202f; les courses figées restent sur leur véhicule"}
+        title={optimizeOff ?? optimizeHint ?? "Calcule les tournées\u202f; les courses figées restent sur leur véhicule"}
         aria-describedby={optimizeOff ? "optimize-blocked" : undefined}
       >
         <Sparkles aria-hidden className="size-4" />

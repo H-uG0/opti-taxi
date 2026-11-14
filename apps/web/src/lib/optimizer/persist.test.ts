@@ -11,6 +11,8 @@ import {
   planRoutes,
   planTripUpdates,
   replanBlockReason,
+  countFinished,
+  isStarted,
   savePlan,
   summarizeRun,
   type CurrentTrip,
@@ -192,9 +194,31 @@ describe("replanBlockReason", () => {
     expect(replanBlockReason("2026-11-03", { ...clear, validatedRoutes: 2 })).toMatch(/est validé\u00a0: rouvrez-le/);
   });
 
-  it("protects the drivers' field timestamps", () => {
-    expect(replanBlockReason("2026-11-03", { ...clear, startedTrips: 1 })).toMatch(/journée a commencé/);
-    expect(replanBlockReason("2026-11-03", { ...clear, completedStops: 1 })).toMatch(/journée a commencé/);
+  it("re-plans a day under way after its stops done (DAY-02), never a day whose every route is finished", () => {
+    expect(replanBlockReason("2026-11-03", { ...clear, startedTrips: 1 })).toBeNull();
+    expect(replanBlockReason("2026-11-03", { ...clear, completedStops: 3, routes: 2, finishedRoutes: 1 })).toBeNull();
+    expect(replanBlockReason("2026-11-03", { ...clear, completedStops: 8, routes: 2, finishedRoutes: 2 })).toBe(
+      "Toutes les tournées du mardi 3 novembre 2026 sont terminées\u00a0: il ne reste rien à réoptimiser.",
+    );
+  });
+
+  it("counts the routes finished by their crew, from the stops and their trips' statuses", () => {
+    const stop = (kind: "PICKUP" | "DROPOFF", completedAt: Date | null, status: "ASSIGNED" | "PICKED_UP" | "DROPPED_OFF" = "ASSIGNED") => ({
+      kind,
+      completedAt,
+      trip: { status },
+    });
+    const at = new Date("2026-11-03T08:00:00Z");
+    expect(
+      countFinished([
+        { stops: [stop("PICKUP", at), stop("DROPOFF", at)] },
+        { stops: [stop("PICKUP", null, "DROPPED_OFF"), stop("DROPOFF", null, "DROPPED_OFF")] },
+        { stops: [stop("PICKUP", at), stop("DROPOFF", null, "PICKED_UP")] },
+        { stops: [] },
+      ]),
+    ).toEqual({ routes: 3, finishedRoutes: 2 });
+    expect(isStarted({ ...clear, completedStops: 1 })).toBe(true);
+    expect(isStarted(clear)).toBe(false);
   });
 
   it("explains, when raised at save time, that the day changed during the solve", () => {
@@ -392,15 +416,17 @@ describe("contract fixtures", () => {
         count: async () => 0,
         findMany: async (args: { where: { routeId?: unknown } }) =>
           args.where.routeId ? servedInPlace : request.trips.map((t) => current(t.id)),
-        update: async () => ({}),
+        update: vi.fn(async () => ({})),
         updateMany: async () => ({ count: 0 }),
       },
       vehicle: {
         findMany: async () =>
           request.vehicles.map((v) => ({ id: v.id, type: v.type, defaultDriverId: `drv_${v.id}`, defaultCrewMateId: null })),
       },
+      routeStop: { deleteMany: vi.fn(async () => ({ count: 0 })), update: vi.fn(async () => ({})), createMany: vi.fn(async () => ({ count: 0 })) },
       route: {
         findMany: async () => inPlace,
+        update: vi.fn(async () => ({})),
         deleteMany: async (args: unknown) => {
           deleted.push(args);
           return { count: inPlace.length };
@@ -443,7 +469,7 @@ describe("contract fixtures", () => {
         },
       },
     };
-    const prisma = { $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx) } as unknown as PrismaClient;
+    const prisma = { tx, $transaction: async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx) } as unknown as PrismaClient;
     return { prisma, runWrites, deleted, createdData, settingsWrites };
   }
 
@@ -622,5 +648,45 @@ describe("contract fixtures", () => {
     ).rejects.toBe(refusal);
     expect(deleted).toEqual([]);
     expect(runWrites).toEqual([]);
+  });
+  it("on a day under way, writes only the routes the plan touches, never a stop done, the drivers' stop ids kept (DAY-02)", async () => {
+    // The ambulance is under way (trip_5 picked up, its row done), a taxi route in place no longer planned.
+    const ambulanceInPlace = {
+      id: "route_amb",
+      vehicleId: "veh_amb_1",
+      driverId: "drv_veh_amb_1",
+      crewMateId: null,
+      startMinute: 400,
+      revenue: 300,
+      margin: 100,
+      distanceKm: 90,
+      optimizationRunId: "run_0",
+      vehicle: { label: "Ambulance 1 (Gap)" },
+      stops: [
+        { id: "s5p", tripId: "trip_5", kind: "PICKUP" as const, sequence: 0, completedAt: NOW, trip: { status: "PICKED_UP" as const } },
+        { id: "s5d", tripId: "trip_5", kind: "DROPOFF" as const, sequence: 1, completedAt: null, trip: { status: "PICKED_UP" as const } },
+      ],
+    };
+    const taxiInPlace = { ...inPlaceRoute, id: "route_taxi", startMinute: 380, stops: inPlaceRoute.stops.map((st) => ({ ...st, id: `old_${st.kind}`, completedAt: null, trip: null })) };
+    const { prisma, deleted, createdData, runWrites } = fakeClient([ambulanceInPlace, taxiInPlace] as never);
+    const tx = (prisma as unknown as { tx: Record<string, Record<string, ReturnType<typeof vi.fn>>> }).tx;
+    tx.trip!.count = vi.fn(async () => 1);
+    const saved = await savePlan(prisma, { runId: "run_1", isoDate: request.date, request, response, kind: "optimize", now: NOW });
+    // No route deleted wholesale: the ambulance's route is updated in place, its stop done kept as it was.
+    expect(deleted).toEqual([{ where: { id: { in: ["route_taxi"] } } }]);
+    expect(createdData).toEqual([]);
+    expect(tx.route!.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "route_amb" }, data: expect.objectContaining({ startMinute: 400 }) }));
+    const stopUpdates = tx.routeStop!.update!.mock.calls.map((call) => call[0] as { where: { id: string }; data: Record<string, unknown> });
+    expect(stopUpdates.find((u) => u.where.id === "s5p")?.data).toEqual({ sequence: 0 });
+    expect(stopUpdates.find((u) => u.where.id === "s5d")?.data).toMatchObject({ sequence: 1, tripId: "trip_5" });
+    expect(tx.routeStop!.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ tripId: "trip_6", kind: "PICKUP", routeId: "route_amb" }), expect.objectContaining({ tripId: "trip_6", kind: "DROPOFF", routeId: "route_amb" })],
+    });
+    // trip_5's pickup is done: its planned pickup minute stays.
+    const tripWrites = tx.trip!.update!.mock.calls.map((call) => call[0] as { where: { id: string }; data: Record<string, unknown> });
+    expect(tripWrites.find((w) => w.where.id === "trip_5")?.data).not.toHaveProperty("plannedPickupMinute");
+    expect(tripWrites.find((w) => w.where.id === "trip_6")?.data).toMatchObject({ routeId: "route_amb", plannedPickupMinute: expect.any(Number) });
+    expect(saved.routes).toBe(1);
+    expect(runWrites[0]?.data.status).toBe("SUCCESS");
   });
 });

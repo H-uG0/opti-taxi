@@ -43,24 +43,18 @@ describe("routeHold", () => {
   const sent = new Set(["trip_3", "trip_9"]);
   const crews = new Map([["veh_taxi_1", { driverId: "drv-1" }]]);
 
-  it("keeps a route under way, one holding a trip no longer sent, and one saved with another crew", () => {
-    expect(routeHold(storedRoute(), sent, () => "ASSIGNED", crews)).toBeNull();
-    expect(routeHold(storedRoute({ stops: [stop("trip_3", "PICKUP", 0, new Date()), stop("trip_3", "DROPOFF", 1)] }), sent, () => "ASSIGNED", crews)).toBe("STARTED");
-    // Picked up on the phone before the stop was recorded: under way too.
-    expect(routeHold(storedRoute(), sent, () => "PICKED_UP", crews)).toBe("STARTED");
+  it("keeps a route holding a trip no longer sent, and one saved with another crew; a route under way is handed over", () => {
+    expect(routeHold(storedRoute(), sent, crews)).toBeNull();
+    // A day under way (DAY-02): the trip goes after the stops done of the route (contract `progress`).
+    expect(routeHold(storedRoute({ stops: [stop("trip_3", "PICKUP", 0, new Date()), stop("trip_3", "DROPOFF", 1)] }), sent, crews)).toBeNull();
     // Rewriting the route would drop the cancelled or incomplete trip from it.
-    expect(routeHold(storedRoute({ stops: [stop("trip_x", "PICKUP", 0), stop("trip_x", "DROPOFF", 1)] }), sent, () => undefined, crews)).toBe(
-      "OFF_REQUEST",
-    );
-    expect(routeHold(storedRoute({ driverId: "drv-2" }), sent, () => "ASSIGNED", crews)).toBe("CREW");
-    expect(ROUTE_HOLD_REASONS.STARTED).toBe("a une tournée commencée, qui ne change plus en cours de journée");
+    expect(routeHold(storedRoute({ stops: [stop("trip_x", "PICKUP", 0), stop("trip_x", "DROPOFF", 1)] }), sent, crews)).toBe("OFF_REQUEST");
+    expect(routeHold(storedRoute({ driverId: "drv-2" }), sent, crews)).toBe("CREW");
   });
 
   it("says a vehicle off the road that day as such, not as another crew", () => {
     // Made unavailable (breakdown, maintenance…): no crew of the day, not sent to the optimizer.
-    expect(routeHold(storedRoute({ vehicleId: "veh_down" }), sent, () => "ASSIGNED", crews)).toBe("UNAVAILABLE");
-    // A stop already done still comes first: the route is under way.
-    expect(routeHold(storedRoute({ vehicleId: "veh_down" }), sent, () => "PICKED_UP", crews)).toBe("STARTED");
+    expect(routeHold(storedRoute({ vehicleId: "veh_down" }), sent, crews)).toBe("UNAVAILABLE");
   });
 });
 
@@ -133,7 +127,7 @@ describe("buildInsertRequest", () => {
 
 describe("placesView", () => {
   it("keeps what the panel shows of each place, its largest shift per trip, and adds the routes held", () => {
-    const view = placesView(placed(), [{ vehicleId: "veh_amb_1", kind: "STARTED", reason: ROUTE_HOLD_REASONS.STARTED }], "v-7", 812);
+    const view = placesView(placed(), [{ vehicleId: "veh_amb_1", kind: "RULES", reason: ROUTE_HOLD_REASONS.CREW }], "v-7", 812);
     expect(view).toMatchObject({ tripId: "trip_1", fromVehicleId: null, version: "v-7", elapsedMs: 812, straightLine: true });
     expect(view.options).toEqual([
       {
@@ -153,7 +147,7 @@ describe("placesView", () => {
     ]);
     expect(view.rejected.map((r) => [r.vehicleId, r.kind])).toEqual([
       ["veh_vsl_1", "SHIFT"],
-      ["veh_amb_1", "STARTED"],
+      ["veh_amb_1", "RULES"],
     ]);
   });
 

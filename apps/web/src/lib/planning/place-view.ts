@@ -29,7 +29,7 @@ export type PlaceOptionView = {
 };
 
 /** The optimizer's kinds, and the web's own: a route under way, a vehicle off the road, a time already past. */
-export type PlaceRejectionKind = RejectionKind | "STARTED" | "UNAVAILABLE" | "PAST";
+export type PlaceRejectionKind = RejectionKind | "UNAVAILABLE" | "PAST";
 
 /** Why the assistant has nothing to place a trip in: the day has no route yet (mirrored on the server). */
 export const PLACE_NO_ROUTES = "Optimisez d'abord la journée\u00a0: l'assistant place une course dans les tournées en place.";

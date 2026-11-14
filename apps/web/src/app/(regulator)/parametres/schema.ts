@@ -95,6 +95,8 @@ export const settingsSchema = z
     replanMaxServedLoss: numberField({ integer: true, min: 0, max: 1000, unit: "courses" }),
     // Typed in %, stored as a fraction of the revenue in place.
     replanMaxMarginLoss: numberField({ min: 0, max: 100, unit: "%" }).transform(percentToFraction),
+    // A trip of the plan in place changes vehicle only for a larger gain (contract changePenalty, DAY-02).
+    replanChangePenalty: numberField({ min: 0, max: 10_000, unit: "€" }),
     // Recurring trips are created from tomorrow to D+N (lib/trips/completion.ts).
     tripHorizonDays: numberField({ integer: true, min: TRIP_HORIZON_DAYS.min, max: TRIP_HORIZON_DAYS.max, unit: "jours" }),
     // A cancellation typed less than this many hours before the pickup is late (lib/domain/cancellation.ts).
@@ -151,6 +153,7 @@ export const SETTINGS_FIELDS = [
   "unassignedPenalty",
   "solverTimeLimitSec",
   "replanMaxServedLoss",
+  "replanChangePenalty",
   "lateCancellationHours",
   "tripHorizonDays",
   "crewMaxReplacementKm",

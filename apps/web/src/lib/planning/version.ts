@@ -54,10 +54,36 @@ export function planVersionToken(parts: PlanVersionParts): string {
 /**
  * Fingerprint of an optimizer request: a plan computed for it may be saved
  * later (« Remplacer quand même ») only if the day's data still builds the
- * same request (trips, locks, vehicles, crews, tariffs, settings).
+ * same request (trips, locks, vehicles, crews, tariffs, settings). The
+ * progress of a day under way (the minute, the stops done) is left out: it
+ * changes with every status, and planHoldsProgress (day-progress.ts) checks it.
  */
 export function requestHash(request: unknown): string {
-  return createHash("sha256").update(JSON.stringify(request)).digest("base64url");
+  const body =
+    request !== null && typeof request === "object" && "progress" in request ? { ...(request as Record<string, unknown>), progress: undefined } : request;
+  return createHash("sha256").update(JSON.stringify(body)).digest("base64url");
+}
+
+/**
+ * Key of the routes of a date, the crew's statuses aside: each route's vehicle and stops in order. On a
+ * day under way, what a plan computed earlier must still find to be saved (the version moves with
+ * every status).
+ */
+export function routesKey(routes: readonly { vehicleId: string; stops: readonly { tripId: string; kind: string; sequence: number }[] }[]): string {
+  const text = [...routes]
+    .sort((a, b) => a.vehicleId.localeCompare(b.vehicleId))
+    .map((route) => `${route.vehicleId}:${[...route.stops].sort((a, b) => a.sequence - b.sequence).map((s) => `${s.tripId}/${s.kind}`).join(",")}`)
+    .join("|");
+  return token(text);
+}
+
+/** routesKey of the routes of isoDate as stored. */
+export async function loadRoutesKey(client: Pick<PrismaClient, "route"> | Pick<Prisma.TransactionClient, "route">, isoDate: string): Promise<string> {
+  const routes = await client.route.findMany({
+    where: { serviceDate: fromIsoDate(isoDate) },
+    select: { vehicleId: true, stops: { select: { tripId: true, kind: true, sequence: true } } },
+  });
+  return routesKey(routes);
 }
 
 export function runToken(run: Pick<LatestRun, "id" | "status"> | null): string | null {

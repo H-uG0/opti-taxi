@@ -87,7 +87,14 @@
  * - staff and crews: day_crew.save (one per vehicle fixed, details: vehicle
  *   and people ids), day_crew.unfix (one vehicle back to the proposal),
  *   day_crew.reset (the whole date), route.crew_change (« Changer l'équipage »
- *   of a route, details: old and new people ids), staff_absence.create/delete,
+ *   of a route, details: old and new people ids), route.interrupt (« Hors service
+ *   ou indisponible à partir de HH:MM », DAY-03, on the Route: details.vehicleId,
+ *   details.who VEHICLE | DRIVER | CREW_MATE, details.fromMinute, details.detached
+ *   and details.interrupted, the numbers of trips taken off and of patients on
+ *   board picked up again; with the unavailability created, a trip.detach
+ *   (details.cause "route_interrupted") and a trip.unlock per trip taken off,
+ *   a trip.cancel (details.reason "INTERRUPTED") and a trip.create
+ *   (details.interrupts) per patient on board), staff_absence.create/delete,
  *   crew_incompatibility.create/delete;
  * - fleet: vehicle.create/update/deactivate/reactivate,
  *   vehicle_unavailability.create/delete, maintenance_deadline.create/

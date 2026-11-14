@@ -20,6 +20,8 @@ import { lockMessage, tripsToLock, tripsToUnlock, unlockMessage, type LockScope,
 import { lockPlanningDay } from "@/lib/planning/day-lock";
 import { loadPlanningDay } from "@/lib/planning/load";
 import { applyTripPlace, findTripPlaces, type FindPlacesOutcome } from "@/lib/planning/place-trip";
+import { interruptRoute as interruptRouteAt } from "@/lib/planning/interrupt-route";
+import { replaceSummary, type ReplaceOutcome } from "@/lib/planning/replace-trips";
 import { DRAFT_MAX_MOVES } from "@/lib/planning/draft";
 import { checkDraftPlan, saveDraftPlan, type CheckDraftOutcome } from "@/lib/planning/draft-plan";
 import { LOCKED, lockAction, notLockedOn } from "@/lib/planning/lock";
@@ -45,6 +47,7 @@ import { validationIssues, validationQuestion } from "@/lib/planning/validation"
 import { checkRouteCrewChange, remainingPart } from "@/lib/staff/route-crew";
 import { loadPlanVersion, STALE_PLAN_ERROR } from "@/lib/planning/version";
 import { VEHICLE_TYPE_SHORT } from "@/lib/labels";
+import { formatPersonName } from "@/lib/names";
 import { formatLongDate, fromIsoDate, isIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import { reopeningDropsFrozenPlan } from "@/lib/kpis-plan";
 import { freezeValidatedPlan } from "@/lib/kpis-plan-store";
@@ -55,6 +58,8 @@ export type PlanningActionResult =
       message: string;
       /** Done, but something is left to look at (violations, trips not placed, locks kept): the toast stays, in amber. */
       warning?: boolean;
+      /** Trips left to place again (an interrupted route, DAY-03): the page lists them with « Replacer ». */
+      toPlace?: string[];
     }
   | {
       ok: false;
@@ -296,6 +301,86 @@ export async function placeTrip(
     const outcome = await applyTripPlace(args.data.tripId, args.data.vehicleId, args.data.version, args.data.confirmed, user);
     if (outcome.ok) refreshPages();
     return outcome;
+  });
+}
+
+const interruptSchema = z.object({
+  routeId: idSchema,
+  who: z.enum(["VEHICLE", "DRIVER", "CREW_MATE"]),
+  from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Heure attendue au format HH:MM."),
+  kind: z.enum(["REPAIR", "MAINTENANCE", "OTHER", "SICK"]),
+  note: z
+    .string()
+    .trim()
+    .max(500)
+    .transform((value) => (value === "" ? null : value)),
+});
+
+/**
+ * « Hors service ou indisponible à partir de HH:MM » (DAY-03): the vehicle out of service, or its driver
+ * or crew mate unavailable, from that time. The partial unavailability is recorded, the route closed
+ * there (what was done stays), the trips not picked up go back « à replacer », a patient on board gets a
+ * continuation trip from the last stop done; traced (lib/planning/interrupt-route.ts). The answer lists
+ * the trips to place again (`toPlace`).
+ */
+export async function interruptRoute(input: { routeId: string; who: string; from: string; kind: string; note: string }): Promise<PlanningActionResult> {
+  const user = await requireUser("REGULATOR");
+  return guarded("interruptRoute", async () => {
+    const parsed = interruptSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Demande invalide." };
+    const { routeId, who, from, kind, note } = parsed.data;
+    // A vehicle stops for a repair, a maintenance or another reason; a person is unavailable (sick or other reason).
+    const allowed: readonly string[] = who === "VEHICLE" ? ["REPAIR", "MAINTENANCE", "OTHER"] : ["SICK", "OTHER"];
+    if (!allowed.includes(kind)) return { ok: false, error: "Motif invalide pour ce choix." };
+    const [hours, minutes] = from.split(":").map(Number);
+    const outcome = await interruptRouteAt({ routeId, who, fromMinute: hours! * 60 + minutes!, kind, note }, user);
+    if (outcome.ok) refreshPages();
+    return outcome;
+  });
+}
+
+/**
+ * « Replacer les courses » after an interruption (DAY-03): each trip, the most urgent first, goes to the
+ * best place « Où placer cette course ? » finds for it now, saved as « Appliquer » does (only the target
+ * route changes, the trip locked there, trip.move traced); the regulator confirmed the drivers' roadmaps
+ * change. The answer lists the trips placed and those left without a place, with why.
+ */
+export async function replaceTrips(date: string, tripIds: string[]): Promise<PlanningActionResult> {
+  const user = await requireUser("REGULATOR");
+  return guarded("replaceTrips", async () => {
+    const args = z.object({ date: dateSchema, tripIds: z.array(idSchema).min(1).max(50) }).safeParse({ date, tripIds });
+    if (!args.success) return { ok: false, error: "Demande invalide." };
+    const trips = await db.trip.findMany({
+      where: { id: { in: args.data.tripIds }, serviceDate: fromIsoDate(args.data.date) },
+      select: { id: true, routeId: true, direction: true, appointmentMinute: true, readyMinute: true, patient: { select: { firstName: true, lastName: true } } },
+    });
+    // The most urgent first: the earliest appointment or end of session.
+    const ordered = trips
+      .filter((trip) => trip.routeId === null)
+      .sort((a, b) => ((a.direction === "OUTBOUND" ? a.appointmentMinute : a.readyMinute) ?? 0) - ((b.direction === "OUTBOUND" ? b.appointmentMinute : b.readyMinute) ?? 0));
+    const outcomes: ReplaceOutcome[] = [];
+    for (const trip of ordered) {
+      const patient = formatPersonName(trip.patient);
+      const places = await findTripPlaces(trip.id);
+      if (!places.ok) {
+        outcomes.push({ patient, placed: false, reason: places.error });
+        continue;
+      }
+      const best = places.view.options[0];
+      if (!best) {
+        const reason = places.view.rejected[0]?.reason ?? "aucun véhicule n'a de place";
+        outcomes.push({ patient, placed: false, reason: `aucune place (${places.view.rejected.length > 1 ? "ex. " : ""}${reason})` });
+        continue;
+      }
+      let applied = await applyTripPlace(trip.id, best.vehicleId, places.view.version, null, user);
+      // The regulator confirmed with « Replacer »: the roadmaps of a validated or started day change at once.
+      if (!applied.ok && applied.needsConfirmation) applied = await applyTripPlace(trip.id, best.vehicleId, places.view.version, applied.error, user);
+      outcomes.push(applied.ok ? { patient, placed: true, vehicleId: best.vehicleId, pickupMinute: best.pickupMinute } : { patient, placed: false, reason: applied.error });
+    }
+    refreshPages();
+    const vehicles = await db.vehicle.findMany({ where: { id: { in: outcomes.flatMap((o) => (o.placed ? [o.vehicleId] : [])) } }, select: { id: true, label: true } });
+    const summary = replaceSummary(outcomes, new Map(vehicles.map((v) => [v.id, v.label])));
+    return { ok: true, message: summary.text, ...(summary.left > 0 ? { warning: true } : {}) };
   });
 }
 

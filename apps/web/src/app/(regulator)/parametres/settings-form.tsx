@@ -346,6 +346,14 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
           >
             <NumberInput name="replanMaxMarginLoss" unit="%" values={values} errors={errors} />
           </Field>
+          <Field
+            label="Pénalité de changement de véhicule (€ par course)"
+            htmlFor="replanChangePenalty"
+            error={errors.replanChangePenalty}
+            hint="15&nbsp;€ par défaut&nbsp;: une réoptimisation ne fait changer une course de véhicule que pour un gain supérieur, les tournées déjà connues des chauffeurs ne sont pas rebattues pour peu. 0&nbsp;: aucune."
+          >
+            <NumberInput name="replanChangePenalty" unit="€" values={values} errors={errors} />
+          </Field>
         </div>
       </Fieldset>
 

@@ -33,6 +33,7 @@ import { LockScopeButtons } from "./lock-scope-buttons";
 import { usePlanningActivity, useTripLink } from "./planning-activity";
 import { PlanningSearch } from "./planning-search";
 import { RouteCrewChange, type CrewChangeMode } from "./route-crew-form";
+import { RouteOutage } from "./route-outage-form";
 import { TimelineToolbar } from "./timeline-toolbar";
 import { TripPanel } from "./trip-panel";
 import { usePlanningDraft } from "./use-planning-draft";
@@ -70,6 +71,8 @@ export type PlanningBoardProps = {
   crewRules: Pick<CrewRules, "minPairOverlapMin">;
   crewChangeMode: CrewChangeMode;
   crewChangeBlocked: string | null;
+  /** The date shown is today's (« Hors service… » proposes the time of now). */
+  today?: boolean;
   /** Plan version shown (actions on a stale page are refused). */
   version: string;
   className?: string;
@@ -132,6 +135,7 @@ export function PlanningBoard({
   crewRules,
   crewChangeMode,
   crewChangeBlocked,
+  today = false,
   version,
   className,
 }: PlanningBoardProps) {
@@ -660,6 +664,17 @@ export function PlanningBoard({
                     mode={crewChangeMode}
                     blocked={crewChangeBlocked}
                   />
+                }
+                outageAction={
+                  crewChangeMode === "none" ? null : (
+                    <RouteOutage
+                      key={`${selectedVehicle.id}/${selectedVehicle.route?.id ?? ""}`}
+                      date={date}
+                      today={today}
+                      vehicle={selectedVehicle}
+                      blocked={crewChangeBlocked}
+                    />
+                  )
                 }
                 onSelectTrip={selectTrip}
                 onClose={clear}

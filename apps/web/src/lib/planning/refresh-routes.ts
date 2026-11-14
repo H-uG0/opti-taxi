@@ -46,6 +46,7 @@ import {
 } from "@/lib/optimizer/persist";
 import { logError } from "@/lib/log";
 import { fromIsoDate, toIsoDate } from "@/lib/time";
+import { isStopDone } from "./stop-done";
 import { loadPlanVersion } from "./version";
 
 /** Same budget as savePlan: the write locks the routes, a re-optimization in flight may hold them. */
@@ -245,12 +246,7 @@ export function sameStops(before: StoredRoute, after: StoredRoute): boolean {
   return a.length === b.length && a.every((stop, i) => stop.id === b[i]?.id && stop.sequence === b[i]?.sequence);
 }
 
-/** A stop the crew has done: recorded, or implied by its trip's field status. */
-export function isStopDone(stop: Pick<StoredStop, "kind" | "completedAt">, tripStatus: TripStatus | undefined): boolean {
-  if (stop.completedAt !== null) return true;
-  if (tripStatus === "DROPPED_OFF") return true;
-  return stop.kind === "PICKUP" && (tripStatus === "PICKED_UP" || tripStatus === "NO_SHOW");
-}
+export { isStopDone } from "./stop-done";
 
 type Break = { breakStartMinute: number | null; breakEndMinute: number | null };
 

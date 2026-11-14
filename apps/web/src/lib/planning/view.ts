@@ -28,6 +28,7 @@ import {
 import type { RunDetails } from "@/lib/optimizer/run-details";
 import { returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
 import { halfServedPairs } from "./half-served";
+import { isStopDone } from "./stop-done";
 import { computeDayKpis as computeDashboardDayKpis, type KpiRoute, type KpiTrip } from "@/lib/kpis";
 import { tapTotal } from "@/lib/kpis-sharing";
 import { VIOLATION_LABELS } from "@/lib/labels";
@@ -160,6 +161,15 @@ export type PlanningRawInput = {
 };
 
 const FIELD_STATUSES: readonly TripStatus[] = ["PICKED_UP", "DROPPED_OFF"];
+
+/** Every route with stops is done by its crew (the same rule as replanBlocker: nothing left to re-plan). */
+export function dayFinishedOf(
+  routes: ReadonlyArray<{ stops: ReadonlyArray<{ tripId: string; kind: StopKind; completedAt: Date | null }> }>,
+  statusOf: (tripId: string) => TripStatus | undefined,
+): boolean {
+  const withStops = routes.filter((r) => r.stops.length > 0);
+  return withStops.length > 0 && withStops.every((r) => r.stops.every((s) => isStopDone(s, statusOf(s.tripId))));
+}
 
 function isActiveTrip(status: TripStatus): boolean {
   return !EXCLUDED_TRIP_STATUSES.includes(status);
@@ -662,6 +672,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     dayStarted:
       input.trips.some((t) => FIELD_STATUSES.includes(t.status)) ||
       input.routes.some((r) => r.stops.some((s) => s.completedAt !== null)),
+    dayFinished: dayFinishedOf(input.routes, (id) => input.trips.find((t) => t.id === id)?.status),
     timeLimitSec: build.request.settings.timeLimitSec,
   };
 }

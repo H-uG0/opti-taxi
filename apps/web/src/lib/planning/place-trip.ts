@@ -11,22 +11,25 @@
  * under the planning lock of the date, only if that version is still the one shown, no computation
  * of the date runs, and the two routes are as read. On a validated or started day it asks first
  * (the drivers' roadmaps change at once; the stops that stay keep their ids, so a status sent from a
- * phone still finds its stop); a route under way is never changed, and on today's date a place
- * whose times are already past is refused. Never on a day without routes (one trip placed there
+ * phone still finds its stop). On a day under way (DAY-02) the optimizer gets the progress of the day
+ * (day-progress.ts): a trip goes after the stops done of a route, never before now, a stop done is never
+ * rewritten, and the version the places are computed on is the routes' order (routesKey), the drivers'
+ * statuses aside; on today's date a place whose pickup is less than 10 min away is refused. Never on a day without routes (one trip placed there
  * would make a half-planned day), nor for a trip in an exceptional ambulance; a route created
  * never takes people still on another route of the date (one vehicle a day).
  */
 import "server-only";
-import type { Prisma, RouteStatus, TripStatus } from "@prisma/client";
+import type { Prisma, TripStatus } from "@prisma/client";
 import { z } from "zod";
 import { audit, type AuditActor } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { buildOptimizeRequest, loadOptimizeInput, personName, type BuildResult, type OptimizeInput } from "@/lib/optimizer/build-request";
 import { insert } from "@/lib/optimizer/client";
 import { violationSchema, type InsertOption } from "@/lib/optimizer/contract";
-import type { CurrentTrip, VehicleCrew } from "@/lib/optimizer/persist";
+import type { CurrentTrip, TripUpdate, VehicleCrew } from "@/lib/optimizer/persist";
 import { formatLongDate, fromIsoDate, minuteOfDay, todayIso, toIsoDate } from "@/lib/time";
 import { lockPlanningDay } from "./day-lock";
+import { buildProgress } from "./day-progress";
 import { isExceptionalAmbulanceTrip } from "./exceptional-ambulance";
 import {
   buildInsertRequest,
@@ -36,8 +39,6 @@ import {
   placeQuestion,
   placesView,
   planPlaceWrite,
-  planStopWrites,
-  type PlaceWrite,
   ROUTE_HOLD_REASONS,
   routeHold,
   violationsAfterPlace,
@@ -52,15 +53,20 @@ import {
   type PlaceRejectionView,
   type PlacesView,
 } from "./place-view";
-import { isDayStarted } from "./refresh-routes";
+import { isDayStarted, isStopDone } from "./refresh-routes";
+import { keepDoneMinutes, writePlacedRoutes } from "./route-writes";
 import { optimizationInProgress, OPTIMIZATION_IN_PROGRESS_ERROR, PLANNING_TX_OPTIONS, withdrawLapsedProposals } from "./run-optimization";
-import { loadPlanVersion } from "./version";
+import { loadPlanVersion, loadRoutesKey } from "./version";
+
+export { writePlacedRoutes };
 
 export type FindPlacesOutcome = { ok: true; view: PlacesView } | { ok: false; error: string; stale?: boolean };
 
 export type PlaceOutcome =
   | { ok: true; message: string; warning?: boolean }
   | { ok: false; error: string; needsConfirmation?: boolean; stale?: boolean };
+
+export const TRIP_PICKED_UP_ERROR = "Cette course est déjà commencée ou terminée\u00a0: elle reste sur son véhicule.";
 
 export const PLACES_STALE_ERROR =
   "Le planning a changé depuis la recherche des places\u00a0: relancez «\u202fOù placer cette course\u202f?\u202f».";
@@ -71,8 +77,20 @@ const storedRouteSelect = {
   status: true,
   driverId: true,
   crewMateId: true,
-  stops: { select: { id: true, tripId: true, kind: true, sequence: true, completedAt: true } },
+  startMinute: true,
+  breakStartMinute: true,
+  breakEndMinute: true,
+  stops: { select: { id: true, tripId: true, kind: true, sequence: true, completedAt: true, startMinute: true, departureMinute: true } },
 } satisfies Prisma.RouteSelect;
+
+/**
+ * The version a placement is computed on: the plan version, or on a day under way the order of its
+ * routes (the drivers' statuses move the plan version all the time; /insert is asked again on the data
+ * of the moment before anything is written).
+ */
+export async function loadPlaceVersion(client: Parameters<typeof loadPlanVersion>[0] & Parameters<typeof loadRoutesKey>[0], isoDate: string, started: boolean): Promise<string> {
+  return started ? `routes:${await loadRoutesKey(client, isoDate)}` : loadPlanVersion(client, isoDate);
+}
 
 /** A date's plan as « Où placer » and the draft read it: the request, the stored routes, which ones must not change. */
 export type PlaceDay = {
@@ -105,6 +123,8 @@ type Prepared = PlaceDay & {
  */
 export function tripPlaceIssue(day: PlaceDay, tripId: string): { error: string; stale?: boolean } | null {
   const { input, build } = day;
+  // Picked up (on board or dropped off): never moved, the drivers' statuses are facts.
+  if (doneKeysOf(day).has(`${tripId}/PICKUP`)) return { error: TRIP_PICKED_UP_ERROR };
   const raw = input.trips.find((t) => t.id === tripId);
   if (raw && isExceptionalAmbulanceTrip(raw, (id) => input.vehicles.find((v) => v.id === id)?.type)) {
     return { error: PLACE_EXCEPTIONAL_AMBULANCE };
@@ -131,16 +151,32 @@ export function tripPlaceIssue(day: PlaceDay, tripId: string): { error: string; 
  * planned by « Optimiser », never one trip at a time). The version is read first: a change made
  * after it makes « Appliquer » see another version (never the other way round).
  */
-export async function loadPlaceDay(isoDate: string): Promise<{ ok: true; day: PlaceDay } | { ok: false; error: string }> {
-  const version = await loadPlanVersion(db, isoDate);
+export async function loadPlaceDay(isoDate: string, now: Date = new Date()): Promise<{ ok: true; day: PlaceDay } | { ok: false; error: string }> {
+  const [planVersion, routesVersion] = await Promise.all([loadPlanVersion(db, isoDate), loadPlaceVersion(db, isoDate, true)]);
   const [input, stored] = await Promise.all([
     loadOptimizeInput(db, isoDate),
     db.route.findMany({ where: { serviceDate: fromIsoDate(isoDate) }, select: storedRouteSelect }),
   ]);
   if (stored.length === 0) return { ok: false, error: PLACE_NO_ROUTES };
-  const build = buildOptimizeRequest(input);
-  const sent = new Set(build.request.trips.map((t) => t.id));
   const statuses = new Map<string, TripStatus>(input.trips.map((t) => [t.id, t.status]));
+  const plain = buildOptimizeRequest(input);
+  // Today: the optimizer plans after the stops done and from now (contract `progress`).
+  const progress = buildProgress({
+    isoDate,
+    now,
+    routes: stored.map((route) => ({
+      vehicleId: route.vehicleId,
+      breakStartMinute: route.breakStartMinute,
+      breakEndMinute: route.breakEndMinute,
+      stops: route.stops,
+    })),
+    statusOf: (id) => statuses.get(id),
+    request: plain.request,
+  });
+  const build = progress ? { ...plain, request: { ...plain.request, progress } } : plain;
+  const started = isDayStarted(stored, input.trips.map((t) => t.status));
+  const version = started ? routesVersion : planVersion;
+  const sent = new Set(build.request.trips.map((t) => t.id));
   const types = new Map(build.request.vehicles.map((v) => [v.id, v.type]));
   const todayCrews = new Map<string, TodayCrew>(
     [...build.crews].map(([vehicleId, crew]) => [
@@ -150,7 +186,7 @@ export async function loadPlaceDay(isoDate: string): Promise<{ ok: true; day: Pl
   );
   const held = new Map<string, RouteHold>();
   for (const route of stored) {
-    const hold = routeHold(route, sent, (id) => statuses.get(id), todayCrews);
+    const hold = routeHold(route, sent, todayCrews);
     if (hold) held.set(route.vehicleId, hold);
   }
   // One person, one vehicle a day: who is on a stored route, and the vehicles without a route whose crew of the day
@@ -179,9 +215,24 @@ export async function loadPlaceDay(isoDate: string): Promise<{ ok: true; day: Pl
       held,
       crewTaken,
       validated: stored.some((route) => route.status === "VALIDATED"),
-      started: isDayStarted(stored, input.trips.map((t) => t.status)),
+      started,
     },
   };
+}
+
+/** The stops the crew has done on the stored routes of the day: never rewritten. */
+export function doneStopIds(day: Pick<PlaceDay, "stored" | "input">): Set<string> {
+  return new Set(doneStops(day).map((stop) => stop.id));
+}
+
+/** The same stops as « tripId/KIND »: their trips keep the minutes they were planned at. */
+export function doneKeysOf(day: Pick<PlaceDay, "stored" | "input">): Set<string> {
+  return new Set(doneStops(day).map((stop) => `${stop.tripId}/${stop.kind}`));
+}
+
+function doneStops(day: Pick<PlaceDay, "stored" | "input">): PlaceDay["stored"][number]["stops"] {
+  const statuses = new Map<string, TripStatus>(day.input.trips.map((t) => [t.id, t.status]));
+  return day.stored.flatMap((route) => route.stops.filter((stop) => isStopDone(stop, statuses.get(stop.tripId))));
 }
 
 /** The day of the trip, read for the assistant, or why it cannot be placed now. */
@@ -251,9 +302,9 @@ export async function findTripPlaces(tripId: string): Promise<FindPlacesOutcome>
     .map((v) => {
       const hold = prepared.held.get(v.id);
       if (!hold) return { vehicleId: v.id, kind: "RULES", reason: crewTakenReason(prepared.crewTaken.get(v.id) ?? "un autre véhicule") };
-      return { vehicleId: v.id, kind: hold === "STARTED" ? "STARTED" : "RULES", reason: ROUTE_HOLD_REASONS[hold] };
+      return { vehicleId: v.id, kind: "RULES", reason: ROUTE_HOLD_REASONS[hold] };
     });
-  // Today: the optimizer times the routes from the start of the shift, unaware of the hour.
+  // Today: the optimizer plans from now (contract `progress`); a pickup must still leave the crew time to go.
   const nowMinute = nowMinuteOn(prepared.isoDate);
   const past: PlaceRejectionView[] =
     nowMinute === null
@@ -300,78 +351,6 @@ async function updatePlanRun(
     },
   });
   return run.id;
-}
-
-/**
- * Writes the routes of a placement (« Appliquer ») or of the draft: each route kept is updated in
- * place, the stops that stay keeping their ids (planStopWrites: a driver's phone names them by id,
- * roadmap and offline queue); a route created takes the day's status (and its validation time) and
- * the crew of its row; the trips of these routes get their results and route; `locks` sets the lock
- * of the trips the regulator moved (null: unlocked); the routes left without a stop are deleted.
- * Run inside the transaction holding the planning lock and the routes' row locks.
- */
-export async function writePlacedRoutes(
-  tx: Prisma.TransactionClient,
-  args: {
-    serviceDate: Date;
-    write: PlaceWrite;
-    storedByVehicle: ReadonlyMap<string, StoredPlaceRoute>;
-    matrixSource: string;
-    status: RouteStatus;
-    validatedAt: Date;
-    planRunId: string | null;
-    locks: ReadonlyMap<string, string | null>;
-  },
-): Promise<void> {
-  const { serviceDate, write, storedByVehicle, matrixSource, status, validatedAt, planRunId, locks } = args;
-  const routeIdByVehicle = new Map<string, string>();
-  for (const { routeId, row } of write.routes) {
-    const { stops, vehicleId: rowVehicle, driverId, crewMateId, ...totals } = row;
-    if (routeId) {
-      // The stops that stay are updated in place: a driver's phone names them by id (roadmap, offline queue).
-      const stopWrites = planStopWrites(storedByVehicle.get(rowVehicle)?.stops ?? [], stops);
-      if (stopWrites.deleteIds.length > 0) await tx.routeStop.deleteMany({ where: { id: { in: stopWrites.deleteIds } } });
-      if (stopWrites.updates.length > 0) {
-        // Out of the way first (-1, -2…): each stop then takes its new position, never one another still holds
-        // (@@unique([routeId, sequence]) is checked row by row).
-        await tx.$executeRaw`UPDATE "RouteStop" SET "sequence" = -"sequence" - 1 WHERE "routeId" = ${routeId}`;
-        for (const { id, data } of stopWrites.updates) await tx.routeStop.update({ where: { id }, data });
-      }
-      await tx.route.update({ where: { id: routeId }, data: { ...totals, matrixSource } });
-      if (stopWrites.creates.length > 0) {
-        await tx.routeStop.createMany({ data: stopWrites.creates.map((stop) => ({ ...stop, routeId })) });
-      }
-      routeIdByVehicle.set(rowVehicle, routeId);
-    } else {
-      const created = await tx.route.create({
-        data: {
-          ...totals,
-          vehicleId: rowVehicle,
-          driverId,
-          crewMateId,
-          serviceDate,
-          status,
-          ...(status === "VALIDATED" ? { validatedAt } : {}),
-          optimizationRunId: planRunId,
-          matrixSource,
-          stops: { createMany: { data: stops } },
-        },
-        select: { id: true },
-      });
-      routeIdByVehicle.set(rowVehicle, created.id);
-    }
-  }
-  for (const update of write.trips) {
-    await tx.trip.update({
-      where: { id: update.tripId },
-      data: {
-        ...update.data,
-        routeId: update.vehicleId ? (routeIdByVehicle.get(update.vehicleId) ?? null) : null,
-        ...(locks.has(update.tripId) ? { lockedVehicleId: locks.get(update.tripId) ?? null } : {}),
-      },
-    });
-  }
-  if (write.deletedRouteIds.length > 0) await tx.route.deleteMany({ where: { id: { in: write.deletedRouteIds } } });
 }
 
 /**
@@ -427,17 +406,19 @@ export async function applyTripPlace(
     // Serialized with the computations, validations and other plan writes of the date (day-lock.ts).
     await lockPlanningDay(tx, isoDate);
     if (await optimizationInProgress(isoDate, tx)) return "running" as const;
-    if ((await loadPlanVersion(tx, isoDate)) !== prepared.version) return "stale" as const;
+    if ((await loadPlaceVersion(tx, isoDate, prepared.started)) !== prepared.version) return "stale" as const;
     const routeIds = changed.flatMap((id) => storedByVehicle.get(id)?.id ?? []);
     if (routeIds.length > 0) {
       // Same row locks as savePlan and refresh-routes.ts: a crew's pick-up in flight waits, or is seen below.
       await tx.$queryRaw`SELECT "id" FROM "Route" WHERE "id" = ANY(${routeIds}) ORDER BY "id" FOR UPDATE`;
       await tx.$queryRaw`SELECT "id" FROM "RouteStop" WHERE "routeId" = ANY(${routeIds}) ORDER BY "id" FOR UPDATE`;
       const now = await tx.route.findMany({ where: { id: { in: routeIds } }, select: storedRouteSelect });
+      // Same stops in the same order, none done since they were read (a stop done of a started route stays done).
       const same = now.length === routeIds.length && now.every((route) => {
         const read = storedByVehicle.get(route.vehicleId);
-        const ids = (stops: { id: string; sequence: number }[]) => [...stops].sort((a, b) => a.sequence - b.sequence).map((s) => s.id).join(" ");
-        return read !== undefined && ids(read.stops) === ids(route.stops) && route.stops.every((stop) => stop.completedAt === null);
+        const ids = (stops: { id: string; sequence: number; completedAt: Date | null }[]) =>
+          [...stops].sort((a, b) => a.sequence - b.sequence).map((s) => `${s.id}:${s.completedAt === null ? "" : "done"}`).join(" ");
+        return read !== undefined && ids(read.stops) === ids(route.stops);
       });
       if (!same) return "stale" as const;
     }
@@ -478,6 +459,8 @@ export async function applyTripPlace(
       now: new Date(),
     });
     if (!write.routes.some((r) => r.row.vehicleId === vehicleId && r.row.stops.some((s) => s.tripId === tripId))) return "stale" as const;
+    // A trip done keeps the minutes it was planned at.
+    write.trips = keepDoneMinutes(write.trips as TripUpdate[], doneKeysOf(prepared));
 
     const planRunId = await updatePlanRun(tx, isoDate, option, fromVehicleId, prepared);
     const status = newRouteStatus(dayRoutes);
@@ -497,6 +480,7 @@ export async function applyTripPlace(
       planRunId,
       // Placed by the regulator: a later optimization keeps it there (as « Déplacer vers… »).
       locks: new Map([[tripId, vehicleId]]),
+      frozenStopIds: doneStopIds(prepared),
     });
     await audit(tx, user, {
       action: "trip.move",

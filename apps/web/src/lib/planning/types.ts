@@ -302,8 +302,10 @@ export type PlanningDayView = {
    * trip without a vehicle on that window.
    */
   waitWindows: { beforeAppointmentMin: number; afterSessionMin: number };
-  /** True once a trip was picked up: re-planning is then disabled. */
+  /** True once a trip was picked up: « Réoptimiser la suite » plans after the stops done (DAY-02). */
   dayStarted: boolean;
+  /** Every route of the day is done by its crew: nothing is left to re-plan. */
+  dayFinished: boolean;
   /** Solver budget of an optimization launched now, scaled with the trips it would send (effectiveTimeLimitSec). */
   timeLimitSec: number;
 };

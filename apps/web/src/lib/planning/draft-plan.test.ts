@@ -42,7 +42,7 @@ vi.mock("@/lib/optimizer/build-request", () => ({
   buildOptimizeRequest: fake.build,
   personName: (p: { firstName: string; lastName: string }) => `${p.lastName.toUpperCase()} ${p.firstName}`,
 }));
-vi.mock("./version", () => ({ loadPlanVersion: fake.version }));
+vi.mock("./version", () => ({ loadPlanVersion: fake.version, loadRoutesKey: async () => "k-1" }));
 vi.mock("./run-optimization", () => ({
   optimizationInProgress: fake.running,
   OPTIMIZATION_IN_PROGRESS_ERROR: "Une optimisation de cette date est en cours.",
@@ -268,17 +268,16 @@ describe("checkDraftPlan", () => {
     expect(outcome.ok && outcome.view.trips.find((t) => t.tripId === "trip_3")).toMatchObject({ vehicleId: null });
   });
 
-  it("never moves a trip out of a route under way, nor onto one", async () => {
+  it("never moves a trip already picked up; a route under way takes a trip after its stops done (DAY-02)", async () => {
     setUp([taxiRoute(), ambulanceRoute(new Date())]);
     const outcome = await checkDraftPlan(DATE, [
       { tripId: "trip_5", toVehicleId: null },
       { tripId: "trip_1", toVehicleId: "veh_amb_1" },
     ]);
-    expect(outcome.ok && outcome.view.moves.map((m) => (m.ok ? "ok" : m.reason))).toEqual([
-      "Cette course ne peut pas quitter sa tournée\u00a0: Ambulance 1 (Gap) a une tournée commencée, qui ne change plus en cours de journée.",
-      "Ambulance 1 (Gap) a une tournée commencée, qui ne change plus en cours de journée.",
-    ]);
-    expect(fake.insert).not.toHaveBeenCalled();
+    expect(outcome.ok && outcome.view.moves[0]).toMatchObject({ ok: false, reason: "Cette course est déjà commencée ou terminée\u00a0: elle reste sur son véhicule." });
+    // The started ambulance is asked like any vehicle.
+    expect(fake.insert).toHaveBeenCalledTimes(1);
+    expect((fake.insert.mock.calls[0]![0] as { vehicleIds: string[] }).vehicleIds).toEqual(["veh_amb_1"]);
   });
 
   it("moves a trip locked elsewhere with its lock: no LOCK violation in the draft, the later moves see the new locks", async () => {

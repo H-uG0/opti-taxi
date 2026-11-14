@@ -11,6 +11,7 @@ import {
   STALE_RUN_MARGIN_SEC,
   toContractSettings,
   tripServiceMinutes,
+  withFreeHours,
   NO_BILLING,
   type BillingInput,
   type DriverInput,
@@ -210,6 +211,42 @@ describe("solver budget", () => {
     // 800 trips: 100 s budget, still alive where a 12 s budget would call it stale.
     expect(isStaleRun({ startedAt: startedSecAgo(12 + STALE_RUN_MARGIN_SEC + 60), tripsCount: 800 }, 12, now)).toBe(false);
     expect(isStaleRun({ startedAt: startedSecAgo(100 + STALE_RUN_MARGIN_SEC + 1), tripsCount: 800 }, 12, now)).toBe(true);
+  });
+});
+
+describe("partial unavailability of the day (DAY-03)", () => {
+  const absence = (driverId: string, startMinute: number | null, endMinute: number | null = null) => ({
+    driverId,
+    kind: "OTHER" as const,
+    startDate: TUESDAY,
+    endDate: TUESDAY,
+    startMinute,
+    endMinute,
+  });
+
+  it("cuts the shift where the vehicle leaves service or its crew becomes unavailable, and says so", () => {
+    const [cut] = withFreeHours(
+      [vehicle("v1")],
+      { absences: [], vehicleUnavailabilities: [{ vehicleId: "v1", kind: "REPAIR", startDate: TUESDAY, endDate: TUESDAY, startMinute: 680 }] },
+      TUESDAY,
+    );
+    expect(cut!.freeHours).toEqual({ from: null, until: 680, reason: "Hors service à partir de 11:20" });
+    const { available, notes } = resolveVehicleAvailability([cut!], TUESDAY);
+    expect(available[0]).toMatchObject({ shiftStartMin: 360, shiftEndMin: 680 });
+    expect(notes).toContain("Véhicule v1\u00a0: hors service à partir de 11:20, horaire du jour 06:00–11:20");
+  });
+
+  it("takes the person of the day, never says why, and leaves out a vehicle whose hours are all taken", () => {
+    const [back] = withFreeHours([vehicle("v1")], { absences: [absence("drv_v1", null, 600)] }, TUESDAY);
+    expect(back!.freeHours).toEqual({ from: 600, until: null, reason: "Chauffeur indisponible jusqu'à 10:00" });
+    expect(resolveVehicleAvailability([back!], TUESDAY).available[0]).toMatchObject({ shiftStartMin: 600, shiftEndMin: 1140 });
+    const [gone] = withFreeHours([vehicle("v1")], { absences: [absence("drv_v1", 300)] }, TUESDAY);
+    expect(resolveVehicleAvailability([gone!], TUESDAY).skipped).toEqual([
+      { vehicleId: "v1", label: "Véhicule v1", type: "TAXI", reason: "Chauffeur indisponible à partir de 05:00" },
+    ]);
+    // A whole-day absence is the crews' business (another person is proposed), not a cut shift.
+    const [whole] = withFreeHours([vehicle("v1")], { absences: [absence("drv_v1", null)] }, TUESDAY);
+    expect(whole!.freeHours).toBeUndefined();
   });
 });
 

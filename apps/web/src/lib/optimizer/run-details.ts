@@ -75,6 +75,12 @@ export type PendingPlan = {
   /** Plan version (lib/planning/version.ts) of the routes it was compared with. */
   basedOnVersion: string;
   /**
+   * Key of the routes it was compared with, statuses aside (routesKey, lib/planning/version.ts): on a day
+   * under way, the drivers' statuses move the version all the time; the plan is still saved while the
+   * routes are the same and every stop done since heads its route in the plan (planHoldsProgress).
+   */
+  basedOnRoutes?: string;
+  /**
    * The trip lock the plan was computed with, written when it is confirmed:
    * meanwhile the trip is locked on `from` (a move's lock was undone, a
    * restored lock is not written yet).
@@ -158,6 +164,7 @@ const pendingSchema = z.object({
   response: planResponseSchema,
   requestHash: z.string(),
   basedOnVersion: z.string(),
+  basedOnRoutes: z.string().optional(),
   lockChange: lockChangeSchema.nullable(),
   placeOnly: z.boolean().optional(),
 });

@@ -6,6 +6,7 @@ import { VEHICLE_TYPE_HEX } from "@/components/ui/badge";
 import {
   applyDayCrewPlan,
   loadDayCrewContext,
+  withFreeHours,
   loadBillingInput,
   loadTariffInputs,
   tripInputSelect,
@@ -133,7 +134,8 @@ export async function loadPlanningDay(
     if (found) details.set(found.runId, found);
   }
 
-  const vehicles = applyDayCrewPlan(defaultVehicles, crewContext.plan, crewContext.people);
+  // The crews of the day, their shifts cut by a partial unavailability (out of service from 11:20…), as the optimizer gets them.
+  const vehicles = withFreeHours(applyDayCrewPlan(defaultVehicles, crewContext.plan, crewContext.people), crewContext.input, isoDate);
   // Routes planned before a change of vehicle or crew, overdue inspection or insurance.
   const issues = vehicleIssues({
     date: isoDate,

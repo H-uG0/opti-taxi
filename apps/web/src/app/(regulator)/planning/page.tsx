@@ -35,6 +35,7 @@ import { PendingPlanBanner, RestorePlanButton } from "./pending-plan";
 import { PlanningActivityBanner, PlanningActivityProvider } from "./planning-activity";
 import { PlanningBoard } from "./planning-board";
 import { PlanningToolbar } from "./planning-toolbar";
+import { ReplacePanel } from "./replace-panel";
 import { PlanningVersionWatcher } from "./version-watcher";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -60,7 +61,7 @@ function runningReasonOf(view: PlanningDayView): string | null {
 function replanBlockedReason(view: PlanningDayView, past: boolean): string | null {
   if (past) return "Date passée\u00a0: le planning n'est plus modifiable.";
   if (view.dayStatus === "VALIDATED" || view.dayStatus === "MIXED") return "Planning validé\u00a0: rouvrez-le pour le modifier.";
-  if (view.dayStarted) return "Journée commencée\u00a0: la réoptimisation en cours de journée n'est pas disponible.";
+  if (view.dayFinished) return "Toutes les tournées du jour sont terminées\u00a0: il ne reste rien à réoptimiser.";
   return null;
 }
 
@@ -130,15 +131,28 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   const dayLocked = view.dayStatus === "VALIDATED" || view.dayStatus === "MIXED" || view.dayStarted;
   const runningReason = runningReasonOf(view);
   const optimizeBlocked = replanBlocked ?? (view.kpis.tripsTotal === 0 ? "Aucune course à planifier ce jour." : null);
-  const optimizeLabel = hasRoutes ? "Réoptimiser" : date === tomorrow ? "Optimiser demain" : `Optimiser le ${formatDayMonth(date)}`;
+  // A day under way (DAY-02): only what is left is planned again, from now; what was done and the patients on board stay.
+  const underWay = hasRoutes && view.dayStarted && date === today;
+  const optimizeLabel = underWay
+    ? "Réoptimiser la suite"
+    : hasRoutes
+      ? "Réoptimiser"
+      : date === tomorrow
+        ? "Optimiser demain"
+        : `Optimiser le ${formatDayMonth(date)}`;
   const relativeDay = date === today ? "Aujourd'hui" : date === tomorrow ? "J+1" : null;
   const initialTripId = requestedTrip && view.trips.some((t) => t.id === requestedTrip) ? requestedTrip : null;
-  // « Où placer cette course ? » works on a validated or started day too (it asks first, and leaves the routes under way),
+  // « Où placer cette course ? » works on a validated or started day too (it asks first; on a day under way the trip goes after the stops done),
   // never on a day without routes: one trip placed there would make a half-planned day, locked on its vehicle.
   const placeBlocked = past ? "Date passée\u00a0: le planning n'est plus modifiable." : (runningReason ?? (hasRoutes ? null : PLACE_NO_ROUTES));
   // « Placer les non affectées » places only the trips the optimizer is sent (incomplete ones never are).
   const incomplete = new Set(view.excludedTrips.map((t) => t.tripId));
   const placeable = view.unassigned.filter((u) => !incomplete.has(u.tripId)).length;
+  // ?replacer=a,b: the trips an interruption left to place again (« Hors service… », DAY-03), ids only.
+  const replacing = (firstParam(params.replacer) ?? "")
+    .split(",")
+    .filter((id) => /^[A-Za-z0-9_-]{1,64}$/.test(id))
+    .slice(0, 50);
 
   return (
     // Keyed by date: an action's progress or result never shows on another date.
@@ -177,6 +191,11 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
                 date={date}
                 version={shownVersion.version}
                 optimizeLabel={optimizeLabel}
+                optimizeHint={
+                  underWay
+                    ? "Replanifie ce qui reste à faire à partir de maintenant\u202f; les arrêts faits et les patients à bord ne changent pas, seules les tournées modifiées sont enregistrées"
+                    : undefined
+                }
                 optimizeBlocked={optimizeBlocked}
                 runningReason={runningReason}
                 canValidate={!past && (view.dayStatus === "PROPOSED" || view.dayStatus === "MIXED")}
@@ -229,6 +248,16 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
         ) : null}
         {closed ? <ClosedFacilitiesNote key={`closed-${date}`} date={date} {...closedFacilitiesNoteProps(closed)} /> : null}
 
+        {replacing.length > 0 && !past ? (
+          // Trips an interruption left (DAY-03): one by one with « Où placer », or all at once.
+          <ReplacePanel
+            key={`replace-${date}`}
+            date={date}
+            tripIds={replacing}
+            trips={Object.fromEntries(view.trips.filter((t) => replacing.includes(t.id)).map((t) => [t.id, t]))}
+            blocked={placeBlocked}
+          />
+        ) : null}
         {view.dayStatus === "EMPTY" ? (
           <>
             <AvailabilityNotes skipped={view.skippedVehicles} notes={view.notes} />
@@ -290,6 +319,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
               crewRules={view.crewRules}
               crewChangeMode={past ? "none" : dayLocked ? "route" : "equipages"}
               crewChangeBlocked={runningReason}
+              today={date === today}
               version={shownVersion.version}
             />
           </>

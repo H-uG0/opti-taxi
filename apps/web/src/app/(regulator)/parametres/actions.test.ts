@@ -51,6 +51,7 @@ const STORED = {
   solverTimeLimitSec: 10,
   replanMaxServedLoss: 0,
   replanMaxMarginLoss: 0.1,
+  replanChangePenalty: 15,
   lateCancellationHours: 2,
   tripHorizonDays: 14,
   crewMaxReplacementKm: 60,

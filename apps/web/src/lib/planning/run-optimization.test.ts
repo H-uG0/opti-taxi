@@ -50,6 +50,7 @@ vi.mock("@/lib/optimizer/persist", () => ({
   FIELD_TRIP_STATUSES: ["PICKED_UP", "DROPPED_OFF"],
   PlanBlockedError: class PlanBlockedError extends Error {},
   replanBlockReason: () => null,
+  countFinished: () => ({ routes: 0, finishedRoutes: 0 }),
   savePlan: fake.savePlan,
 }));
 
@@ -611,6 +612,85 @@ describe("a plan waiting for confirmation", () => {
     savePlanComparing({ current: figures(2), next: figures(1), lostTripIds: [] }, "v2");
     const outcome = await confirmPendingRun("run-p", REGULATOR);
     expect(outcome).toMatchObject({ ok: false, error: expect.stringMatching(/planning en place a changé/) });
+  });
+
+  it("on a day under way, is saved after the drivers' statuses moved the version, never once a stop it moved got done (DAY-02)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(`${DATE}T10:00:00Z`)); // 11:00 in Paris
+    try {
+      const day = { ...build(), request: { ...build().request, settings: { timeLimitSec: 10, pickupServiceMin: 5, dropoffServiceMin: 5 } } };
+      fake.build.mockReturnValue(day);
+      // Taxi Marseille 1 has picked t1 up at 09:00; the plan was computed on these routes.
+      fake.db.route.findMany.mockResolvedValue([
+        {
+          vehicleId: "taxi_mrs",
+          breakStartMinute: null,
+          breakEndMinute: null,
+          stops: [
+            { tripId: "t1", kind: "PICKUP", sequence: 0, startMinute: 535, departureMinute: 540, completedAt: new Date(`${DATE}T08:00:00Z`), trip: { status: "PICKED_UP" } },
+            { tripId: "t1", kind: "DROPOFF", sequence: 1, startMinute: 600, departureMinute: 605, completedAt: null, trip: { status: "PICKED_UP" } },
+          ],
+        },
+      ]);
+      const route = (vehicleId: string) => ({
+        vehicleId,
+        startMin: 500,
+        endMin: 700,
+        distanceKm: 20,
+        emptyKm: 5,
+        loadedKm: 15,
+        durationMin: 200,
+        revenue: 40,
+        cost: 20,
+        margin: 20,
+        break: null,
+        stops: (["PICKUP", "DROPOFF"] as const).map((kind, k) => ({
+          tripId: "t1",
+          kind,
+          location: { lat: 43.3, lng: 5.4 },
+          arrivalMin: 540 + 60 * k,
+          startMin: 540 + 60 * k,
+          departureMin: 545 + 60 * k,
+          loadAfter: 1 - k,
+        })),
+      });
+      const held = (vehicleId: string) => ({
+        finishedAt: null,
+        id: "run-p",
+        serviceDate: new Date(`${DATE}T00:00:00Z`),
+        status: "AWAITING_CONFIRMATION",
+        kpis: null,
+        details: {
+          solverStatus: "OK",
+          violations: [],
+          warnings: [],
+          unassigned: [],
+          kind: "optimize",
+          pending: { response: planResponse([route(vehicleId)]), requestHash: requestHash(day.request), basedOnVersion: "v1", basedOnRoutes: "k-1", lockChange: null },
+        },
+      });
+      const statusesCameIn = () =>
+        fake.savePlan.mockImplementation(async (client: Client, args: { check?: (c: unknown) => unknown }) =>
+          client.$transaction(async (tx) => {
+            // The version moved with the statuses; the routes kept their stops in order.
+            await args.check?.({ tx, comparison: { current: figures(1), next: figures(1), lostTripIds: [] }, version: "v2", routesKey: "k-1", started: true });
+            return { routes: 1, served: 1, unassigned: 1, comparison: null };
+          }),
+        );
+      fake.db.optimizationRun.findUnique.mockImplementation(async (args: { select: { serviceDate?: boolean } }) =>
+        args.select.serviceDate ? held("taxi_mrs") : { status: "AWAITING_CONFIRMATION" },
+      );
+      statusesCameIn();
+      expect(await confirmPendingRun("run-p", REGULATOR)).toMatchObject({ ok: true });
+      // A plan that put t1, picked up meanwhile by Taxi Marseille 1, on another vehicle is refused.
+      fake.db.optimizationRun.findUnique.mockImplementation(async (args: { select: { serviceDate?: boolean } }) =>
+        args.select.serviceDate ? held("vsl_gre") : { status: "AWAITING_CONFIRMATION" },
+      );
+      statusesCameIn();
+      expect(await confirmPendingRun("run-p", REGULATOR)).toMatchObject({ ok: false, error: expect.stringMatching(/planning en place a changé/) });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("is refused once handled elsewhere, and can be discarded once", async () => {

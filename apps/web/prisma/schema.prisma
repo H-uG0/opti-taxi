@@ -82,6 +82,9 @@ enum CancellationReason {
   PATIENT_ABSENCE
   /// Établissement fermé : fermeture datée saisie sur sa fiche, ou jour férié qu'il ne travaille pas.
   FACILITY_CLOSED
+  /// Transport interrompu en cours de route (panne du véhicule, équipage indisponible) : le patient est repris
+  /// au lieu de l'interruption par une course de reprise.
+  INTERRUPTED
   OTHER
 }
 
@@ -569,14 +572,20 @@ model Driver {
 }
 
 /// Indisponibilité d'un véhicule du startDate au endDate inclus (entretien, réparation, garde…) : il n'est pas planifié.
+/// Avec startMinute, il roule le premier jour jusqu'à cette heure (panne en cours de journée) ; avec endMinute, il
+/// reprend le dernier jour à cette heure.
 model VehicleUnavailability {
-  id        String                    @id @default(cuid())
-  vehicleId String
-  kind      VehicleUnavailabilityKind
-  startDate DateTime                  @db.Date
-  endDate   DateTime                  @db.Date
-  note      String?
-  createdAt DateTime                  @default(now())
+  id          String                    @id @default(cuid())
+  vehicleId   String
+  kind        VehicleUnavailabilityKind
+  startDate   DateTime                  @db.Date
+  endDate     DateTime                  @db.Date
+  /// Heure de début le premier jour (minutes depuis minuit) ; null : toute la journée.
+  startMinute Int?
+  /// Heure de fin le dernier jour (minutes depuis minuit) ; null : toute la journée.
+  endMinute   Int?
+  note        String?
+  createdAt   DateTime                  @default(now())
 
   vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
 
@@ -622,15 +631,20 @@ model FuelLog {
   @@index([vehicleId, date])
 }
 
-/// Indisponibilité d'une personne du startDate au endDate inclus (congé, maladie, formation, garde…).
+/// Indisponibilité d'une personne du startDate au endDate inclus (congé, maladie, formation, garde…). Avec
+/// startMinute, elle travaille le premier jour jusqu'à cette heure ; avec endMinute, elle reprend le dernier jour.
 model StaffAbsence {
-  id        String      @id @default(cuid())
-  driverId  String
-  kind      AbsenceKind
-  startDate DateTime    @db.Date
-  endDate   DateTime    @db.Date
-  note      String?
-  createdAt DateTime    @default(now())
+  id          String      @id @default(cuid())
+  driverId    String
+  kind        AbsenceKind
+  startDate   DateTime    @db.Date
+  endDate     DateTime    @db.Date
+  /// Heure de début le premier jour (minutes depuis minuit) ; null : toute la journée.
+  startMinute Int?
+  /// Heure de fin le dernier jour (minutes depuis minuit) ; null : toute la journée.
+  endMinute   Int?
+  note        String?
+  createdAt   DateTime    @default(now())
 
   driver Driver @relation(fields: [driverId], references: [id], onDelete: Cascade)
 
@@ -865,6 +879,9 @@ model AppSettings {
   replanMaxServedLoss        Int      @default(0)
   /// Baisse de marge acceptée sans confirmation, en fraction du CA du planning en place (0.1 = 10 %).
   replanMaxMarginLoss        Float    @default(0.1)
+  /// Pénalité de changement (€ par course) : une réoptimisation ne fait changer une course de véhicule par rapport
+  /// au planning en place que pour un gain supérieur (tournées déjà connues des chauffeurs). 0 : aucune.
+  replanChangePenalty        Float    @default(15)
   /// Une annulation saisie moins de N heures avant la prise en charge prévue est tardive.
   lateCancellationHours      Int      @default(2)
   /// Les courses des récurrences sont créées de demain à J+N (création, modification ou réactivation

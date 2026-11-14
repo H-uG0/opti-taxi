@@ -16,7 +16,9 @@ import {
   type TodayCrew,
 } from "@/lib/planning/plan-compare";
 import { placementsOf, planChanges, type PlanChanges } from "@/lib/planning/plan-changes";
-import { loadPlanVersion } from "@/lib/planning/version";
+import { isStopDone } from "@/lib/planning/stop-done";
+import { planStartedWrite, writePlacedRoutes } from "@/lib/planning/route-writes";
+import { loadPlanVersion, routesKey } from "@/lib/planning/version";
 import { formatLongDate, fromIsoDate } from "@/lib/time";
 import type { OptimizeRequest, PlanResponse } from "./contract";
 import { readRunDetails, runDetailsJson, type LockChange, type RunKind } from "./run-details";
@@ -55,21 +57,40 @@ export type ReplanState = {
   startedTrips: number;
   /** Route stops of the date with a field timestamp (completedAt). */
   completedStops: number;
+  /** Routes of the date with at least one stop (absent: not counted, never blocking). */
+  routes?: number;
+  /** Routes of the date whose every stop is done by the crew (absent: none). */
+  finishedRoutes?: number;
 };
 
 /**
- * Why the routes of isoDate cannot be replaced, or null. Deleting the routes
- * would discard a validated planning, or the drivers' pick-up / drop-off
- * timestamps (stops cascade).
+ * Why the routes of isoDate cannot be replaced, or null: a validated planning (reopen it first), or a
+ * day whose every route is finished (nothing left to plan). A day under way is re-planned after its
+ * stops done (DAY-02): savePlan never deletes nor rewrites them.
  */
 export function replanBlockReason(isoDate: string, state: ReplanState): string | null {
   if (state.validatedRoutes > 0) {
     return `Le planning du ${formatLongDate(isoDate)} est validé\u00a0: rouvrez-le avant de le modifier.`;
   }
-  if (state.startedTrips > 0 || state.completedStops > 0) {
-    return "La journée a commencé (courses déjà prises en charge)\u00a0: la réoptimisation en cours de journée n'est pas disponible dans cette version.";
+  const routes = state.routes ?? 0;
+  if (routes > 0 && (state.finishedRoutes ?? 0) >= routes) {
+    return `Toutes les tournées du ${formatLongDate(isoDate)} sont terminées\u00a0: il ne reste rien à réoptimiser.`;
   }
   return null;
+}
+
+/** Whether a day is under way for savePlan: a stop done or a trip picked up. */
+export function isStarted(state: ReplanState): boolean {
+  return state.startedTrips > 0 || state.completedStops > 0;
+}
+
+/** Routes with stops and finished routes (every stop done) of a date, from its stops as read. */
+export function countFinished(
+  routes: readonly { stops: readonly { kind: StopKind; completedAt: Date | null; trip: { status: TripStatus } | null }[] }[],
+): { routes: number; finishedRoutes: number } {
+  const withStops = routes.filter((route) => route.stops.length > 0);
+  const finished = withStops.filter((route) => route.stops.every((stop) => isStopDone(stop, stop.trip?.status)));
+  return { routes: withStops.length, finishedRoutes: finished.length };
 }
 
 /** Thrown inside the savePlan transaction when the date changed while the solver ran. */
@@ -291,6 +312,10 @@ export type SavePlanCheck = {
    * (lib/planning/plan-changes.ts); null when the date has no routes in place.
    */
   changes?: PlanChanges | null;
+  /** Key of the routes in place, the drivers' statuses aside (lib/planning/version.ts routesKey). */
+  routesKey?: string;
+  /** The day is under way: only the routes the plan touches are written, the stops done never. */
+  started?: boolean;
 };
 
 /**
@@ -367,19 +392,29 @@ async function lockReplanState(tx: Prisma.TransactionClient, isoDate: string, se
     FROM "RouteStop" rs JOIN "Route" r ON r."id" = rs."routeId"
     WHERE r."serviceDate" = ${isoDate}::date
     FOR UPDATE OF rs`;
-  const startedTrips = await tx.trip.count({ where: { serviceDate, status: { in: [...FIELD_TRIP_STATUSES] } } });
+  const [startedTrips, finished] = await Promise.all([
+    tx.trip.count({ where: { serviceDate, status: { in: [...FIELD_TRIP_STATUSES] } } }),
+    tx.route.findMany({
+      where: { serviceDate },
+      select: { stops: { select: { kind: true, completedAt: true, trip: { select: { status: true } } } } },
+    }),
+  ]);
   return {
     validatedRoutes: routes.filter((r) => r.status === "VALIDATED").length,
     startedTrips,
     completedStops: stops.filter((s) => s.completed).length,
+    ...countFinished(finished),
   };
 }
 
 /**
  * Replaces the routes of `isoDate` with the plan and marks run `runId` as
  * SUCCESS, all in one transaction, under the planning lock of the date.
- * Throws PlanBlockedError (nothing written) when the date was validated or
- * started while the solver ran. Before replacing anything, the new plan is
+ * Throws PlanBlockedError (nothing written) when the date was validated, or
+ * every route finished, while the solver ran. On a day under way (a stop done)
+ * only the routes the plan touches are written, in place (route-writes.ts
+ * planStartedWrite): the stops that stay keep their ids, a stop done is never
+ * rewritten nor deleted, an untouched route keeps its times. Before replacing anything, the new plan is
  * compared with the routes in place and `check` may refuse it by throwing
  * (lib/planning/plan-compare.ts: worse or invalid plans wait for the
  * regulator). The stop sequences replaced are kept in the run's details
@@ -425,8 +460,10 @@ export async function savePlan(
     async (tx) => {
       // Serialized with the creation of runs and the validation of the date (day-lock.ts).
       await lockPlanningDay(tx, isoDate);
-      const blocker = replanBlockReason(isoDate, await lockReplanState(tx, isoDate, serviceDate));
+      const state = await lockReplanState(tx, isoDate, serviceDate);
+      const blocker = replanBlockReason(isoDate, state);
       if (blocker) throw new PlanBlockedError(blocker);
+      const started = isStarted(state);
 
       const [currentTrips, vehicles] = await Promise.all([
         tx.trip.findMany({
@@ -467,33 +504,61 @@ export async function savePlan(
             new Set(tripIds),
           )
         : null;
-      await args.check?.({ tx, comparison, version: await loadPlanVersion(tx, isoDate), changes });
+      const key = inPlace ? routesKey(inPlace.routes) : routesKey([]);
+      await args.check?.({ tx, comparison, version: await loadPlanVersion(tx, isoDate), changes, routesKey: key, started });
 
-      // Stops cascade; trips keep their row but lose routeId (onDelete: SetNull).
-      await tx.route.deleteMany({ where: { serviceDate } });
-
-      const routeIdByVehicle = new Map<string, string>();
-      for (const { stops, ...route } of routes) {
-        const created = await tx.route.create({
-          data: {
-            ...route,
-            serviceDate,
-            status: "PROPOSED",
-            optimizationRunId: runId,
-            // Traffic calibration compares the stored times with real ones, source by source.
-            matrixSource: response.meta.matrixSource,
-            stops: { createMany: { data: stops } },
+      if (started) {
+        // A day under way: the routes the plan touches, in place; the stops done and the untouched routes stay.
+        const stored = await tx.route.findMany({
+          where: { serviceDate },
+          select: {
+            id: true,
+            vehicleId: true,
+            startMinute: true,
+            stops: { select: { id: true, tripId: true, kind: true, sequence: true, completedAt: true, trip: { select: { status: true } } } },
           },
-          select: { id: true },
         });
-        routeIdByVehicle.set(route.vehicleId, created.id);
-      }
+        const statuses = new Map(stored.flatMap((route) => route.stops.flatMap((stop) => (stop.trip ? [[stop.tripId, stop.trip.status] as const] : []))));
+        for (const trip of currentTrips) statuses.set(trip.id, trip.status);
+        const write = planStartedWrite({ rows: routes, updates, stored, statusOf: (id) => statuses.get(id) });
+        await writePlacedRoutes(tx, {
+          serviceDate,
+          write,
+          storedByVehicle: new Map(stored.map((route) => [route.vehicleId, route])),
+          matrixSource: response.meta.matrixSource,
+          status: "PROPOSED",
+          validatedAt: now,
+          planRunId: runId,
+          locks: new Map(),
+          frozenStopIds: write.frozenStopIds,
+        });
+      } else {
+        // Stops cascade; trips keep their row but lose routeId (onDelete: SetNull).
+        await tx.route.deleteMany({ where: { serviceDate } });
 
-      for (const { tripId, vehicleId, data } of updates) {
-        await tx.trip.update({
-          where: { id: tripId },
-          data: { ...data, routeId: vehicleId ? (routeIdByVehicle.get(vehicleId) ?? null) : null },
-        });
+        const routeIdByVehicle = new Map<string, string>();
+        for (const { stops, ...route } of routes) {
+          const created = await tx.route.create({
+            data: {
+              ...route,
+              serviceDate,
+              status: "PROPOSED",
+              optimizationRunId: runId,
+              // Traffic calibration compares the stored times with real ones, source by source.
+              matrixSource: response.meta.matrixSource,
+              stops: { createMany: { data: stops } },
+            },
+            select: { id: true },
+          });
+          routeIdByVehicle.set(route.vehicleId, created.id);
+        }
+
+        for (const { tripId, vehicleId, data } of updates) {
+          await tx.trip.update({
+            where: { id: tripId },
+            data: { ...data, routeId: vehicleId ? (routeIdByVehicle.get(vehicleId) ?? null) : null },
+          });
+        }
       }
 
       // Trips of the day left out of the request (incomplete data) cannot stay "planned".

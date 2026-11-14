@@ -63,7 +63,8 @@ import {
   workTimeBlock,
 } from "@/lib/staff/day-crews";
 import { breakInShift, workTimeSummary } from "@/lib/staff/work-time";
-import { addDays, fromIsoDate, isoWeekday, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
+import { addDays, formatMinute, fromIsoDate, isoWeekday, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
+import { freeHoursOfAll, type FreeHours } from "@/lib/fleet/partial-day";
 import {
   DEFAULT_MAX_RIDE_EXTRA_MIN,
   MAX_TRIP_SERVICE_MIN,
@@ -130,6 +131,11 @@ export type VehicleInput = {
    * cannot work that day.
    */
   dayCrew?: { blocked: string | null };
+  /**
+   * Set by withFreeHours: the hours a partial unavailability of the day leaves (the vehicle out of
+   * service, or its crew unavailable, from or until a time), and why: the shift is cut to them.
+   */
+  freeHours?: { from: number | null; until: number | null; reason: string };
 };
 
 export type TripInput = {
@@ -190,7 +196,7 @@ export type SettingsInput = Pick<
   | "solverTimeLimitSec"
 > &
   ServiceSettings &
-  Partial<Pick<AppSettings, "maxRideExtraMin">>;
+  Partial<Pick<AppSettings, "maxRideExtraMin" | "replanChangePenalty">>;
 
 export type TariffInput = PricedGrid &
   Pick<
@@ -308,6 +314,8 @@ export function toContractSettings(settings: SettingsInput, tripCount: number): 
     unassignedPenalty: settings.unassignedPenalty,
     timeLimitSec: effectiveTimeLimitSec(settings.solverTimeLimitSec, tripCount),
     maxRideExtraMin: settings.maxRideExtraMin ?? DEFAULT_MAX_RIDE_EXTRA_MIN,
+    // Only with a plan in place (initialRoutes): its trips change vehicle only for a larger gain (DAY-02).
+    ...(settings.replanChangePenalty ? { changePenalty: settings.replanChangePenalty } : {}),
   };
 }
 
@@ -347,6 +355,10 @@ export function tripServiceMinutes(
 }
 
 /** « DUPONT Marie » (lib/names): in the reasons a vehicle is left out, and on the planning screens. */
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1);
+}
+
 export function personName(person: { firstName: string; lastName: string }): string {
   return formatPersonName(person);
 }
@@ -410,13 +422,22 @@ export function decideVehicle(vehicle: VehicleInput, weekday: number): VehicleDe
     return { ok: false, reason: `Horaires du chauffeur invalides (${personName(driver)})` };
   }
 
+  // Out of service, or its crew unavailable, from (or until) a time of the day (DAY-03): the shift is cut there.
+  const notes: string[] = [];
+  const free = vehicle.freeHours;
+  if (free) {
+    shiftStart = Math.max(shiftStart, free.from ?? shiftStart);
+    shiftEnd = Math.min(shiftEnd, free.until ?? shiftEnd);
+    if (shiftEnd <= shiftStart) return { ok: false, reason: free.reason };
+    notes.push(`${vehicle.label}\u00a0: ${lowerFirst(free.reason)}, horaire du jour ${formatMinute(shiftStart)}–${formatMinute(shiftEnd)}`);
+  }
+
   // Art. L. 3121-16: over 6 hours, the shift is only worked with a break of 20 min or more inside it.
   // A crew of the day was checked on /equipages already (blocked above); this covers the default crew.
   const shift = { start: shiftStart, end: shiftEnd };
   const workIssue = workTimeSummary(driver, shift);
   if (workIssue) return { ok: false, reason: workIssue };
 
-  const notes: string[] = [];
   let breakRule: OptimizerVehicle["break"] = null;
   if (driver.breakWindowStartMinute !== null && driver.breakWindowEndMinute !== null && driver.breakMinutes > 0) {
     // The break must fit inside the working hours to be schedulable.
@@ -861,7 +882,7 @@ export async function loadDayCrewContext(prisma: PrismaClient | Prisma.Transacti
     prisma.driver.findMany({ select: { ...driverInputSelect, qualifications: true, depotId: true } }),
     prisma.staffAbsence.findMany({
       where: { startDate: { lte: serviceDate }, endDate: { gte: serviceDate } },
-      select: { driverId: true, kind: true, startDate: true, endDate: true },
+      select: { driverId: true, kind: true, startDate: true, endDate: true, startMinute: true, endMinute: true },
     }),
     prisma.crewIncompatibility.findMany({ select: { driverAId: true, driverBId: true } }),
     prisma.dayCrew.findMany({
@@ -870,7 +891,7 @@ export async function loadDayCrewContext(prisma: PrismaClient | Prisma.Transacti
     }),
     prisma.vehicleUnavailability.findMany({
       where: { startDate: { lte: serviceDate }, endDate: { gte: serviceDate } },
-      select: { vehicleId: true, kind: true, startDate: true, endDate: true },
+      select: { vehicleId: true, kind: true, startDate: true, endDate: true, startMinute: true, endMinute: true },
     }),
     prisma.maintenanceDeadline.findMany({
       where: { kind: { in: [...COMPLIANCE_KINDS] }, doneDate: null },
@@ -918,10 +939,46 @@ export async function loadCrewRules(prisma: Pick<PrismaClient, "appSettings">): 
   };
 }
 
-/** Every vehicle with the crew of isoDate (optimisation, planning view, moves). */
+/** Every vehicle with the crew of isoDate (optimisation, planning view, moves), its hours cut by a partial unavailability. */
 export async function loadDayVehicleInputs(prisma: PrismaClient, isoDate: string): Promise<VehicleInput[]> {
   const [vehicles, context] = await Promise.all([loadVehicleInputs(prisma), loadDayCrewContext(prisma, isoDate)]);
-  return applyDayCrewPlan(vehicles, context.plan, context.people);
+  return withFreeHours(applyDayCrewPlan(vehicles, context.plan, context.people), context.input, isoDate);
+}
+
+/**
+ * Pure: each vehicle with the hours a partial unavailability of the day leaves it (DAY-03): the
+ * vehicle out of service from a time, or its driver or crew mate of the day unavailable from a time
+ * (lib/fleet/partial-day.ts). The reason never says why a person is away (health data).
+ */
+export function withFreeHours<V extends VehicleInput>(
+  vehicles: readonly V[],
+  input: Pick<DayCrewInput, "absences" | "vehicleUnavailabilities">,
+  isoDate: string,
+): V[] {
+  return vehicles.map((vehicle) => {
+    const own = (input.vehicleUnavailabilities ?? []).filter((u) => u.vehicleId === vehicle.id);
+    const cuts: { free: FreeHours; who: string }[] = [];
+    const vehicleFree = freeHoursOfAll(own, isoDate);
+    if (vehicleFree) cuts.push({ free: vehicleFree, who: "Hors service" });
+    for (const [person, who] of [
+      [vehicle.defaultDriver, "Chauffeur indisponible"],
+      [vehicle.type === "AMBULANCE" ? vehicle.defaultCrewMate : null, "Équipier indisponible"],
+    ] as const) {
+      if (!person) continue;
+      const free = freeHoursOfAll(
+        input.absences.filter((a) => a.driverId === person.id),
+        isoDate,
+      );
+      if (free) cuts.push({ free, who });
+    }
+    if (cuts.length === 0) return vehicle;
+    const froms = cuts.flatMap((c) => (c.free.from === null ? [] : [c.free.from]));
+    const untils = cuts.flatMap((c) => (c.free.until === null ? [] : [c.free.until]));
+    const free: FreeHours = { from: froms.length > 0 ? Math.max(...froms) : null, until: untils.length > 0 ? Math.min(...untils) : null };
+    const first = cuts.find((c) => c.free.until !== null && c.free.until === free.until) ?? cuts[0]!;
+    const when = free.until !== null ? `à partir de ${formatMinute(free.until)}` : `jusqu'à ${formatMinute(free.from ?? 0)}`;
+    return { ...vehicle, freeHours: { ...free, reason: `${first.who} ${when}` } };
+  });
 }
 
 /** Tariff grids that may be in force on isoDate (tariffsInForce picks one per type, department and certification). */

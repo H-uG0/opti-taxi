@@ -75,7 +75,7 @@ export default async function EditVehiclePage({
     db.vehicleUnavailability.findMany({
       where: { vehicleId: vehicle.id, endDate: { gte: fromIsoDate(addDays(todayText, -30)) } },
       orderBy: { startDate: "asc" },
-      select: { id: true, kind: true, startDate: true, endDate: true, note: true },
+      select: { id: true, kind: true, startDate: true, endDate: true, startMinute: true, endMinute: true, note: true },
     }),
     db.maintenanceDeadline.findMany({
       where: { vehicleId: vehicle.id, OR: [{ doneDate: null }, { doneDate: { gte: fromIsoDate(addDays(todayText, -365)) } }] },
@@ -139,7 +139,13 @@ export default async function EditVehiclePage({
               ) : (
                 <ul className="divide-y divide-slate-100">
                   {outages.map((o) => {
-                    const text = unavailabilityText({ kind: o.kind, startDate: toIsoDate(o.startDate), endDate: toIsoDate(o.endDate) });
+                    const text = unavailabilityText({
+                      kind: o.kind,
+                      startDate: toIsoDate(o.startDate),
+                      endDate: toIsoDate(o.endDate),
+                      startMinute: o.startMinute,
+                      endMinute: o.endMinute,
+                    });
                     const past = toIsoDate(o.endDate) < todayText;
                     return (
                       <li key={o.id} className="space-y-1 py-2">

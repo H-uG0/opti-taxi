@@ -27,6 +27,7 @@ const fake = vi.hoisted(() => {
     insert: vi.fn(),
     audit: vi.fn(),
     version: vi.fn(),
+    routesKey: vi.fn(),
     running: vi.fn(),
     withdraw: vi.fn(),
   };
@@ -41,7 +42,7 @@ vi.mock("@/lib/optimizer/build-request", () => ({
   buildOptimizeRequest: fake.build,
   personName: (p: { firstName: string; lastName: string }) => `${p.lastName.toUpperCase()} ${p.firstName}`,
 }));
-vi.mock("./version", () => ({ loadPlanVersion: fake.version }));
+vi.mock("./version", () => ({ loadPlanVersion: fake.version, loadRoutesKey: fake.routesKey }));
 vi.mock("./run-optimization", () => ({
   optimizationInProgress: fake.running,
   OPTIMIZATION_IN_PROGRESS_ERROR: "Une optimisation de cette date est en cours.",
@@ -116,6 +117,7 @@ function setUp(routes: unknown[] = [taxiRoute(), ambulanceRoute()]) {
   });
   fake.insert.mockResolvedValue({ ok: true, data: answer() });
   fake.version.mockResolvedValue("v-1");
+  fake.routesKey.mockResolvedValue("k-1");
   fake.running.mockResolvedValue(false);
   fake.tx.route.findMany.mockImplementation(async (args: { where: { id?: unknown; serviceDate?: unknown } }) =>
     args.where.serviceDate ? [{ status: "PROPOSED" }, { status: "PROPOSED" }] : [taxiRoute()],
@@ -150,27 +152,25 @@ afterEach(() => {
 const sqlOf = (call: unknown[]) => (call[0] as TemplateStringsArray).join("?");
 
 describe("findTripPlaces", () => {
-  it("asks /insert with the routes in place, and greys the vehicles whose route is under way", async () => {
+  it("asks /insert with the routes in place, every vehicle tried, a route under way too (DAY-02)", async () => {
     fake.db.route.findMany.mockResolvedValue([taxiRoute(), ambulanceRoute(new Date())]);
     const outcome = await findTripPlaces("trip_1");
     const sent = fake.insert.mock.calls[0]![0] as { tripId: string; vehicleIds: string[] | null; routes: { vehicleId: string }[] };
     expect(sent.tripId).toBe("trip_1");
-    // Every route goes (the total wait of a patient is checked across them), the started one is not tried.
+    // Every route goes (the total wait of a patient is checked across them); the started one takes trips after its stops done.
     expect(sent.routes.map((r) => r.vehicleId)).toEqual(["veh_taxi_1", "veh_amb_1"]);
-    expect(sent.vehicleIds).toEqual(["veh_taxi_1", "veh_vsl_1"]);
-    expect(outcome.ok && outcome.view.version).toBe("v-1");
+    expect(sent.vehicleIds).toBeNull();
+    // A day under way: the places hold while the routes keep their stops in order, whatever the drivers' statuses.
+    expect(outcome.ok && outcome.view.version).toBe("routes:k-1");
     expect(outcome.ok && outcome.view.options.map((o) => o.vehicleId)).toEqual(["veh_taxi_1"]);
     // An ambulance is not of an allowed type for this seated trip: not listed.
     expect(outcome.ok && outcome.view.rejected.map((r) => r.vehicleId)).toEqual(["veh_vsl_1"]);
   });
 
-  it("refuses a trip whose own route is under way, and says the optimizer's error", async () => {
+  it("moves a trip off a route under way, and says the optimizer's error", async () => {
     fake.db.route.findMany.mockResolvedValue([{ ...taxiRoute("PROPOSED", new Date()), stops: [...taxiRoute("PROPOSED", new Date()).stops, stop("trip_1", "PICKUP", 6), stop("trip_1", "DROPOFF", 7)] }]);
-    expect(await findTripPlaces("trip_1")).toEqual({
-      ok: false,
-      error: "Cette course ne peut pas quitter sa tournée\u00a0: Taxi 1 (Marseille) a une tournée commencée, qui ne change plus en cours de journée.",
-    });
-    expect(fake.insert).not.toHaveBeenCalled();
+    expect(await findTripPlaces("trip_1")).toMatchObject({ ok: true });
+    expect((fake.insert.mock.calls[0]![0] as { tripId: string }).tripId).toBe("trip_1");
     setUp();
     fake.insert.mockResolvedValue({ ok: false, error: "Le service d'optimisation ne répond pas." });
     expect(await findTripPlaces("trip_1")).toEqual({ ok: false, error: "Le service d'optimisation ne répond pas." });

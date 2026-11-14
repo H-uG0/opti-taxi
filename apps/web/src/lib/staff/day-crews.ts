@@ -51,6 +51,7 @@
 import type { AbsenceKind, Qualification, VehicleType } from "@prisma/client";
 import { CREW_REQUIRED_ONE_OF, crewHoldsRequired, REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
 import { unavailabilityOn, unavailabilityText, type DatedVehicleUnavailability } from "@/lib/fleet/availability";
+import { coversWholeDay } from "@/lib/fleet/partial-day";
 // Same display order as the optimizer request and every list: type, then label in numeric order.
 import { compareVehicles, VEHICLE_TYPE_ORDER } from "@/lib/fleet/order";
 import { ABSENCE_KIND_LABELS, QUALIFICATION_NOUNS } from "@/lib/labels";
@@ -101,8 +102,19 @@ export type CrewRules = {
 /** Schema defaults of AppSettings (crewMaxReplacementKm, crewMinPairOverlapMin, crewReservePerDepot). */
 export const DEFAULT_CREW_RULES: CrewRules = { maxReplacementKm: 60, minPairOverlapMin: 240, reservePerDepot: 0 };
 
-/** Absence from startDate to endDate included ("YYYY-MM-DD"). */
-export type DatedAbsence = { driverId: string; kind: AbsenceKind; startDate: string; endDate: string };
+/**
+ * Absence from startDate to endDate included ("YYYY-MM-DD"); with startMinute, from that time of the first
+ * day, with endMinute, until that time of the last day (lib/fleet/partial-day.ts): the person works that
+ * day until (or from) then, on their vehicle whose shift is cut (build-request.ts).
+ */
+export type DatedAbsence = {
+  driverId: string;
+  kind: AbsenceKind;
+  startDate: string;
+  endDate: string;
+  startMinute?: number | null;
+  endMinute?: number | null;
+};
 export type Incompatibility = { driverAId: string; driverBId: string };
 export type SavedCrew = { vehicleId: string; driverId: string | null; crewMateId: string | null };
 
@@ -278,11 +290,11 @@ export function depotDistanceKm(a: Pick<CrewDepot, "lat" | "lng">, b: Pick<CrewD
   return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-/** The absence covering the date, if any (the earliest one when several overlap). */
+/** The absence covering the whole date, if any (the earliest one when several overlap); one from a time of the day is not. */
 export function absenceOn(driverId: string, isoDate: string, absences: readonly DatedAbsence[]): DatedAbsence | null {
   let found: DatedAbsence | null = null;
   for (const a of absences) {
-    if (a.driverId !== driverId || a.startDate > isoDate || a.endDate < isoDate) continue;
+    if (a.driverId !== driverId || !coversWholeDay(a, isoDate)) continue;
     if (!found || a.startDate < found.startDate) found = a;
   }
   return found;
@@ -292,17 +304,19 @@ export function areIncompatible(a: string, b: string, pairs: readonly Incompatib
   return pairs.some((p) => (p.driverAId === a && p.driverBId === b) || (p.driverAId === b && p.driverBId === a));
 }
 
-function datedText(label: string, absence: Pick<DatedAbsence, "startDate" | "endDate">): string {
+function datedText(label: string, absence: Pick<DatedAbsence, "startDate" | "endDate" | "startMinute" | "endMinute">): string {
+  const from = absence.startMinute != null ? ` à partir de ${formatMinute(absence.startMinute)}` : "";
+  const until = absence.endMinute != null ? ` jusqu'à ${formatMinute(absence.endMinute)}` : "";
   return absence.startDate === absence.endDate
-    ? `${label} le ${formatShortDate(absence.startDate)}`
-    : `${label} du ${formatShortDate(absence.startDate)} au ${formatShortDate(absence.endDate)}`;
+    ? `${label} le ${formatShortDate(absence.startDate)}${from}${until}`
+    : `${label} du ${formatShortDate(absence.startDate)}${from} au ${formatShortDate(absence.endDate)}${until}`;
 }
 
 /**
  * "Congé du 10/11/2026 au 14/11/2026", "Arrêt maladie le 10/11/2026": with the
  * reason, for the person's own sheet only (/chauffeurs/[id]).
  */
-export function absenceText(absence: Pick<DatedAbsence, "kind" | "startDate" | "endDate">): string {
+export function absenceText(absence: Pick<DatedAbsence, "kind" | "startDate" | "endDate" | "startMinute" | "endMinute">): string {
   return datedText(ABSENCE_KIND_LABELS[absence.kind], absence);
 }
 
@@ -315,7 +329,7 @@ const DUTY_KINDS: Partial<Record<AbsenceKind, string>> = { ON_CALL: "Garde", TRA
  * 14/11/2026" for leave, sick leave and any other reason alike, so a sick
  * leave cannot be told from a holiday there. A noun, so it reads right for anyone.
  */
-export function planningAbsenceText(absence: Pick<DatedAbsence, "kind" | "startDate" | "endDate">): string {
+export function planningAbsenceText(absence: Pick<DatedAbsence, "kind" | "startDate" | "endDate" | "startMinute" | "endMinute">): string {
   return datedText(planningAbsenceLabel(absence.kind), absence);
 }
 

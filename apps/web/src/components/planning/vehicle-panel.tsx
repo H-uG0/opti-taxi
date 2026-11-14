@@ -16,6 +16,7 @@ export function VehiclePanel({
   trips,
   issues = [],
   crewAction,
+  outageAction,
   lockAction,
   onSelectTrip,
   onClose,
@@ -26,6 +27,8 @@ export function VehiclePanel({
   issues?: string[];
   /** « Changer l'équipage » (planning page). */
   crewAction?: ReactNode;
+  /** « Hors service… » : the vehicle or its crew unavailable from a time (planning page, DAY-03). */
+  outageAction?: ReactNode;
   /** « Figer la tournée » / « Défiger la tournée » (planning page). */
   lockAction?: ReactNode;
   onSelectTrip: (tripId: string) => void;
@@ -93,6 +96,7 @@ export function VehiclePanel({
         ) : null}
       </div>
       {crewAction}
+      {outageAction}
 
       {route ? (
         <ol className="border-t border-slate-100 px-2 py-2">

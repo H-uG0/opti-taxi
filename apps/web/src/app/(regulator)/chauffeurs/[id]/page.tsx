@@ -65,7 +65,7 @@ export default async function EditDriverPage({
     db.staffAbsence.findMany({
       where: { driverId: driver.id, endDate: { gte: fromIsoDate(addDays(today, -30)) } },
       orderBy: { startDate: "asc" },
-      select: { id: true, kind: true, startDate: true, endDate: true, note: true },
+      select: { id: true, kind: true, startDate: true, endDate: true, startMinute: true, endMinute: true, note: true },
     }),
     db.crewIncompatibility.findMany({
       where: { OR: [{ driverAId: driver.id }, { driverBId: driver.id }] },
@@ -224,7 +224,13 @@ export default async function EditDriverPage({
               ) : (
                 <ul className="divide-y divide-slate-100">
                   {absences.map((a) => {
-                    const text = absenceText({ kind: a.kind, startDate: toIsoDate(a.startDate), endDate: toIsoDate(a.endDate) });
+                    const text = absenceText({
+                      kind: a.kind,
+                      startDate: toIsoDate(a.startDate),
+                      endDate: toIsoDate(a.endDate),
+                      startMinute: a.startMinute,
+                      endMinute: a.endMinute,
+                    });
                     const past = toIsoDate(a.endDate) < today;
                     return (
                       <li key={a.id} className="space-y-1 py-2">
