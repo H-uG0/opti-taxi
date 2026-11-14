@@ -3,7 +3,7 @@ import Link from "next/link";
 import { FormMessage } from "@/components/ui/form";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import type { TripDirection, TripStatus } from "@prisma/client";
+import type { TripDirection } from "@prisma/client";
 import { Pencil, Plus } from "lucide-react";
 import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
@@ -11,20 +11,16 @@ import { db } from "@/lib/db";
 import { recurrenceOverlaps } from "@/lib/domain/duplicates";
 import { describeDaySchedules, describeRhythmDays, nextSessionDates, parseDaySchedules } from "@/lib/domain/recurrence-rhythm";
 import {
-  cancellationLabel,
   DEFAULT_LATE_CANCELLATION_HOURS,
   PATIENT_HISTORY_DAYS,
   patientCancellationStats,
   patientHistoryStart,
 } from "@/lib/domain/cancellation";
 import {
-  DIRECTION_LABELS,
   MOBILITY_LABELS,
   PRESCRIBED_MODE_LABELS,
   RECURRENCE_LEGS_LABELS,
   SHARING_SCOPE_LABELS,
-  SHARING_STATUS_LABELS,
-  TRIP_STATUS_LABELS,
 } from "@/lib/labels";
 import { addDays, formatDayDate, formatDuration, formatMinute, formatShortDate, fromIsoDate, todayIso, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
 import { formatCoordinate } from "@/components/address/address-utils";
@@ -35,6 +31,17 @@ import { TBody, Td, Th, THead } from "@/components/ui/table";
 import { attachRecurrencesToRenewal, deletePrescription, setPatientActive, setRecurrenceActive } from "../actions";
 import { ActionButton } from "@/components/ui/action-button";
 import { SyncNotice } from "../_components/sync-notice";
+import { PatientAbsenceForm } from "../_components/absence-form";
+import { UpcomingTrips } from "../_components/upcoming-trips";
+import { addPatientAbsence, deletePatientAbsence, updatePatientAbsence } from "../absence-actions";
+import { upcomingDays } from "../_lib/upcoming";
+import { ConfirmAction } from "@/components/ui/confirm-action";
+import {
+  absenceText,
+  currentAbsence,
+  planningAbsenceLabel,
+  recordAbsenceFrom,
+} from "@/lib/domain/patient-absences";
 import {
   findPredecessor,
   findRenewal,
@@ -67,15 +74,6 @@ const VALIDITY_TONES: Record<ValidityState, BadgeTone> = {
   expired: "danger",
 };
 
-const TRIP_STATUS_TONES: Record<TripStatus, BadgeTone> = {
-  PLANNED: "neutral",
-  ASSIGNED: "brand",
-  PICKED_UP: "info",
-  DROPPED_OFF: "success",
-  CANCELLED: "neutral",
-  NO_SHOW: "warning",
-};
-
 /** " et ses 4 courses à venir non commencées seront annulées (…)" (empty when there is none). */
 function cancelledTripsClause(count: number): string {
   if (count === 0) return "";
@@ -99,7 +97,7 @@ export default async function PatientPage({
   const today = todayIso();
   const lastDay = addDays(today, UPCOMING_DAYS - 1);
 
-  const [patient, trips, openTrips, pastTrips] = await Promise.all([
+  const [patient, trips, openTrips, pastTrips, absenceRows] = await Promise.all([
     db.patient.findUnique({
       where: { id },
       include: {
@@ -135,8 +133,16 @@ export default async function PatientPage({
       },
       select: { status: true, cancellationOrigin: true, cancellationReason: true, lateCancellation: true },
     }),
+    // Current, upcoming and recent absences (the last days are kept on screen to correct a mistake).
+    db.patientAbsence.findMany({
+      where: { patientId: id, endDate: { gte: fromIsoDate(recordAbsenceFrom(today)) } },
+      orderBy: { startDate: "asc" },
+      select: { id: true, kind: true, startDate: true, endDate: true, note: true },
+    }),
   ]);
   if (!patient) notFound();
+  const absences = absenceRows.map((a) => ({ ...a, startDate: toIsoDate(a.startDate), endDate: toIsoDate(a.endDate) }));
+  const absentNow = currentAbsence(absences, today);
   // Just created with its rhythm: its new trips on days already planned wait for a place (« Où la placer ? »).
   const waiting = query.cree === "regulier" ? await tripsOnPlannedDays(patient.id, today) : [];
   // Its trips start tomorrow (the horizon never writes a day already begun): a session of today has none.
@@ -189,12 +195,6 @@ export default async function PatientPage({
   const totalOpenTrips = [...openTrips.values()].reduce((sum, n) => sum + n, 0);
   const hasValidToday = prescriptions.some((p) => p.validity.state === "valid" || p.validity.state === "expiring");
   const activeRecurrences = patient.recurrences.filter((r) => r.active);
-  const sortedTrips = [...trips].sort(
-    (a, b) =>
-      toIsoDate(a.serviceDate).localeCompare(toIsoDate(b.serviceDate)) ||
-      (a.plannedPickupMinute ?? a.appointmentMinute ?? a.readyMinute ?? 0) -
-        (b.plannedPickupMinute ?? b.appointmentMinute ?? b.readyMinute ?? 0),
-  );
   const fullName = formatPersonName(patient);
   // Trips of today the referential sync cancelled (e.g. patient deactivated by mistake this morning): a
   // reactivation brings back the trips from tomorrow on only, those of today are restored by hand.
@@ -233,6 +233,11 @@ export default async function PatientPage({
             <span className="flex flex-wrap items-center gap-3">
               {fullName}
               <Badge tone={patient.active ? "success" : "neutral"}>{patient.active ? "Actif" : "Désactivé"}</Badge>
+              {absentNow ? (
+                <Badge tone="warning" className="tabular">
+                  {planningAbsenceLabel(absentNow.kind)} jusqu&apos;au {formatShortDate(absentNow.endDate)}
+                </Badge>
+              ) : null}
             </span>
           }
           description={`${patient.city} · ${MOBILITY_LABELS[patient.mobility]}`}
@@ -364,6 +369,78 @@ export default async function PatientPage({
               )}
             </Item>
           </dl>
+        </CardBody>
+      </Card>
+
+      {/* ------------------------------------------------------------ absences */}
+      <Card id="absences" className="scroll-mt-6">
+        <CardHeader title="Absences" />
+        <CardBody className="space-y-4 text-sm text-slate-700">
+          <p className="text-xs text-slate-500">
+            Hospitalisation, vacances&nbsp;: les récurrences ne créent pas de course ces jours-là, et les courses déjà
+            créées sont annulées. Elles reviennent d&apos;elles-mêmes quand l&apos;absence est raccourcie ou supprimée (à
+            partir de demain). Le planning et les courses indiquent seulement «&#x202F;Hospitalisation&#x202F;» ou
+            «&#x202F;Absence du patient&#x202F;» avec les dates&nbsp;; la précision reste sur cette fiche.
+          </p>
+          {absences.length === 0 ? (
+            <p className="text-slate-500">Aucune absence en cours ou à venir.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {absences.map((a) => {
+                const text = absenceText(a);
+                const past = a.endDate < today;
+                return (
+                  <li key={a.id} className="space-y-2 py-2">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className={past ? "text-slate-500" : "font-medium text-slate-900"}>
+                          {text}
+                          {past ? " (passée)" : a === absentNow ? " (en cours)" : ""}
+                        </p>
+                        {a.note ? <p className="text-xs text-slate-500">{a.note}</p> : null}
+                      </div>
+                      <ConfirmAction
+                        action={deletePatientAbsence.bind(null, patient.id, a.id)}
+                        label="Supprimer"
+                        ariaLabel={`Supprimer «\u202f${text}\u202f»`}
+                        confirmLabel="Oui, supprimer l'absence"
+                        keepLabel="Garder l'absence"
+                        triggerVariant="ghost"
+                        question={
+                          <p>
+                            Supprimer «&#x202F;{text}&#x202F;»&#x202F;? Les courses annulées pour cette absence reviennent à
+                            partir de demain.
+                          </p>
+                        }
+                      />
+                    </div>
+                    {past ? null : (
+                      <details className="rounded-md border border-slate-200 px-3 py-2">
+                        <summary className="cursor-pointer text-sm font-medium text-brand-700">Modifier ou raccourcir</summary>
+                        <div className="pt-3">
+                          <PatientAbsenceForm
+                            action={updatePatientAbsence.bind(null, patient.id, a.id)}
+                            initial={{ kind: a.kind, startDate: a.startDate, endDate: a.endDate, note: a.note ?? "" }}
+                            submitLabel="Enregistrer l'absence"
+                          />
+                        </div>
+                      </details>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <details className="rounded-md border border-slate-200 px-3 py-2">
+            <summary className="cursor-pointer text-sm font-medium text-brand-700">Nouvelle absence</summary>
+            <div className="pt-3">
+              <PatientAbsenceForm
+                action={addPatientAbsence.bind(null, patient.id)}
+                initial={{ kind: "HOSPITALIZATION", startDate: today, endDate: today, note: "" }}
+                submitLabel="Ajouter l'absence"
+              />
+            </div>
+          </details>
         </CardBody>
       </Card>
 
@@ -727,7 +804,7 @@ export default async function PatientPage({
             </span>
           }
         />
-        {sortedTrips.length === 0 ? (
+        {trips.length === 0 ? (
           <CardBody>
             <p className="text-sm text-slate-600">
               Aucune course prévue sur les {UPCOMING_DAYS} prochains jours. Les courses régulières apparaissent une fois
@@ -735,89 +812,7 @@ export default async function PatientPage({
             </p>
           </CardBody>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <THead>
-              <tr>
-                <Th>Date</Th>
-                <Th>Sens</Th>
-                <Th>Horaire</Th>
-                <Th>Établissement</Th>
-                <Th>Statut</Th>
-                <Th>Partage</Th>
-                <Th className="text-right">
-                  <span className="sr-only">Actions</span>
-                </Th>
-              </tr>
-            </THead>
-            <TBody>
-              {sortedTrips.map((t) => {
-                const date = toIsoDate(t.serviceDate);
-                return (
-                  <tr key={t.id}>
-                    <Td className="tabular whitespace-nowrap">
-                      {/* The trip in Courses (its day, this patient only): a link to the record, not to a list. */}
-                      <Link
-                        href={`/courses?date=${date}&patient=${patient.id}`}
-                        className="font-medium text-brand-700 underline-offset-2 hover:underline"
-                        title="Voir cette course dans Courses"
-                      >
-                        {formatShortDate(date)}
-                      </Link>
-                      {date === today ? <span className="ml-1.5 text-xs text-slate-500">aujourd&apos;hui</span> : null}
-                    </Td>
-                    <Td>{DIRECTION_LABELS[t.direction]}</Td>
-                    <Td className="tabular whitespace-nowrap">
-                      {t.direction === "OUTBOUND"
-                        ? `RDV ${formatMinute(t.appointmentMinute)}`
-                        : `Fin de séance ${formatMinute(t.readyMinute)}`}
-                      {t.plannedPickupMinute !== null ? (
-                        <span className="block text-xs text-slate-500">
-                          prise en charge {formatMinute(t.plannedPickupMinute)}
-                        </span>
-                      ) : null}
-                    </Td>
-                    <Td>
-                      {t.facility?.name ?? <span className="text-slate-500">Adresse libre</span>}
-                      {t.oneOffAddress ? (
-                        <span className="block text-xs font-medium text-amber-800">Adresse ponctuelle du patient</span>
-                      ) : null}
-                      {t.notes ? <span className="block max-w-xs truncate text-xs text-slate-500" title={t.notes}>{t.notes}</span> : null}
-                    </Td>
-                    <Td>
-                      <Badge tone={TRIP_STATUS_TONES[t.status]}>{TRIP_STATUS_LABELS[t.status]}</Badge>
-                      {t.status === "CANCELLED" ? (
-                        <span className="mt-0.5 block text-xs text-slate-500">{cancellationLabel(t)}</span>
-                      ) : null}
-                    </Td>
-                    <Td className="whitespace-nowrap">
-                      {t.shared ? (
-                        <Badge tone="shared" className="mr-1.5">
-                          Partagée
-                        </Badge>
-                      ) : null}
-                      <span className={t.sharingStatus === "REFUSED" ? "font-medium text-red-700" : "text-slate-700"}>
-                        {SHARING_STATUS_LABELS[t.sharingStatus]}
-                      </span>
-                    </Td>
-                    <Td className="text-right">
-                      {(t.status === "PLANNED" || t.status === "ASSIGNED") ? (
-                        <LinkButton
-                          href={`/courses/${encodeURIComponent(t.id)}/modifier?retour=patient`}
-                          size="sm"
-                          variant="ghost"
-                          aria-label={`Modifier la course du ${formatShortDate(date)} (${DIRECTION_LABELS[t.direction].toLowerCase()})`}
-                        >
-                          Modifier
-                        </LinkButton>
-                      ) : null}
-                    </Td>
-                  </tr>
-                );
-              })}
-            </TBody>
-            </table>
-          </div>
+          <UpcomingTrips days={upcomingDays(trips, absences, patient.id, today)} />
         )}
       </Card>
     </div>

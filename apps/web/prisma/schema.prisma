@@ -78,6 +78,8 @@ enum CancellationReason {
   REFERENTIAL_SYNC
   /// Décision de la régulation.
   REGULATION
+  /// Absence datée du patient (vacances, autre) saisie sur sa fiche ; une hospitalisation garde HOSPITALIZATION.
+  PATIENT_ABSENCE
   OTHER
 }
 
@@ -121,6 +123,14 @@ enum AbsenceKind {
   SICK
   TRAINING
   ON_CALL
+  OTHER
+}
+
+/// Motif d'une absence datée d'un patient. Les écrans de planification ne nomment que l'hospitalisation ;
+/// les autres motifs y sont « Absence », et la précision libre reste sur la fiche patient.
+enum PatientAbsenceKind {
+  HOSPITALIZATION
+  HOLIDAY
   OTHER
 }
 
@@ -244,8 +254,28 @@ model Patient {
   prescriptions Prescription[]
   recurrences   Recurrence[]
   trips         Trip[]
+  absences      PatientAbsence[]
 
   @@index([lastName, firstName])
+}
+
+/// Absence d'un patient du startDate au endDate inclus (hospitalisation, vacances…) : ses récurrences ne génèrent
+/// pas de course ces jours-là, et ses courses déjà créées sont annulées par l'application (origine SYSTEM), qui
+/// les rétablit d'elle-même quand l'absence est raccourcie ou supprimée (lib/domain/patient-absences.ts).
+model PatientAbsence {
+  id        String             @id @default(cuid())
+  patientId String
+  kind      PatientAbsenceKind
+  startDate DateTime           @db.Date
+  endDate   DateTime           @db.Date
+  /// Précision libre, montrée sur la fiche patient seulement (jamais sur le planning, les courses ni l'audit).
+  note      String?
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId, startDate])
 }
 
 model Facility {

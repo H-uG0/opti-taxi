@@ -212,6 +212,19 @@ describe("planTripsFromRecurrences — rhythms (PAT-05)", () => {
   });
 });
 
+describe("planTripsFromRecurrences — patient absences (PAT-02)", () => {
+  it("creates no trip on the days of an absence, both ends included, and resumes after it", () => {
+    const rec = recurrence({ patient: { absences: [{ startDate: fromIsoDate("2026-11-04"), endDate: fromIsoDate("2026-11-06") }] } });
+    expect([...new Set(planTripsFromRecurrences([rec], MONDAY, "2026-11-09").map(dayOf))]).toEqual(["2026-11-02", "2026-11-09"]);
+    expect(recurrenceOccursOn(rec, "2026-11-04")).toBe(false);
+    expect(recurrenceOccursOn(rec, "2026-11-09")).toBe(true);
+  });
+
+  it("loads the absences with the patient", () => {
+    expect(GENERATION_INCLUDE.patient.include.absences).toEqual({ select: { startDate: true, endDate: true } });
+  });
+});
+
 describe("planTripsFromRecurrences — trip content", () => {
   const [outbound, ret] = planTripsFromRecurrences([recurrence()], MONDAY, MONDAY);
 

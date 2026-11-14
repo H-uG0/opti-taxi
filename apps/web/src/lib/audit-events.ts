@@ -9,6 +9,7 @@ import { fromIsoDate } from "@/lib/time";
 
 export type AuditEntity =
   | "Patient"
+  | "PatientAbsence"
   | "Prescription"
   | "Recurrence"
   | "Trip"

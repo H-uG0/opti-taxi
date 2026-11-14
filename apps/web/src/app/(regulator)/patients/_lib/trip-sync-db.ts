@@ -1,5 +1,5 @@
 import "server-only";
-import type { Prisma } from "@prisma/client";
+import type { CancellationReason, Prisma } from "@prisma/client";
 import { audit } from "@/lib/audit";
 import { systemCancellation } from "@/lib/domain/cancellation";
 import { removeTripStops } from "@/lib/planning/detach";
@@ -87,8 +87,8 @@ export async function loadOpenTrips(
  * its new prescription refuses) and every exceptional ambulance ended
  * (trip.exceptional_ambulance_withdrawn: the trip now prescribed in ambulance).
  * A trip cancelled here is marked as cancelled by the application (origin
- * SYSTEM, reason « synchronisation du référentiel », `options.cause` as its
- * note, `actor` as author): it comes back by itself once the cause is gone
+ * SYSTEM, reason « synchronisation du référentiel » or `options.reason`,
+ * `options.cause` as its note, `actor` as author): it comes back by itself once the cause is gone
  * (lib/domain/trip-generation.ts), unlike a trip a person cancelled.
  */
 export async function syncTrips(
@@ -101,7 +101,7 @@ export async function syncTrips(
   options: SyncOptions = {},
 ): Promise<SyncSummary> {
   const summary: SyncSummary = { ...EMPTY_SYNC };
-  const cancellation = systemCancellation(actor.id, new Date(), options.cause ?? null);
+  const cancellation = systemCancellation(actor.id, new Date(), options.cause ?? null, options.reason);
   const cancelled: SyncTrip[] = [];
   const detachedOnly: SyncTrip[] = [];
   const unlocked: SyncTrip[] = [];
@@ -145,6 +145,8 @@ export async function syncTrips(
 export type SyncOptions = {
   /** Why trips may be cancelled ("Patient désactivé"…): the note of their cancellation. */
   cause?: string;
+  /** Reason of those cancellations; absent: « synchronisation du référentiel » (an absence: its own). */
+  reason?: CancellationReason;
 };
 
 /** Shorthand: loads the open trips matching `where` and syncs them (see syncTrips for `leftRoutes`, `actor` and `options`). */

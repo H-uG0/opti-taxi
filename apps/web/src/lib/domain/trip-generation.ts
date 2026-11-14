@@ -18,6 +18,7 @@
 import type { Prisma, PrescribedMode, RecurrenceLegs, SharingScope, SharingStatus, TripDirection } from "@prisma/client";
 import { addDays, fromIsoDate, toIsoDate } from "@/lib/time";
 import { NO_CANCELLATION } from "./cancellation";
+import { coveredOn } from "./patient-absences";
 import { rhythmOccursOn, sessionTimesOn, type Rhythm } from "./recurrence-rhythm";
 import { prescriptionCovering } from "./renewal";
 import { allowedVehicleTypesFor, formatAddress, initialSharingStatus, nextSharingStatus, sharingAllowedFor } from "./rules";
@@ -54,8 +55,15 @@ export type RecurrenceForGeneration = {
   active: boolean;
   /** Instructions for the crew, copied to every trip generated (never medical). */
   notes?: string | null;
-  /** `prescriptions`: all the patient's prescriptions, to fall back on a renewal not attached yet (or the PMT renewed). */
-  patient: Place & { active: boolean; prescriptions?: readonly PrescriptionForGeneration[] };
+  /**
+   * `prescriptions`: all the patient's prescriptions, to fall back on a renewal not attached yet (or the PMT
+   * renewed); `absences`: the patient's dated absences (no session on their days).
+   */
+  patient: Place & {
+    active: boolean;
+    prescriptions?: readonly PrescriptionForGeneration[];
+    absences?: readonly { startDate: Date; endDate: Date }[];
+  };
   facility: Place;
   /** The prescription the recurrence is attached to. */
   prescription: Omit<PrescriptionForGeneration, "id">;
@@ -68,6 +76,8 @@ export type RecurrenceForGeneration = {
 export const GENERATION_INCLUDE = {
   patient: {
     include: {
+      // No session on the days of an absence (hospitalisation, holidays): lib/domain/patient-absences.ts.
+      absences: { select: { startDate: true, endDate: true } },
       prescriptions: {
         select: {
           id: true,
@@ -118,17 +128,18 @@ export function rhythmOf(
 }
 
 /**
- * The recurrence plans a care session on this date (active, patient active, its rhythm: period, weekdays and
- * interval, or explicit dates), whatever the prescription.
+ * The recurrence plans a care session on this date (active, patient active and not absent that day, its rhythm:
+ * period, weekdays and interval, or explicit dates), whatever the prescription.
  */
 export function recurrenceOccursOn(
   rec: Pick<RecurrenceForGeneration, "active" | "weekdays" | "intervalWeeks" | "sessionDates" | "startDate" | "endDate"> & {
-    patient: { active: boolean };
+    patient: Pick<RecurrenceForGeneration["patient"], "active" | "absences">;
   },
   isoDate: string,
 ): boolean {
   if (!rec.active || !rec.patient.active) return false;
-  return rhythmOccursOn(rhythmOf(rec), isoDate);
+  if (!rhythmOccursOn(rhythmOf(rec), isoDate)) return false;
+  return !coveredOn(rec.patient.absences, isoDate);
 }
 
 /** A session the recurrence plans but no prescription covers: no trip, reported to the regulator. */

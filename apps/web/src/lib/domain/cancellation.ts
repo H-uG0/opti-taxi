@@ -19,6 +19,7 @@ export const CANCELLATION_REASON_LABELS: Record<CancellationReason, string> = {
   PARTNER: "Confiée à un confrère",
   REFERENTIAL_SYNC: "Synchronisation du référentiel",
   REGULATION: "Décision de la régulation",
+  PATIENT_ABSENCE: "Absence du patient",
   OTHER: "Autre motif",
 };
 
@@ -110,13 +111,20 @@ export function userCancellation(input: {
 }
 
 /**
- * A cancellation by the referential sync, on behalf of `actorId` (the
- * regulator whose change caused it). `cause` says which change ("Patient
- * désactivé"…); it is never late: the patient did not cancel.
+ * A cancellation by the application, on behalf of `actorId` (the regulator
+ * whose change caused it). `cause` says which change ("Patient désactivé",
+ * the dates of an absence…); `reason` is the sync's own unless the change has
+ * a reason of its own (a patient's absence: lib/domain/patient-absences.ts).
+ * It is never late: the patient did not cancel.
  */
-export function systemCancellation(actorId: string, now: Date, cause: string | null): CancellationFields {
+export function systemCancellation(
+  actorId: string,
+  now: Date,
+  cause: string | null,
+  reason: CancellationReason = "REFERENTIAL_SYNC",
+): CancellationFields {
   return {
-    cancellationReason: "REFERENTIAL_SYNC",
+    cancellationReason: reason,
     cancellationOrigin: "SYSTEM",
     cancellationNote: cause,
     cancelledAt: now,
@@ -174,7 +182,14 @@ export type PatientCancellationStats = {
  * a trip handed over to a partner company, the regulation's own decision, a
  * session the facility cancelled or moved, a death.
  */
-const NOT_THE_PATIENTS: readonly CancellationReason[] = ["PARTNER", "REGULATION", "REFERENTIAL_SYNC", "FACILITY", "DECEASED"];
+const NOT_THE_PATIENTS: readonly CancellationReason[] = [
+  "PARTNER",
+  "REGULATION",
+  "REFERENTIAL_SYNC",
+  "FACILITY",
+  "DECEASED",
+  "PATIENT_ABSENCE",
+];
 
 /**
  * What the patient page counts: « patient absent » (NO_SHOW), and the

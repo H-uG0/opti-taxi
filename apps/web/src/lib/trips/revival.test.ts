@@ -50,6 +50,13 @@ describe("oneOffRevival", () => {
     expect(oneOffRevival(trip({ prescription: ended }))).toBeNull();
   });
 
+  it("waits while the patient is absent that day (PAT-02), and comes back once the absence no longer covers it", () => {
+    const absent = { startDate: fromIsoDate("2026-11-10"), endDate: fromIsoDate("2026-11-12") };
+    expect(oneOffRevival(trip({ patient: { ...HOME, active: true, absences: [absent] } }))).toBeNull();
+    const shortened = { startDate: fromIsoDate("2026-11-10"), endDate: fromIsoDate("2026-11-11") };
+    expect(oneOffRevival(trip({ patient: { ...HOME, active: true, absences: [shortened] } }))).toMatchObject({ status: "PLANNED" });
+  });
+
   it("keeps a private client's free destination, and a return comes back home", () => {
     const station = trip({ payer: "PRIVATE", prescription: null, facility: null, direction: "RETURN", pickupAddress: "Gare de Manosque" });
     expect(oneOffRevival(station)).toMatchObject({

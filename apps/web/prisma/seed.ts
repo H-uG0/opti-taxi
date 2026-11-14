@@ -23,6 +23,8 @@ import { hashPassword } from "@/lib/auth/password";
 import { crewHoldsRequired, DEFAULT_CAPACITY, formatAddress, REQUIRED_QUALIFICATIONS } from "@/lib/domain/rules";
 import { frenchPublicHolidays } from "@/lib/domain/holidays";
 import { generateTrips } from "@/lib/domain/trip-generation";
+import { systemCancellation } from "@/lib/domain/cancellation";
+import { absenceCancellationNote, absenceCancellationReason } from "@/lib/domain/patient-absences";
 import { logError } from "@/lib/log";
 import {
   addDays,
@@ -147,6 +149,7 @@ async function wipe(): Promise<void> {
     prisma.vehicleUnavailability.deleteMany(),
     prisma.dayCrew.deleteMany(),
     prisma.staffAbsence.deleteMany(),
+    prisma.patientAbsence.deleteMany(),
     prisma.crewIncompatibility.deleteMany(),
     prisma.routeStop.deleteMany(),
     prisma.trip.deleteMany(),
@@ -604,6 +607,59 @@ async function seedRhythmExamples(facilities: Map<FacilityKey, CreatedFacility>,
       data: { daySchedules: [{ weekday: 5, appointmentMinute: minute("07:30"), sessionMinutes: null }] },
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Patient absences (PAT-02).
+
+/** First active recurrence of a facility at a time: its patient (no random draw, the other data stay the same). */
+async function patientOf(facilities: Map<FacilityKey, CreatedFacility>, facility: FacilityKey, appointment: string) {
+  const rec = await prisma.recurrence.findFirst({
+    where: { facilityId: lookup(facilities, facility, "Établissement").id, appointmentMinute: minute(appointment), active: true },
+    orderBy: { createdAt: "asc" },
+    select: { patientId: true },
+  });
+  return rec?.patientId ?? null;
+}
+
+/**
+ * Before the trips are generated: a dialysis patient of Marseille hospitalised
+ * from next Monday to next Wednesday (no trip is created on those days).
+ */
+async function seedHospitalisation(facilities: Map<FacilityKey, CreatedFacility>, dates: Dates): Promise<void> {
+  const patientId = await patientOf(facilities, "dialysisMarseille", "07:30");
+  if (!patientId) return;
+  await prisma.patientAbsence.create({
+    data: {
+      patientId,
+      kind: "HOSPITALIZATION",
+      startDate: fromIsoDate(dates.nextMonday),
+      endDate: fromIsoDate(addDays(dates.nextMonday, 2)),
+      note: "Entrée prévue lundi matin, sortie à confirmer par la famille.",
+    },
+  });
+}
+
+/**
+ * After the trips are generated: a radiotherapy patient of Grenoble on holiday
+ * from tomorrow for three days. Their trips are cancelled as the record's
+ * « Absences » does it (origin SYSTEM, reason « absence du patient », the
+ * dates as note, by the regulator): they come back if the absence is removed.
+ */
+async function seedHolidayAbsence(facilities: Map<FacilityKey, CreatedFacility>, dates: Dates, regulatorId: string): Promise<void> {
+  const patientId = await patientOf(facilities, "radiotherapyGrenoble", "10:30");
+  if (!patientId) return;
+  const period = { startDate: dates.tomorrow, endDate: addDays(dates.tomorrow, 2) };
+  await prisma.patientAbsence.create({
+    data: { patientId, kind: "HOLIDAY", startDate: fromIsoDate(period.startDate), endDate: fromIsoDate(period.endDate) },
+  });
+  await prisma.trip.updateMany({
+    where: { patientId, serviceDate: { gte: fromIsoDate(period.startDate), lte: fromIsoDate(period.endDate) }, status: "PLANNED" },
+    data: {
+      status: "CANCELLED",
+      ...systemCancellation(regulatorId, new Date(), absenceCancellationNote(period), absenceCancellationReason("HOLIDAY")),
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1194,6 +1250,7 @@ async function main(): Promise<void> {
   const names = new NameFactory(rng, Object.values(DRIVERS));
   await seedPatients(rng, names, facilities, dates);
   await seedRhythmExamples(facilities, dates);
+  await seedHospitalisation(facilities, dates);
   // Own generator: the patients and trips drawn afterwards stay those of the earlier seeds.
   await seedPrescriptionFollowUp(new Rng(RANDOM_SEED + 5), facilities, dates);
   console.log(`• Courses générées du ${formatShortDate(dates.monday)} au ${formatShortDate(dates.lastDay)}`);
@@ -1202,6 +1259,7 @@ async function main(): Promise<void> {
   console.log("• Clients privés et refus de partage de demain");
   const privateClients = await seedPrivateClients(rng, names, dates);
   const refusals = await seedSharingRefusals(dates, regulatorId);
+  await seedHolidayAbsence(facilities, dates, regulatorId);
   console.log(`• Patients occasionnels et leurs courses ponctuelles du ${formatShortDate(dates.monday)} au ${formatShortDate(dates.lastDay)}`);
   // Own generators: the patients and trips drawn above stay those of the earlier seeds.
   const pool = await seedOccasionalPatients(new Rng(RANDOM_SEED + 7), OCCASIONAL_POOL_SIZE, OCCASIONAL_AREAS);

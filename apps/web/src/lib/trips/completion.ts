@@ -23,6 +23,7 @@ import {
   revivalData,
   type RecurrenceForGeneration,
 } from "@/lib/domain/trip-generation";
+import { coveredOn } from "@/lib/domain/patient-absences";
 import { fromIsoDate, toIsoDate, tomorrowIso } from "@/lib/time";
 import { oneOffRevival, type OneOffRevivalTrip } from "./revival";
 import { DEFAULT_TRIP_HORIZON_DAYS, horizonOf, writableRange, type DateRange } from "./horizon";
@@ -160,12 +161,15 @@ async function reviveRecurrenceTrips(tx: Client, actor: AuditActor, where: Prism
     include: GENERATION_INCLUDE,
   });
   const planned = new Map(planRecurrenceTrips(recurrences, first, last).trips.map((trip) => [plannedTripKey(trip), trip]));
+  const recurrenceById = new Map(recurrences.map((rec) => [rec.id, rec]));
 
   const events: AuditEntry[] = [];
   for (const trip of candidates) {
     const day = toIsoDate(trip.serviceDate);
     const again = planned.get(recurrenceTripKey(trip.recurrenceId ?? "", occurrenceOf(trip), trip.direction));
     if (!again) continue;
+    // A trip moved to another day stays cancelled while the patient is absent on that day.
+    if (coveredOn(recurrenceById.get(trip.recurrenceId ?? "")?.patient.absences, day)) continue;
     // Guarded: a trip restored or changed meanwhile is left as it is.
     const { count } = await tx.trip.updateMany({
       where: { id: trip.id, status: "CANCELLED", cancellationOrigin: "SYSTEM" },
@@ -180,8 +184,9 @@ async function reviveRecurrenceTrips(tx: Client, actor: AuditActor, where: Prism
 /**
  * Brings back the one-off trips (no recurrence) matching `where`, from
  * tomorrow on, that the application cancelled and whose cause is gone: the
- * patient is active, the facility too, and a CPAM trip's prescription covers
- * its date (see oneOffRevival). Traced trip.revive. Returns how many.
+ * patient is active and not absent that day, the facility too, and a CPAM
+ * trip's prescription covers its date (see oneOffRevival). Traced
+ * trip.revive. Returns how many.
  */
 export async function reviveOneOffTrips(tx: Client, actor: AuditActor, where: Prisma.TripWhereInput): Promise<number> {
   const candidates: OneOffRevivalTrip[] = await tx.trip.findMany({
@@ -203,7 +208,17 @@ export async function reviveOneOffTrips(tx: Client, actor: AuditActor, where: Pr
       dropoffAddress: true,
       dropoffLat: true,
       dropoffLng: true,
-      patient: { select: { active: true, address: true, postalCode: true, city: true, lat: true, lng: true } },
+      patient: {
+        select: {
+          active: true,
+          address: true,
+          postalCode: true,
+          city: true,
+          lat: true,
+          lng: true,
+          absences: { select: { startDate: true, endDate: true } },
+        },
+      },
       prescription: { select: { mode: true, sharing: true, validFrom: true, validTo: true } },
       facility: { select: { active: true, address: true, postalCode: true, city: true, lat: true, lng: true } },
     },

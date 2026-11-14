@@ -5,6 +5,7 @@
  */
 import type { Payer, PrescribedMode, Prisma, SharingScope, SharingStatus, TripDirection } from "@prisma/client";
 import { NO_CANCELLATION } from "@/lib/domain/cancellation";
+import { coveredOn } from "@/lib/domain/patient-absences";
 import { allowedVehicleTypesFor, formatAddress, nextSharingStatus, sharingAllowedFor } from "@/lib/domain/rules";
 import { toIsoDate } from "@/lib/time";
 
@@ -23,7 +24,8 @@ export type OneOffRevivalTrip = {
   dropoffAddress: string;
   dropoffLat: number;
   dropoffLng: number;
-  patient: Place & { active: boolean };
+  /** `absences`: the patient's dated absences (a trip on one of their days stays cancelled). */
+  patient: Place & { active: boolean; absences?: readonly { startDate: Date; endDate: Date }[] };
   prescription: { mode: PrescribedMode; sharing: SharingScope; validFrom: Date; validTo: Date } | null;
   facility: (Place & { active: boolean }) | null;
 };
@@ -31,13 +33,16 @@ export type OneOffRevivalTrip = {
 /**
  * What the trip becomes when it can come back, or null while a cause holds:
  * patient inactive, facility inactive, or a CPAM trip whose prescription no
- * longer covers its date. Places are taken again from the patient's home and
- * the facility (they may have moved meanwhile); rules from the prescription.
+ * longer covers its date, or the patient absent that day
+ * (lib/domain/patient-absences.ts). Places are taken again from the patient's
+ * home and the facility (they may have moved meanwhile); rules from the
+ * prescription.
  */
 export function oneOffRevival(trip: OneOffRevivalTrip): Prisma.TripUncheckedUpdateManyInput | null {
   if (!trip.patient.active) return null;
   if (trip.facility && !trip.facility.active) return null;
   const date = toIsoDate(trip.serviceDate);
+  if (coveredOn(trip.patient.absences, date)) return null;
   const prescription = trip.payer === "CPAM" ? trip.prescription : null;
   if (trip.payer === "CPAM") {
     if (!prescription || toIsoDate(prescription.validFrom) > date || date > toIsoDate(prescription.validTo)) return null;
