@@ -49,7 +49,7 @@ import {
   type ValidityState,
 } from "../_lib/status";
 import { countOpenTripsByRecurrence } from "../_lib/trip-counts";
-import { openTripsLabel } from "../_lib/trip-sync";
+import { openTripsLabel, recurrenceSchedules } from "../_lib/trip-sync";
 import { BackLink } from "@/components/ui/back-link";
 import { Notice } from "@/components/ui/notice";
 import { formatPersonName } from "@/lib/names";
@@ -139,6 +139,21 @@ export default async function PatientPage({
   if (!patient) notFound();
   // Just created with its rhythm: its new trips on days already planned wait for a place (« Où la placer ? »).
   const waiting = query.cree === "regulier" ? await tripsOnPlannedDays(patient.id, today) : [];
+  // Its trips start tomorrow (the horizon never writes a day already begun): a session of today has none.
+  const sessionTodayWithoutTrip =
+    query.cree === "regulier" &&
+    patient.recurrences.some(
+      (r) =>
+        r.active &&
+        (["OUTBOUND", "RETURN"] as const).some((leg) =>
+          recurrenceSchedules(
+            { weekdays: r.weekdays, legs: r.legs, startDate: toIsoDate(r.startDate), endDate: r.endDate ? toIsoDate(r.endDate) : null },
+            today,
+            leg,
+          ),
+        ) &&
+        !trips.some((t) => t.recurrenceId === r.id && toIsoDate(t.serviceDate) === today),
+    );
   // Health data shown: the read is traced (never breaks the page).
   await auditRead(user, { action: "patient.view", entity: "Patient", entityId: patient.id });
   // Read only: a page never creates the settings row.
@@ -250,6 +265,17 @@ export default async function PatientPage({
           ) : null}
           {query.enregistre === "1" ? <FormMessage tone="success">Modifications enregistrées.</FormMessage> : null}
           {query.cree === "regulier" && waiting.length > 0 ? <PlannedDaysNotice trips={waiting} today={today} /> : null}
+          {sessionTodayWithoutTrip ? (
+            <Notice size="sm" tone="warning">
+              La séance d&apos;aujourd&apos;hui n&apos;a pas de course&nbsp;: les courses de la récurrence commencent demain.{" "}
+              <Link
+                href={`/courses/nouvelle?${new URLSearchParams({ patient: patient.id, date: today }).toString()}`}
+                className="font-medium underline underline-offset-2"
+              >
+                Créer la course d&apos;aujourd&apos;hui
+              </Link>
+            </Notice>
+          ) : null}
           {query.cree === "1" || query.cree === "regulier" || query.enregistre === "1" ? <DropNoticeParams /> : null}
           <SyncNotice query={query} />
           {todayCancelledBySync > 0 ? (
@@ -746,7 +772,7 @@ export default async function PatientPage({
                     <Td className="text-right">
                       {(t.status === "PLANNED" || t.status === "ASSIGNED") ? (
                         <LinkButton
-                          href={`/courses/${encodeURIComponent(t.id)}/modifier`}
+                          href={`/courses/${encodeURIComponent(t.id)}/modifier?retour=patient`}
                           size="sm"
                           variant="ghost"
                           aria-label={`Modifier la course du ${formatShortDate(date)} (${DIRECTION_LABELS[t.direction].toLowerCase()})`}

@@ -3,8 +3,9 @@ import type { Prisma } from "@prisma/client";
 import { audit } from "@/lib/audit";
 import { systemCancellation } from "@/lib/domain/cancellation";
 import { removeTripStops } from "@/lib/planning/detach";
+import { isExceptionalAmbulanceTrip } from "@/lib/planning/exceptional-ambulance";
 import { fromIsoDate, toIsoDate } from "@/lib/time";
-import { tripCancelEvents, tripDetachEvents, type AuditActor } from "./audit-events";
+import { exceptionalWithdrawnEvents, tripCancelEvents, tripDetachEvents, tripUnlockEvents, type AuditActor } from "./audit-events";
 import { EMPTY_SYNC, OPEN_TRIP_STATUSES, planTripChange, type SyncSummary, type SyncTrip, type TripTarget } from "./trip-sync";
 
 /**
@@ -41,6 +42,7 @@ const syncTripSelect = {
   recurrenceId: true,
   routeId: true,
   lockedVehicleId: true,
+  exceptionalAmbulanceAt: true,
   route: { select: { vehicle: { select: { type: true } } } },
   lockedVehicle: { select: { type: true } },
   prescription: { select: { validFrom: true, validTo: true } },
@@ -61,12 +63,13 @@ export async function loadOpenTrips(
     select: syncTripSelect,
     orderBy: [{ serviceDate: "asc" }, { id: "asc" }],
   });
-  return rows.map(({ serviceDate, occurrenceDate, route, lockedVehicle, prescription, ...trip }) => ({
+  return rows.map(({ serviceDate, occurrenceDate, route, lockedVehicle, prescription, exceptionalAmbulanceAt, ...trip }) => ({
     ...trip,
     serviceDate: toIsoDate(serviceDate),
     occurrenceDate: occurrenceDate ? toIsoDate(occurrenceDate) : null,
     routeVehicleType: route?.vehicle.type ?? null,
     lockedVehicleType: lockedVehicle?.type ?? null,
+    exceptionalAmbulance: isExceptionalAmbulanceTrip({ ...trip, exceptionalAmbulanceAt }, () => lockedVehicle?.type),
     prescriptionValidity: prescription
       ? { validFrom: toIsoDate(prescription.validFrom), validTo: toIsoDate(prescription.validTo) }
       : null,
@@ -79,7 +82,10 @@ export async function loadOpenTrips(
  * (lib/planning/detach.ts); the routes it left are added to `leftRoutes`, to be
  * recomputed once the transaction has committed (lib/planning/refresh-routes.ts).
  * Every trip cancelled is traced (one trip.cancel per trip, by `actor`) in the
- * same transaction, and so is every trip taken off its route but kept (trip.detach).
+ * same transaction, and so is every trip taken off its route but kept
+ * (trip.detach), every lock dropped on a trip kept (trip.unlock: a vehicle type
+ * its new prescription refuses) and every exceptional ambulance ended
+ * (trip.exceptional_ambulance_withdrawn: the trip now prescribed in ambulance).
  * A trip cancelled here is marked as cancelled by the application (origin
  * SYSTEM, reason « synchronisation du référentiel », `options.cause` as its
  * note, `actor` as author): it comes back by itself once the cause is gone
@@ -98,6 +104,8 @@ export async function syncTrips(
   const cancellation = systemCancellation(actor.id, new Date(), options.cause ?? null);
   const cancelled: SyncTrip[] = [];
   const detachedOnly: SyncTrip[] = [];
+  const unlocked: SyncTrip[] = [];
+  const withdrawn: SyncTrip[] = [];
   for (const trip of trips) {
     const decision = planTripChange(trip, targetFor(trip), todayIso);
     if (decision.type === "deferred") summary.deferred += 1;
@@ -121,9 +129,16 @@ export async function syncTrips(
     } else {
       summary.updated += 1;
       if (change.detach) detachedOnly.push(trip);
+      if (trip.lockedVehicleId !== null && change.data.lockedVehicleId === null) unlocked.push(trip);
+      if (change.data.exceptionalAmbulanceAt === null) withdrawn.push(trip);
     }
   }
-  await audit(tx, actor, [...tripCancelEvents(cancelled), ...tripDetachEvents(detachedOnly)]);
+  await audit(tx, actor, [
+    ...tripCancelEvents(cancelled),
+    ...tripDetachEvents(detachedOnly),
+    ...tripUnlockEvents(unlocked),
+    ...exceptionalWithdrawnEvents(withdrawn),
+  ]);
   return summary;
 }
 
@@ -143,4 +158,31 @@ export async function syncOpenTrips(
   options: SyncOptions = {},
 ): Promise<SyncSummary> {
   return syncTrips(tx, await loadOpenTrips(tx, where, todayIso), targetFor, todayIso, leftRoutes, actor, options);
+}
+
+/**
+ * New notes of a recurrence, for its trips to come that the application
+ * cancelled (they come back once the cause is gone, keeping their notes:
+ * lib/domain/trip-generation.ts revivalData): those still carrying the old
+ * notes take the new ones, as the open trips do (recurrenceTarget); notes
+ * typed on a trip stay. In the caller's transaction. Returns how many.
+ */
+export async function carryRecurrenceNotes(
+  tx: Prisma.TransactionClient,
+  recurrenceId: string,
+  notes: { before: string | null; after: string | null },
+  todayIso: string,
+): Promise<number> {
+  if (notes.before === notes.after) return 0;
+  const { count } = await tx.trip.updateMany({
+    where: {
+      recurrenceId,
+      status: "CANCELLED",
+      cancellationOrigin: "SYSTEM",
+      serviceDate: { gte: fromIsoDate(todayIso) },
+      notes: notes.before,
+    },
+    data: { notes: notes.after },
+  });
+  return count;
 }

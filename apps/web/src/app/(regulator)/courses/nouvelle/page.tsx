@@ -9,6 +9,7 @@ import { geocoderEnabled } from "@/lib/geocode";
 import { FACILITY_TYPE_LABELS } from "@/lib/labels";
 import { isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
 import { NewTripForm, type FacilityOption } from "./new-trip-form";
+import { readTripDraft } from "./trip-draft";
 import { loadTripPatient } from "./trip-patient";
 
 export const metadata: Metadata = { title: "Nouvelle course" };
@@ -21,7 +22,8 @@ function firstParam(value: string | string[] | undefined): string | undefined {
  * « Nouvelle course » : the patient is searched on the server as the regulator
  * types (never the whole list in the page); ?patient= (the button of the
  * patient's record) opens the form on that patient, their usual facility
- * proposed; ?date= the day.
+ * proposed (« Annuler » leads back to the record unless ?retour=courses); ?date=
+ * the day; the choices carried back from « Nouvelle prescription » (trip-draft.ts).
  */
 export default async function NewTripPage({
   searchParams,
@@ -50,11 +52,15 @@ export default async function NewTripPage({
     id: facility.id,
     label: `${facility.name} — ${facility.city} (${FACILITY_TYPE_LABELS[facility.type]})`,
   }));
-  const back = initialPatient ? `/patients/${initialPatient.id}` : `/courses?date=${initialDate}`;
+  const read = readTripDraft(params);
+  // A facility carried back that is no longer offered is dropped (the usual one is proposed instead).
+  const draft = { ...read, facilityId: facilities.some((f) => f.id === read.facilityId) ? read.facilityId : undefined };
+  const fromRecord = initialPatient !== null && !draft.fromCourses;
+  const back = initialPatient && fromRecord ? `/patients/${initialPatient.id}` : `/courses?date=${initialDate}`;
 
   return (
     <div className="max-w-3xl">
-      <BackLink href={back}>{initialPatient ? "Fiche patient" : "Courses"}</BackLink>
+      <BackLink href={back}>{fromRecord ? "Fiche patient" : "Courses"}</BackLink>
       <PageHeader
         title="Nouvelle course"
         description="Course ponctuelle, hors récurrence&nbsp;: un trajet, ou l'aller et le retour d'une consultation."
@@ -84,6 +90,9 @@ export default async function NewTripPage({
               initialDate={initialDate}
               today={today}
               geocoder={geocoderEnabled()}
+              draft={draft}
+              fromRecord={fromRecord}
+              cancelHref={fromRecord ? back : undefined}
             />
           </CardBody>
         </Card>

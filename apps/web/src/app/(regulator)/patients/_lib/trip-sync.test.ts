@@ -59,6 +59,7 @@ function trip(overrides: Partial<SyncTrip> = {}): SyncTrip {
     routeVehicleType: null,
     lockedVehicleId: null,
     lockedVehicleType: null,
+    exceptionalAmbulance: false,
     prescriptionValidity: { validFrom: "2026-09-01", validTo: "2027-02-28" },
     ...overrides,
   };
@@ -336,6 +337,51 @@ describe("one-off address and notes", () => {
       change: { tripId: "t1", expectedStatus: "ASSIGNED", cancel: false, detach: false, data: { notes: "Salle 5" } },
     });
     expect(planTripChange(routed, { kind: "update", notes: "Salle 3" }, TODAY)).toEqual({ type: "none" });
+  });
+});
+
+describe("exceptional ambulance (TAR-03)", () => {
+  // A seated trip locked on, and routed in, an ambulance by « recours exceptionnel ».
+  const exceptional = (overrides: Partial<SyncTrip> = {}) =>
+    trip({
+      status: "ASSIGNED",
+      routeId: "route1",
+      routeVehicleType: "AMBULANCE",
+      lockedVehicleId: "amb1",
+      lockedVehicleType: "AMBULANCE",
+      exceptionalAmbulance: true,
+      notes: "Salle 3",
+      ...overrides,
+    });
+
+  it("keeps its lock and its route when the recurrence's notes change", () => {
+    expect(planTripChange(exceptional(), { kind: "update", notes: "Salle 5" }, TODAY)).toEqual({
+      type: "change",
+      change: { tripId: "t1", expectedStatus: "ASSIGNED", cancel: false, detach: false, data: { notes: "Salle 5" } },
+    });
+  });
+
+  it("keeps its lock on a new time (out of its route, to be placed again on its ambulance) and on another seated PMT", () => {
+    const time = planTripChange(exceptional(), { kind: "update", keyMinute: 480 }, TODAY);
+    expect(time).toMatchObject({ type: "change", change: { detach: true, data: { appointmentMinute: 480, routeId: null } } });
+    expect(time.type === "change" && time.change.data).not.toHaveProperty("lockedVehicleId");
+
+    const renewal = planTripChange(exceptional(), { kind: "update", prescription: { id: "p2", mode: "TAP", sharing: "BOTH" } }, TODAY);
+    expect(renewal).toEqual({
+      type: "change",
+      change: { tripId: "t1", expectedStatus: "ASSIGNED", cancel: false, detach: false, data: { prescriptionId: "p2" } },
+    });
+  });
+
+  it("ends the measure, keeping the ambulance, once the trip is prescribed in ambulance", () => {
+    const decision = planTripChange(exceptional(), { kind: "update", prescription: { id: "p1", mode: "AMBULANCE", sharing: "NONE" } }, TODAY);
+    expect(decision.type === "change" && decision.change.data).toMatchObject({
+      allowedVehicleTypes: ["AMBULANCE"],
+      exceptionalAmbulanceAt: null,
+      exceptionalAmbulanceById: null,
+    });
+    expect(decision.type === "change" && decision.change.data).not.toHaveProperty("lockedVehicleId");
+    expect(decision.type === "change" && decision.change.detach).toBe(false);
   });
 });
 

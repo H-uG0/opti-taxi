@@ -41,7 +41,10 @@ export function renewalEvents(recurrenceIds: readonly string[]): AuditEntry[] {
 
 type TripRef = { id: string; serviceDate: string };
 
-function tripEvents(action: "trip.cancel" | "trip.detach", trips: readonly TripRef[]): AuditEntry[] {
+function tripEvents(
+  action: "trip.cancel" | "trip.detach" | "trip.unlock" | "trip.exceptional_ambulance_withdrawn",
+  trips: readonly TripRef[],
+): AuditEntry[] {
   return trips.map((trip) => ({ action, entity: "Trip", entityId: trip.id, serviceDate: trip.serviceDate }));
 }
 
@@ -56,4 +59,14 @@ export function tripCancelEvents(trips: readonly TripRef[]): AuditEntry[] {
  */
 export function tripDetachEvents(trips: readonly TripRef[]): AuditEntry[] {
   return tripEvents("trip.detach", trips);
+}
+
+/** One trip.unlock per trip kept whose lock a referential change dropped (a vehicle type its prescription now refuses). */
+export function tripUnlockEvents(trips: readonly TripRef[]): AuditEntry[] {
+  return tripEvents("trip.unlock", trips);
+}
+
+/** One trip.exceptional_ambulance_withdrawn per trip whose exceptional ambulance a referential change ended. */
+export function exceptionalWithdrawnEvents(trips: readonly TripRef[]): AuditEntry[] {
+  return tripEvents("trip.exceptional_ambulance_withdrawn", trips);
 }

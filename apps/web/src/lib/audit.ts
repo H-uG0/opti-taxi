@@ -37,7 +37,10 @@
  *   trip.reschedule, trip.update (« Modifier la course »: details.fields, the
  *   names of what changed — date, time, home, facility, care_place, notes,
  *   prescription —, details.serviceDate { from, to } when it moved to another
- *   day, details.detached when it left its route; never an address or a note), trip.sharing_accept, trip.sharing_refuse, trip.move
+ *   day, details.detached when it left its route, details.lockedVehicleId
+ *   { from, to: null } when it lost its lock, with a trip.unlock — and a
+ *   trip.exceptional_ambulance_withdrawn when that lock carried an exceptional
+ *   ambulance —; never an address or a note), trip.sharing_accept, trip.sharing_refuse, trip.move
  *   (« Déplacer vers… »: no details, the day is then re-optimized; « Où placer
  *   cette course ? »: details.mode "insert", details.vehicleId and
  *   details.lockedVehicleId as { from, to }, and on a validated or started day
@@ -46,12 +49,14 @@
  *   drag-and-drop draft of the timeline, « Enregistrer »: one event per trip
  *   moved, details.mode "draft" with the same fields, `to` null for a trip
  *   put in « À placer », taken out of its route and unlocked),
- *   trip.lock, trip.unlock, trip.toll (details: old and new toll),
+ *   trip.lock, trip.unlock (also by a referential change: a vehicle type the
+ *   new prescription refuses), trip.toll (details: old and new toll),
  *   trip.exceptional_ambulance (a seated trip proposed in an ambulance,
  *   details.vehicleId and details.reason, a fixed text) and
  *   trip.exceptional_ambulance_withdrawn (not kept: the optimizer could not
  *   serve it there or did not answer; or no longer in force: unlocked, moved
- *   off the ambulance, the plan computed with it discarded);
+ *   off the ambulance or to another day, the plan computed with it
+ *   discarded, the trip now prescribed in ambulance);
  * - planning: plan.optimize (details.confirmed when the regulator replaced the
  *   routes in place with a plan that waited for confirmation;
  *   details.refusedVehicleIds when it was accepted vehicle by vehicle: the

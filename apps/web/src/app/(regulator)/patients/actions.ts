@@ -50,8 +50,9 @@ import {
   type SyncSummary,
   type SyncTrip,
 } from "./_lib/trip-sync";
-import { SYNC_TX_OPTIONS, syncOpenTrips } from "./_lib/trip-sync-db";
+import { carryRecurrenceNotes, SYNC_TX_OPTIONS, syncOpenTrips } from "./_lib/trip-sync-db";
 import { formatPersonName } from "@/lib/names";
+import { newTripHref, type TripDraft } from "../courses/nouvelle/trip-draft";
 
 const NOT_FOUND = "Fiche introuvable\u00a0: elle a peut-être été supprimée. Rechargez la page.";
 
@@ -378,13 +379,14 @@ export async function setPatientActive(_prev: ActionResult, formData: FormData):
 // ---------------------------------------------------------------- prescriptions
 
 /**
- * Saves a new prescription. `returnDate`: opened from « Nouvelle course »
+ * Saves a new prescription. `returnTo`: opened from « Nouvelle course »
  * (a CPAM trip without a valid PMT that day), the form goes back to the new
- * trip on that day, for that patient.
+ * trip on that day, for that patient, with the choices already made (checked
+ * again: trip-draft.ts).
  */
 export async function createPrescription(
   patientId: string,
-  returnDate: string | null,
+  returnTo: { date: string; draft: TripDraft } | null,
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
@@ -409,9 +411,7 @@ export async function createPrescription(
   }, SYNC_TX_OPTIONS);
   revalidatePatients();
   revalidateTrips(summary);
-  if (returnDate && isIsoDate(returnDate)) {
-    redirect(`/courses/nouvelle?${new URLSearchParams({ patient: patient.id, date: returnDate, pmt: "1" }).toString()}`);
-  }
+  if (returnTo && isIsoDate(returnTo.date)) redirect(newTripHref(patient.id, returnTo.date, returnTo.draft ?? {}, true));
   redirect(withSyncNotice(`/patients/${patient.id}#prescriptions`, summary));
 }
 
@@ -791,6 +791,8 @@ export async function updateRecurrence(
       user,
       { cause: CAUSES.recurrenceChanged },
     );
+    // Trips the application cancelled come back with their notes: the new ones reach them too.
+    await carryRecurrenceNotes(tx, existing.id, { before: before.notes, after: after.notes }, today);
     // A day added, a period lengthened or another prescription: the trips of the horizon follow.
     return withCompletion(synced, await completeHorizon(tx, user, { id: existing.id }));
   }, SYNC_TX_OPTIONS);

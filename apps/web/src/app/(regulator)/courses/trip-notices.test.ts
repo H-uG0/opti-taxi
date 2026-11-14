@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NOTHING_REFRESHED } from "@/lib/planning/refresh-routes";
-import { createdTripsHref, readTripNotice, updatedSentence, updatedTripHref } from "./trip-notices";
+import { createdTripsHref, droppedLockSentence, readTripNotice, updatedSentence, updatedTripHref } from "./trip-notices";
 
 const params = (href: string) => Object.fromEntries(new URL(href, "http://x").searchParams);
 
@@ -22,8 +22,20 @@ describe("trip notices of « Courses »", () => {
       tripId: "t1",
       changes: ["date", "home"],
       detached: true,
+      unlocked: null,
       refresh: { ...NOTHING_REFRESHED, refreshed: 1 },
     });
+  });
+
+  it("round-trips the lock an edit dropped, and says so", () => {
+    for (const unlocked of ["lock", "exceptional"] as const) {
+      const href = updatedTripHref("2026-11-17", "t1", { changes: ["date"], detached: false, unlocked, refresh: NOTHING_REFRESHED });
+      expect(readTripNotice(params(href))).toMatchObject({ unlocked });
+    }
+    expect(readTripNotice({ notice: "updated", course: "t1", defigee: "x" })).toMatchObject({ unlocked: null });
+    expect(droppedLockSentence("lock")).toBe("Elle n'est plus figée sur son véhicule.");
+    expect(droppedLockSentence("exceptional")).toMatch(/recours exceptionnel est retiré/);
+    expect(droppedLockSentence(null)).toBe("");
   });
 
   it("ignores codes it does not know, and a notice without its trip", () => {

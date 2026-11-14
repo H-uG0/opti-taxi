@@ -45,7 +45,7 @@ import {
 import { placeTripHref, planningTripHref } from "@/lib/planning/links";
 import { refreshAdvice, refreshNotice } from "@/lib/planning/refresh-routes";
 import { Notice } from "@/components/ui/notice";
-import { readTripNotice, updatedSentence } from "./trip-notices";
+import { droppedLockSentence, readTripNotice, updatedSentence } from "./trip-notices";
 import type { TripRowData } from "./trip-row";
 import { TripTable } from "./trip-table";
 import { keyMinute } from "./trip-rules";
@@ -286,7 +286,9 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
                 ? noticeIds.length > 1
                   ? "Aller et retour créés."
                   : "Course créée."
-                : `${updatedSentence(notice.changes)}${notice.detached ? " Elle a quitté sa tournée." : ""}`}{" "}
+                : [updatedSentence(notice.changes), notice.detached ? "Elle a quitté sa tournée." : "", droppedLockSentence(notice.unlocked)]
+                    .filter(Boolean)
+                    .join(" ")}{" "}
               {unplaced.length === 0
                 ? notice.kind === "updated" && !notice.detached && noticeTrips.some((trip) => trip.routeId !== null)
                   ? "Elle reste dans sa tournée."

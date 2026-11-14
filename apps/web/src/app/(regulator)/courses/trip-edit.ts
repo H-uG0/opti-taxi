@@ -11,6 +11,7 @@
  */
 import type { Prisma, SharingStatus, TripDirection, TripStatus, VehicleType } from "@prisma/client";
 import { isShareable, nextSharingStatus } from "@/lib/domain/rules";
+import { isSeatedOnly, keepsVehicleType } from "@/lib/planning/exceptional-ambulance";
 import { fromIsoDate } from "@/lib/time";
 
 export type Place = { address: string; lat: number; lng: number };
@@ -43,6 +44,8 @@ export type EditableTrip = {
   routeVehicleType: VehicleType | null;
   lockedVehicleId: string | null;
   lockedVehicleType: VehicleType | null;
+  /** A « recours exceptionnel à une ambulance » is in force (isExceptionalAmbulanceTrip): seated only, locked on an ambulance. */
+  exceptionalAmbulance: boolean;
 };
 
 /** What the regulator asked for, places and prescription resolved by the action. */
@@ -69,6 +72,10 @@ export type EditPlan = {
   detach: boolean;
   /** Only the time changed on a routed trip: the route keeps it if its planned stop still fits (schedule-fit.ts). */
   checkFit: boolean;
+  /** The trip loses its lock (another day, or a vehicle type its prescription no longer allows): traced trip.unlock. */
+  unlocked: boolean;
+  /** The exceptional ambulance ends with it (data clears it): traced trip.exceptional_ambulance_withdrawn. */
+  exceptionalWithdrawn: boolean;
 };
 
 /** Planning results that no longer hold once the trip leaves its route. */
@@ -93,8 +100,10 @@ function sameTypes(a: readonly VehicleType[], b: readonly VehicleType[]): boolea
  * The write of an edit. A routed trip whose date or places change leaves its
  * route (its stops are removed, the routes left recomputed); one whose time
  * alone changes stays there if its planned stop still fits. Moving a trip to
- * another day drops its lock (another day's vehicles). A trip of a recurrence
- * keeps the session it serves (occurrenceDate). Notes never move a trip.
+ * another day drops its lock (another day's vehicles) and so ends an
+ * exceptional ambulance; notes, a time or a place change keep them (TAR-03).
+ * A trip of a recurrence keeps the session it serves (occurrenceDate). Notes
+ * never move a trip.
  */
 export function planTripEdit(trip: EditableTrip, edit: TripEdit): EditPlan {
   const changes: EditChange[] = [];
@@ -165,18 +174,23 @@ export function planTripEdit(trip: EditableTrip, edit: TripEdit): EditPlan {
     const next = nextSharingStatus(sharingStatus, sharingAllowed);
     if (next !== sharingStatus) data.sharingStatus = sharingStatus = next;
   }
-  // A lock on a vehicle type the prescription no longer allows cannot be kept.
-  if (trip.lockedVehicleType !== null && !allowed.includes(trip.lockedVehicleType)) data.lockedVehicleId = null;
+  // An exceptional ambulance holds while the trip stays on its day, seated only and locked on it: its lock
+  // and its route on that ambulance are kept. A lock on a vehicle type the prescription no longer allows cannot be.
+  const exceptional = trip.exceptionalAmbulance && !moved && isSeatedOnly(allowed);
+  if (trip.lockedVehicleType !== null && !keepsVehicleType(trip.lockedVehicleType, allowed, exceptional)) data.lockedVehicleId = null;
+  const unlocked = trip.lockedVehicleId !== null && data.lockedVehicleId === null;
+  const exceptionalWithdrawn = trip.exceptionalAmbulance && !exceptional;
+  if (exceptionalWithdrawn) Object.assign(data, { exceptionalAmbulanceAt: null, exceptionalAmbulanceById: null });
 
   const routed = trip.routeId !== null;
-  const vehicleRefused = trip.routeVehicleType !== null && !allowed.includes(trip.routeVehicleType);
+  const vehicleRefused = trip.routeVehicleType !== null && !keepsVehicleType(trip.routeVehicleType, allowed, exceptional);
   const sharingBroken = trip.shared && !isShareable({ sharingAllowed, sharingStatus });
   const detach = routed && (moved || placeChanged || vehicleRefused || sharingBroken);
   if (detach) {
     Object.assign(data, DETACHED);
     if (trip.status === "ASSIGNED") data.status = "PLANNED";
   }
-  return { changes, data, detach, checkFit: routed && !detach && changes.includes("time") };
+  return { changes, data, detach, checkFit: routed && !detach && changes.includes("time"), unlocked, exceptionalWithdrawn };
 }
 
 /** French list of what changed: « date, adresse et consignes ». */
@@ -196,29 +210,47 @@ export function describeEditChanges(changes: readonly EditChange[]): string {
   return `${labels.slice(0, -1).join(", ")} et ${labels.at(-1)}`;
 }
 
+/** Another trip of the same recurrence and leg, on the new date or serving its session (dates "YYYY-MM-DD"). */
+export type RecurrenceTripNearby = {
+  status: TripStatus;
+  cancellationOrigin: "USER" | "SYSTEM" | null;
+  serviceDate: string;
+  /** The session it serves (its own date unless moved). */
+  occurrenceDate: string;
+};
+
+/** A trip a person cancelled (never brought back by the application), or closed as patient absent, leaves its day free. */
+function leavesDayFree(trip: RecurrenceTripNearby): boolean {
+  return (trip.status === "CANCELLED" && trip.cancellationOrigin === "USER") || trip.status === "NO_SHOW";
+}
+
 /**
- * Why a trip of a recurrence cannot move to another day: the recurrence
- * already plans this leg that day (its own trip still open, or not generated
- * yet), which would send two vehicles. A session of that day cancelled by a
- * person (never brought back by the application) or closed as patient absent
- * leaves the day free, and a trip may always go back to the day of its own
- * session. Null when the move is possible.
+ * Why a trip of a recurrence cannot move to `newDate`: the recurrence already
+ * has a trip of this leg on that day (its own, or one moved there; a trip the
+ * application cancelled may come back), or plans one there (the session of
+ * that day, not generated yet), which would send two vehicles. A session of
+ * that day whose trip was moved to another day, cancelled by a person or
+ * closed as patient absent leaves the day free, and a trip may always go back
+ * to the day of its own session when no other trip took it. Null when the
+ * move is possible.
  */
 export function recurrenceMoveBlocker(
   move: {
+    newDate: string;
     /** The new date is the day of the session the trip serves. */
     ownSession: boolean;
     /** The recurrence plans this leg on the new date. */
     schedulesThatDay: boolean;
-    /** The trip of the recurrence serving the new date's session, if generated. */
-    sameSessionTrip: { status: TripStatus; cancellationOrigin: "USER" | "SYSTEM" | null } | null;
+    /** The recurrence's other trips of this leg on the new date or serving its session. */
+    others: readonly RecurrenceTripNearby[];
   },
   formattedDate: string,
 ): string | null {
+  if (move.others.some((t) => t.serviceDate === move.newDate && !leavesDayFree(t))) {
+    return `La récurrence a déjà une course le ${formattedDate} pour ce trajet\u00a0: modifiez plutôt celle-ci, ou annulez-la d'abord.`;
+  }
   if (move.ownSession || !move.schedulesThatDay) return null;
-  const other = move.sameSessionTrip;
-  if (other && ((other.status === "CANCELLED" && other.cancellationOrigin === "USER") || other.status === "NO_SHOW")) return null;
-  return other
-    ? `La récurrence a déjà une course le ${formattedDate} pour ce trajet : modifiez plutôt celle-ci, ou annulez-la d'abord.`
-    : `La récurrence prévoit déjà une séance le ${formattedDate} pour ce trajet : choisissez un autre jour, ou modifiez la récurrence.`;
+  // The session of that day: served elsewhere (moved), or freed, or not generated yet.
+  if (move.others.some((t) => t.occurrenceDate === move.newDate)) return null;
+  return `La récurrence prévoit déjà une séance le ${formattedDate} pour ce trajet\u00a0: choisissez un autre jour, ou modifiez la récurrence.`;
 }

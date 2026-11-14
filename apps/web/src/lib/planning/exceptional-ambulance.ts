@@ -56,3 +56,14 @@ export function isExceptionalAmbulanceTrip(
   if (!trip.exceptionalAmbulanceAt || !trip.lockedVehicleId) return false;
   return isSeatedOnly(trip.allowedVehicleTypes) && vehicleType(trip.lockedVehicleId) === "AMBULANCE";
 }
+
+/**
+ * May a trip keep a vehicle of `type` (its lock, the vehicle of its route)
+ * when its prescription allows `allowed`: a type it allows, or the ambulance
+ * of an exceptional measure in force (`exceptional`, isExceptionalAmbulanceTrip
+ * on the stored trip) while the trip stays seated only. A change of the notes,
+ * the time or the prescription alone never ends the measure.
+ */
+export function keepsVehicleType(type: VehicleType, allowed: readonly VehicleType[], exceptional: boolean): boolean {
+  return allowed.includes(type) || (exceptional && type === "AMBULANCE" && isSeatedOnly(allowed));
+}

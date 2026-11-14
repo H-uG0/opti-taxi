@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { addDays, fromIsoDate, todayIso } from "@/lib/time";
+import { addDays, fromIsoDate, isoWeekday, todayIso } from "@/lib/time";
 import { completeTrips, reviveOneOffTrips } from "./completion";
 
 // completion.ts against a fake transaction client: what is created, brought
@@ -130,6 +130,41 @@ describe("completeTrips", () => {
     expect(data).toMatchObject({ status: "PLANNED", cancellationOrigin: null, sharingStatus: "REFUSED" });
     expect(result.revived).toBe(1);
     expect(events(tx)).toContainEqual({ action: "trip.revive", entityId: "t-sys", details: undefined });
+  });
+
+  it("matches a moved trip by the session it serves, and leaves it on its day", async () => {
+    // The recurrence plans tomorrow only; its trip of tomorrow's session was moved to the day after.
+    const rec = recurrence();
+    rec.weekdays = [isoWeekday(TOMORROW)];
+    tx.recurrence.findMany.mockResolvedValue([rec]);
+    const dayAfter = addDays(TOMORROW, 1);
+    const cancelled = (id: string, serviceDate: string, occurrenceDate: string) => ({
+      id,
+      recurrenceId: "rec1",
+      serviceDate: fromIsoDate(serviceDate),
+      occurrenceDate: fromIsoDate(occurrenceDate),
+      direction: "OUTBOUND",
+      sharingStatus: "NOT_PROPOSED",
+    });
+    tx.trip.findMany.mockResolvedValue([
+      cancelled("t-moved", dayAfter, TOMORROW),
+      // Serves a session of the day after, which the recurrence no longer plans: stays cancelled, though it sits on tomorrow.
+      cancelled("t-other", TOMORROW, dayAfter),
+    ]);
+
+    const result = await completeTrips(tx as unknown as Prisma.TransactionClient, ACTOR, { from: TOMORROW, to: dayAfter });
+
+    expect(tx.trip.findMany.mock.calls[0]![0].where.AND[1]).toMatchObject({
+      occurrenceDate: { gte: fromIsoDate(TOMORROW), lte: fromIsoDate(dayAfter) },
+    });
+    expect(tx.trip.updateMany).toHaveBeenCalledTimes(1);
+    const { where, data } = tx.trip.updateMany.mock.calls[0]![0];
+    expect(where).toMatchObject({ id: "t-moved" });
+    expect(data).toMatchObject({ status: "PLANNED" });
+    expect(data).not.toHaveProperty("serviceDate");
+    expect(data).not.toHaveProperty("occurrenceDate");
+    expect(result.revived).toBe(1);
+    expect(events(tx)).toContainEqual({ action: "trip.revive", entityId: "t-moved", details: undefined });
   });
 });
 

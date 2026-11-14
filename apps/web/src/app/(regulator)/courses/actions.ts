@@ -17,6 +17,7 @@ import { getSettings } from "@/lib/domain/settings";
 import { logError, safeErrorFields } from "@/lib/log";
 import { evaluate } from "@/lib/optimizer/client";
 import { isConcurrentWriteError, lockRoutesOfTrips, NOTHING_DETACHED, removeTripStops, type DetachResult } from "@/lib/planning/detach";
+import { isExceptionalAmbulanceTrip } from "@/lib/planning/exceptional-ambulance";
 import {
   refreshAdvice,
   refreshCallsForReoptimization,
@@ -49,7 +50,7 @@ import {
   type TripPrescription,
 } from "./trip-form";
 import { checkScheduleFit, type ScheduleFit } from "./schedule-fit";
-import { locatePlace, type LocatedPlace } from "./locate-place";
+import { isStoredPoint, locateEditedPlace, locatePlace, type LocatedPlace } from "./locate-place";
 import { planTripEdit, recurrenceMoveBlocker, type EditableTrip, type TripEdit } from "./trip-edit";
 import { createdTripsHref, updatedTripHref } from "./trip-notices";
 import { recurrenceSchedules } from "../patients/_lib/trip-sync";
@@ -675,6 +676,7 @@ const EDIT_SELECT = {
   notes: true,
   routeId: true,
   lockedVehicleId: true,
+  exceptionalAmbulanceAt: true,
   route: { select: { status: true, vehicle: { select: { type: true, label: true } } } },
   lockedVehicle: { select: { type: true } },
   prescription: { select: { validFrom: true, validTo: true } },
@@ -711,6 +713,7 @@ function editableTrip(trip: EditedTrip): EditableTrip {
     routeVehicleType: trip.route?.vehicle.type ?? null,
     lockedVehicleId: trip.lockedVehicleId,
     lockedVehicleType: trip.lockedVehicle?.type ?? null,
+    exceptionalAmbulance: isExceptionalAmbulanceTrip(trip, () => trip.lockedVehicle?.type),
   };
 }
 
@@ -729,7 +732,7 @@ function tripSides(trip: EditedTrip): { home: LocatedPlace; care: LocatedPlace }
 function isStoredPlace(stored: LocatedPlace, address: string, lat: number | undefined, lng: number | undefined): boolean {
   if (address !== stored.address) return false;
   if (lat === undefined && lng === undefined) return true;
-  return lat !== undefined && lng !== undefined && Math.abs(lat - stored.lat) < 1e-6 && Math.abs(lng - stored.lng) < 1e-6;
+  return lat !== undefined && lng !== undefined && isStoredPoint(stored, lat, lng);
 }
 
 /**
@@ -797,10 +800,12 @@ export async function updateTrip(tripId: string, _prev: EditTripState, formData:
     care = { facilityId: facility.id, place: { address: formatAddress(facility), lat: facility.lat, lng: facility.lng } };
   } else {
     const typed = input.careAddress ?? "";
-    if (trip.facilityId === null && isStoredPlace(sides.care, typed, input.careLat, input.careLng)) {
-      care = { facilityId: null, place: sides.care };
+    // The form showed the stored free address (and its point) when the trip had no facility.
+    const shown = trip.facilityId === null ? sides.care : null;
+    if (shown && isStoredPlace(shown, typed, input.careLat, input.careLng)) {
+      care = { facilityId: null, place: shown };
     } else {
-      const located = await locatePlace(user, typed, input.careLat, input.careLng, { address: "careAddress", lat: "careLat" });
+      const located = await locateEditedPlace(user, shown, typed, input.careLat, input.careLng, { address: "careAddress", lat: "careLat" });
       if (!located.ok) return answer({ [located.field]: [located.message] });
       care = { facilityId: null, place: located.place };
     }
@@ -815,10 +820,12 @@ export async function updateTrip(tripId: string, _prev: EditTripState, formData:
       : { place: sides.home, oneOff: false };
   } else {
     const typed = input.homeAddress ?? "";
-    if (trip.oneOffAddress && isStoredPlace(sides.home, typed, input.homeLat, input.homeLng)) {
-      home = { place: sides.home, oneOff: true };
+    // The form showed the stored one-off address (and its point) when the trip had one.
+    const shown = trip.oneOffAddress ? sides.home : null;
+    if (shown && isStoredPlace(shown, typed, input.homeLat, input.homeLng)) {
+      home = { place: shown, oneOff: true };
     } else {
-      const located = await locatePlace(user, typed, input.homeLat, input.homeLng, { address: "homeAddress", lat: "homeLat" });
+      const located = await locateEditedPlace(user, shown, typed, input.homeLat, input.homeLng, { address: "homeAddress", lat: "homeLat" });
       if (!located.ok) return answer({ [located.field]: [located.message] });
       home = { place: located.place, oneOff: true };
     }
@@ -833,26 +840,38 @@ export async function updateTrip(tripId: string, _prev: EditTripState, formData:
     if (trip.payer === "CPAM" && !covered) {
       prescription = await prescriptionForMovedTrip(trip, newDate);
       if (!prescription) {
+        // A one-off trip keeps its own PMT (another one of the patient may be for another care); a trip of a
+        // recurrence takes the link of its series covering the day.
         return answer({
           serviceDate: [
-            `Aucune prescription du patient ne couvre le ${formatShortDate(newDate)}\u00a0: saisissez d'abord sa nouvelle prescription.`,
+            trip.recurrenceId
+              ? `Aucune prescription de cette série de soins ne couvre le ${formatShortDate(newDate)}\u00a0: saisissez d'abord son renouvellement sur la fiche du patient.`
+              : `La prescription de cette course ne couvre pas le ${formatShortDate(newDate)}\u00a0: annulez-la et créez une nouvelle course à cette date, avec la prescription en vigueur.`,
           ],
         });
       }
     }
     if (trip.recurrenceId) {
-      const [recurrence, sameSession] = await Promise.all([
+      const day = fromIsoDate(newDate);
+      const [recurrence, nearby] = await Promise.all([
         db.recurrence.findUnique({
           where: { id: trip.recurrenceId },
           select: { active: true, weekdays: true, legs: true, startDate: true, endDate: true },
         }),
-        db.trip.findFirst({
-          where: { recurrenceId: trip.recurrenceId, occurrenceDate: fromIsoDate(newDate), direction: trip.direction, id: { not: trip.id } },
-          select: { status: true, cancellationOrigin: true },
+        // Its other trips of this leg on that day (moved there or not) or serving that day's session (moved or not).
+        db.trip.findMany({
+          where: {
+            recurrenceId: trip.recurrenceId,
+            direction: trip.direction,
+            id: { not: trip.id },
+            OR: [{ serviceDate: day }, { occurrenceDate: day }],
+          },
+          select: { status: true, cancellationOrigin: true, serviceDate: true, occurrenceDate: true },
         }),
       ]);
       const blocker = recurrenceMoveBlocker(
         {
+          newDate,
           ownSession: newDate === toIsoDate(trip.occurrenceDate ?? trip.serviceDate),
           schedulesThatDay:
             recurrence !== null &&
@@ -867,7 +886,12 @@ export async function updateTrip(tripId: string, _prev: EditTripState, formData:
               newDate,
               trip.direction,
             ),
-          sameSessionTrip: sameSession,
+          others: nearby.map((t) => ({
+            status: t.status,
+            cancellationOrigin: t.cancellationOrigin,
+            serviceDate: toIsoDate(t.serviceDate),
+            occurrenceDate: toIsoDate(t.occurrenceDate ?? t.serviceDate),
+          })),
         },
         formatShortDate(newDate),
       );
@@ -917,24 +941,36 @@ export async function updateTrip(tripId: string, _prev: EditTripState, formData:
   let detached: DetachResult | null;
   try {
     detached = await detachInTransaction(async (tx) => {
-      // Guarded on what was read: a trip started, cancelled, re-planned or moved meanwhile is left alone.
+      // Guarded on what was read: a trip started, cancelled, re-planned or moved meanwhile is left alone, and
+      // so is one whose lock changed meanwhile when this edit drops it.
       const updated = await tx.trip.updateMany({
-        where: { id: trip.id, status: trip.status, routeId: trip.routeId, serviceDate: trip.serviceDate },
+        where: {
+          id: trip.id,
+          status: trip.status,
+          routeId: trip.routeId,
+          serviceDate: trip.serviceDate,
+          ...(plan.unlocked || plan.exceptionalWithdrawn ? { lockedVehicleId: trip.lockedVehicleId } : {}),
+        },
         data,
       });
       if (updated.count === 0) return null;
-      // The names of the fields changed and the dates, never an address or a note.
-      await audit(tx, user, {
-        action: "trip.update",
-        entity: "Trip",
-        entityId: trip.id,
-        serviceDate: newDate,
-        details: {
-          fields: plan.changes,
-          ...(newDate !== currentDate ? { serviceDate: { from: currentDate, to: newDate } } : {}),
-          ...(detach ? { detached: true } : {}),
+      // The names of the fields changed and the dates, never an address or a note; the lock dropped with them
+      // (another day) and the exceptional ambulance it carried, as « Défiger » traces them.
+      const traced = { entity: "Trip", entityId: trip.id, serviceDate: newDate } as const;
+      await audit(tx, user, [
+        {
+          action: "trip.update",
+          ...traced,
+          details: {
+            fields: plan.changes,
+            ...(newDate !== currentDate ? { serviceDate: { from: currentDate, to: newDate } } : {}),
+            ...(detach ? { detached: true } : {}),
+            ...(plan.unlocked ? { lockedVehicleId: { from: trip.lockedVehicleId, to: null } } : {}),
+          },
         },
-      });
+        ...(plan.unlocked ? [{ action: "trip.unlock" as const, ...traced }] : []),
+        ...(plan.exceptionalWithdrawn ? [{ action: "trip.exceptional_ambulance_withdrawn" as const, ...traced }] : []),
+      ]);
       return detach ? removeTripStops(tx, trip.id) : NOTHING_DETACHED;
     });
   } catch (error) {
@@ -946,7 +982,14 @@ export async function updateTrip(tripId: string, _prev: EditTripState, formData:
   const refresh = await refreshLeftRoutes(detached.routeIds);
   revalidateTripViews();
   revalidatePath("/(regulator)/patients", "layout");
-  redirect(updatedTripHref(newDate, trip.id, { changes: plan.changes, detached: detach && trip.routeId !== null, refresh }));
+  redirect(
+    updatedTripHref(newDate, trip.id, {
+      changes: plan.changes,
+      detached: detach && trip.routeId !== null,
+      unlocked: plan.exceptionalWithdrawn ? "exceptional" : plan.unlocked ? "lock" : null,
+      refresh,
+    }),
+  );
 }
 
 /**

@@ -19,6 +19,7 @@ import type {
   VehicleType,
 } from "@prisma/client";
 import { allowedVehicleTypesFor, isShareable, nextSharingStatus, sharingAllowedFor } from "@/lib/domain/rules";
+import { isSeatedOnly, keepsVehicleType } from "@/lib/planning/exceptional-ambulance";
 
 // Shared with the revival of cancelled trips (lib/domain/trip-generation.ts).
 export { nextSharingStatus };
@@ -65,6 +66,8 @@ export type SyncTrip = {
   routeVehicleType: VehicleType | null;
   lockedVehicleId: string | null;
   lockedVehicleType: VehicleType | null;
+  /** A « recours exceptionnel à une ambulance » is in force (isExceptionalAmbulanceTrip): seated only, locked on an ambulance. */
+  exceptionalAmbulance: boolean;
   /** Validity of the prescription the trip is attached to. */
   prescriptionValidity: DateRange | null;
 };
@@ -106,6 +109,8 @@ export type TripPatch = {
   dropoffLng?: number;
   notes?: string | null;
   lockedVehicleId?: null;
+  exceptionalAmbulanceAt?: null;
+  exceptionalAmbulanceById?: null;
   routeId?: null;
   plannedPickupMinute?: null;
   plannedDropoffMinute?: null;
@@ -238,11 +243,16 @@ export function planTripChange(trip: SyncTrip, target: TripTarget, todayIso: str
 
   if (Object.keys(data).length === 0) return { type: "none" };
 
-  // A lock on a vehicle type the prescription no longer allows cannot be kept.
-  if (trip.lockedVehicleId !== null && trip.lockedVehicleType !== null && !allowed.includes(trip.lockedVehicleType)) {
+  // An exceptional ambulance holds while the trip stays seated only: its lock and its route on that ambulance
+  // are kept (notes, a time or another seated PMT never end it). A lock on a vehicle type the prescription no
+  // longer allows cannot be kept.
+  const exceptional = trip.exceptionalAmbulance && isSeatedOnly(allowed);
+  if (trip.lockedVehicleId !== null && trip.lockedVehicleType !== null && !keepsVehicleType(trip.lockedVehicleType, allowed, exceptional)) {
     data.lockedVehicleId = null;
   }
-  const vehicleRefused = trip.routeVehicleType !== null && !allowed.includes(trip.routeVehicleType);
+  // Prescribed in ambulance now: the measure is over (the lock stays, allowed by the prescription itself).
+  if (trip.exceptionalAmbulance && !exceptional) Object.assign(data, { exceptionalAmbulanceAt: null, exceptionalAmbulanceById: null });
+  const vehicleRefused = trip.routeVehicleType !== null && !keepsVehicleType(trip.routeVehicleType, allowed, exceptional);
   const sharingBroken = trip.shared && !isShareable({ sharingAllowed, sharingStatus });
   const detach = trip.routeId !== null && (moved || vehicleRefused || sharingBroken);
   if (detach) {

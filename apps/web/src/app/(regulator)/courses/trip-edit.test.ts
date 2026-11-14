@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { fromIsoDate } from "@/lib/time";
-import { describeEditChanges, planTripEdit, recurrenceMoveBlocker, type EditableTrip, type TripEdit } from "./trip-edit";
+import {
+  describeEditChanges,
+  planTripEdit,
+  recurrenceMoveBlocker,
+  type EditableTrip,
+  type RecurrenceTripNearby,
+  type TripEdit,
+} from "./trip-edit";
 
 const HOME = { address: "4 avenue Jean Jaurès, 04100 Manosque", lat: 43.8297, lng: 5.7864 };
 const CLINIC = { address: "1 rue de l'Hôpital, 04100 Manosque", lat: 43.83, lng: 5.79 };
@@ -35,6 +42,7 @@ function trip(overrides: Partial<EditableTrip> = {}): EditableTrip {
     routeVehicleType: null,
     lockedVehicleId: null,
     lockedVehicleType: null,
+    exceptionalAmbulance: false,
     ...overrides,
   };
 }
@@ -52,15 +60,24 @@ function edit(overrides: Partial<TripEdit> = {}): TripEdit {
 }
 
 const ROUTED = { status: "ASSIGNED" as const, routeId: "route1", routeVehicleType: "TAXI" as const };
+const KEPT = { unlocked: false, exceptionalWithdrawn: false };
+/** « Recours exceptionnel à une ambulance »: a seated trip locked on, and routed in, an ambulance. */
+const EXCEPTIONAL = {
+  ...ROUTED,
+  routeVehicleType: "AMBULANCE" as const,
+  lockedVehicleId: "amb1",
+  lockedVehicleType: "AMBULANCE" as const,
+  exceptionalAmbulance: true,
+};
 
 describe("planTripEdit", () => {
   it("writes nothing when nothing changed", () => {
-    expect(planTripEdit(trip(), edit())).toEqual({ changes: [], data: {}, detach: false, checkFit: false });
+    expect(planTripEdit(trip(), edit())).toEqual({ changes: [], data: {}, detach: false, checkFit: false, ...KEPT });
   });
 
   it("writes notes without touching the route", () => {
     const plan = planTripEdit(trip(ROUTED), edit({ notes: "  Salle 3  " }));
-    expect(plan).toEqual({ changes: ["notes"], data: { notes: "Salle 3" }, detach: false, checkFit: false });
+    expect(plan).toEqual({ changes: ["notes"], data: { notes: "Salle 3" }, detach: false, checkFit: false, ...KEPT });
     expect(planTripEdit(trip({ notes: "Salle 3" }), edit({ notes: "" })).data).toEqual({ notes: null });
   });
 
@@ -68,6 +85,7 @@ describe("planTripEdit", () => {
     const plan = planTripEdit(trip({ ...ROUTED, lockedVehicleId: "v1", lockedVehicleType: "TAXI" }), edit({ serviceDate: "2026-11-17" }));
     expect(plan.changes).toEqual(["date"]);
     expect(plan.detach).toBe(true);
+    expect(plan).toMatchObject({ unlocked: true, exceptionalWithdrawn: false });
     expect(plan.data).toMatchObject({
       serviceDate: fromIsoDate("2026-11-17"),
       occurrenceDate: fromIsoDate("2026-11-16"),
@@ -120,7 +138,7 @@ describe("planTripEdit", () => {
 
   it("checks the fit of a time change on a routed trip instead of taking it out", () => {
     const plan = planTripEdit(trip(ROUTED), edit({ keyMinute: 480 }));
-    expect(plan).toEqual({ changes: ["time"], data: { appointmentMinute: 480 }, detach: false, checkFit: true });
+    expect(plan).toEqual({ changes: ["time"], data: { appointmentMinute: 480 }, detach: false, checkFit: true, ...KEPT });
     expect(planTripEdit(trip(), edit({ keyMinute: 480 })).checkFit).toBe(false);
   });
 
@@ -141,6 +159,32 @@ describe("planTripEdit", () => {
     });
   });
 
+  it("keeps an exceptional ambulance, its lock and its route when only the notes, the time or a place change", () => {
+    const notes = planTripEdit(trip(EXCEPTIONAL), edit({ notes: "Salle 5" }));
+    expect(notes).toEqual({ changes: ["notes"], data: { notes: "Salle 5" }, detach: false, checkFit: false, ...KEPT });
+
+    const time = planTripEdit(trip(EXCEPTIONAL), edit({ keyMinute: 480 }));
+    expect(time).toEqual({ changes: ["time"], data: { appointmentMinute: 480 }, detach: false, checkFit: true, ...KEPT });
+
+    // Another address takes it out of its route, not off its ambulance: the optimizer puts it back there.
+    const away = planTripEdit(trip(EXCEPTIONAL), edit({ home: { place: DAUGHTER, oneOff: true } }));
+    expect(away.detach).toBe(true);
+    expect(away).toMatchObject(KEPT);
+    expect(away.data).not.toHaveProperty("lockedVehicleId");
+    expect(away.data).not.toHaveProperty("exceptionalAmbulanceAt");
+  });
+
+  it("ends an exceptional ambulance with its lock when the trip moves to another day", () => {
+    const plan = planTripEdit(trip(EXCEPTIONAL), edit({ serviceDate: "2026-11-17" }));
+    expect(plan).toMatchObject({ detach: true, unlocked: true, exceptionalWithdrawn: true });
+    expect(plan.data).toMatchObject({ lockedVehicleId: null, exceptionalAmbulanceAt: null, exceptionalAmbulanceById: null, routeId: null });
+  });
+
+  it("still drops a lock on an ambulance that is no exceptional measure", () => {
+    const plan = planTripEdit(trip({ ...EXCEPTIONAL, exceptionalAmbulance: false }), edit({ notes: "Salle 5" }));
+    expect(plan).toMatchObject({ detach: true, unlocked: true, exceptionalWithdrawn: false });
+  });
+
   it("says what changed in French", () => {
     expect(describeEditChanges(["date"])).toBe("date");
     expect(describeEditChanges(["date", "home", "notes"])).toBe("date, adresse du patient et notes");
@@ -148,19 +192,39 @@ describe("planTripEdit", () => {
 });
 
 describe("recurrenceMoveBlocker", () => {
+  const DAY = "2026-11-17";
   const move = (overrides: Partial<Parameters<typeof recurrenceMoveBlocker>[0]> = {}) =>
-    recurrenceMoveBlocker({ ownSession: false, schedulesThatDay: true, sameSessionTrip: null, ...overrides }, "17/11");
+    recurrenceMoveBlocker({ newDate: DAY, ownSession: false, schedulesThatDay: true, others: [], ...overrides }, "17/11");
+  const other = (overrides: Partial<RecurrenceTripNearby> = {}): RecurrenceTripNearby => ({
+    status: "PLANNED",
+    cancellationOrigin: null,
+    serviceDate: DAY,
+    occurrenceDate: DAY,
+    ...overrides,
+  });
 
   it("lets a trip move to a day its recurrence does not plan, back to its own day, or to a session a person cancelled", () => {
     expect(move({ schedulesThatDay: false })).toBeNull();
     expect(move({ ownSession: true })).toBeNull();
-    expect(move({ sameSessionTrip: { status: "CANCELLED", cancellationOrigin: "USER" } })).toBeNull();
-    expect(move({ sameSessionTrip: { status: "NO_SHOW", cancellationOrigin: null } })).toBeNull();
+    expect(move({ others: [other({ status: "CANCELLED", cancellationOrigin: "USER" })] })).toBeNull();
+    expect(move({ others: [other({ status: "NO_SHOW" })] })).toBeNull();
   });
 
   it("refuses a day the recurrence already serves, or will (a trip the application cancelled may come back)", () => {
-    expect(move({ sameSessionTrip: { status: "PLANNED", cancellationOrigin: null } })).toMatch(/déjà une course le 17\/11/);
-    expect(move({ sameSessionTrip: { status: "CANCELLED", cancellationOrigin: "SYSTEM" } })).toMatch(/déjà une course/);
+    expect(move({ others: [other()] })).toMatch(/déjà une course le 17\/11/);
+    expect(move({ others: [other({ status: "CANCELLED", cancellationOrigin: "SYSTEM" })] })).toMatch(/déjà une course/);
     expect(move()).toMatch(/prévoit déjà une séance le 17\/11/);
+  });
+
+  it("lets a trip take the day of a session whose own trip was moved to another day", () => {
+    expect(move({ others: [other({ serviceDate: "2026-11-18" })] })).toBeNull();
+    expect(move({ others: [other({ serviceDate: "2026-11-18", status: "CANCELLED", cancellationOrigin: "SYSTEM" })] })).toBeNull();
+  });
+
+  it("refuses a day another trip of the recurrence was already moved to, even off its days or back to its own session", () => {
+    const movedThere = other({ occurrenceDate: "2026-11-16" });
+    expect(move({ schedulesThatDay: false, others: [movedThere] })).toMatch(/déjà une course le 17\/11/);
+    expect(move({ ownSession: true, others: [movedThere] })).toMatch(/déjà une course/);
+    expect(move({ schedulesThatDay: false, others: [{ ...movedThere, status: "CANCELLED", cancellationOrigin: "USER" }] })).toBeNull();
   });
 });

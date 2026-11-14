@@ -8,6 +8,7 @@ import { Card, CardBody, PageHeader } from "@/components/ui/layout";
 import { Notice } from "@/components/ui/notice";
 import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
+import { isExceptionalAmbulanceTrip } from "@/lib/planning/exceptional-ambulance";
 import { db } from "@/lib/db";
 import { formatAddress } from "@/lib/domain/rules";
 import { geocoderEnabled } from "@/lib/geocode";
@@ -20,9 +21,21 @@ import { EditTripForm, type EditTripInitial } from "./edit-trip-form";
 
 export const metadata: Metadata = { title: "Modifier la course" };
 
-export default async function EditTripPage({ params }: { params: Promise<{ id: string }> }) {
+/**
+ * « Modifier la course ». ?retour=patient: opened from the patient's record,
+ * where the back link and « Annuler » lead (the save still goes to Courses,
+ * where « Où la placer ? » is offered).
+ */
+export default async function EditTripPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const user = await requireUser("REGULATOR");
   const { id } = await params;
+  const fromRecord = (await searchParams).retour === "patient";
   const trip = await db.trip.findUnique({
     where: { id },
     select: {
@@ -44,7 +57,11 @@ export default async function EditTripPage({ params }: { params: Promise<{ id: s
       oneOffAddress: true,
       notes: true,
       routeId: true,
+      allowedVehicleTypes: true,
+      lockedVehicleId: true,
+      exceptionalAmbulanceAt: true,
       route: { select: { status: true, vehicle: { select: { label: true } } } },
+      lockedVehicle: { select: { label: true, type: true } },
       patient: { select: { id: true, firstName: true, lastName: true, address: true, postalCode: true, city: true } },
       recurrence: {
         select: { id: true, label: true, weekdays: true, appointmentMinute: true, facility: { select: { name: true } } },
@@ -87,13 +104,14 @@ export default async function EditTripPage({ params }: { params: Promise<{ id: s
     careLng: trip.facilityId === null ? formatCoordinate(care.lng) : "",
     notes: trip.notes ?? "",
   };
-  const back = `/courses?date=${date}`;
+  const back = fromRecord ? `/patients/${trip.patient.id}` : `/courses?date=${date}`;
   const occurrence = trip.occurrenceDate ? toIsoDate(trip.occurrenceDate) : null;
   const recurrence = trip.recurrence;
+  const exceptional = isExceptionalAmbulanceTrip(trip, () => trip.lockedVehicle?.type);
 
   return (
     <div className="max-w-3xl">
-      <BackLink href={back}>Courses du {formatShortDate(date)}</BackLink>
+      <BackLink href={back}>{fromRecord ? "Fiche patient" : `Courses du ${formatShortDate(date)}`}</BackLink>
       <PageHeader
         title="Modifier la course"
         description={`${formatPersonName(trip.patient)} · ${DIRECTION_LABELS[trip.direction]} · ${formatLongDate(date)}`}
@@ -116,6 +134,13 @@ export default async function EditTripPage({ params }: { params: Promise<{ id: s
             retirent (la tournée est alors recalculée) et elle sera à replacer. Un horaire seul la laisse dans sa tournée s&apos;il reste
             compatible.
             {trip.route.status === "VALIDATED" ? " Planning validé : prévenez le chauffeur." : ""}
+          </Notice>
+        ) : null}
+        {editable && trip.lockedVehicle ? (
+          <Notice size="sm" tone="warning">
+            {exceptional
+              ? `Recours exceptionnel à l'ambulance ${trip.lockedVehicle.label}\u00a0: une autre date le retire (la course revient au taxi ou au VSL).`
+              : `Figée sur ${trip.lockedVehicle.label}\u00a0: une autre date la défige (l'optimisation lui choisira un véhicule ce jour-là).`}
           </Notice>
         ) : null}
       </div>
@@ -151,7 +176,7 @@ export default async function EditTripPage({ params }: { params: Promise<{ id: s
           </p>
           <p className="mt-2">
             <LinkButton href={back} size="sm" variant="secondary">
-              Retour aux courses
+              {fromRecord ? "Retour à la fiche patient" : "Retour aux courses"}
             </LinkButton>
           </p>
         </Notice>

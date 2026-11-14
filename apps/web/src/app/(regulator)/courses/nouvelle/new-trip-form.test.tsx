@@ -83,10 +83,32 @@ describe("NewTripForm (« Nouvelle course »)", () => {
     expect(facility.value).toBe("f1");
   });
 
-  it("offers « Nouvelle prescription », back to this trip, when none covers the date", () => {
+  it("offers « Nouvelle prescription », back to this trip with what was chosen (never the notes), when none covers the date", () => {
     renderForm(PATIENT, "2027-04-01");
+    fireEvent.change(screen.getByLabelText("Heure du rendez-vous"), { target: { value: "08:15" } });
     const link = screen.getByRole("link", { name: "Nouvelle prescription" });
-    expect(link.getAttribute("href")).toBe("/patients/p1/prescriptions/nouvelle?course=2027-04-01");
+    // Opened from Courses (no record): back there afterwards.
+    expect(link.getAttribute("href")).toBe("/patients/p1/prescriptions/nouvelle?course=2027-04-01&sens=OUTBOUND&heure=08%3A15&etab=f1&retour=courses");
+  });
+
+  it("comes back from « Nouvelle prescription » with the choices carried, « Annuler » to the record it was opened from", () => {
+    render(
+      <NewTripForm
+        initialPatient={PATIENT}
+        facilities={FACILITIES}
+        initialDate="2026-11-16"
+        today="2026-11-14"
+        geocoder={false}
+        draft={{ direction: "BOTH", time: "08:15", returnTime: "12:40", facilityId: "f2" }}
+        fromRecord
+        cancelHref="/patients/p1"
+      />,
+    );
+    expect((screen.getByLabelText("Établissement de soins") as HTMLSelectElement).value).toBe("f2");
+    expect((document.querySelector('input[name="time"]') as HTMLInputElement).value).toBe("08:15");
+    expect((document.querySelector('input[name="returnTime"]') as HTMLInputElement).value).toBe("12:40");
+    expect((document.querySelector('input[name="direction"][value="BOTH"]') as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole("link", { name: "Annuler" }).getAttribute("href")).toBe("/patients/p1");
   });
 
   it("ships no patient list: the choice is searched", () => {

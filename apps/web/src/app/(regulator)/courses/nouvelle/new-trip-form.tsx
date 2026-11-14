@@ -16,6 +16,7 @@ import type { NewTripDirection } from "../trip-form";
 import { prescriptionValidOn, timeFieldHint, timeFieldLabel } from "../trip-rules";
 import { IDLE_STATE, refusalKey, valueOf } from "@/lib/forms";
 import { loadPatientForTrip, searchTripPatients } from "./actions";
+import { newPrescriptionHref as prescriptionHref, type TripDraft } from "./trip-draft";
 import { suggestedReturnMinute } from "./usual-facility";
 
 export type PrescriptionOption = {
@@ -48,6 +49,11 @@ type Props = {
   initialDate: string;
   today: string;
   geocoder: boolean;
+  /** Choices carried back from « Nouvelle prescription » (trip-draft.ts). */
+  draft?: TripDraft;
+  /** Opened from the patient's record: « Annuler » leads back there (`cancelHref`). */
+  fromRecord?: boolean;
+  cancelHref?: string;
 };
 
 const DIRECTION_OPTIONS: { value: NewTripDirection; label: string }[] = [
@@ -62,9 +68,11 @@ export function NewTripForm(props: Props) {
     values: {
       serviceDate: props.initialDate,
       payer: "CPAM",
-      direction: "OUTBOUND",
+      direction: props.draft?.direction ?? "OUTBOUND",
       patientId: props.initialPatient?.id ?? "",
-      facilityId: props.initialPatient?.usualFacilityId ?? "",
+      facilityId: props.draft?.facilityId ?? props.initialPatient?.usualFacilityId ?? "",
+      time: props.draft?.time ?? "",
+      returnTime: props.draft?.returnTime ?? "",
     },
   };
   const [state, action] = useActionState(createTrip, initialState);
@@ -82,6 +90,8 @@ function NewTripFields({
   facilities,
   today,
   geocoder,
+  fromRecord = false,
+  cancelHref,
 }: Props & {
   state: NewTripState;
   action: (formData: FormData) => void;
@@ -145,8 +155,15 @@ function NewTripFields({
   };
 
   const invalid = (field: string) => (errors[field] ? true : undefined);
+  // Back from the new prescription with what was already chosen (never the notes).
   const newPrescriptionHref = patient
-    ? `/patients/${patient.id}/prescriptions/nouvelle?${new URLSearchParams({ course: serviceDate || today }).toString()}`
+    ? prescriptionHref(patient.id, serviceDate || today, {
+        direction,
+        time,
+        returnTime: direction === "BOTH" ? returnTime : undefined,
+        facilityId: facilityId || undefined,
+        fromCourses: !fromRecord,
+      })
     : null;
 
   return (
@@ -373,7 +390,7 @@ function NewTripFields({
       </section>
 
       <FormFooter
-        cancelHref={`/courses?date=${serviceDate || today}`}
+        cancelHref={cancelHref ?? `/courses?date=${serviceDate || today}`}
         submitLabel={direction === "BOTH" ? "Créer l'aller et le retour" : "Créer la course"}
       />
       <ErrorFocus refusal={refusalKey(state)} />

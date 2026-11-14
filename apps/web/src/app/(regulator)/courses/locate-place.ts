@@ -46,3 +46,35 @@ export async function locatePlace(
     return { ok: false, field: fields.lat, message: "Le géocodage n'a pas répondu : saisissez la latitude et la longitude." };
   }
 }
+
+/** The coordinates are the stored point, as a form printed them (6 decimals). */
+export function isStoredPoint(stored: LocatedPlace, lat: number, lng: number): boolean {
+  return Math.abs(lat - stored.lat) < 1e-6 && Math.abs(lng - stored.lng) < 1e-6;
+}
+
+/**
+ * A place changed in « Modifier la course », whose form showed the stored one
+ * (`stored`, null when it showed none). Coordinates still those of the stored
+ * point while the address changed are stale (the form prefilled them): the new
+ * address is located as if they had been left empty, never saved with the old
+ * point (the optimizer and the driver's GPS links read the point).
+ */
+export async function locateEditedPlace(
+  user: Pick<SessionUser, "id">,
+  stored: LocatedPlace | null,
+  address: string,
+  lat: number | undefined,
+  lng: number | undefined,
+  fields: PlaceFields,
+): Promise<LocateResult> {
+  const stale = stored !== null && address !== stored.address && lat !== undefined && lng !== undefined && isStoredPoint(stored, lat, lng);
+  if (!stale) return locatePlace(user, address, lat, lng, fields);
+  if (!geocoderEnabled()) {
+    return {
+      ok: false,
+      field: fields.lat,
+      message: "L'adresse a changé mais pas ses coordonnées\u00a0: saisissez la latitude et la longitude de la nouvelle adresse.",
+    };
+  }
+  return locatePlace(user, address, undefined, undefined, fields);
+}

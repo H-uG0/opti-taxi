@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/ui/layout";
 import { createPrescription } from "../../../actions";
 import { PrescriptionForm } from "../../../_components/prescription-form";
 import { BackLink } from "@/components/ui/back-link";
+import { newTripHref, readTripDraft } from "../../../../courses/nouvelle/trip-draft";
 
 export const metadata: Metadata = { title: "Nouvelle prescription" };
 
@@ -20,9 +21,10 @@ export default async function NewPrescriptionPage({
 }) {
   const user = await requireUser("REGULATOR");
   const { id } = await params;
-  // Opened from « Nouvelle course » (?course=<date>): back to the new trip once saved.
-  const rawCourse = (await searchParams).course;
-  const course = Array.isArray(rawCourse) ? rawCourse[0] : rawCourse;
+  // Opened from « Nouvelle course » (?course=<date> and its choices): back to the new trip, as it was, once saved.
+  const query = await searchParams;
+  const course = Array.isArray(query.course) ? query.course[0] : query.course;
+  const draft = readTripDraft(query);
   const patient = await db.patient.findUnique({
     where: { id },
     select: { id: true, firstName: true, lastName: true, mobility: true },
@@ -33,9 +35,7 @@ export default async function NewPrescriptionPage({
   const today = todayIso();
   const lying = patient.mobility === "LYING";
   const returnDate = isIsoDate(course) && course >= today ? course : null;
-  const back = returnDate
-    ? `/courses/nouvelle?${new URLSearchParams({ patient: patient.id, date: returnDate }).toString()}`
-    : `/patients/${patient.id}#prescriptions`;
+  const back = returnDate ? newTripHref(patient.id, returnDate, draft) : `/patients/${patient.id}#prescriptions`;
 
   return (
     <div>
@@ -53,7 +53,7 @@ export default async function NewPrescriptionPage({
         description="Prescription médicale de transport (PMT)&nbsp;: mode, partage autorisé et période de validité."
       />
       <PrescriptionForm
-        action={createPrescription.bind(null, patient.id, returnDate)}
+        action={createPrescription.bind(null, patient.id, returnDate ? { date: returnDate, draft } : null)}
         initial={{
           mode: lying ? "AMBULANCE" : "TAP",
           sharing: lying ? "NONE" : "BOTH",

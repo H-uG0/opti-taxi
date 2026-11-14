@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import { fromIsoDate } from "@/lib/time";
 import { CANCEL, EMPTY_SYNC } from "./trip-sync";
-import { syncOpenTrips } from "./trip-sync-db";
+import { carryRecurrenceNotes, syncOpenTrips } from "./trip-sync-db";
 
 // trip-sync-db.ts and lib/audit.ts are server modules: the transaction client
 // is faked below and the shared Prisma client is never used.
@@ -57,7 +57,7 @@ function ownStops(tripId: string, routeId: string): Stop[] {
  * guarded trip write of the trips in `lostWrites` applies to no row (the trip
  * changed meanwhile).
  */
-function fakeTx(rows: ReturnType<typeof tripRow>[], { lostWrites = [] as string[], stops = [] as Stop[] } = {}) {
+function fakeTx(rows: Partial<Record<keyof ReturnType<typeof tripRow>, unknown>>[], { lostWrites = [] as string[], stops = [] as Stop[] } = {}) {
   const createMany = vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length }));
   const tripUpdateMany = vi.fn(async (args: { where: { id: unknown } }) => ({
     count: typeof args.where.id === "string" && lostWrites.includes(args.where.id) ? 0 : 1,
@@ -80,7 +80,11 @@ function fakeTx(rows: ReturnType<typeof tripRow>[], { lostWrites = [] as string[
   return { tx: tx as unknown as Prisma.TransactionClient, createMany, tripUpdateMany };
 }
 
-function tripEvent(action: "trip.cancel" | "trip.detach", tripId: string, serviceDate: string) {
+function tripEvent(
+  action: "trip.cancel" | "trip.detach" | "trip.unlock" | "trip.exceptional_ambulance_withdrawn",
+  tripId: string,
+  serviceDate: string,
+) {
   return {
     userId: "u1",
     role: "REGULATOR",
@@ -166,5 +170,55 @@ describe("syncOpenTrips: trace of the trips cancelled", () => {
     expect(summary).toEqual({ ...EMPTY_SYNC, deferred: 1 });
     expect(tripUpdateMany).not.toHaveBeenCalled();
     expect(createMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("syncOpenTrips: locks and exceptional ambulances", () => {
+  const exceptionalRow = (id: string) => ({
+    ...tripRow(id, "2026-11-04", "r1"),
+    route: { vehicle: { type: "AMBULANCE" } },
+    lockedVehicleId: "amb1",
+    lockedVehicle: { type: "AMBULANCE" },
+    exceptionalAmbulanceAt: new Date("2026-11-03T17:00:00Z"),
+    notes: "Salle 3",
+  });
+
+  it("keeps an exceptional ambulance when only the recurrence's notes change: nothing but the notes written or traced", async () => {
+    const { tx, createMany, tripUpdateMany } = fakeTx([exceptionalRow("t1")], { stops: ownStops("t1", "r1") });
+
+    const summary = await syncOpenTrips(tx, { recurrenceId: "rc1" }, () => ({ kind: "update", notes: "Salle 5" }), TODAY, new Set(), ACTOR);
+
+    expect(summary).toEqual({ ...EMPTY_SYNC, updated: 1 });
+    expect(tripUpdateMany.mock.calls[0]?.[0]).toEqual({ where: expect.anything(), data: { notes: "Salle 5" } });
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  it("traces the lock a new prescription drops, and the exceptional ambulance it ends", async () => {
+    const taxiLocked = { ...tripRow("t2", "2026-11-05"), lockedVehicleId: "taxi1", lockedVehicle: { type: "TAXI" } };
+    const { tx, createMany } = fakeTx([exceptionalRow("t1"), taxiLocked], { stops: ownStops("t1", "r1") });
+    const ambulance = { id: "rx2", mode: "AMBULANCE" as const, sharing: "NONE" as const };
+
+    await syncOpenTrips(tx, { prescriptionId: "rx1" }, () => ({ kind: "update", prescription: ambulance }), TODAY, new Set(), ACTOR);
+
+    expect(createMany).toHaveBeenCalledWith({
+      data: [tripEvent("trip.unlock", "t2", "2026-11-05"), tripEvent("trip.exceptional_ambulance_withdrawn", "t1", "2026-11-04")],
+    });
+  });
+});
+
+describe("carryRecurrenceNotes", () => {
+  it("gives the new notes to the trips to come the application cancelled that still carry the old ones", async () => {
+    const updateMany = vi.fn(async () => ({ count: 2 }));
+    const tx = { trip: { updateMany } } as unknown as Prisma.TransactionClient;
+
+    expect(await carryRecurrenceNotes(tx, "rc1", { before: "Salle 3", after: "Salle 5" }, TODAY)).toBe(2);
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { recurrenceId: "rc1", status: "CANCELLED", cancellationOrigin: "SYSTEM", serviceDate: { gte: fromIsoDate(TODAY) }, notes: "Salle 3" },
+      data: { notes: "Salle 5" },
+    });
+
+    updateMany.mockClear();
+    expect(await carryRecurrenceNotes(tx, "rc1", { before: "Salle 3", after: "Salle 3" }, TODAY)).toBe(0);
+    expect(updateMany).not.toHaveBeenCalled();
   });
 });

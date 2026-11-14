@@ -335,8 +335,8 @@ export function RegularPatientForm({
       </Fieldset>
 
       <Notice size="sm" tone="info">
-        À l&apos;enregistrement, les courses sont créées jusqu&apos;au {formatShortDate(horizonEnd)}&#x202F;; la fiche dit si une journée
-        concernée est déjà planifiée.
+        À l&apos;enregistrement, les courses sont créées de demain au {formatShortDate(horizonEnd)} (une séance d&apos;aujourd&apos;hui se
+        crée avec «&#x202F;Nouvelle course&#x202F;»)&#x202F;; la fiche dit si une journée concernée est déjà planifiée.
       </Notice>
 
       {similar.length > 0 ? <SimilarPatients similar={similar} pending={isPending} onCreateAnyway={createAnyway} /> : null}

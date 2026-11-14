@@ -18,6 +18,8 @@ const fake = vi.hoisted(() => {
     ...client,
     $transaction: vi.fn(async (fn: (tx: typeof client) => unknown) => fn(client)),
     refreshRoutes: vi.fn(),
+    geocoderEnabled: vi.fn(() => false),
+    searchAddress: vi.fn(),
     redirect: vi.fn((href: string) => {
       throw new Error(`REDIRECT ${href}`);
     }),
@@ -32,6 +34,10 @@ vi.mock("@/lib/auth", () => ({
 }));
 vi.mock("@/lib/db", () => ({ db: fake }));
 vi.mock("@/lib/optimizer/client", () => ({ evaluate: vi.fn() }));
+vi.mock("@/lib/geocode", async (original) => {
+  const actual = await original<typeof import("@/lib/geocode")>();
+  return { ...actual, geocoderEnabled: fake.geocoderEnabled, searchAddress: fake.searchAddress, allowGeocodeSearch: () => true };
+});
 vi.mock("@/lib/planning/refresh-routes", async (original) => {
   const actual = await original<typeof import("@/lib/planning/refresh-routes")>();
   return { ...actual, refreshRoutes: fake.refreshRoutes };
@@ -73,6 +79,7 @@ function stored(overrides: Record<string, unknown> = {}) {
     notes: null,
     routeId: null,
     lockedVehicleId: null,
+    exceptionalAmbulanceAt: null,
     route: null,
     lockedVehicle: null,
     prescription: { validFrom: fromIsoDate("2026-01-01"), validTo: fromIsoDate("2099-12-31") },
@@ -122,6 +129,7 @@ beforeEach(() => {
   fake.appSettings.upsert.mockResolvedValue({ id: 1, waitBeforeAppointmentMin: 30, waitAfterSessionMin: 30, maxTotalWaitMin: 45 });
   fake.auditEvent.createMany.mockResolvedValue({ count: 1 });
   fake.refreshRoutes.mockResolvedValue({ refreshed: 0, kept: 0, violations: 0, unavailable: false, failed: false, dayStarted: false });
+  fake.geocoderEnabled.mockReturnValue(false);
 });
 
 describe("updateTrip (« Modifier la course »)", () => {
@@ -218,12 +226,42 @@ describe("updateTrip (« Modifier la course »)", () => {
       startDate: fromIsoDate("2026-01-01"),
       endDate: null,
     });
-    fake.trip.findFirst.mockResolvedValue({ status: "PLANNED", cancellationOrigin: null });
+    fake.trip.findMany.mockResolvedValue([
+      { status: "PLANNED", cancellationOrigin: null, serviceDate: fromIsoDate(LATER), occurrenceDate: fromIsoDate(LATER) },
+    ]);
 
     const { state } = await submit({ serviceDate: LATER });
 
     expect(state?.fieldErrors.serviceDate).toMatch(/déjà une course/);
     expect(fake.trip.updateMany).not.toHaveBeenCalled();
+    expect(fake.trip.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ OR: [{ serviceDate: fromIsoDate(LATER) }, { occurrenceDate: fromIsoDate(LATER) }] }),
+      }),
+    );
+  });
+
+  it("refuses a day another trip of the recurrence was moved to, and allows one whose session trip moved away", async () => {
+    // Off the recurrence's days, but Monday's trip already went there.
+    fake.trip.findMany.mockResolvedValue([
+      { status: "PLANNED", cancellationOrigin: null, serviceDate: fromIsoDate(LATER), occurrenceDate: fromIsoDate(TOMORROW) },
+    ]);
+    const refused = await submit({ serviceDate: LATER });
+    expect(refused.state?.fieldErrors.serviceDate).toMatch(/déjà une course/);
+
+    // A day of the recurrence whose own trip was moved elsewhere: the day is free.
+    fake.recurrence.findUnique.mockResolvedValue({
+      active: true,
+      weekdays: [1, 2, 3, 4, 5, 6, 7],
+      legs: "BOTH",
+      startDate: fromIsoDate("2026-01-01"),
+      endDate: null,
+    });
+    fake.trip.findMany.mockResolvedValue([
+      { status: "PLANNED", cancellationOrigin: null, serviceDate: fromIsoDate(addDays(LATER, 1)), occurrenceDate: fromIsoDate(LATER) },
+    ]);
+    const { href } = await submit({ serviceDate: LATER });
+    expect(href).toContain(`date=${LATER}`);
   });
 
   it("refuses a CPAM trip moved off its prescription when none covers the new day", async () => {
@@ -231,8 +269,16 @@ describe("updateTrip (« Modifier la course »)", () => {
       stored({ recurrenceId: null, occurrenceDate: null, prescription: { validFrom: fromIsoDate("2026-01-01"), validTo: fromIsoDate(TOMORROW) } }),
     );
     const { state } = await submit({ serviceDate: LATER });
-    expect(state?.fieldErrors.serviceDate).toMatch(/Aucune prescription du patient ne couvre/);
+    // Its own PMT only, whatever the patient's other ones: the message says what to do instead.
+    expect(state?.fieldErrors.serviceDate).toMatch(/La prescription de cette course ne couvre pas le .*\u00a0: annulez-la et créez une nouvelle course/);
+    expect(fake.recurrence.findUnique).not.toHaveBeenCalled();
     expect(fake.trip.updateMany).not.toHaveBeenCalled();
+
+    // A trip of a recurrence looks for the link of its series covering the day.
+    fake.trip.findUnique.mockResolvedValue(stored({ prescription: { validFrom: fromIsoDate("2026-01-01"), validTo: fromIsoDate(TOMORROW) } }));
+    fake.recurrence.findUnique.mockResolvedValue(null);
+    const recurring = await submit({ serviceDate: LATER });
+    expect(recurring.state?.fieldErrors.serviceDate).toMatch(/Aucune prescription de cette série de soins ne couvre/);
   });
 
   it("keeps a routed trip in its route when only its time changes and the planned stop still fits", async () => {
@@ -269,6 +315,84 @@ describe("updateTrip (« Modifier la course »)", () => {
     fake.facility.findUnique.mockResolvedValue(null);
     const { state } = await submit({ facilityId: "f9" });
     expect(state?.fieldErrors.facilityId).toMatch(/introuvable/);
+  });
+
+  it("locates a one-off address whose text changed but whose coordinates are still the old point", async () => {
+    const away = { address: "8 rue des Lilas, 04000 Digne-les-Bains", lat: 44.09251234, lng: 6.23561234 };
+    fake.trip.findUnique.mockResolvedValue(stored({ oneOffAddress: true, pickupAddress: away.address, pickupLat: away.lat, pickupLng: away.lng }));
+    const corrected = { homeMode: "other", homeAddress: "18 rue des Lilas, 04000 Digne-les-Bains", homeLat: "44.092512", homeLng: "6.235612" };
+
+    // Without a geocoder: refused, rather than saved with the old point.
+    const { state } = await submit(corrected);
+    expect(state?.fieldErrors.homeLat).toMatch(/pas ses coordonnées/);
+    expect(fake.trip.updateMany).not.toHaveBeenCalled();
+
+    // With one: the new address is located.
+    fake.geocoderEnabled.mockReturnValue(true);
+    fake.searchAddress.mockResolvedValue({
+      results: [{ label: corrected.homeAddress, address: "18 rue des Lilas", postalCode: "04000", city: "Digne-les-Bains", lat: 44.0931, lng: 6.2371, score: 0.9 }],
+      outsideFrance: 0,
+    });
+    await submit(corrected);
+    expect(fake.searchAddress).toHaveBeenCalledWith(corrected.homeAddress, 1);
+    expect(written()[0]?.data).toMatchObject({ pickupAddress: corrected.homeAddress, pickupLat: 44.0931, pickupLng: 6.2371 });
+  });
+
+  it("does the same for the free care address of a private trip, and keeps coordinates typed anew", async () => {
+    const free = { address: "Cabinet du Dr Martin, 04100 Manosque", lat: 43.831, lng: 5.789 };
+    fake.trip.findUnique.mockResolvedValue(
+      stored({ payer: "PRIVATE", facilityId: null, prescriptionId: null, prescription: null, dropoffAddress: free.address, dropoffLat: free.lat, dropoffLng: free.lng }),
+    );
+    const { state } = await submit({ facilityId: "", careAddress: "Cabinet du Dr Durand, 04100 Manosque", careLat: "43.831", careLng: "5.789" });
+    expect(state?.fieldErrors.careLat).toMatch(/pas ses coordonnées/);
+
+    await submit({ facilityId: "", careAddress: "Cabinet du Dr Durand, 04100 Manosque", careLat: "43.84", careLng: "5.8" });
+    expect(written()[0]?.data).toMatchObject({ dropoffAddress: "Cabinet du Dr Durand, 04100 Manosque", dropoffLat: 43.84, dropoffLng: 5.8 });
+  });
+
+  it("keeps the exceptional ambulance, its lock and its route when only the notes change", async () => {
+    fake.trip.findUnique.mockResolvedValue(
+      stored({
+        status: "ASSIGNED",
+        routeId: "route1",
+        route: { status: "VALIDATED", vehicle: { type: "AMBULANCE", label: "Ambulance 1" } },
+        lockedVehicleId: "amb1",
+        lockedVehicle: { type: "AMBULANCE" },
+        exceptionalAmbulanceAt: new Date("2026-11-13T17:00:00Z"),
+      }),
+    );
+    await submit({ notes: "Salle 5" });
+    expect(written()[0]?.data).toEqual({ notes: "Salle 5" });
+    expect(traced()).toEqual([expect.objectContaining({ action: "trip.update", details: { fields: ["notes"] } })]);
+    expect(fake.routeStop.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("traces the lock and the exceptional ambulance a move to another day drops, and says so", async () => {
+    fake.trip.findUnique.mockResolvedValue(
+      stored({ lockedVehicleId: "amb1", lockedVehicle: { type: "AMBULANCE" }, exceptionalAmbulanceAt: new Date("2026-11-13T17:00:00Z") }),
+    );
+    const { href } = await submit({ serviceDate: LATER });
+    expect(written()[0]).toMatchObject({
+      where: { lockedVehicleId: "amb1" },
+      data: { lockedVehicleId: null, exceptionalAmbulanceAt: null, exceptionalAmbulanceById: null },
+    });
+    expect(traced()).toEqual([
+      expect.objectContaining({
+        action: "trip.update",
+        details: { fields: ["date"], serviceDate: { from: TOMORROW, to: LATER }, lockedVehicleId: { from: "amb1", to: null } },
+      }),
+      expect.objectContaining({ action: "trip.unlock", entityId: "t1" }),
+      expect.objectContaining({ action: "trip.exceptional_ambulance_withdrawn", entityId: "t1" }),
+    ]);
+    expect(href).toContain("defigee=ambulance");
+
+    vi.clearAllMocks();
+    fake.trip.findUnique.mockResolvedValue(stored({ lockedVehicleId: "v1", lockedVehicle: { type: "TAXI" } }));
+    fake.trip.updateMany.mockResolvedValue({ count: 1 });
+    fake.auditEvent.createMany.mockResolvedValue({ count: 1 });
+    const again = await submit({ serviceDate: LATER });
+    expect(traced().map((event) => event.action)).toEqual(["trip.update", "trip.unlock"]);
+    expect(again.href).toContain("defigee=1");
   });
 
   it("refuses a trip already started", async () => {

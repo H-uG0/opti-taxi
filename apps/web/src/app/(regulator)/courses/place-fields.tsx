@@ -10,7 +10,9 @@ import { Field, Input } from "@/components/ui/form";
  * trip, one-off address of « Modifier la course »): the address, « Localiser
  * l'adresse », and its coordinates. Inputs named `${prefix}Address`,
  * `${prefix}Lat` and `${prefix}Lng`; coordinates left empty are found on save
- * (geocoder configured).
+ * (geocoder configured). Coordinates shown with the address (the stored place
+ * of « Modifier la course ») count as its localisation: editing the address
+ * says so, and the server locates the new address if they are left as they were.
  */
 export function PlaceFields({
   prefix,
@@ -33,7 +35,7 @@ export function PlaceFields({
   const [address, setAddress] = useState(defaults.address);
   const [lat, setLat] = useState(defaults.lat);
   const [lng, setLng] = useState(defaults.lng);
-  const [located, setLocated] = useState<string | null>(null);
+  const [located, setLocated] = useState<string | null>(defaults.lat && defaults.lng ? defaults.address : null);
   const choose = (suggestion: GeocodeSuggestion) => {
     setAddress(suggestion.label);
     setLat(formatCoordinate(suggestion.lat));
@@ -66,7 +68,7 @@ export function PlaceFields({
           error={errors[names.lat]}
           hint={
             geocoder
-              ? "Remplie par « Localiser l'adresse », ou laissée vide : l'adresse est localisée à l'enregistrement."
+              ? "Remplie par « Localiser l'adresse », ou laissée vide : l'adresse est localisée à l'enregistrement (de même une adresse changée sans changer ses coordonnées)."
               : "Obligatoire (géocodage non configuré)."
           }
         >
