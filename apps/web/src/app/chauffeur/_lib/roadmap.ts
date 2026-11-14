@@ -3,7 +3,7 @@
  * stop to do, shared rides, and the timeline with depot and break markers.
  * No server-only import: used by the server page and the unit tests.
  */
-import type { StopKind, TripDirection, TripStatus } from "@prisma/client";
+import type { RouteStatus, StopKind, TripDirection, TripStatus } from "@prisma/client";
 import { isStopClosed, stopState } from "@/lib/domain/stops";
 import { addDays, isIsoDate } from "@/lib/time";
 
@@ -21,6 +21,23 @@ export function isReadableRoadmapDate(date: string | null | undefined, today: st
   if (!isIsoDate(date)) return false;
   const { first, last } = roadmapDateWindow(today);
   return date >= first && date <= last;
+}
+
+/** Tomorrow at a glance on today's roadmap: start, vehicle, depot and first stop (time and town only). */
+export type NextDaySummary = {
+  id: string;
+  status: RouteStatus;
+  startMinute: number;
+  vehicleLabel: string;
+  depotName: string;
+  firstStop: { minute: number; kind: StopKind; town: string | null } | null;
+};
+
+/** The town of an address written « 12 rue X, 04100 Manosque » (null when it does not end with a postcode and a town). */
+export function townOf(address: string): string | null {
+  const last = address.split(",").at(-1)?.trim() ?? "";
+  const match = /^\d{5}\s+(.+)$/.exec(last);
+  return match?.[1]?.trim() || null;
 }
 
 // Pairing of the outbound and return legs (patient absent on the outbound

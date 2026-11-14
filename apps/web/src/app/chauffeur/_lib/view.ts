@@ -3,9 +3,11 @@
  * (state, next stop, shared ride, buttons) and the route header. Pure (the
  * import from ./load is type-only), so it is unit-tested with plain objects.
  */
-import type { Mobility, RouteStatus, StopKind, VehicleType } from "@prisma/client";
+import type { Mobility, RouteStatus, StopKind, TripStatus, VehicleType } from "@prisma/client";
+import { fieldRequestCrewText, OPEN_TRIP_STATUSES, type FieldRequestView } from "@/lib/domain/field-requests";
+import { roadmapSnapshot, stopKey } from "@/lib/planning/roadmap-version";
 import { dayHoursText, facilityHoursOn } from "@/lib/domain/facility-hours";
-import { minuteOfDay, toIsoDate } from "@/lib/time";
+import { addDays, formatMinute, minuteOfDay, toIsoDate } from "@/lib/time";
 import type { DriverRoute, DriverRouteStop } from "./load";
 import { phoneContact, telHref, type PhoneContact } from "./links";
 import { plannedTapMinute, recordedLateness, type RecordedLateness } from "./punctuality";
@@ -25,8 +27,47 @@ import {
 } from "./roadmap";
 import { stopControls, type StopControls } from "./transitions";
 
+/**
+ * What the crew may signal or ask from a stop (DAY-05), and what it already sent. Today only, never on a stop of an
+ * absent patient or a cancelled trip.
+ */
+export type StopFieldView = {
+  /** Outbound drop-off: end of session of the patient's return still to do (null: none, or no time). */
+  readyMinute: number | null;
+  /** The appointment of the outbound: a session never ends before it. */
+  appointmentMinute: number | null;
+  /** « Patient prêt à HH:MM »: the return is still to do. */
+  signalReady: boolean;
+  /** Ask for the return's cancellation (none asked yet). */
+  cancelReturn: boolean;
+  /** Ask for a return when none is planned (none asked yet). */
+  askReturn: boolean;
+  /** The next session of the series (a trip of a recurrence). */
+  nextSession: boolean;
+  /** Earliest date of the next session (the day after the route's), YYYY-MM-DD. */
+  nextSessionMin: string | null;
+  /** A pickup still to do: ask for the trip's cancellation (none asked yet). */
+  askCancel: boolean;
+  /** What was sent already, with where it stands. */
+  sent: string[];
+};
+
+/** The crew's requests and the patient's return, read for the stops of today (load.ts loadFieldContext). */
+export type FieldContext = {
+  /** Outbound trip id -> its return the same day (same care), when there is one. */
+  returns: ReadonlyMap<string, { id: string; status: TripStatus; readyMinute: number | null }>;
+  /** Trip id -> the crews' requests about it, oldest first. */
+  requests: ReadonlyMap<string, readonly FieldRequestView[]>;
+};
+
+export const NO_FIELD_CONTEXT: FieldContext = { returns: new Map(), requests: new Map() };
+
 export type StopView = {
   id: string;
+  /** « tripId/KIND »: what a change of the roadmap highlights (lib/planning/roadmap-version.ts). */
+  changeKey: string;
+  /** Signals and requests of the crew from this stop (DAY-05), null when none applies. */
+  field: StopFieldView | null;
   /** 1-based position in the route. */
   position: number;
   kind: StopKind;
@@ -101,6 +142,10 @@ export type StopView = {
 
 export type RouteView = {
   id: string;
+  /** The vehicle: the roadmap's published versions are kept per vehicle and date (DAY-04). */
+  vehicleId: string;
+  /** Fingerprint of the roadmap as drawn: the page is stale when the server's differs. */
+  fingerprint: string;
   status: RouteStatus;
   vehicle: {
     label: string;
@@ -175,15 +220,70 @@ function onBoardAfterStops(stops: readonly StopLike[]): Map<string, number> {
   return result;
 }
 
+/** « 10:05 » of an ISO instant (Europe/Paris). */
+function sentAt(iso: string): string {
+  return formatMinute(minuteOfDay(new Date(iso)));
+}
+
+const hasPending = (requests: readonly FieldRequestView[] | undefined, kind: FieldRequestView["kind"]) =>
+  (requests ?? []).some((request) => request.kind === kind && request.status === "PENDING");
+
+/** The signals and requests a stop offers (DAY-05): an outbound drop-off, or a pickup still to do. */
+export function stopFieldView(
+  stop: Pick<DriverRouteStop, "kind" | "tripId" | "completedAt"> & { trip: Pick<DriverRouteStop["trip"], "direction" | "status" | "appointmentMinute" | "recurrenceId"> },
+  field: FieldContext,
+  serviceDate: string,
+): StopFieldView | null {
+  const { trip } = stop;
+  if (trip.status === "CANCELLED" || trip.status === "NO_SHOW") return null;
+  const own = field.requests.get(stop.tripId);
+  if (stop.kind === "DROPOFF" && trip.direction === "OUTBOUND") {
+    const back = field.returns.get(stop.tripId) ?? null;
+    const backRequests = back ? field.requests.get(back.id) : undefined;
+    const open = back !== null && OPEN_TRIP_STATUSES.includes(back.status);
+    const sent = [...(own ?? []), ...(backRequests ?? [])]
+      .filter((request) => request.kind !== "CANCEL" || back?.id === request.tripId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map((request) => fieldRequestCrewText(request, sentAt(request.createdAt)));
+    return {
+      readyMinute: open ? back.readyMinute : null,
+      appointmentMinute: trip.appointmentMinute,
+      signalReady: open,
+      cancelReturn: open && !hasPending(backRequests, "CANCEL"),
+      askReturn: back === null && !hasPending(own, "RETURN"),
+      nextSession: trip.recurrenceId !== null,
+      nextSessionMin: addDays(serviceDate, 1),
+      askCancel: false,
+      sent,
+    };
+  }
+  if (stop.kind === "PICKUP" && stop.completedAt === null && OPEN_TRIP_STATUSES.includes(trip.status)) {
+    const sent = (own ?? []).filter((request) => request.kind === "CANCEL").map((request) => fieldRequestCrewText(request, sentAt(request.createdAt)));
+    return {
+      readyMinute: null,
+      appointmentMinute: null,
+      signalReady: false,
+      cancelReturn: false,
+      askReturn: false,
+      nextSession: false,
+      nextSessionMin: null,
+      askCancel: !hasPending(own, "CANCEL"),
+      sent,
+    };
+  }
+  return null;
+}
+
 /**
  * `editable` is true on the service day only (see stopControls).
- * `returnTripsAfterOutboundNoShow` comes from loadReturnTripsAfterOutboundNoShow.
+ * `returnTripsAfterOutboundNoShow` comes from loadReturnTripsAfterOutboundNoShow, `field` from loadFieldContext.
  */
 export function buildRouteView(
   route: DriverRoute,
   driverId: string,
   editable: boolean,
   returnTripsAfterOutboundNoShow: ReadonlySet<string> = new Set(),
+  field: FieldContext = NO_FIELD_CONTEXT,
 ): RouteView {
   const like: StopLike[] = route.stops.map((stop) => ({
     id: stop.id,
@@ -231,6 +331,8 @@ export function buildRouteView(
       const plannedTap = plannedTapMinute({ ...stop, noShow: state === "no_show" });
       return {
         id: stop.id,
+        changeKey: stopKey(stop.tripId, stop.kind),
+        field: editable ? stopFieldView(stop, field, toIsoDate(route.serviceDate)) : null,
         position: index + 1,
         kind: stop.kind,
         state,
@@ -310,6 +412,8 @@ export function buildRouteView(
 
   return {
     id: route.id,
+    vehicleId: route.vehicleId,
+    fingerprint: roadmapSnapshot(route.stops, (tripId) => route.stops.find((stop) => stop.tripId === tripId)?.trip.status === "CANCELLED").fingerprint,
     status: route.status,
     vehicle: { ...route.vehicle, depot: { ...route.vehicle.depot, notes: route.vehicle.depot.notes?.trim() || null } },
     startMinute: route.startMinute,

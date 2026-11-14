@@ -34,6 +34,8 @@ const SESSION_CHECK_EVERY_MS = 10 * 60_000;
 const REFRESH_AFTER_MS = 1500;
 
 type DriverApp = {
+  /** The signed-in account: each request says whose page it comes from. */
+  ownerId: string;
   queue: StatusQueue;
   submit: (stopId: string, action: StopAction) => void;
   cancelQueued: (stopId: string) => void;
@@ -208,6 +210,7 @@ export function DriverAppProvider({
 
   const value = useMemo<DriverApp>(
     () => ({
+      ownerId,
       queue,
       submit: (stopId, action) => {
         if (typeof navigator.vibrate === "function") navigator.vibrate(25);
@@ -224,7 +227,7 @@ export function DriverAppProvider({
       lastRenderAt,
       serverRendered,
     }),
-    [queue, checkSession, expiresAt, sessionRenewable, sessionLost, lastRenderAt, serverRendered],
+    [ownerId, queue, checkSession, expiresAt, sessionRenewable, sessionLost, lastRenderAt, serverRendered],
   );
 
   return <DriverAppContext.Provider value={value}>{children}</DriverAppContext.Provider>;

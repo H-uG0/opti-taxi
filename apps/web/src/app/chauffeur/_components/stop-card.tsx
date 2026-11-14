@@ -26,7 +26,9 @@ import { NavLinks } from "./nav-links";
 import { NextStopTiming } from "./next-stop-timing";
 import { PhoneLink } from "./phone-link";
 import { RegulatorCallBlock } from "./regulator-call";
+import { ChangedPill, ChangedRing } from "./roadmap-watch";
 import { StopActions, UndoStatus } from "./stop-actions";
+import { StopRequests } from "./stop-requests";
 
 const KIND_STYLES = {
   PICKUP: { icon: ArrowUpFromLine, className: "bg-brand-50 text-brand-900 ring-brand-300" },
@@ -177,10 +179,11 @@ function OpenStopCard({ stop, total, regulator }: { stop: StopView; total: numbe
       id={`stop-${stop.id}`}
       aria-current={stop.isNext ? "step" : undefined}
       className={cn(
-        "scroll-mt-24 overflow-hidden rounded-2xl border bg-white",
+        "relative scroll-mt-24 overflow-hidden rounded-2xl border bg-white",
         stop.isNext ? "border-brand-700 shadow-md ring-2 ring-brand-700" : "border-slate-300 shadow-xs",
       )}
     >
+      <ChangedRing changeKey={stop.changeKey} />
       {stop.isNext ? (
         <p className="bg-brand-700 px-4 py-1.5 text-sm font-bold uppercase tracking-wide text-white">Prochain arrêt</p>
       ) : null}
@@ -188,6 +191,7 @@ function OpenStopCard({ stop, total, regulator }: { stop: StopView; total: numbe
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <p className="tabular text-3xl font-bold leading-none text-slate-950">{formatMinute(stop.plannedMinute)}</p>
           <KindChip kind={stop.kind} />
+          <ChangedPill changeKey={stop.changeKey} />
           <span className="tabular ml-auto text-sm text-slate-500">
             Arrêt {stop.position}/{total}
           </span>
@@ -225,6 +229,8 @@ function OpenStopCard({ stop, total, regulator }: { stop: StopView; total: numbe
         <StopDetails stop={stop} />
 
         <NavLinks lat={stop.lat} lng={stop.lng} destination={stop.address} />
+
+        {stop.field ? <StopRequests stopId={stop.id} view={stop.field} /> : null}
       </div>
 
       {hasActions ? (
@@ -284,7 +290,8 @@ function ClosedStopCard({ stop, routeStopIds }: { stop: StopView; routeStopIds: 
   const shownMinute = stop.completedMinute ?? stop.plannedMinute;
 
   return (
-    <li id={`stop-${stop.id}`} className="scroll-mt-24 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
+    <li id={`stop-${stop.id}`} className="relative scroll-mt-24 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
+      <ChangedRing changeKey={stop.changeKey} />
       <details className="group">
         <summary className="flex min-h-14 cursor-pointer touch-manipulation list-none items-center gap-3 px-4 py-2 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand-600 [&::-webkit-details-marker]:hidden">
           <ClosedIcon state={stop.state} />
@@ -306,6 +313,7 @@ function ClosedStopCard({ stop, routeStopIds }: { stop: StopView; routeStopIds: 
               </span>
             ) : null}
           </span>
+          <ChangedPill changeKey={stop.changeKey} />
           <ChevronDown aria-hidden className="size-5 shrink-0 text-slate-500 transition-transform group-open:rotate-180" />
           <span className="sr-only">Afficher le détail</span>
         </summary>
@@ -331,6 +339,12 @@ function ClosedStopCard({ stop, routeStopIds }: { stop: StopView; routeStopIds: 
           <StopDetails stop={stop} />
         </div>
       </details>
+      {stop.field ? (
+        // After « Déposé »: the end of the session, a return or the next session, still to signal.
+        <div className="px-3 pb-3">
+          <StopRequests stopId={stop.id} view={stop.field} />
+        </div>
+      ) : null}
       {stop.controls.undo ? (
         <UndoStatus key={`${stop.id}-${stop.state}`} stopId={stop.id} label={`Annuler «\u202f${label}\u202f»`} routeStopIds={routeStopIds} />
       ) : null}

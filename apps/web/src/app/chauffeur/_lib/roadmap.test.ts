@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { StopKind, TripStatus } from "@prisma/client";
 import * as domain from "@/lib/domain/no-show";
 import {
+  townOf,
   buildTimeline,
   coPassengers,
   isFacilityStop,
@@ -268,5 +269,13 @@ describe("buildTimeline", () => {
     expect(late.map((item) => item.type)).toEqual(["depart", "stop", "stop", "stop", "break", "return"]);
     const none = buildTimeline(stops, { startMinute: 450, endMinute: 900, breakStartMinute: null, breakEndMinute: null });
     expect(none.map((item) => item.type)).toEqual(["depart", "stop", "stop", "stop", "return"]);
+  });
+});
+
+describe("townOf", () => {
+  it("reads the town after the postcode, nothing else", () => {
+    expect(townOf("12 rue des Lilas, 04100 Manosque")).toBe("Manosque");
+    expect(townOf("Route de Gap, 04200 Sisteron Cedex")).toBe("Sisteron Cedex");
+    expect(townOf("Lieu de l'interruption (Taxi 3, 11:00)")).toBeNull();
   });
 });

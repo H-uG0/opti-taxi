@@ -1,19 +1,22 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { CalendarX } from "lucide-react";
+import { CalendarClock, CalendarX } from "lucide-react";
 import { auditRead } from "@/lib/audit";
 import { PASSWORD_PAGE, requireDriver } from "@/lib/auth";
 import { cn } from "@/components/ui/cn";
 import { formatLongDate, formatMinute, minuteOfDay, todayIso, tomorrowIso } from "@/lib/time";
+import { Badge } from "@/components/ui/badge";
+import { STOP_KIND_LABELS } from "@/lib/labels";
 import type { RegulatorContact } from "./_lib/links";
-import { loadDriverRoutes, loadRegulatorContact, loadReturnTripsAfterOutboundNoShow } from "./_lib/load";
-import { isReadableRoadmapDate } from "./_lib/roadmap";
-import { buildRouteView } from "./_lib/view";
+import { loadDriverRoutes, loadFieldContext, loadNextDaySummary, loadRegulatorContact, loadReturnTripsAfterOutboundNoShow } from "./_lib/load";
+import { isReadableRoadmapDate, type NextDaySummary } from "./_lib/roadmap";
+import { buildRouteView, NO_FIELD_CONTEXT } from "./_lib/view";
 import { DaySwitch } from "./_components/day-switch";
 import { RefreshControl } from "./_components/refresh-control";
 import { ServerRenderMark } from "./_components/driver-app";
 import { SessionLine } from "./_components/field-status";
 import { RegulatorCallBlock } from "./_components/regulator-call";
+import { RoadmapChangeBanner, RoadmapWatchProvider } from "./_components/roadmap-watch";
 import { RouteSection } from "./_components/route-section";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -47,6 +50,55 @@ function NoRoute({ date, tomorrow, regulator }: { date: string; tomorrow: string
   );
 }
 
+/** Tomorrow at a glance on today's roadmap (DAY-04): when the crew starts and its first stop, no patient named. */
+function NextDayCard({ tomorrow, routes }: { tomorrow: string; routes: NextDaySummary[] }) {
+  if (routes.length === 0) return null;
+  return (
+    <section aria-labelledby="next-day-title" className="space-y-3 rounded-2xl border border-slate-300 bg-white px-4 py-3">
+      <h2 id="next-day-title" className="flex items-center gap-2 text-base font-bold text-slate-950 first-letter:uppercase">
+        <CalendarClock aria-hidden className="size-5 shrink-0 text-brand-700" />
+        Demain, {formatLongDate(tomorrow)}
+      </h2>
+      {routes.map((route) => (
+        <div key={route.id} className="space-y-2">
+          <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-800">
+            {route.vehicleLabel}
+            {route.status === "VALIDATED" ? <Badge tone="success">Validée</Badge> : <Badge tone="warning">Provisoire</Badge>}
+          </p>
+          <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200">
+            <div className="bg-white px-3 py-2">
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Embauche</dt>
+              <dd className="tabular text-lg font-semibold text-slate-900">{formatMinute(route.startMinute)}</dd>
+              <dd className="text-sm text-slate-600">Départ du dépôt {route.depotName}</dd>
+            </div>
+            <div className="bg-white px-3 py-2">
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Premier arrêt</dt>
+              {route.firstStop ? (
+                <>
+                  <dd className="tabular text-lg font-semibold text-slate-900">{formatMinute(route.firstStop.minute)}</dd>
+                  <dd className="text-sm text-slate-600">
+                    {STOP_KIND_LABELS[route.firstStop.kind]}
+                    {route.firstStop.town ? `, ${route.firstStop.town}` : ""}
+                  </dd>
+                </>
+              ) : (
+                <dd className="text-sm text-slate-600">Aucun arrêt</dd>
+              )}
+            </div>
+          </dl>
+        </div>
+      ))}
+      <Link
+        href={`/chauffeur?date=${tomorrow}`}
+        prefetch={false}
+        className="inline-flex min-h-11 items-center text-sm font-semibold text-brand-800 underline underline-offset-2"
+      >
+        Voir la tournée de demain
+      </Link>
+    </section>
+  );
+}
+
 function DayNotice({ date, today }: { date: string; today: string }) {
   if (date === today) return null;
   return (
@@ -77,40 +129,58 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
     // tomorrow on the ?date= preview; never breaks the page.
     auditRead(user, { action: "roadmap.view", entity: "Driver", entityId: user.driverId, serviceDate: date }),
   ]);
-  const afterOutboundNoShow = await loadReturnTripsAfterOutboundNoShow(routes, date);
-  const views = routes.map((route) => buildRouteView(route, user.driverId, editable, afterOutboundNoShow));
+  const [afterOutboundNoShow, field, nextDay] = await Promise.all([
+    loadReturnTripsAfterOutboundNoShow(routes, date),
+    // Signals and requests of the crew (DAY-05): the patients' returns and what was already sent, today only.
+    editable ? loadFieldContext(routes, date) : NO_FIELD_CONTEXT,
+    // The evening before: tomorrow's start and first stop (DAY-04).
+    date === today ? loadNextDaySummary(user.driverId, tomorrow) : [],
+  ]);
+  const views = routes.map((route) => buildRouteView(route, user.driverId, editable, afterOutboundNoShow, field));
+  const dayDone = views.every((view) => view.nextStop === null);
 
   return (
-    <div className="space-y-4">
-      {/* Statuses sent before this render are now shown by the page itself. */}
-      <ServerRenderMark at={now.getTime()} />
-      <DaySwitch date={date} today={today} tomorrow={tomorrow} />
+    // Changes made by the regulation since the crew last looked (DAY-04): banner, highlighted stops, « J'ai vu ».
+    <RoadmapWatchProvider date={date} routes={views.map((view) => ({ vehicleId: view.vehicleId, fingerprint: view.fingerprint }))}>
+      <div className="space-y-4">
+        {/* Statuses sent before this render are now shown by the page itself. */}
+        <ServerRenderMark at={now.getTime()} />
+        <DaySwitch date={date} today={today} tomorrow={tomorrow} />
 
-      <div className="space-y-2">
-        <h1 className="text-xl font-bold text-slate-950 first-letter:uppercase">{formatLongDate(date)}</h1>
-        <DayNotice date={date} today={today} />
-        <RefreshControl renderedAt={formatMinute(minuteOfDay(new Date()))} />
-      </div>
-
-      {views.length === 0 ? (
-        <NoRoute date={date} tomorrow={tomorrow} regulator={regulator} />
-      ) : (
-        <div className="space-y-8">
-          {views.map((view) => (
-            <RouteSection key={view.id} route={view} regulator={regulator} />
-          ))}
+        <div className="space-y-2">
+          <h1 className="text-xl font-bold text-slate-950 first-letter:uppercase">{formatLongDate(date)}</h1>
+          <DayNotice date={date} today={today} />
+          <RefreshControl renderedAt={formatMinute(minuteOfDay(new Date()))} />
         </div>
-      )}
 
-      <div className="space-y-1 border-t border-slate-200 pt-3 text-center">
-        <SessionLine />
-        <Link
-          href={PASSWORD_PAGE}
-          className="inline-flex min-h-11 items-center px-3 text-sm font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900"
-        >
-          Changer mon mot de passe
-        </Link>
+        <RoadmapChangeBanner labels={Object.fromEntries(views.map((view) => [view.vehicleId, view.vehicle.label]))} />
+      {/* The evening, once today's routes are done (or without any): tomorrow first. */}
+      {dayDone ? <NextDayCard tomorrow={tomorrow} routes={nextDay} /> : null}
+
+        {views.length === 0 ? (
+          <>
+            <NextDayCard tomorrow={tomorrow} routes={nextDay} />
+            <NoRoute date={date} tomorrow={tomorrow} regulator={regulator} />
+          </>
+        ) : (
+          <div className="space-y-8">
+            {views.map((view) => (
+              <RouteSection key={view.id} route={view} regulator={regulator} />
+            ))}
+            <NextDayCard tomorrow={tomorrow} routes={nextDay} />
+          </div>
+        )}
+
+        <div className="space-y-1 border-t border-slate-200 pt-3 text-center">
+          <SessionLine />
+          <Link
+            href={PASSWORD_PAGE}
+            className="inline-flex min-h-11 items-center px-3 text-sm font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900"
+          >
+            Changer mon mot de passe
+          </Link>
+        </div>
       </div>
-    </div>
+    </RoadmapWatchProvider>
   );
 }

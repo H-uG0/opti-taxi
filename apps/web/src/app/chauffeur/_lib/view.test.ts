@@ -80,6 +80,7 @@ function makeStop(
 function makeRoute(stops: DriverRouteStop[], overrides: Partial<DriverRoute> = {}): DriverRoute {
   return {
     id: "route_1",
+    vehicleId: "veh_1",
     // Tuesday 3 November 2026.
     serviceDate: new Date("2026-11-03T00:00:00.000Z"),
     status: "PROPOSED",
@@ -453,5 +454,58 @@ describe("buildRouteView", () => {
     // Not « Adresse inhabituelle »: the place where the vehicle stopped.
     expect(there.stops[0]).toMatchObject({ resumesInterrupted: true, oneOffAddress: false });
     expect(there.stops[1]?.keyTime).toEqual({ label: "RDV", minute: 840 });
+  });
+});
+
+describe("roadmap changes and field requests (DAY-04, DAY-05)", () => {
+  it("keys each stop by trip and kind, and fingerprints the route as the server does", () => {
+    const view = buildRouteView(sharedRoute(), DRIVER, true);
+    expect(view.vehicleId).toBe("veh_1");
+    expect(view.stops.map((stop) => stop.changeKey).slice(0, 2)).toEqual(["trip_a/PICKUP", "trip_b/PICKUP"]);
+    const moved = makeRoute(sharedRoute().stops.map((stop) => (stop.sequence === 4 ? { ...stop, startMinute: stop.startMinute + 10 } : stop)));
+    expect(buildRouteView(moved, DRIVER, true).fingerprint).not.toBe(view.fingerprint);
+    expect(buildRouteView(sharedRoute(), DRIVER, true).fingerprint).toBe(view.fingerprint);
+  });
+
+  it("offers the end of session, the cancellation of the return and the next session from an outbound drop-off", () => {
+    const route = makeRoute([
+      makeStop(0, "trip_a", "PICKUP", { ...A, status: "PICKED_UP" }, "2026-11-03T07:02:00Z"),
+      makeStop(1, "trip_a", "DROPOFF", { ...A, status: "PICKED_UP" }),
+    ]);
+    route.stops[1]!.trip.recurrenceId = "rec_1";
+    const field = {
+      returns: new Map([["trip_a", { id: "trip_back", status: "ASSIGNED" as const, readyMinute: 705 }]]),
+      requests: new Map([
+        [
+          "trip_back",
+          [{ id: "r1", kind: "READY_TIME" as const, status: "PENDING" as const, tripId: "trip_back", readyMinute: 705, previousReadyMinute: 690, cancellationReason: null, nextSessionDate: null, createdAt: "2026-11-03T09:05:00.000Z", createdBy: "Karim Benali" }],
+        ],
+      ]),
+    };
+    const [pickup, dropoff] = buildRouteView(route, DRIVER, true, new Set(), field).stops;
+    expect(pickup?.field).toBeNull();
+    expect(dropoff?.field).toEqual({
+      readyMinute: 705,
+      appointmentMinute: 540,
+      signalReady: true,
+      cancelReturn: true,
+      askReturn: false,
+      nextSession: true,
+      nextSessionMin: "2026-11-04",
+      askCancel: false,
+      sent: ["Patient prêt à 11:45 (prévu 11:30) · envoyé à 10:05, transmis à la régulation"],
+    });
+    // Not on another day than the service day.
+    expect(buildRouteView(route, DRIVER, false, new Set(), field).stops[1]?.field).toBeNull();
+  });
+
+  it("offers a return asked for when none is planned, and the cancellation of a pickup still to do, once", () => {
+    const route = makeRoute([makeStop(0, "trip_a", "PICKUP", A), makeStop(1, "trip_a", "DROPOFF", A)]);
+    const pending = [{ id: "r2", kind: "CANCEL" as const, status: "PENDING" as const, tripId: "trip_a", readyMinute: null, previousReadyMinute: null, cancellationReason: "OWN_MEANS" as const, nextSessionDate: null, createdAt: "2026-11-03T07:00:00.000Z", createdBy: null }];
+    const [pickup, dropoff] = buildRouteView(route, DRIVER, true, new Set(), { returns: new Map(), requests: new Map() }).stops;
+    expect(pickup?.field).toMatchObject({ askCancel: true, sent: [] });
+    expect(dropoff?.field).toMatchObject({ askReturn: true, signalReady: false, cancelReturn: false, nextSession: false });
+    const asked = buildRouteView(route, DRIVER, true, new Set(), { returns: new Map(), requests: new Map([["trip_a", pending]]) }).stops[0];
+    expect(asked?.field).toMatchObject({ askCancel: false, sent: ["Annulation demandée : rentre par ses propres moyens · envoyé à 08:00, en attente de la régulation"] });
   });
 });

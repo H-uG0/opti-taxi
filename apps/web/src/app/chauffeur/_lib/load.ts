@@ -4,8 +4,12 @@ import { requireDriverAccount } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getRegulatorPhone } from "@/lib/domain/settings";
 import { fromIsoDate, todayIso } from "@/lib/time";
+import type { FieldRequestView } from "@/lib/domain/field-requests";
+import { isSameEpisode } from "@/lib/domain/no-show";
+import { fieldRequestView } from "@/lib/planning/live-load";
 import { regulatorContact, type RegulatorContact } from "./links";
-import { isReadableRoadmapDate, returnTripsAfterOutboundNoShow } from "./roadmap";
+import { isReadableRoadmapDate, returnTripsAfterOutboundNoShow, townOf, type NextDaySummary } from "./roadmap";
+import { NO_FIELD_CONTEXT, type FieldContext } from "./view";
 
 /**
  * Routes of a service date where the driver is at the wheel or crew mate,
@@ -23,6 +27,8 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
     orderBy: [{ startMinute: "asc" }, { id: "asc" }],
     select: {
       id: true,
+      // The roadmap's published versions are kept per vehicle and date (DAY-04).
+      vehicleId: true,
       // The day of the route: the reception hours of each facility are those of its weekday.
       serviceDate: true,
       status: true,
@@ -140,6 +146,81 @@ export async function loadReturnTripsAfterOutboundNoShow(routes: readonly Driver
     select: { patientId: true, recurrenceId: true, facilityId: true },
   });
   return returnTripsAfterOutboundNoShow([...returnTrips.values()], outboundNoShows);
+}
+
+/**
+ * What the crew's signals and requests need (DAY-05): the return the same day of each outbound dropped off on these
+ * routes (on any vehicle: only its id, status and end of session come out), and the crews' requests about these
+ * trips and returns.
+ */
+export async function loadFieldContext(routes: readonly DriverRoute[], isoDate: string): Promise<FieldContext> {
+  const stops = routes.flatMap((route) => route.stops);
+  if (stops.length === 0) return NO_FIELD_CONTEXT;
+  const serviceDate = fromIsoDate(isoDate);
+  const outbound = stops.filter((stop) => stop.kind === "DROPOFF" && stop.trip.direction === "OUTBOUND");
+  const patientIds = [...new Set(outbound.map((stop) => stop.trip.patientId))];
+  const candidates =
+    patientIds.length > 0
+      ? await db.trip.findMany({
+          where: { serviceDate, direction: "RETURN", status: { not: "CANCELLED" }, patientId: { in: patientIds } },
+          orderBy: { createdAt: "asc" },
+          select: { id: true, status: true, readyMinute: true, patientId: true, recurrenceId: true, facilityId: true },
+        })
+      : [];
+  const returns = new Map<string, { id: string; status: (typeof candidates)[number]["status"]; readyMinute: number | null }>();
+  for (const stop of outbound) {
+    const back = candidates.find((trip) => isSameEpisode(stop.trip, trip));
+    if (back) returns.set(stop.tripId, { id: back.id, status: back.status, readyMinute: back.readyMinute });
+  }
+  const tripIds = [...new Set([...stops.map((stop) => stop.tripId), ...[...returns.values()].map((back) => back.id)])];
+  const rows = await db.fieldRequest.findMany({
+    where: { serviceDate, tripId: { in: tripIds } },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      kind: true,
+      status: true,
+      tripId: true,
+      readyMinute: true,
+      previousReadyMinute: true,
+      cancellationReason: true,
+      nextSessionDate: true,
+      createdAt: true,
+      createdBy: { select: { name: true } },
+    },
+  });
+  const requests = new Map<string, FieldRequestView[]>();
+  for (const row of rows) requests.set(row.tripId, [...(requests.get(row.tripId) ?? []), fieldRequestView(row)]);
+  return { returns, requests };
+}
+
+/**
+ * Tomorrow at a glance on today's roadmap (DAY-04): when the crew starts (departure from the depot), with which
+ * vehicle, and its first stop's time and town. No name, no address: the evening before, the « Demain » tab gives the rest.
+ */
+export async function loadNextDaySummary(driverId: string, tomorrow: string): Promise<NextDaySummary[]> {
+  const routes = await db.route.findMany({
+    where: { serviceDate: fromIsoDate(tomorrow), OR: [{ driverId }, { crewMateId: driverId }] },
+    orderBy: [{ startMinute: "asc" }, { id: "asc" }],
+    select: {
+      id: true,
+      status: true,
+      startMinute: true,
+      vehicle: { select: { label: true, depot: { select: { name: true } } } },
+      stops: { orderBy: { sequence: "asc" }, take: 1, select: { startMinute: true, kind: true, address: true } },
+    },
+  });
+  return routes.map((route) => {
+    const first = route.stops[0];
+    return {
+      id: route.id,
+      status: route.status,
+      startMinute: route.startMinute,
+      vehicleLabel: route.vehicle.label,
+      depotName: route.vehicle.depot.name,
+      firstStop: first ? { minute: first.startMinute, kind: first.kind, town: townOf(first.address) } : null,
+    };
+  });
 }
 
 /**
