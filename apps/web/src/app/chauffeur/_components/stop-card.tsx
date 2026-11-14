@@ -108,14 +108,11 @@ function StopDetails({ stop }: { stop: StopView }) {
               </span>
             ) : null}
           </p>
+          {stop.facility?.hours ? <p className="tabular mt-1 text-sm text-slate-700">{stop.facility.hours}</p> : null}
         </Line>
       ) : null}
 
       {stop.accessNotes ? <Instructions label="Accès domicile">{stop.accessNotes}</Instructions> : null}
-
-      {stop.facility?.hours ? (
-        <p className="tabular -mt-1 pl-8 text-sm text-slate-700">{stop.facility.hours}</p>
-      ) : null}
 
       {stop.facility?.notes ? <Instructions label="Consignes de l'établissement">{stop.facility.notes}</Instructions> : null}
 

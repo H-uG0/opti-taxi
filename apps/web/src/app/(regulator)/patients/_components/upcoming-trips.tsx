@@ -24,8 +24,15 @@ import { dayCancelLabel, dayCancelQuestion, type UpcomingDay, type UpcomingTrip 
 export function UpcomingTrips({ days }: { days: UpcomingDay[] }) {
   // One cancellation form open at a time: a day ("day:2026-11-17") or a trip ("trip:<id>").
   const [open, setOpen] = useState<string | null>(null);
+  // « Rétablir » answers here: the trip's row loses its button once restored, the message stays.
+  const [restored, restoreAction, restoring] = useActionState(restoreTrip, INITIAL_ACTION_RESULT);
   return (
     <div className="overflow-x-auto">
+      {restored.message ? (
+        <div className="border-b border-slate-200 px-3 py-2">
+          <ActionMessage result={restored} />
+        </div>
+      ) : null}
       <table className="min-w-full divide-y divide-slate-200 text-sm">
         <THead>
           <tr>
@@ -78,7 +85,14 @@ export function UpcomingTrips({ days }: { days: UpcomingDay[] }) {
                   </td>
                 </tr>
                 {day.trips.map((t) => (
-                  <TripRow key={t.id} trip={t} cancelling={open === `trip:${t.id}`} onCancel={() => setOpen(`trip:${t.id}`)} onClose={() => setOpen(null)} />
+                  <TripRow
+                    key={t.id}
+                    trip={t}
+                    cancelling={open === `trip:${t.id}`}
+                    onCancel={() => setOpen(`trip:${t.id}`)}
+                    onClose={() => setOpen(null)}
+                    restore={{ action: restoreAction, pending: restoring }}
+                  />
                 ))}
               </Fragment>
             );
@@ -94,11 +108,13 @@ function TripRow({
   cancelling,
   onCancel,
   onClose,
+  restore,
 }: {
   trip: UpcomingTrip;
   cancelling: boolean;
   onCancel: () => void;
   onClose: () => void;
+  restore: { action: (formData: FormData) => void; pending: boolean };
 }) {
   return (
     <>
@@ -141,7 +157,7 @@ function TripRow({
                 Annuler
               </Button>
             ) : null}
-            {trip.canRestore ? <RestoreButton tripId={trip.id} ariaName={trip.ariaName} /> : null}
+            {trip.canRestore ? <RestoreButton tripId={trip.id} ariaName={trip.ariaName} {...restore} /> : null}
           </div>
         </Td>
       </tr>
@@ -162,10 +178,19 @@ function TripRow({
 }
 
 /** « Rétablir » : the trip comes back, outside any route (restoreTrip refuses a past day, an inactive patient…). */
-function RestoreButton({ tripId, ariaName }: { tripId: string; ariaName: string }) {
-  const [state, formAction, pending] = useActionState(restoreTrip, INITIAL_ACTION_RESULT);
+function RestoreButton({
+  tripId,
+  ariaName,
+  action,
+  pending,
+}: {
+  tripId: string;
+  ariaName: string;
+  action: (formData: FormData) => void;
+  pending: boolean;
+}) {
   return (
-    <form action={formAction} className="flex flex-col items-end gap-1">
+    <form action={action}>
       <input type="hidden" name="tripId" value={tripId} />
       <Button type="submit" variant="ghost" size="sm" disabled={pending} aria-busy={pending} aria-label={`Rétablir la course ${ariaName}`}>
         {pending ? (
@@ -177,9 +202,6 @@ function RestoreButton({ tripId, ariaName }: { tripId: string; ariaName: string 
           </>
         )}
       </Button>
-      <div className="max-w-xs text-right">
-        <ActionMessage result={state} />
-      </div>
     </form>
   );
 }
@@ -207,8 +229,8 @@ function CancelForm({
     event.preventDefault();
     if (event.currentTarget.reportValidity()) setConfirming(true);
   };
-  // Done (or nothing left to cancel): the answer stays until the form is closed.
-  if (tripIds.length === 0) {
+  // Done (or nothing left to cancel): the answer stays until the form is closed (reopening starts afresh).
+  if (tripIds.length === 0 || (state.ok && state.message)) {
     return (
       <div className="mt-2 flex flex-wrap items-start justify-between gap-2 rounded-md border border-slate-200 bg-white p-3">
         <ActionMessage result={state.message ? state : { ok: true, message: "Plus aucune course à annuler ce jour." }} />

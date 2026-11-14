@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { redirect } from "next/navigation";
 import { IDLE_STATE } from "@/lib/forms";
 import { addPatientAbsence, deletePatientAbsence, updatePatientAbsence } from "./absence-actions";
 
@@ -21,6 +22,7 @@ const fake = vi.hoisted(() => {
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
   requireUser: vi.fn(async () => ({ id: "u1", name: "Régulation", role: "REGULATOR", driverId: null })),
 }));
@@ -181,8 +183,9 @@ describe("updatePatientAbsence and deletePatientAbsence", () => {
     fake.patientAbsence.deleteMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
     fake.completeTrips.mockResolvedValue({ created: 0, revived: 4, createdByDay: new Map(), skipped: [] });
 
-    const done = await deletePatientAbsence("p1", "abs1");
-    expect(done.message).toBe("Absence supprimée. Courses à venir : 4 rétablies.");
+    await deletePatientAbsence("p1", "abs1");
+    // Back to the record, which says what came back (?courses=…).
+    expect(redirect).toHaveBeenCalledWith("/patients/p1?enregistre=1&courses=0-0-0-0-0-4#absences");
     expect(recorded()).toEqual([{ action: "patient_absence.delete", entityId: "abs1", details: { patientId: "p1" } }]);
 
     const again = await deletePatientAbsence("p1", "abs1");

@@ -2,6 +2,7 @@
 
 import type { PatientAbsenceKind, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -14,11 +15,11 @@ import {
 } from "@/lib/domain/patient-absences";
 import { errorState, idSchema, invalidState, messageState, readForm, successState, type FormState } from "@/lib/forms";
 import { evaluate } from "@/lib/optimizer/client";
-import { refreshNotice, refreshRoutes } from "@/lib/planning/refresh-routes";
+import { refreshNotice, refreshRoutes, withRefreshNotice } from "@/lib/planning/refresh-routes";
 import { fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import { completeTrips, currentHorizon, reviveOneOffTrips } from "@/lib/trips/completion";
 import { patientAbsenceSchema } from "./_lib/absence-schema";
-import { CANCEL, describeSync, EMPTY_SYNC, isEmptySync, withCompletion, type SyncSummary } from "./_lib/trip-sync";
+import { CANCEL, describeSync, EMPTY_SYNC, isEmptySync, withCompletion, withSyncNotice, type SyncSummary } from "./_lib/trip-sync";
 import { SYNC_TX_OPTIONS, syncOpenTrips } from "./_lib/trip-sync-db";
 
 /**
@@ -193,5 +194,7 @@ export async function deletePatientAbsence(patientId: string, absenceId: string)
     return successState("Cette absence était déjà supprimée.");
   }
   refreshPages(pid, summary);
-  return answer("Absence supprimée.", summary, leftRoutes);
+  // The absence leaves the list (its button with it): the record says what came back, as after any save.
+  const refresh = await refreshRoutes({ prisma: db, evaluate }, leftRoutes);
+  redirect(withRefreshNotice(withSyncNotice(`/patients/${pid}?enregistre=1#absences`, summary), refresh));
 }

@@ -227,7 +227,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
         ) : showMissing ? (
           <MissingRecurrencesNote missing={missing} state={generationStateOf(date, today, false)} />
         ) : null}
-        {closed ? <ClosedFacilitiesNote key={date} date={date} {...closedFacilitiesNoteProps(closed)} /> : null}
+        {closed ? <ClosedFacilitiesNote key={`closed-${date}`} date={date} {...closedFacilitiesNoteProps(closed)} /> : null}
 
         {view.dayStatus === "EMPTY" ? (
           <>

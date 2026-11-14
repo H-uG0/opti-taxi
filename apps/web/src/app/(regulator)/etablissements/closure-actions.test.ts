@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { redirect } from "next/navigation";
 import { IDLE_STATE } from "@/lib/forms";
 import { addFacilityClosure, deleteFacilityClosure } from "./closure-actions";
 
@@ -20,6 +21,7 @@ const fake = vi.hoisted(() => {
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 vi.mock("@/lib/auth", () => ({
   requireUser: vi.fn(async () => ({ id: "u1", name: "Régulation", role: "REGULATOR", driverId: null })),
 }));
@@ -124,11 +126,11 @@ describe("facility closures (PAT-03)", () => {
     fake.completeTrips.mockResolvedValue({ created: 0, revived: 2, createdByDay: new Map(), skipped: [] });
     fake.reviveOneOffTrips.mockResolvedValue(1);
 
-    const state = await deleteFacilityClosure("f1", "c1");
+    await deleteFacilityClosure("f1", "c1");
 
     expect(fake.facilityClosure.deleteMany).toHaveBeenCalledWith({ where: { id: "c1", facilityId: "f1" } });
     expect(fake.reviveOneOffTrips.mock.calls[0]![2]).toEqual({ facilityId: "f1" });
     expect(actions()).toEqual([["facility_closure.delete", "c1"]]);
-    expect(state.message).toBe("Fermeture supprimée. Courses à venir : 3 rétablies.");
+    expect(redirect).toHaveBeenCalledWith("/etablissements/f1?enregistre=1&courses=0-0-0-0-0-3#calendrier");
   });
 });

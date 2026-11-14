@@ -2,6 +2,7 @@
 
 import type { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -9,10 +10,18 @@ import { closureCancellationNote } from "@/lib/domain/facility-calendar";
 import { periodFrom, type DatedPeriod } from "@/lib/domain/patient-absences";
 import { idSchema, invalidState, messageState, readForm, successState, type FormState } from "@/lib/forms";
 import { evaluate } from "@/lib/optimizer/client";
-import { refreshNotice, refreshRoutes } from "@/lib/planning/refresh-routes";
+import { refreshNotice, refreshRoutes, withRefreshNotice } from "@/lib/planning/refresh-routes";
 import { fromIsoDate, todayIso } from "@/lib/time";
 import { completeTrips, currentHorizon, reviveOneOffTrips } from "@/lib/trips/completion";
-import { CANCEL, describeSync, EMPTY_SYNC, isEmptySync, withCompletion, type SyncSummary } from "@/app/(regulator)/patients/_lib/trip-sync";
+import {
+  CANCEL,
+  describeSync,
+  EMPTY_SYNC,
+  isEmptySync,
+  withCompletion,
+  withSyncNotice,
+  type SyncSummary,
+} from "@/app/(regulator)/patients/_lib/trip-sync";
 import { SYNC_TX_OPTIONS, syncOpenTrips } from "@/app/(regulator)/patients/_lib/trip-sync-db";
 import { closureSchema } from "./_lib/closure-schema";
 
@@ -108,5 +117,7 @@ export async function deleteFacilityClosure(facilityId: string, closureId: strin
     return successState("Cette fermeture était déjà supprimée.");
   }
   refreshPages(fid, summary);
-  return answer("Fermeture supprimée.", summary, leftRoutes);
+  // The closure leaves the list (its button with it): the record says what came back, as after any save.
+  const refresh = await refreshRoutes({ prisma: db, evaluate }, leftRoutes);
+  redirect(withRefreshNotice(withSyncNotice(`/etablissements/${fid}?enregistre=1#calendrier`, summary), refresh));
 }

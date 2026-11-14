@@ -350,7 +350,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
         <MissingRecurrencesNote missing={missing} state={generationStateOf(date, today, false)} onCourses className="mb-4" />
       )}
       {closed ? (
-        <ClosedFacilitiesNote key={date} date={date} {...closedFacilitiesNoteProps(closed)} className="mb-4" />
+        <ClosedFacilitiesNote key={`closed-${date}`} date={date} {...closedFacilitiesNoteProps(closed)} className="mb-4" />
       ) : null}
 
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
