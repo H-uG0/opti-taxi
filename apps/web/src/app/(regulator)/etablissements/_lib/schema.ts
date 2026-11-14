@@ -6,7 +6,7 @@ import { z } from "zod";
 import { addressShape } from "@/components/address/address-schema";
 import { readAddressForm } from "@/components/address/address-utils";
 import { optionalPhone, optionalText, parseForm, type ParseResult } from "@/app/(regulator)/patients/_lib/form-parse";
-import { formString, type FormValues } from "@/lib/forms";
+import { formCheckbox, formString, type FormValues } from "@/lib/forms";
 import { parseDecimal } from "@/lib/forms";
 import { FACILITY_TYPES } from "./options";
 
@@ -28,8 +28,9 @@ export const facilitySchema = z.object({
   type: z.enum(FACILITY_TYPES, { error: "Choisissez un type d'établissement" }),
   ...addressShape,
   phone: optionalPhone,
-  notes: optionalText(1000, "Notes"),
+  notes: optionalText(1000, "Consignes"),
   extraServiceMin,
+  openOnHolidays: z.boolean(),
 });
 
 export type FacilityInput = z.output<typeof facilitySchema>;
@@ -43,5 +44,7 @@ export function parseFacilityForm(formData: FormData): ParseResult<FacilityInput
     notes: formString(formData, "notes"),
     extraServiceMin: formString(formData, "extraServiceMin"),
   };
-  return parseForm(facilitySchema, values, values);
+  const openOnHolidays = formCheckbox(formData, "openOnHolidays");
+  if (openOnHolidays) values.openOnHolidays = "on";
+  return parseForm(facilitySchema, { ...values, openOnHolidays }, values);
 }

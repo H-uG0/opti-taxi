@@ -18,6 +18,7 @@ export type AuditEntity =
   | "User"
   | "Driver"
   | "Facility"
+  | "FacilityClosure"
   | "DayCrew"
   | "StaffAbsence"
   | "CrewIncompatibility"

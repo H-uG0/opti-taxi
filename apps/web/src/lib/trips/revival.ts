@@ -27,14 +27,15 @@ export type OneOffRevivalTrip = {
   /** `absences`: the patient's dated absences (a trip on one of their days stays cancelled). */
   patient: Place & { active: boolean; absences?: readonly { startDate: Date; endDate: Date }[] };
   prescription: { mode: PrescribedMode; sharing: SharingScope; validFrom: Date; validTo: Date } | null;
-  facility: (Place & { active: boolean }) | null;
+  /** `closures`: the facility's dated closures (a trip on one of their days stays cancelled). */
+  facility: (Place & { active: boolean; closures?: readonly { startDate: Date; endDate: Date }[] }) | null;
 };
 
 /**
  * What the trip becomes when it can come back, or null while a cause holds:
  * patient inactive, facility inactive, or a CPAM trip whose prescription no
- * longer covers its date, or the patient absent that day
- * (lib/domain/patient-absences.ts). Places are taken again from the patient's
+ * longer covers its date, the patient absent that day
+ * (lib/domain/patient-absences.ts) or the facility closed that day. Places are taken again from the patient's
  * home and the facility (they may have moved meanwhile); rules from the
  * prescription.
  */
@@ -43,6 +44,7 @@ export function oneOffRevival(trip: OneOffRevivalTrip): Prisma.TripUncheckedUpda
   if (trip.facility && !trip.facility.active) return null;
   const date = toIsoDate(trip.serviceDate);
   if (coveredOn(trip.patient.absences, date)) return null;
+  if (trip.facility && coveredOn(trip.facility.closures, date)) return null;
   const prescription = trip.payer === "CPAM" ? trip.prescription : null;
   if (trip.payer === "CPAM") {
     if (!prescription || toIsoDate(prescription.validFrom) > date || date > toIsoDate(prescription.validTo)) return null;

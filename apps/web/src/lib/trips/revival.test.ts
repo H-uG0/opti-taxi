@@ -57,6 +57,11 @@ describe("oneOffRevival", () => {
     expect(oneOffRevival(trip({ patient: { ...HOME, active: true, absences: [shortened] } }))).toMatchObject({ status: "PLANNED" });
   });
 
+  it("waits while the facility is closed that day (PAT-03)", () => {
+    const closures = [{ startDate: fromIsoDate("2026-11-12"), endDate: fromIsoDate("2026-11-12") }];
+    expect(oneOffRevival(trip({ facility: { ...CARE, active: true, closures } }))).toBeNull();
+  });
+
   it("keeps a private client's free destination, and a return comes back home", () => {
     const station = trip({ payer: "PRIVATE", prescription: null, facility: null, direction: "RETURN", pickupAddress: "Gare de Manosque" });
     expect(oneOffRevival(station)).toMatchObject({

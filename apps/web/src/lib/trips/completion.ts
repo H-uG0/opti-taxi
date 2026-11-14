@@ -168,8 +168,9 @@ async function reviveRecurrenceTrips(tx: Client, actor: AuditActor, where: Prism
     const day = toIsoDate(trip.serviceDate);
     const again = planned.get(recurrenceTripKey(trip.recurrenceId ?? "", occurrenceOf(trip), trip.direction));
     if (!again) continue;
-    // A trip moved to another day stays cancelled while the patient is absent on that day.
-    if (coveredOn(recurrenceById.get(trip.recurrenceId ?? "")?.patient.absences, day)) continue;
+    // A trip moved to another day stays cancelled while the patient is absent, or the facility closed, on that day.
+    const rec = recurrenceById.get(trip.recurrenceId ?? "");
+    if (coveredOn(rec?.patient.absences, day) || coveredOn(rec?.facility.closures, day)) continue;
     // Guarded: a trip restored or changed meanwhile is left as it is.
     const { count } = await tx.trip.updateMany({
       where: { id: trip.id, status: "CANCELLED", cancellationOrigin: "SYSTEM" },
@@ -184,9 +185,9 @@ async function reviveRecurrenceTrips(tx: Client, actor: AuditActor, where: Prism
 /**
  * Brings back the one-off trips (no recurrence) matching `where`, from
  * tomorrow on, that the application cancelled and whose cause is gone: the
- * patient is active and not absent that day, the facility too, and a CPAM
- * trip's prescription covers its date (see oneOffRevival). Traced
- * trip.revive. Returns how many.
+ * patient is active and not absent that day, the facility active and not
+ * closed that day, and a CPAM trip's prescription covers its date (see
+ * oneOffRevival). Traced trip.revive. Returns how many.
  */
 export async function reviveOneOffTrips(tx: Client, actor: AuditActor, where: Prisma.TripWhereInput): Promise<number> {
   const candidates: OneOffRevivalTrip[] = await tx.trip.findMany({
@@ -220,7 +221,17 @@ export async function reviveOneOffTrips(tx: Client, actor: AuditActor, where: Pr
         },
       },
       prescription: { select: { mode: true, sharing: true, validFrom: true, validTo: true } },
-      facility: { select: { active: true, address: true, postalCode: true, city: true, lat: true, lng: true } },
+      facility: {
+        select: {
+          active: true,
+          address: true,
+          postalCode: true,
+          city: true,
+          lat: true,
+          lng: true,
+          closures: { select: { startDate: true, endDate: true } },
+        },
+      },
     },
   });
   const events: AuditEntry[] = [];

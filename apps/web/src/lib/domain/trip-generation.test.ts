@@ -220,6 +220,14 @@ describe("planTripsFromRecurrences — patient absences (PAT-02)", () => {
     expect(recurrenceOccursOn(rec, "2026-11-09")).toBe(true);
   });
 
+  it("creates no trip to a facility on the days of its dated closures, but keeps those of a public holiday (PAT-03)", () => {
+    const closed = recurrence({ facility: { ...CARE, closures: [{ startDate: fromIsoDate("2026-11-04"), endDate: fromIsoDate("2026-11-04") }] } });
+    expect([...new Set(planTripsFromRecurrences([closed], MONDAY, SUNDAY).map(dayOf))]).toEqual(["2026-11-02", "2026-11-06"]);
+    expect(GENERATION_INCLUDE.facility).toEqual({ include: { closures: { select: { startDate: true, endDate: true } } } });
+    // Wednesday 11 November 2026 (Armistice): the trips are created, then flagged.
+    expect([...new Set(planTripsFromRecurrences([recurrence()], "2026-11-11", "2026-11-11").map(dayOf))]).toEqual(["2026-11-11"]);
+  });
+
   it("loads the absences with the patient", () => {
     expect(GENERATION_INCLUDE.patient.include.absences).toEqual({ select: { startDate: true, endDate: true } });
   });

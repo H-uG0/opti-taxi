@@ -64,7 +64,8 @@ export type RecurrenceForGeneration = {
     prescriptions?: readonly PrescriptionForGeneration[];
     absences?: readonly { startDate: Date; endDate: Date }[];
   };
-  facility: Place;
+  /** `closures`: the facility's dated closures (no session to it on their days). */
+  facility: Place & { closures?: readonly { startDate: Date; endDate: Date }[] };
   /** The prescription the recurrence is attached to. */
   prescription: Omit<PrescriptionForGeneration, "id">;
 };
@@ -90,7 +91,8 @@ export const GENERATION_INCLUDE = {
       },
     },
   },
-  facility: true,
+  // No session on the days of a dated closure of the facility: lib/domain/facility-calendar.ts.
+  facility: { include: { closures: { select: { startDate: true, endDate: true } } } },
   prescription: true,
 } satisfies Prisma.RecurrenceInclude;
 
@@ -128,18 +130,20 @@ export function rhythmOf(
 }
 
 /**
- * The recurrence plans a care session on this date (active, patient active and not absent that day, its rhythm:
- * period, weekdays and interval, or explicit dates), whatever the prescription.
+ * The recurrence plans a care session on this date (active, patient active and not absent that day, facility
+ * not closed that day by a dated closure, its rhythm: period, weekdays and interval, or explicit dates), whatever
+ * the prescription. A public holiday does not stop it: the trips are flagged (lib/domain/facility-calendar.ts).
  */
 export function recurrenceOccursOn(
   rec: Pick<RecurrenceForGeneration, "active" | "weekdays" | "intervalWeeks" | "sessionDates" | "startDate" | "endDate"> & {
     patient: Pick<RecurrenceForGeneration["patient"], "active" | "absences">;
+    facility?: Pick<RecurrenceForGeneration["facility"], "closures">;
   },
   isoDate: string,
 ): boolean {
   if (!rec.active || !rec.patient.active) return false;
   if (!rhythmOccursOn(rhythmOf(rec), isoDate)) return false;
-  return !coveredOn(rec.patient.absences, isoDate);
+  return !coveredOn(rec.patient.absences, isoDate) && !coveredOn(rec.facility?.closures, isoDate);
 }
 
 /** A session the recurrence plans but no prescription covers: no trip, reported to the regulator. */

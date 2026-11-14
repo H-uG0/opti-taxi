@@ -80,6 +80,8 @@ enum CancellationReason {
   REGULATION
   /// Absence datée du patient (vacances, autre) saisie sur sa fiche ; une hospitalisation garde HOSPITALIZATION.
   PATIENT_ABSENCE
+  /// Établissement fermé : fermeture datée saisie sur sa fiche, ou jour férié qu'il ne travaille pas.
+  FACILITY_CLOSED
   OTHER
 }
 
@@ -292,12 +294,32 @@ model Facility {
   notes      String?
   /// Minutes ajoutées au temps d'arrêt à l'établissement (dépose d'un aller, prise en charge d'un retour) : accueil, étages.
   extraServiceMin Int     @default(0)
+  /// Ouvert les jours fériés (PublicHoliday) : sinon, les courses vers lui ces jours-là sont signalées sur le
+  /// planning et dans Courses (« Jour férié : N courses vers des établissements fermés »). Coché pour la dialyse.
+  openOnHolidays Boolean  @default(false)
   active     Boolean      @default(true)
   createdAt  DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
 
   recurrences Recurrence[]
   trips       Trip[]
+  closures    FacilityClosure[]
+}
+
+/// Fermeture datée d'un établissement, du startDate au endDate inclus : ses récurrences ne génèrent pas de course
+/// ces jours-là, et les courses déjà créées vers lui sont annulées par l'application (origine SYSTEM, motif
+/// FACILITY_CLOSED), rétablies d'elles-mêmes si la fermeture est supprimée.
+model FacilityClosure {
+  id         String   @id @default(cuid())
+  facilityId String
+  startDate  DateTime @db.Date
+  endDate    DateTime @db.Date
+  note       String?
+  createdAt  DateTime @default(now())
+
+  facility Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  @@index([facilityId, startDate])
 }
 
 model Prescription {

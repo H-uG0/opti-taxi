@@ -36,7 +36,15 @@ describe("parseFacilityForm", () => {
       phone: "04 92 40 61 61",
       notes: null,
       extraServiceMin: 0,
+      openOnHolidays: false,
     });
+  });
+
+  it("reads « ouvert les jours fériés » (PAT-03), and echoes it after a refusal", () => {
+    const parsed = parseFacilityForm(form({ ...facility, openOnHolidays: "on" }));
+    expect(parsed.success && parsed.data.openOnHolidays).toBe(true);
+    const refused = parseFacilityForm(form({ ...facility, name: "", openOnHolidays: "on" }));
+    expect(!refused.success && refused.state.values?.openOnHolidays).toBe("on");
   });
 
   it("reads the minutes added to the stop at the facility", () => {

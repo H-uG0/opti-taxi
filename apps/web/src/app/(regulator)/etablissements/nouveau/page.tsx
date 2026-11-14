@@ -5,6 +5,7 @@ import { EMPTY_ADDRESS } from "@/components/address/address-utils";
 import { PageHeader } from "@/components/ui/layout";
 import { createFacility } from "../actions";
 import { FacilityForm } from "../_components/facility-form";
+import { holidayDefault } from "../_lib/options";
 import { BackLink } from "@/components/ui/back-link";
 
 export const metadata: Metadata = { title: "Nouvel établissement" };
@@ -18,7 +19,16 @@ export default async function NewFacilityPage() {
       <PageHeader title="Nouvel établissement" description="Lieu de soins, destination des courses régulières." />
       <FacilityForm
         action={createFacility}
-        initial={{ name: "", type: "DIALYSIS", phone: "", notes: "", extraServiceMin: "0", address: EMPTY_ADDRESS }}
+        initial={{
+          name: "",
+          type: "DIALYSIS",
+          phone: "",
+          notes: "",
+          extraServiceMin: "0",
+          openOnHolidays: holidayDefault("DIALYSIS"),
+          address: EMPTY_ADDRESS,
+        }}
+        followsType
         geocoderEnabled={geocoderEnabled()}
         submitLabel="Créer l'établissement"
         cancelHref="/etablissements"

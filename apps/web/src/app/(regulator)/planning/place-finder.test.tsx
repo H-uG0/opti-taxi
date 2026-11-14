@@ -94,7 +94,8 @@ describe("PlaceFinder (« Où placer cette course ? »)", () => {
     expect(depots[1]!.textContent).toContain("aucune place");
     expect(within(depots[1]!).getByText("1 véhicule sans place")).toBeTruthy();
     expect(depots[1]!.textContent).toContain("VSL 2 (Manosque) est indisponible ce jour\u00a0: révision au garage");
-    expect(screen.getByRole("button", { name: "Recalculer" })).toBeTruthy();
+    // The list and the button's label are two renders apart: waited for, never read in between.
+    expect(await screen.findByRole("button", { name: "Recalculer" })).toBeTruthy();
   });
 
   it("applies a place on the version it was computed on, and asks first on a validated day", async () => {
@@ -167,7 +168,7 @@ describe("PlaceFinder (« Où placer cette course ? »)", () => {
     expect(screen.getByRole("status").textContent).toBe("Recherche des places…");
     answer({ ok: true, view: places() });
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("2 places possibles sur 3 véhicules compatibles"));
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Recalculer" }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Recalculer" })));
     // The list itself is not a live region (a screen reader would read all of it at each search).
     expect(screen.getByRole("list", { name: "Places par dépôt" }).closest("[aria-live]")).toBeNull();
   });

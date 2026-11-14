@@ -42,6 +42,7 @@ export default async function EditFacilityPage({ params }: { params: Promise<{ i
           phone: facility.phone ?? "",
           notes: facility.notes ?? "",
           extraServiceMin: String(facility.extraServiceMin),
+          openOnHolidays: facility.openOnHolidays,
           address: addressFormValues(facility),
         }}
         geocoderEnabled={geocoderEnabled()}

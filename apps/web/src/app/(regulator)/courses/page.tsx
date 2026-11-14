@@ -16,6 +16,9 @@ import { addDays, formatDayDate, formatLongDate, formatShortDate, fromIsoDate, i
 import { currentHorizon, inHorizon } from "@/lib/trips/completion";
 import { loadRecurrencesWithoutTrip } from "@/lib/trips/missing-load";
 import { generationStateOf, MissingRecurrencesNote } from "@/components/trips/missing-recurrences";
+import { ClosedFacilitiesNote } from "@/components/trips/closed-facilities-note";
+import { closedFacilitiesNoteProps } from "@/lib/trips/closed-facilities";
+import { loadClosedFacilityTrips } from "@/lib/trips/closed-facilities-load";
 import { TripCompletion } from "@/components/trips/trip-completion";
 import { SimulatedDayBadge } from "@/components/planning/simulated-day-badge";
 import { isSimulatedDay } from "@/lib/simulated-day";
@@ -74,7 +77,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
   // The day's patients, phones, addresses and notes are on screen (auditRead never throws).
   const traced = auditRead(user, { action: "trip_list.view", entity: "Trip", entityId: null, serviceDate: date });
   const today = todayIso();
-  const [trips, stops, horizon, missing, simulated, depots] = await Promise.all([
+  const [trips, stops, horizon, missing, simulated, depots, closed] = await Promise.all([
     db.trip.findMany({
       where: { serviceDate },
       select: {
@@ -140,6 +143,8 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
     // Its statuses and sharing answers are simulated: said in the header, as on the planning.
     isSimulatedDay(date),
     db.depot.findMany({ select: { id: true, name: true } }),
+    // Holiday or dated closure: the open trips to a facility closed that day (from today on).
+    date >= today ? loadClosedFacilityTrips(db, date) : Promise.resolve(null),
   ]);
   await traced;
   const completing = inHorizon(date, horizon);
@@ -344,6 +349,9 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       ) : (
         <MissingRecurrencesNote missing={missing} state={generationStateOf(date, today, false)} onCourses className="mb-4" />
       )}
+      {closed ? (
+        <ClosedFacilitiesNote key={date} date={date} {...closedFacilitiesNoteProps(closed)} className="mb-4" />
+      ) : null}
 
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <Stat label="Courses" value={summary.total} hint={`${summary.outbound} aller · ${summary.return} retour`} />

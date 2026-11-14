@@ -25,6 +25,7 @@ import { frenchPublicHolidays } from "@/lib/domain/holidays";
 import { generateTrips } from "@/lib/domain/trip-generation";
 import { systemCancellation } from "@/lib/domain/cancellation";
 import { absenceCancellationNote, absenceCancellationReason } from "@/lib/domain/patient-absences";
+import { closureCancellationNote } from "@/lib/domain/facility-calendar";
 import { logError } from "@/lib/log";
 import {
   addDays,
@@ -150,6 +151,7 @@ async function wipe(): Promise<void> {
     prisma.dayCrew.deleteMany(),
     prisma.staffAbsence.deleteMany(),
     prisma.patientAbsence.deleteMany(),
+    prisma.facilityClosure.deleteMany(),
     prisma.crewIncompatibility.deleteMany(),
     prisma.routeStop.deleteMany(),
     prisma.trip.deleteMany(),
@@ -227,6 +229,8 @@ async function seedFacilities<K extends string>(rng: Rng, defs: Record<K, Facili
         phone: fictitiousLandline(rng),
         notes: def.notes,
         extraServiceMin: "extraServiceMin" in def ? def.extraServiceMin : 0,
+        // Dialysis centres work on public holidays (the others are flagged those days: PAT-03).
+        openOnHolidays: def.type === "DIALYSIS",
       },
     });
     facilities.set(key, created);
@@ -659,6 +663,28 @@ async function seedHolidayAbsence(facilities: Map<FacilityKey, CreatedFacility>,
       status: "CANCELLED",
       ...systemCancellation(regulatorId, new Date(), absenceCancellationNote(period), absenceCancellationReason("HOLIDAY")),
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Facility closures (PAT-03).
+
+/**
+ * After the trips are generated: the chemotherapy day unit of Aix closed next
+ * Thursday (staff training). Its trips that day are cancelled as the facility
+ * record's « Fermetures » does it (origin SYSTEM, reason « établissement
+ * fermé », by the regulator): they come back if the closure is removed.
+ */
+async function seedFacilityClosure(facilities: Map<FacilityKey, CreatedFacility>, dates: Dates, regulatorId: string): Promise<void> {
+  const facility = lookup(facilities, "chemotherapyAix", "Établissement");
+  const day = addDays(dates.nextMonday, 3);
+  const period = { startDate: day, endDate: day };
+  await prisma.facilityClosure.create({
+    data: { facilityId: facility.id, startDate: fromIsoDate(day), endDate: fromIsoDate(day), note: "Formation du personnel." },
+  });
+  await prisma.trip.updateMany({
+    where: { facilityId: facility.id, serviceDate: fromIsoDate(day), status: "PLANNED" },
+    data: { status: "CANCELLED", ...systemCancellation(regulatorId, new Date(), closureCancellationNote(period), "FACILITY_CLOSED") },
   });
 }
 
@@ -1260,6 +1286,7 @@ async function main(): Promise<void> {
   const privateClients = await seedPrivateClients(rng, names, dates);
   const refusals = await seedSharingRefusals(dates, regulatorId);
   await seedHolidayAbsence(facilities, dates, regulatorId);
+  await seedFacilityClosure(facilities, dates, regulatorId);
   console.log(`• Patients occasionnels et leurs courses ponctuelles du ${formatShortDate(dates.monday)} au ${formatShortDate(dates.lastDay)}`);
   // Own generators: the patients and trips drawn above stay those of the earlier seeds.
   const pool = await seedOccasionalPatients(new Rng(RANDOM_SEED + 7), OCCASIONAL_POOL_SIZE, OCCASIONAL_AREAS);

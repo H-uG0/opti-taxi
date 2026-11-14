@@ -20,6 +20,7 @@ export const CANCELLATION_REASON_LABELS: Record<CancellationReason, string> = {
   REFERENTIAL_SYNC: "Synchronisation du référentiel",
   REGULATION: "Décision de la régulation",
   PATIENT_ABSENCE: "Absence du patient",
+  FACILITY_CLOSED: "Établissement fermé",
   OTHER: "Autre motif",
 };
 
@@ -189,6 +190,7 @@ const NOT_THE_PATIENTS: readonly CancellationReason[] = [
   "FACILITY",
   "DECEASED",
   "PATIENT_ABSENCE",
+  "FACILITY_CLOSED",
 ];
 
 /**

@@ -22,6 +22,9 @@ import { formatDateTime, formatDayDate, formatLongDate, isIsoDate, todayIso, tom
 import { currentHorizon, inHorizon } from "@/lib/trips/completion";
 import { loadRecurrencesWithoutTrip } from "@/lib/trips/missing-load";
 import { generationStateOf, MissingRecurrencesNote } from "@/components/trips/missing-recurrences";
+import { ClosedFacilitiesNote } from "@/components/trips/closed-facilities-note";
+import { closedFacilitiesNoteProps } from "@/lib/trips/closed-facilities";
+import { loadClosedFacilityTrips } from "@/lib/trips/closed-facilities-load";
 import type { MissingRecurrence } from "@/lib/trips/missing";
 import { TripCompletion } from "@/components/trips/trip-completion";
 import { DayTabs } from "@/components/nav/day-tabs";
@@ -106,11 +109,13 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   // Read before the plan: a change made between the two reads makes the version older than the plan shown,
   // so an action on this page is refused (never the other way round).
   const shownVersion = await loadDayVersion(db, date);
-  const [view, horizon, missing] = await Promise.all([
+  const [view, horizon, missing, closed] = await Promise.all([
     loadPlanningDay(date),
     // Read only: the trips of a date of the horizon are completed by <TripCompletion> once the page is shown.
     currentHorizon(db, today),
     date >= today ? loadRecurrencesWithoutTrip(date) : Promise.resolve([]),
+    // Holiday or dated closure: the open trips to a facility closed that day (from today on).
+    date >= today ? loadClosedFacilityTrips(db, date) : Promise.resolve(null),
     // The day's patients, stop addresses, phones, access and trip notes are on screen (timeline, map, trip panel).
     auditRead(user, { action: "plan.view", entity: "Route", entityId: null, serviceDate: date }),
   ]);
@@ -222,6 +227,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
         ) : showMissing ? (
           <MissingRecurrencesNote missing={missing} state={generationStateOf(date, today, false)} />
         ) : null}
+        {closed ? <ClosedFacilitiesNote key={date} date={date} {...closedFacilitiesNoteProps(closed)} /> : null}
 
         {view.dayStatus === "EMPTY" ? (
           <>
