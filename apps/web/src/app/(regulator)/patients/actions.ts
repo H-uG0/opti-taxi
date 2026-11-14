@@ -18,6 +18,7 @@ import {
   type RefreshOutcome,
 } from "@/lib/planning/refresh-routes";
 import { GENERATION_INCLUDE, prescriptionOn } from "@/lib/domain/trip-generation";
+import { parseDaySchedules } from "@/lib/domain/recurrence-rhythm";
 import { completeTrips, currentHorizon, reviveOneOffTrips, type Completion } from "@/lib/trips/completion";
 import { formatShortDate, fromIsoDate, isIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import { activationEvent, alreadyInStateMessage, renewalEvents } from "./_lib/audit-events";
@@ -32,6 +33,7 @@ import {
   readPatientForm,
   readRecurrenceForm,
   type PatientInput,
+  type RecurrenceInput,
 } from "./_lib/schemas";
 import { isRenewalOf } from "./_lib/status";
 import { RENEWAL_MAX_GAP_DAYS } from "@/lib/domain/renewal";
@@ -88,6 +90,18 @@ function afterSave(path: string, summary: SyncSummary, refresh: RefreshOutcome):
 }
 
 const activeFlag = z.enum(["true", "false"]).transform((v) => v === "true");
+
+/** The recurrence form's output as Prisma stores it (dates of the period and of the sessions, day schedules as JSON). */
+function recurrenceData<T extends Omit<RecurrenceInput, "prescriptionId">>(input: T) {
+  const { startDate, endDate, sessionDates, daySchedules, ...rest } = input;
+  return {
+    ...rest,
+    startDate: fromIsoDate(startDate),
+    endDate: endDate ? fromIsoDate(endDate) : null,
+    sessionDates: sessionDates.map(fromIsoDate),
+    daySchedules: daySchedules as Prisma.InputJsonValue,
+  };
+}
 
 /** Note of the trips a referential change cancels (origin SYSTEM: they come back once the cause is gone). */
 const CAUSES = {
@@ -260,15 +274,8 @@ export async function createRegularPatient(_prev: PatientFormState, formData: Fo
       data: { ...rules, patientId: patient.id, validFrom: fromIsoDate(validFrom), validTo: fromIsoDate(validTo) },
       select: { id: true },
     });
-    const { startDate, endDate, ...rhythm } = recurrence;
     const rec = await tx.recurrence.create({
-      data: {
-        ...rhythm,
-        patientId: patient.id,
-        prescriptionId: pmt.id,
-        startDate: fromIsoDate(startDate),
-        endDate: endDate ? fromIsoDate(endDate) : null,
-      },
+      data: { ...recurrenceData(recurrence), patientId: patient.id, prescriptionId: pmt.id },
       select: { id: true },
     });
     await audit(tx, user, [
@@ -641,7 +648,7 @@ export async function createRecurrence(patientId: string, _prev: FormState, form
   const patient = await db.patient.findUnique({ where: { id: id.data }, select: { id: true } });
   if (!patient) return messageState(NOT_FOUND, null);
 
-  const { startDate, endDate, ...rest } = parsed.data;
+  const rest = parsed.data;
   const refErrors = await checkRecurrenceReferences(patient.id, rest.facilityId, rest.prescriptionId, null);
   if (refErrors) {
     return errorState(refErrors, readRecurrenceForm(formData), "Vérifiez l'établissement et la prescription.");
@@ -649,12 +656,7 @@ export async function createRecurrence(patientId: string, _prev: FormState, form
 
   const summary = await db.$transaction(async (tx) => {
     const created = await tx.recurrence.create({
-      data: {
-        ...rest,
-        patientId: patient.id,
-        startDate: fromIsoDate(startDate),
-        endDate: endDate ? fromIsoDate(endDate) : null,
-      },
+      data: { ...recurrenceData(rest), patientId: patient.id },
       select: { id: true },
     });
     await audit(tx, user, { action: "recurrence.create", entity: "Recurrence", entityId: created.id });
@@ -669,10 +671,15 @@ export async function createRecurrence(patientId: string, _prev: FormState, form
 
 function sameSchedule(a: RecurrenceSchedule, b: RecurrenceSchedule): boolean {
   const days = (r: RecurrenceSchedule) => [...r.weekdays].sort((x, y) => x - y).join(",");
+  const dates = (r: RecurrenceSchedule) => [...(r.sessionDates ?? [])].sort().join(",");
+  const daySchedules = (r: RecurrenceSchedule) => JSON.stringify(parseDaySchedules(r.daySchedules));
   return (
     a.facilityId === b.facilityId &&
     a.prescriptionId === b.prescriptionId &&
     days(a) === days(b) &&
+    (a.intervalWeeks ?? 1) === (b.intervalWeeks ?? 1) &&
+    dates(a) === dates(b) &&
+    daySchedules(a) === daySchedules(b) &&
     a.appointmentMinute === b.appointmentMinute &&
     a.sessionMinutes === b.sessionMinutes &&
     a.legs === b.legs &&
@@ -707,8 +714,11 @@ export async function updateRecurrence(
       facilityId: true,
       prescriptionId: true,
       weekdays: true,
+      intervalWeeks: true,
+      sessionDates: true,
       appointmentMinute: true,
       sessionMinutes: true,
+      daySchedules: true,
       legs: true,
       startDate: true,
       endDate: true,
@@ -733,8 +743,11 @@ export async function updateRecurrence(
     facilityId: existing.facilityId,
     prescriptionId: existing.prescriptionId,
     weekdays: existing.weekdays,
+    intervalWeeks: existing.intervalWeeks,
+    sessionDates: existing.sessionDates.map(toIsoDate),
     appointmentMinute: existing.appointmentMinute,
     sessionMinutes: existing.sessionMinutes,
+    daySchedules: existing.daySchedules,
     legs: existing.legs,
     startDate: toIsoDate(existing.startDate),
     endDate: existing.endDate ? toIsoDate(existing.endDate) : null,
@@ -744,8 +757,11 @@ export async function updateRecurrence(
     facilityId: rest.facilityId,
     prescriptionId: rest.prescriptionId,
     weekdays: rest.weekdays,
+    intervalWeeks: rest.intervalWeeks,
+    sessionDates: rest.sessionDates,
     appointmentMinute: rest.appointmentMinute,
     sessionMinutes: rest.sessionMinutes,
+    daySchedules: rest.daySchedules,
     legs: rest.legs,
     startDate,
     endDate,
@@ -755,10 +771,7 @@ export async function updateRecurrence(
 
   const leftRoutes = new Set<string>();
   const summary = await db.$transaction(async (tx) => {
-    await tx.recurrence.update({
-      where: { id: existing.id },
-      data: { ...rest, startDate: fromIsoDate(startDate), endDate: endDate ? fromIsoDate(endDate) : null },
-    });
+    await tx.recurrence.update({ where: { id: existing.id }, data: recurrenceData(parsed.data) });
     await audit(tx, user, { action: "recurrence.update", entity: "Recurrence", entityId: existing.id });
     if (sameSchedule(before, after)) return EMPTY_SYNC;
 

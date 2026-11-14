@@ -19,11 +19,11 @@ import type {
   VehicleType,
 } from "@prisma/client";
 import { allowedVehicleTypesFor, isShareable, nextSharingStatus, sharingAllowedFor } from "@/lib/domain/rules";
+import { rhythmOccursOn, sessionTimesOn } from "@/lib/domain/recurrence-rhythm";
 import { isSeatedOnly, keepsVehicleType } from "@/lib/planning/exceptional-ambulance";
 
 // Shared with the revival of cancelled trips (lib/domain/trip-generation.ts).
 export { nextSharingStatus };
-import { isoWeekday } from "@/lib/time";
 
 /** Trips a referential change may still modify: not started, not cancelled. */
 export const OPEN_TRIP_STATUSES = ["PLANNED", "ASSIGNED"] as const satisfies readonly TripStatus[];
@@ -284,8 +284,14 @@ export type RecurrenceSchedule = {
   facilityId: string;
   prescriptionId: string;
   weekdays: number[];
+  /** Every N weeks from the week of startDate (lib/domain/recurrence-rhythm.ts); absent: every week. */
+  intervalWeeks?: number;
+  /** Explicit session dates ("YYYY-MM-DD"); absent or empty: the weekly rhythm. */
+  sessionDates?: string[];
   appointmentMinute: number;
   sessionMinutes: number;
+  /** Own time or session length of some weekdays (DaySchedule[]); absent: none. */
+  daySchedules?: unknown;
   legs: RecurrenceLegs;
   startDate: string;
   endDate: string | null;
@@ -293,15 +299,13 @@ export type RecurrenceSchedule = {
   notes: string | null;
 };
 
-/** Does the recurrence still produce a trip on this date and leg? */
+/** Does the recurrence still produce a trip on this date and leg (its rhythm: weekdays and interval, or explicit dates)? */
 export function recurrenceSchedules(
-  recurrence: Pick<RecurrenceSchedule, "weekdays" | "legs" | "startDate" | "endDate">,
+  recurrence: Pick<RecurrenceSchedule, "weekdays" | "intervalWeeks" | "sessionDates" | "legs" | "startDate" | "endDate">,
   isoDate: string,
   direction: TripDirection,
 ): boolean {
-  if (!recurrence.weekdays.includes(isoWeekday(isoDate))) return false;
-  if (isoDate < recurrence.startDate) return false;
-  if (recurrence.endDate !== null && isoDate > recurrence.endDate) return false;
+  if (!rhythmOccursOn(recurrence, isoDate)) return false;
   return recurrence.legs === "BOTH" || recurrence.legs === direction;
 }
 
@@ -312,8 +316,9 @@ export function recurrenceSchedules(
  * covers their date (otherwise they keep the one in force that day, or take
  * `fallback`, the one the generation would give them that day — a renewal or
  * the PMT renewed —, and are cancelled only when none covers it), the new
- * facility, the new time and the new notes — except trips whose facility,
- * time or notes were changed by hand, which keep them.
+ * facility, the new time (of their session's weekday: its own time when it has
+ * one) and the new notes — except trips whose facility, time or notes were
+ * changed by hand, which keep them.
  */
 export function recurrenceTarget(
   trip: SyncTrip,
@@ -321,7 +326,8 @@ export function recurrenceTarget(
   after: RecurrenceSchedule & { prescription: PrescriptionRules & DateRange; facility: Place },
   fallback: PrescriptionRules | null = null,
 ): TripTarget {
-  if (!recurrenceSchedules(after, trip.occurrenceDate ?? trip.serviceDate, trip.direction)) return CANCEL;
+  const session = trip.occurrenceDate ?? trip.serviceDate;
+  if (!recurrenceSchedules(after, session, trip.direction)) return CANCEL;
 
   let prescription: PrescriptionRules | undefined;
   if (coversDate(after.prescription, trip.serviceDate)) {
@@ -331,14 +337,17 @@ export function recurrenceTarget(
     prescription = fallback;
   }
 
+  // The times of the session's weekday, before and after (a weekday may have its own).
+  const timesBefore = sessionTimesOn(before, session);
+  const timesAfter = sessionTimesOn(after, session);
   let keyMinute: number | undefined;
   if (trip.direction === "OUTBOUND") {
-    if (before.appointmentMinute !== after.appointmentMinute && trip.appointmentMinute === before.appointmentMinute) {
-      keyMinute = after.appointmentMinute;
+    if (timesBefore.appointmentMinute !== timesAfter.appointmentMinute && trip.appointmentMinute === timesBefore.appointmentMinute) {
+      keyMinute = timesAfter.appointmentMinute;
     }
   } else {
-    const readyBefore = before.appointmentMinute + before.sessionMinutes;
-    const readyAfter = after.appointmentMinute + after.sessionMinutes;
+    const readyBefore = timesBefore.appointmentMinute + timesBefore.sessionMinutes;
+    const readyAfter = timesAfter.appointmentMinute + timesAfter.sessionMinutes;
     if (readyBefore !== readyAfter && trip.readyMinute === readyBefore) keyMinute = readyAfter;
   }
 

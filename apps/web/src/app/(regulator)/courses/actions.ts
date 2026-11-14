@@ -856,7 +856,7 @@ export async function updateTrip(tripId: string, _prev: EditTripState, formData:
       const [recurrence, nearby] = await Promise.all([
         db.recurrence.findUnique({
           where: { id: trip.recurrenceId },
-          select: { active: true, weekdays: true, legs: true, startDate: true, endDate: true },
+          select: { active: true, weekdays: true, intervalWeeks: true, sessionDates: true, legs: true, startDate: true, endDate: true },
         }),
         // Its other trips of this leg on that day (moved there or not) or serving that day's session (moved or not).
         db.trip.findMany({
@@ -879,6 +879,8 @@ export async function updateTrip(tripId: string, _prev: EditTripState, formData:
             recurrenceSchedules(
               {
                 weekdays: recurrence.weekdays,
+                intervalWeeks: recurrence.intervalWeeks,
+                sessionDates: recurrence.sessionDates.map(toIsoDate),
                 legs: recurrence.legs,
                 startDate: toIsoDate(recurrence.startDate),
                 endDate: recurrence.endDate ? toIsoDate(recurrence.endDate) : null,

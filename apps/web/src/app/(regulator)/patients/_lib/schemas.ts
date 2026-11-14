@@ -8,7 +8,27 @@ import { readAddressForm } from "@/components/address/address-utils";
 import { isIsoDate, parseMinute } from "@/lib/time";
 import { optionalPhone, optionalText, parseForm, type ParseResult } from "./form-parse";
 import { errorState, formCheckbox, formString, formStrings, type FieldErrors, type FormState, type FormValues } from "@/lib/forms";
-import { MAX_SESSION_MINUTES, MOBILITIES, PRESCRIBED_MODES, RECURRENCE_LEGS, RECURRENCE_NOTES_MAX, SHARING_SCOPES } from "./options";
+import {
+  MAX_INTERVAL_WEEKS,
+  MAX_SESSION_DATES,
+  parseSessionDates,
+  weekdaysOfDates,
+  type DaySchedule,
+} from "@/lib/domain/recurrence-rhythm";
+import {
+  DATES_FREQUENCY,
+  dayTimeField,
+  daySessionField,
+  ISO_WEEKDAYS,
+  MAX_SESSION_MINUTES,
+  MOBILITIES,
+  PRESCRIBED_MODES,
+  RECURRENCE_LEGS,
+  RECURRENCE_NOTES_MAX,
+  SHARING_SCOPES,
+} from "./options";
+
+export { DATES_FREQUENCY, dayTimeField, daySessionField };
 
 function requiredDate(label: string) {
   return z
@@ -98,45 +118,68 @@ export function parsePrescriptionForm(formData: FormData): ParseResult<Prescript
 
 // ---------------------------------------------------------------- recurrence
 
-export const recurrenceSchema = z
-  .object({
-    facilityId: z.string().trim().min(1, "Choisissez un établissement").max(64),
-    prescriptionId: z.string().trim().min(1, "Choisissez une prescription").max(64),
-    label: optionalText(80, "Libellé"),
-    weekdays: z
-      .array(z.string().regex(/^[1-7]$/, "Jour invalide"))
-      .min(1, "Cochez au moins un jour")
-      .transform((days) => [...new Set(days.map(Number))].sort((a, b) => a - b)),
-    appointmentTime: z
-      .string()
-      .trim()
-      .min(1, "Heure de rendez-vous obligatoire")
-      .transform((value, ctx) => {
-        const minute = parseMinute(value);
-        if (minute === null) {
-          ctx.addIssue({ code: "custom", message: "Heure invalide (HH:MM, ex. 07:30)" });
-          return z.NEVER;
-        }
-        return minute;
-      }),
-    sessionMinutes: z
-      .string()
-      .trim()
-      .min(1, "Durée de séance obligatoire")
-      .regex(/^\d+$/, "Durée en minutes entières")
-      .transform(Number)
-      .pipe(
-        z
-          .number()
-          .int()
-          .min(0, "Durée positive attendue")
-          .max(MAX_SESSION_MINUTES, `Durée de séance\u00a0: ${MAX_SESSION_MINUTES}\u00a0min au plus`),
-      ),
-    legs: z.enum(RECURRENCE_LEGS, { error: "Choisissez les trajets" }),
-    startDate: requiredDate("Date de début"),
-    endDate: optionalDate("Date de fin"),
-    notes: optionalText(RECURRENCE_NOTES_MAX, "Texte des consignes"),
-  })
+function sessionMinutesOf(raw: string): number | null {
+  return /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : null;
+}
+
+const recurrenceBaseSchema = z.object({
+  facilityId: z.string().trim().min(1, "Choisissez un établissement").max(64),
+  prescriptionId: z.string().trim().min(1, "Choisissez une prescription").max(64),
+  label: optionalText(80, "Libellé"),
+  frequency: z
+    .string()
+    .trim()
+    .transform((v) => (v === "" ? "1" : v))
+    .refine((v) => v === DATES_FREQUENCY || (/^\d$/.test(v) && Number(v) >= 1 && Number(v) <= MAX_INTERVAL_WEEKS), {
+      message: "Choisissez une fréquence",
+    }),
+  sessionDates: z.string().max(4000, "Trop de dates"),
+  weekdays: z
+    .array(z.string().regex(/^[1-7]$/, "Jour invalide"))
+    .min(1, "Cochez au moins un jour")
+    .transform((days) => [...new Set(days.map(Number))].sort((a, b) => a - b)),
+  appointmentTime: z
+    .string()
+    .trim()
+    .min(1, "Heure de rendez-vous obligatoire")
+    .transform((value, ctx) => {
+      const minute = parseMinute(value);
+      if (minute === null) {
+        ctx.addIssue({ code: "custom", message: "Heure invalide (HH:MM, ex. 07:30)" });
+        return z.NEVER;
+      }
+      return minute;
+    }),
+  sessionMinutes: z
+    .string()
+    .trim()
+    .min(1, "Durée de séance obligatoire")
+    .regex(/^\d+$/, "Durée en minutes entières")
+    .transform(Number)
+    .pipe(
+      z
+        .number()
+        .int()
+        .min(0, "Durée positive attendue")
+        .max(MAX_SESSION_MINUTES, `Durée de séance\u00a0: ${MAX_SESSION_MINUTES}\u00a0min au plus`),
+    ),
+  dayTimes: z.record(z.string(), z.string()),
+  daySessions: z.record(z.string(), z.string()),
+  legs: z.enum(RECURRENCE_LEGS, { error: "Choisissez les trajets" }),
+  startDate: requiredDate("Date de début"),
+  endDate: optionalDate("Date de fin"),
+  notes: optionalText(RECURRENCE_NOTES_MAX, "Texte des consignes"),
+});
+
+/**
+ * The recurrence form. A weekly rhythm (« Fréquence » every 1 to 8 weeks,
+ * counted from the week of the start date) or explicit dates (« Dates
+ * précises » : the weekdays and the period are theirs, see readRecurrenceRaw);
+ * a weekday ticked may have its own time and/or session length (empty: the
+ * common ones). The output is what Prisma stores (sessionDates as
+ * "YYYY-MM-DD", daySchedules without the values equal to the common ones).
+ */
+export const recurrenceSchema = recurrenceBaseSchema
   .superRefine((r, ctx) => {
     if (r.endDate !== null && isIsoDate(r.startDate) && r.endDate < r.startDate) {
       ctx.addIssue({
@@ -145,24 +188,80 @@ export const recurrenceSchema = z
         message: "La date de fin doit être égale ou postérieure à la date de début",
       });
     }
-    const end = r.appointmentTime + r.sessionMinutes;
-    if (r.legs !== "OUTBOUND" && Number.isFinite(end) && end >= 1440) {
+    if (r.frequency === DATES_FREQUENCY) {
+      const { dates, invalid } = parseSessionDates(r.sessionDates);
+      if (invalid.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["sessionDates"],
+          message: `Date${invalid.length > 1 ? "s" : ""} invalide${invalid.length > 1 ? "s" : ""}\u00a0: ${invalid.slice(0, 3).join(", ")} (JJ/MM/AAAA)`,
+        });
+      } else if (dates.length === 0) {
+        ctx.addIssue({ code: "custom", path: ["sessionDates"], message: "Saisissez au moins une date de séance" });
+      } else if (dates.length > MAX_SESSION_DATES) {
+        ctx.addIssue({ code: "custom", path: ["sessionDates"], message: `${MAX_SESSION_DATES} dates au plus` });
+      }
+    }
+    const lateReturn = (end: number) => r.legs !== "OUTBOUND" && Number.isFinite(end) && end >= 1440;
+    if (lateReturn(r.appointmentTime + r.sessionMinutes)) {
       ctx.addIssue({
         code: "custom",
         path: ["sessionMinutes"],
         message: "La fin de séance dépasse minuit\u00a0: le retour ne peut pas être planifié",
       });
     }
+    for (const day of r.weekdays) {
+      const time = (r.dayTimes[String(day)] ?? "").trim();
+      const session = (r.daySessions[String(day)] ?? "").trim();
+      const minute = time === "" ? r.appointmentTime : parseMinute(time);
+      if (minute === null) {
+        ctx.addIssue({ code: "custom", path: [dayTimeField(day)], message: "Heure invalide (HH:MM, ex. 13:00)" });
+        continue;
+      }
+      const length = session === "" ? r.sessionMinutes : sessionMinutesOf(session);
+      if (length === null || length > MAX_SESSION_MINUTES) {
+        ctx.addIssue({
+          code: "custom",
+          path: [daySessionField(day)],
+          message: `Durée en minutes entières, ${MAX_SESSION_MINUTES}\u00a0au plus`,
+        });
+        continue;
+      }
+      if (lateReturn(minute + length) && (time !== "" || session !== "")) {
+        ctx.addIssue({ code: "custom", path: [daySessionField(day)], message: "La fin de séance dépasse minuit" });
+      }
+    }
   })
-  .transform(({ appointmentTime, ...r }) => ({ ...r, appointmentMinute: appointmentTime }));
+  .transform(({ appointmentTime, frequency, sessionDates, dayTimes, daySessions, ...r }) => {
+    const daySchedules: DaySchedule[] = [];
+    for (const weekday of r.weekdays) {
+      const time = parseMinute((dayTimes[String(weekday)] ?? "").trim());
+      const session = sessionMinutesOf(daySessions[String(weekday)] ?? "");
+      const entry: DaySchedule = {
+        weekday,
+        appointmentMinute: time !== null && time !== appointmentTime ? time : null,
+        sessionMinutes: session !== null && session !== r.sessionMinutes ? session : null,
+      };
+      if (entry.appointmentMinute !== null || entry.sessionMinutes !== null) daySchedules.push(entry);
+    }
+    return {
+      ...r,
+      appointmentMinute: appointmentTime,
+      intervalWeeks: frequency === DATES_FREQUENCY ? 1 : Number(frequency),
+      sessionDates: frequency === DATES_FREQUENCY ? parseSessionDates(sessionDates).dates : [],
+      daySchedules,
+    };
+  });
 
 export type RecurrenceInput = z.output<typeof recurrenceSchema>;
 
 export function readRecurrenceForm(formData: FormData): FormValues {
-  return {
+  const values: FormValues = {
     facilityId: formString(formData, "facilityId"),
     prescriptionId: formString(formData, "prescriptionId"),
     label: formString(formData, "label"),
+    frequency: formString(formData, "frequency"),
+    sessionDates: formString(formData, "sessionDates"),
     weekdays: formStrings(formData, "weekdays"),
     appointmentTime: formString(formData, "appointmentTime"),
     sessionMinutes: formString(formData, "sessionMinutes"),
@@ -171,11 +270,47 @@ export function readRecurrenceForm(formData: FormData): FormValues {
     endDate: formString(formData, "endDate"),
     notes: formString(formData, "notes"),
   };
+  for (const day of ISO_WEEKDAYS) {
+    values[dayTimeField(day)] = formString(formData, dayTimeField(day));
+    values[daySessionField(day)] = formString(formData, daySessionField(day));
+  }
+  return values;
+}
+
+/**
+ * What the schema reads from the form's values: the weekdays' own times grouped,
+ * and, for explicit dates, the weekdays and the period taken from the dates
+ * (the fields of the weekly rhythm are hidden then).
+ */
+export function readRecurrenceRaw(values: FormValues): Record<string, unknown> {
+  const text = (key: string) => {
+    const v = values[key];
+    return typeof v === "string" ? v : "";
+  };
+  const raw: Record<string, unknown> = { ...values, dayTimes: {}, daySessions: {} };
+  for (const day of ISO_WEEKDAYS) {
+    (raw.dayTimes as Record<string, string>)[String(day)] = text(dayTimeField(day));
+    (raw.daySessions as Record<string, string>)[String(day)] = text(daySessionField(day));
+  }
+  if (text("frequency").trim() === DATES_FREQUENCY) {
+    const { dates, invalid } = parseSessionDates(text("sessionDates"));
+    if (invalid.length === 0 && dates.length > 0) {
+      raw.weekdays = weekdaysOfDates(dates).map(String);
+      raw.startDate = dates[0];
+      raw.endDate = dates.at(-1);
+    } else {
+      // The dates field carries the error; the period's own fields are hidden.
+      raw.weekdays = ["1"];
+      raw.startDate = "2000-01-01";
+      raw.endDate = "";
+    }
+  }
+  return raw;
 }
 
 export function parseRecurrenceForm(formData: FormData): ParseResult<RecurrenceInput> {
   const values = readRecurrenceForm(formData);
-  return parseForm(recurrenceSchema, values, values);
+  return parseForm(recurrenceSchema, readRecurrenceRaw(values), values);
 }
 
 // ---------------------------------------------------------------- regular patient (one screen)
@@ -210,7 +345,7 @@ export function parseRegularPatientForm(formData: FormData): { success: true; da
   if (formCheckbox(formData, "isSeries")) prescriptionValues.isSeries = "on";
   const prescription = parseForm(prescriptionSchema, { ...prescriptionValues, isSeries: formCheckbox(formData, "isSeries") }, prescriptionValues);
   const recurrenceValues = readRecurrenceForm(formData);
-  const recurrence = parseForm(recurrenceSchema, { ...recurrenceValues, prescriptionId: NEW_PRESCRIPTION }, recurrenceValues);
+  const recurrence = parseForm(recurrenceSchema, { ...readRecurrenceRaw(recurrenceValues), prescriptionId: NEW_PRESCRIPTION }, recurrenceValues);
 
   const values: FormValues = { ...readPatientForm(formData).values, ...prescriptionValues, ...recurrenceValues };
   delete values.prescriptionId;

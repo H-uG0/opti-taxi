@@ -8,7 +8,7 @@ import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { FACILITY_TYPE_LABELS, PRESCRIBED_MODE_LABELS, RECURRENCE_LEGS_LABELS } from "@/lib/labels";
-import { formatMinute } from "@/lib/time";
+import { formatMinute, toIsoDate } from "@/lib/time";
 import { formatCoordinate } from "@/components/address/address-utils";
 import { Badge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
 import { TBody, Td, Th, THead } from "@/components/ui/table";
 import { ActionButton } from "@/components/ui/action-button";
 import { SyncNotice } from "@/app/(regulator)/patients/_components/sync-notice";
-import { formatWeekdays } from "@/app/(regulator)/patients/_lib/status";
+import { describeRhythmDays } from "@/lib/domain/recurrence-rhythm";
 import { setFacilityActive } from "../actions";
 import { BackLink } from "@/components/ui/back-link";
 import { Notice } from "@/components/ui/notice";
@@ -196,7 +196,7 @@ export default async function FacilityPage({
                       ) : null}
                     </Td>
                     <Td className="tabular whitespace-nowrap">
-                      {formatWeekdays(r.weekdays)} · {formatMinute(r.appointmentMinute)}
+                      {describeRhythmDays({ ...r, sessionDates: r.sessionDates.map(toIsoDate) })} · {formatMinute(r.appointmentMinute)}
                       {r.label ? <span className="ml-1.5 text-xs text-slate-500">{r.label}</span> : null}
                     </Td>
                     <Td className="whitespace-nowrap">{RECURRENCE_LEGS_LABELS[r.legs]}</Td>

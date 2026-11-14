@@ -12,3 +12,14 @@ export const MAX_SESSION_MINUTES = 720;
 
 /** Longest instructions of a recurrence: copied to its trips, whose notes hold 500 characters. */
 export const RECURRENCE_NOTES_MAX = 500;
+
+/** « Fréquence » of the recurrence form: every N weeks ("1" … "8"), or explicit dates. */
+export const DATES_FREQUENCY = "dates";
+
+/** Form names of a weekday's own time and session length (« Horaire différent selon le jour »). */
+export function dayTimeField(weekday: number): string {
+  return `dayTime${weekday}`;
+}
+export function daySessionField(weekday: number): string {
+  return `daySession${weekday}`;
+}

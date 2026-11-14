@@ -289,6 +289,29 @@ describe("recurrenceTarget", () => {
     expect(recurrenceTarget(copied, old, after({ notes: "Salle 3" }))).toMatchObject({ notes: undefined });
   });
 
+  it("cancels the trips of the weeks off once the recurrence comes back every other week (PAT-05)", () => {
+    // From the week of 2026-09-01 (Monday 2026-08-31), 9 weeks before that of 2026-11-02: the weeks of 2026-11-09 and
+    // 2026-11-23 are on, those of 2026-11-02 and 2026-11-16 off.
+    const everyOther = after({ intervalWeeks: 2 });
+    expect(recurrenceTarget(trip({ serviceDate: "2026-11-11" }), before, everyOther)).toMatchObject({ kind: "update" });
+    expect(recurrenceTarget(trip({ serviceDate: wednesday }), before, everyOther)).toEqual(CANCEL);
+    // Explicit dates: only those days keep their trip.
+    const dated = after({ sessionDates: ["2026-11-04"], startDate: "2026-11-04", endDate: "2026-11-04" });
+    expect(recurrenceTarget(trip({ serviceDate: wednesday }), before, dated)).toMatchObject({ kind: "update" });
+    expect(recurrenceTarget(trip({ serviceDate: "2026-11-06" }), before, dated)).toEqual(CANCEL);
+  });
+
+  it("moves the times of the weekday given its own time only (PAT-05)", () => {
+    const own = after({ daySchedules: [{ weekday: 3, appointmentMinute: 780, sessionMinutes: 180 }] });
+    expect(recurrenceTarget(trip({ serviceDate: wednesday }), before, own)).toMatchObject({ keyMinute: 780 });
+    expect(recurrenceTarget(trip({ serviceDate: "2026-11-06" }), before, own)).toMatchObject({ keyMinute: undefined });
+    const back = trip({ serviceDate: wednesday, direction: "RETURN", appointmentMinute: null, readyMinute: 690 });
+    expect(recurrenceTarget(back, before, own)).toMatchObject({ keyMinute: 960 });
+    // Back to the common time: the trip of that weekday follows.
+    const moved = trip({ serviceDate: wednesday, appointmentMinute: 780 });
+    expect(recurrenceTarget(moved, { ...before, daySchedules: own.daySchedules }, after())).toMatchObject({ keyMinute: 450 });
+  });
+
   it("sends the trips to the new facility", () => {
     expect(recurrenceTarget(trip({ serviceDate: wednesday }), before, after({ facilityId: "f2" }))).toMatchObject({
       destination: { facilityId: "f2", place: CLINIC },

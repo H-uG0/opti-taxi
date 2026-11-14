@@ -15,7 +15,7 @@ import { geocoderEnabled } from "@/lib/geocode";
 import { DIRECTION_LABELS, FACILITY_TYPE_LABELS } from "@/lib/labels";
 import { formatPersonName } from "@/lib/names";
 import { formatLongDate, formatMinute, formatShortDate, todayIso, toIsoDate } from "@/lib/time";
-import { formatWeekdays } from "../../../patients/_lib/status";
+import { describeRhythmDays } from "@/lib/domain/recurrence-rhythm";
 import { canEditTime, keyMinute } from "../../trip-rules";
 import { EditTripForm, type EditTripInitial } from "./edit-trip-form";
 
@@ -64,7 +64,15 @@ export default async function EditTripPage({
       lockedVehicle: { select: { label: true, type: true } },
       patient: { select: { id: true, firstName: true, lastName: true, address: true, postalCode: true, city: true } },
       recurrence: {
-        select: { id: true, label: true, weekdays: true, appointmentMinute: true, facility: { select: { name: true } } },
+        select: {
+          id: true,
+          label: true,
+          weekdays: true,
+          intervalWeeks: true,
+          sessionDates: true,
+          appointmentMinute: true,
+          facility: { select: { name: true } },
+        },
       },
     },
   });
@@ -119,7 +127,8 @@ export default async function EditTripPage({
       <div className="mb-5 space-y-2">
         {recurrence ? (
           <Notice size="sm" tone="info">
-            Course de la récurrence {formatWeekdays(recurrence.weekdays)} {formatMinute(recurrence.appointmentMinute)}
+            Course de la récurrence {describeRhythmDays({ ...recurrence, sessionDates: recurrence.sessionDates.map(toIsoDate) })}{" "}
+            {formatMinute(recurrence.appointmentMinute)}
             {recurrence.label ? ` (${recurrence.label})` : ` (${recurrence.facility.name})`}&nbsp;: les changements ne valent que pour
             cette course, qui reste rattachée à sa récurrence.
             {occurrence && occurrence !== date ? ` Elle remplace la séance du ${formatShortDate(occurrence)}.` : ""}{" "}

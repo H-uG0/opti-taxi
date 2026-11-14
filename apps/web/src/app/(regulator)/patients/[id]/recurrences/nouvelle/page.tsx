@@ -71,6 +71,8 @@ export default async function NewRecurrencePage({ params }: { params: Promise<{ 
             facilityId: facilities.length === 1 ? (facilities[0]?.id ?? "") : "",
             prescriptionId: current?.id ?? "",
             label: "",
+            frequency: "1",
+            sessionDates: "",
             weekdays: [],
             appointmentTime: "",
             sessionMinutes: "",
@@ -78,6 +80,8 @@ export default async function NewRecurrencePage({ params }: { params: Promise<{ 
             startDate: today,
             endDate: "",
             notes: "",
+            dayTimes: {},
+            daySessions: {},
           }}
           facilities={facilities}
           prescriptions={prescriptions}

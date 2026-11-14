@@ -10,6 +10,8 @@ import { RecurrenceForm } from "../../../../_components/recurrence-form";
 import { loadRecurrenceOptions } from "../../../../_lib/recurrence-options";
 import { countOpenTrips } from "../../../../_lib/trip-counts";
 import { openTripsLabel } from "../../../../_lib/trip-sync";
+import { DATES_FREQUENCY } from "../../../../_lib/options";
+import { formatSessionDates, parseDaySchedules } from "@/lib/domain/recurrence-rhythm";
 import { BackLink } from "@/components/ui/back-link";
 import { Notice } from "@/components/ui/notice";
 
@@ -37,6 +39,7 @@ export default async function EditRecurrencePage({
     countOpenTrips({ recurrenceId: recurrence.id }, today),
   ]);
   const back = `/patients/${patient.id}#recurrences`;
+  const daySchedules = parseDaySchedules(recurrence.daySchedules);
 
   return (
     <div>
@@ -63,6 +66,8 @@ export default async function EditRecurrencePage({
           facilityId: recurrence.facilityId,
           prescriptionId: recurrence.prescriptionId,
           label: recurrence.label ?? "",
+          frequency: recurrence.sessionDates.length > 0 ? DATES_FREQUENCY : String(recurrence.intervalWeeks),
+          sessionDates: formatSessionDates(recurrence.sessionDates.map(toIsoDate)),
           weekdays: recurrence.weekdays.map(String),
           appointmentTime: formatMinute(recurrence.appointmentMinute),
           sessionMinutes: String(recurrence.sessionMinutes),
@@ -70,6 +75,12 @@ export default async function EditRecurrencePage({
           startDate: toIsoDate(recurrence.startDate),
           endDate: recurrence.endDate ? toIsoDate(recurrence.endDate) : "",
           notes: recurrence.notes ?? "",
+          dayTimes: Object.fromEntries(
+            daySchedules.filter((d) => d.appointmentMinute !== null).map((d) => [String(d.weekday), formatMinute(d.appointmentMinute)]),
+          ),
+          daySessions: Object.fromEntries(
+            daySchedules.filter((d) => d.sessionMinutes !== null).map((d) => [String(d.weekday), String(d.sessionMinutes)]),
+          ),
         }}
         facilities={facilities}
         prescriptions={prescriptions}

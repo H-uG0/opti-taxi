@@ -44,6 +44,8 @@ export async function loadPrescriptionWork(todayIso: string): Promise<WorkItem[]
     },
     select: {
       weekdays: true,
+      intervalWeeks: true,
+      sessionDates: true,
       appointmentMinute: true,
       label: true,
       startDate: true,
@@ -63,6 +65,8 @@ export async function loadPrescriptionWork(todayIso: string): Promise<WorkItem[]
         endDate: r.endDate ? toIsoDate(r.endDate) : null,
         summary: formatRecurrenceSummary({
           weekdays: r.weekdays,
+          intervalWeeks: r.intervalWeeks,
+          sessionDates: r.sessionDates.map(toIsoDate),
           appointmentMinute: r.appointmentMinute,
           label: r.label,
           facilityName: r.facility.name,

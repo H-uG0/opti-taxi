@@ -9,6 +9,7 @@ import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { recurrenceOverlaps } from "@/lib/domain/duplicates";
+import { describeDaySchedules, describeRhythmDays, nextSessionDates, parseDaySchedules } from "@/lib/domain/recurrence-rhythm";
 import {
   cancellationLabel,
   DEFAULT_LATE_CANCELLATION_HOURS,
@@ -25,7 +26,7 @@ import {
   SHARING_STATUS_LABELS,
   TRIP_STATUS_LABELS,
 } from "@/lib/labels";
-import { addDays, formatDuration, formatMinute, formatShortDate, fromIsoDate, todayIso, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
+import { addDays, formatDayDate, formatDuration, formatMinute, formatShortDate, fromIsoDate, todayIso, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
 import { formatCoordinate } from "@/components/address/address-utils";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
@@ -37,7 +38,6 @@ import { SyncNotice } from "../_components/sync-notice";
 import {
   findPredecessor,
   findRenewal,
-  formatWeekdays,
   mobilityModeWarning,
   needsRenewal,
   prescriptionValidity,
@@ -147,7 +147,14 @@ export default async function PatientPage({
         r.active &&
         (["OUTBOUND", "RETURN"] as const).some((leg) =>
           recurrenceSchedules(
-            { weekdays: r.weekdays, legs: r.legs, startDate: toIsoDate(r.startDate), endDate: r.endDate ? toIsoDate(r.endDate) : null },
+            {
+              weekdays: r.weekdays,
+              intervalWeeks: r.intervalWeeks,
+              sessionDates: r.sessionDates.map(toIsoDate),
+              legs: r.legs,
+              startDate: toIsoDate(r.startDate),
+              endDate: r.endDate ? toIsoDate(r.endDate) : null,
+            },
             today,
             leg,
           ),
@@ -207,6 +214,8 @@ export default async function PatientPage({
       id: r.id,
       active: r.active,
       weekdays: r.weekdays,
+      intervalWeeks: r.intervalWeeks,
+      sessionDates: r.sessionDates.map(toIsoDate),
       appointmentMinute: r.appointmentMinute,
       sessionMinutes: r.sessionMinutes,
       startDate: toIsoDate(r.startDate),
@@ -596,16 +605,38 @@ export default async function PatientPage({
                       if (!other) continue;
                       warnings.push({
                         tone: "warning",
-                        text: `Chevauche la récurrence ${formatWeekdays(other.weekdays)} ${formatMinute(other.appointmentMinute)}${other.label ? ` (${other.label})` : ""}\u00a0: mêmes jours et même créneau. Doublon\u202f? Désactivez l'une des deux.`,
+                        text: `Chevauche la récurrence ${describeRhythmDays({ ...other, sessionDates: other.sessionDates.map(toIsoDate) })} ${formatMinute(other.appointmentMinute)}${other.label ? ` (${other.label})` : ""}\u00a0: mêmes jours et même créneau. Doublon\u202f? Désactivez l'une des deux.`,
                       });
                     }
                   }
+                  const rhythmDates = r.sessionDates.map(toIsoDate);
+                  const ownTimes = describeDaySchedules(parseDaySchedules(r.daySchedules));
+                  const nextSessions = nextSessionDates(
+                    { weekdays: r.weekdays, sessionDates: rhythmDates, startDate: toIsoDate(r.startDate), endDate: null },
+                    today,
+                    4,
+                  );
                   return (
                     <tr key={r.id} className={r.active ? "align-top" : "align-top text-slate-500"}>
                       <Td>
-                        <span className="tabular font-medium whitespace-nowrap" title={r.weekdays.map((d) => WEEKDAY_LABELS[d]).join(", ")}>
-                          {formatWeekdays(r.weekdays)} · {formatMinute(r.appointmentMinute)}
+                        <span
+                          className="tabular font-medium whitespace-nowrap"
+                          title={
+                            rhythmDates.length > 0
+                              ? rhythmDates.map(formatShortDate).join(", ")
+                              : r.weekdays.map((d) => WEEKDAY_LABELS[d]).join(", ")
+                          }
+                        >
+                          {describeRhythmDays({ ...r, sessionDates: rhythmDates })} · {formatMinute(r.appointmentMinute)}
                         </span>
+                        {ownTimes.length > 0 ? (
+                          <span className="tabular block text-xs text-slate-600">Horaire propre&nbsp;: {ownTimes.join(", ")}</span>
+                        ) : null}
+                        {rhythmDates.length > 0 ? (
+                          <span className="tabular block max-w-xs text-xs text-slate-500">
+                            {nextSessions.length > 0 ? `Prochaines séances\u00a0: ${nextSessions.map((d) => formatDayDate(d)).join(", ")}` : "Toutes les séances sont passées"}
+                          </span>
+                        ) : null}
                         {r.label ? <span className="block text-xs text-slate-600">{r.label}</span> : null}
                         {r.notes ? (
                           <span className="mt-0.5 block max-w-xs text-xs whitespace-pre-line text-slate-500" title="Consignes pour le chauffeur, recopiées sur les courses">
@@ -655,7 +686,7 @@ export default async function PatientPage({
                             href={`/patients/${patient.id}/recurrences/${r.id}/modifier`}
                             size="sm"
                             variant="ghost"
-                            aria-label={`Modifier la récurrence ${formatWeekdays(r.weekdays)} ${formatMinute(r.appointmentMinute)}`}
+                            aria-label={`Modifier la récurrence ${describeRhythmDays({ ...r, sessionDates: rhythmDates })} ${formatMinute(r.appointmentMinute)}`}
                           >
                             Modifier
                           </LinkButton>

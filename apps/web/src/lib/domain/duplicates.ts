@@ -6,7 +6,8 @@
  * by the server actions, the pages and the tests.
  */
 import type { TripDirection, TripStatus } from "@prisma/client";
-import { formatMinute } from "@/lib/time";
+import { addDays, formatMinute } from "@/lib/time";
+import { hasSessionDates, intervalOf, rhythmOccursOn } from "./recurrence-rhythm";
 
 // ---------------------------------------------------------------- trips of a day
 
@@ -107,14 +108,37 @@ export type OverlapRecurrence = {
   id: string;
   active: boolean;
   weekdays: number[];
+  /** Every N weeks (lib/domain/recurrence-rhythm.ts); absent: every week. */
+  intervalWeeks?: number;
+  /** Explicit session dates; absent or empty: the weekly rhythm. */
+  sessionDates?: string[];
   appointmentMinute: number;
   sessionMinutes: number;
   startDate: string;
   endDate: string | null;
 };
 
+/** Weeks of the common period looked at for two rhythms that are not plain weekly ones (a year). */
+const OVERLAP_LOOKAHEAD_DAYS = 371;
+
+/** A day both recurrences plan a session on: a common weekday for two weekly rhythms, else a common date. */
+function shareADay(a: OverlapRecurrence, b: OverlapRecurrence): boolean {
+  const plain = (r: OverlapRecurrence) => intervalOf(r) === 1 && !hasSessionDates(r);
+  if (plain(a) && plain(b)) return a.weekdays.some((d) => b.weekdays.includes(d));
+  const from = a.startDate > b.startDate ? a.startDate : b.startDate;
+  const ends = [a.endDate, b.endDate, addDays(from, OVERLAP_LOOKAHEAD_DAYS)].filter((d): d is string => d !== null);
+  const to = ends.sort()[0] ?? from;
+  const [sparse, other] = hasSessionDates(a) ? [a, b] : [b, a];
+  if (hasSessionDates(sparse)) return (sparse.sessionDates ?? []).some((d) => d >= from && d <= to && rhythmOccursOn(other, d));
+  for (let day = from; day <= to; day = addDays(day, 1)) {
+    if (rhythmOccursOn(a, day) && rhythmOccursOn(b, day)) return true;
+  }
+  return false;
+}
+
 /**
- * Active recurrences of one patient that overlap: a common weekday, periods
+ * Active recurrences of one patient that overlap: a common session day
+ * (weekday, or date for rhythms every N weeks or on explicit dates), periods
  * that meet, and sessions ([appointment, appointment + session]) that meet.
  * For each recurrence, the ids of those it overlaps.
  */
@@ -124,8 +148,8 @@ export function recurrenceOverlaps(recurrences: readonly OverlapRecurrence[]): M
   for (const a of active) {
     for (const b of active) {
       if (a.id === b.id) continue;
-      const commonDay = a.weekdays.some((d) => b.weekdays.includes(d));
       const periods = (a.endDate === null || b.startDate <= a.endDate) && (b.endDate === null || a.startDate <= b.endDate);
+      const commonDay = periods && shareADay(a, b);
       const sessions =
         a.appointmentMinute < b.appointmentMinute + b.sessionMinutes && b.appointmentMinute < a.appointmentMinute + a.sessionMinutes;
       if (commonDay && periods && sessions) overlaps.set(a.id, [...(overlaps.get(a.id) ?? []), b.id]);

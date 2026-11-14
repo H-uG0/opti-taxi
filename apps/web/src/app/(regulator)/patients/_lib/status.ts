@@ -3,6 +3,7 @@
  * and recurrence summaries. Pure module (dates are "YYYY-MM-DD" strings).
  */
 import type { Mobility, PrescribedMode } from "@prisma/client";
+import { describeRhythmDays } from "@/lib/domain/recurrence-rhythm";
 import { addDays, formatMinute, formatShortDate, fromIsoDate, toIsoDate, WEEKDAY_SHORT } from "@/lib/time";
 
 /** A prescription ending within this many days is flagged. */
@@ -239,14 +240,19 @@ export function formatWeekdays(weekdays: number[]): string {
     .join(" ");
 }
 
-/** "Lun Mer Ven 07:30 — Dialyse" (the facility name stands in for a missing label). */
+/**
+ * "Lun Mer Ven 07:30 — Dialyse", "Lun, une semaine sur deux 07:30 — …", "6 dates (…) 09:00 — …" (the facility
+ * name stands in for a missing label).
+ */
 export function formatRecurrenceSummary(r: {
   weekdays: number[];
+  intervalWeeks?: number;
+  sessionDates?: readonly string[];
   appointmentMinute: number;
   label: string | null;
   facilityName?: string | null;
 }): string {
-  const days = formatWeekdays(r.weekdays);
+  const days = describeRhythmDays(r);
   const what = r.label?.trim() || r.facilityName?.trim() || "";
   const head = `${days} ${formatMinute(r.appointmentMinute)}`.trim();
   return what ? `${head} — ${what}` : head;

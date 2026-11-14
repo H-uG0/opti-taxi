@@ -113,6 +113,8 @@ export default async function PatientsPage({
         select: {
           id: true,
           weekdays: true,
+          intervalWeeks: true,
+          sessionDates: true,
           appointmentMinute: true,
           label: true,
           prescriptionId: true,
@@ -292,6 +294,8 @@ export default async function PatientsPage({
                             <li key={r.id} className="whitespace-nowrap">
                               {formatRecurrenceSummary({
                                 weekdays: r.weekdays,
+                                intervalWeeks: r.intervalWeeks,
+                                sessionDates: r.sessionDates.map(toIsoDate),
                                 appointmentMinute: r.appointmentMinute,
                                 label: r.label,
                                 facilityName: r.facility.name,

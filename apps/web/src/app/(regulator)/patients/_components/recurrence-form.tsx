@@ -5,8 +5,10 @@ import { Field, Fieldset, FormMessage, Input, Select, Textarea } from "@/compone
 import { RECURRENCE_LEGS_LABELS } from "@/lib/labels";
 import { formatDuration, formatMinute, isIsoDate, parseMinute } from "@/lib/time";
 import { echoed, echoedList, IDLE_STATE, refusalKey, type FormState } from "@/lib/forms";
-import { MAX_SESSION_MINUTES, RECURRENCE_LEGS, RECURRENCE_NOTES_MAX } from "../_lib/options";
+import { DATES_FREQUENCY, dayTimeField, daySessionField, MAX_SESSION_MINUTES, RECURRENCE_LEGS, RECURRENCE_NOTES_MAX } from "../_lib/options";
+import { parseSessionDates, weekdaysOfDates } from "@/lib/domain/recurrence-rhythm";
 import { WeekdayPicker } from "./weekday-picker";
+import { DaySchedulesFields, FREQUENCY_OPTIONS, intervalPreview, SessionDatesField } from "./rhythm-fields";
 import { recurrenceFormNotices, type FormPrescription } from "../_lib/status";
 import { submitWithoutReset } from "./form-submit";
 import { ErrorFocus } from "@/components/ui/error-focus";
@@ -17,6 +19,10 @@ export type RecurrenceFormInitial = {
   facilityId: string;
   prescriptionId: string;
   label: string;
+  /** « Fréquence » : "1" … "8" (every N weeks) or "dates". */
+  frequency: string;
+  /** Explicit session dates, one per line (JJ/MM/AAAA). */
+  sessionDates: string;
   weekdays: string[];
   appointmentTime: string;
   sessionMinutes: string;
@@ -24,6 +30,9 @@ export type RecurrenceFormInitial = {
   startDate: string;
   endDate: string;
   notes: string;
+  /** A weekday's own time ("HH:MM") and session length (minutes), keyed by ISO weekday; "" or absent: the common ones. */
+  dayTimes: Record<string, string>;
+  daySessions: Record<string, string>;
 };
 
 export type FacilityOption = { id: string; name: string; city: string; active: boolean };
@@ -48,7 +57,7 @@ export function RecurrenceForm({
 }) {
   const [state, formAction, isPending] = useActionState(action, IDLE_STATE);
   const errors = state.fieldErrors;
-  const value = (key: keyof Omit<RecurrenceFormInitial, "weekdays">) => echoed(state, key, initial[key]);
+  const value = (key: keyof Omit<RecurrenceFormInitial, "weekdays" | "dayTimes" | "daySessions">) => echoed(state, key, initial[key]);
 
   const [weekdays, setWeekdays] = useState<Set<string>>(() => new Set(echoedList(state, "weekdays", initial.weekdays)));
   const [prescriptionId, setPrescriptionId] = useState(value("prescriptionId"));
@@ -57,12 +66,33 @@ export function RecurrenceForm({
   const [appointmentTime, setAppointmentTime] = useState(value("appointmentTime"));
   const [sessionMinutes, setSessionMinutes] = useState(value("sessionMinutes"));
   const [legs, setLegs] = useState(value("legs"));
+  const [frequency, setFrequency] = useState(value("frequency") || "1");
+  const [sessionDates, setSessionDates] = useState(value("sessionDates"));
+
+  // Explicit dates: the weekdays and the period are theirs.
+  const byDates = frequency === DATES_FREQUENCY;
+  const typedDates = parseSessionDates(sessionDates);
+  const datesPeriod =
+    byDates && typedDates.invalid.length === 0 && typedDates.dates.length > 0
+      ? { startDate: typedDates.dates[0] ?? "", endDate: typedDates.dates.at(-1) ?? "" }
+      : null;
+  const rhythmWeekdays = byDates ? weekdaysOfDates(typedDates.dates) : [...weekdays].map(Number).sort((a, b) => a - b);
+  const period = byDates ? datesPeriod : { startDate, endDate };
 
   const prescription = prescriptions.find((p) => p.id === prescriptionId) ?? null;
   const validityNotices =
-    prescription && isIsoDate(startDate) && (endDate === "" || isIsoDate(endDate))
-      ? recurrenceFormNotices({ startDate, endDate: endDate === "" ? null : endDate }, prescription, todayIso)
+    prescription && period && isIsoDate(period.startDate) && (period.endDate === "" || isIsoDate(period.endDate))
+      ? recurrenceFormNotices({ startDate: period.startDate, endDate: period.endDate === "" ? null : period.endDate }, prescription, todayIso)
       : [];
+  const every = byDates ? null : intervalPreview(rhythmWeekdays, Number(frequency), startDate, todayIso);
+  const ownValue = (field: (day: number) => string) =>
+    Object.fromEntries(
+      [1, 2, 3, 4, 5, 6, 7].map((day) => {
+        const key = String(day);
+        const initialValue = (field === dayTimeField ? initial.dayTimes : initial.daySessions)[key] ?? "";
+        return [key, echoed(state, field(day), initialValue)];
+      }),
+    );
 
   const appointment = parseMinute(appointmentTime);
   const session = /^\d+$/.test(sessionMinutes.trim()) ? Number(sessionMinutes) : null;
@@ -120,7 +150,40 @@ export function RecurrenceForm({
       </Fieldset>
 
       <Fieldset legend="Rythme et horaires">
-        <WeekdayPicker value={weekdays} onChange={setWeekdays} error={errors.weekdays} />
+        <Field
+          label="Fréquence"
+          htmlFor="frequency"
+          error={errors.frequency}
+          hint={
+            byDates
+              ? "Les séances n'ont lieu qu'aux dates saisies (cure de chimiothérapie, série de séances)."
+              : every
+                ? `À partir de la semaine du début\u00a0; prochaines séances\u00a0: ${every}.`
+                : frequency !== "1"
+                  ? "Comptée à partir de la semaine de la date de début."
+                  : undefined
+          }
+          className="sm:max-w-sm"
+        >
+          <Select
+            id="frequency"
+            name="frequency"
+            value={frequency}
+            onChange={(e) => setFrequency(e.target.value)}
+            aria-invalid={errors.frequency ? true : undefined}
+          >
+            {FREQUENCY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {byDates ? (
+          <SessionDatesField value={sessionDates} onChange={setSessionDates} error={errors.sessionDates} todayIso={todayIso} />
+        ) : (
+          <WeekdayPicker value={weekdays} onChange={setWeekdays} error={errors.weekdays} />
+        )}
 
         <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Heure du rendez-vous" htmlFor="appointmentTime" error={errors.appointmentTime}>
@@ -179,40 +242,60 @@ export function RecurrenceForm({
             </Select>
           </Field>
         </div>
+        <DaySchedulesFields
+          weekdays={rhythmWeekdays}
+          dayTimes={ownValue(dayTimeField)}
+          daySessions={ownValue(daySessionField)}
+          errors={errors}
+          commonTime={appointmentTime}
+          commonSession={sessionMinutes}
+        />
       </Fieldset>
 
-      <Fieldset legend="Période">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Date de début" htmlFor="startDate" error={errors.startDate}>
-            <Input
-              id="startDate"
-              name="startDate"
-              type="date"
-              defaultValue={value("startDate")}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="tabular"
-              aria-invalid={errors.startDate ? true : undefined}
-            />
-          </Field>
-          <Field label="Date de fin" htmlFor="endDate" error={errors.endDate} hint="Facultative — vide&nbsp;: sans fin prévue">
-            <Input
-              id="endDate"
-              name="endDate"
-              type="date"
-              min={isIsoDate(startDate) ? startDate : undefined}
-              defaultValue={value("endDate")}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="tabular"
-              aria-invalid={errors.endDate ? true : undefined}
-            />
-          </Field>
-        </div>
-        {validityNotices.map((notice) => (
-          <Notice size="sm" key={notice.text} tone={notice.tone}>
-            {notice.text}
-          </Notice>
-        ))}
-      </Fieldset>
+      {byDates ? (
+        validityNotices.length > 0 ? (
+          <div className="space-y-2">
+            {validityNotices.map((notice) => (
+              <Notice size="sm" key={notice.text} tone={notice.tone}>
+                {notice.text}
+              </Notice>
+            ))}
+          </div>
+        ) : null
+      ) : (
+        <Fieldset legend="Période">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Date de début" htmlFor="startDate" error={errors.startDate}>
+              <Input
+                id="startDate"
+                name="startDate"
+                type="date"
+                defaultValue={value("startDate")}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="tabular"
+                aria-invalid={errors.startDate ? true : undefined}
+              />
+            </Field>
+            <Field label="Date de fin" htmlFor="endDate" error={errors.endDate} hint="Facultative — vide&nbsp;: sans fin prévue">
+              <Input
+                id="endDate"
+                name="endDate"
+                type="date"
+                min={isIsoDate(startDate) ? startDate : undefined}
+                defaultValue={value("endDate")}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="tabular"
+                aria-invalid={errors.endDate ? true : undefined}
+              />
+            </Field>
+          </div>
+          {validityNotices.map((notice) => (
+            <Notice size="sm" key={notice.text} tone={notice.tone}>
+              {notice.text}
+            </Notice>
+          ))}
+        </Fieldset>
+      )}
 
       <FormFooter cancelHref={cancelHref} submitLabel={submitLabel} pending={isPending} />
       <ErrorFocus refusal={refusalKey(state)} />

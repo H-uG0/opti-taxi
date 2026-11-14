@@ -297,9 +297,18 @@ model Recurrence {
   prescriptionId    String
   /// Libellé libre, ex. « Dialyse ».
   label             String?
+  /// Jours de séance ; pour des dates précises, leurs jours de semaine.
   weekdays          Int[]
+  /// Toutes les N semaines, comptées depuis la semaine (lundi à dimanche) de startDate ; 1 : chaque semaine.
+  intervalWeeks     Int            @default(1)
+  /// Dates précises des séances (cycles de chimiothérapie) : non vide, la récurrence n'a lieu que ces
+  /// jours-là, et startDate / endDate sont la première et la dernière (lib/domain/recurrence-rhythm.ts).
+  sessionDates      DateTime[]     @default([]) @db.Date
   appointmentMinute Int
   sessionMinutes    Int
+  /// Heure et durée propres à certains jours de semaine, chacune facultative :
+  /// [{ "weekday": 3, "appointmentMinute": 780, "sessionMinutes": null }] (null : celle de la récurrence).
+  daySchedules      Json           @default("[]")
   legs              RecurrenceLegs @default(BOTH)
   startDate         DateTime       @db.Date
   endDate           DateTime?      @db.Date

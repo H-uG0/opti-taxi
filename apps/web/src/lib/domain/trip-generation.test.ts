@@ -165,6 +165,53 @@ describe("planTripsFromRecurrences — validity", () => {
   });
 });
 
+describe("planTripsFromRecurrences — rhythms (PAT-05)", () => {
+  const days = (rec: RecurrenceForGeneration, from: string, to: string) => [
+    ...new Set(planTripsFromRecurrences([rec], from, to).map(dayOf)),
+  ];
+
+  it("comes back one week out of two, counted from the week of its start date", () => {
+    // Starts on Wednesday 2026-11-04: weeks of 2026-11-02, 2026-11-16, 2026-11-30…
+    const everyOther = recurrence({ weekdays: [1, 4], intervalWeeks: 2, startDate: fromIsoDate("2026-11-04") });
+    expect(days(everyOther, "2026-11-02", "2026-12-06")).toEqual(["2026-11-05", "2026-11-16", "2026-11-19", "2026-11-30", "2026-12-03"]);
+  });
+
+  it("follows a 21-day cycle every 3 weeks, or given as explicit dates (J1 and J8 of each cycle)", () => {
+    const everyThree = recurrence({ weekdays: [2], intervalWeeks: 3, startDate: fromIsoDate("2026-11-03") });
+    expect(days(everyThree, "2026-11-01", "2027-01-31")).toEqual(["2026-11-03", "2026-11-24", "2026-12-15", "2027-01-05", "2027-01-26"]);
+    const cycles = ["2026-11-03", "2026-11-10", "2026-11-24", "2026-12-01", "2026-12-15", "2026-12-22"];
+    const dated = recurrence({
+      weekdays: [2],
+      sessionDates: cycles.map(fromIsoDate),
+      startDate: fromIsoDate(cycles[0]!),
+      endDate: fromIsoDate(cycles.at(-1)!),
+    });
+    expect(days(dated, "2026-11-01", "2027-01-31")).toEqual(cycles);
+    expect(planTripsFromRecurrences([dated], "2026-11-01", "2027-01-31")).toHaveLength(12);
+  });
+
+  it("gives a weekday its own appointment and session length", () => {
+    const rec = recurrence({ daySchedules: [{ weekday: 3, appointmentMinute: 780, sessionMinutes: null }, { weekday: 5, appointmentMinute: null, sessionMinutes: 180 }] });
+    const trips = planTripsFromRecurrences([rec], MONDAY, SUNDAY);
+    const times = trips.map((t) => `${dayOf(t)} ${t.direction} ${t.appointmentMinute ?? t.readyMinute}`);
+    expect(times).toEqual([
+      "2026-11-02 OUTBOUND 450",
+      "2026-11-02 RETURN 690",
+      "2026-11-04 OUTBOUND 780",
+      "2026-11-04 RETURN 1020",
+      "2026-11-06 OUTBOUND 450",
+      "2026-11-06 RETURN 630",
+    ]);
+  });
+
+  it("does not plan the weeks off of a rhythm every other week (recurrenceOccursOn)", () => {
+    const rec = recurrence({ weekdays: [1], intervalWeeks: 2, startDate: fromIsoDate("2026-11-02") });
+    expect(recurrenceOccursOn(rec, "2026-11-02")).toBe(true);
+    expect(recurrenceOccursOn(rec, "2026-11-09")).toBe(false);
+    expect(recurrenceOccursOn(rec, "2026-11-16")).toBe(true);
+  });
+});
+
 describe("planTripsFromRecurrences — trip content", () => {
   const [outbound, ret] = planTripsFromRecurrences([recurrence()], MONDAY, MONDAY);
 

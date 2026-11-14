@@ -167,7 +167,58 @@ describe("parseRecurrenceForm", () => {
       startDate: "2026-11-02",
       endDate: null,
       notes: null,
+      intervalWeeks: 1,
+      sessionDates: [],
+      daySchedules: [],
     });
+  });
+
+  it("reads a rhythm every other week, and refuses an unknown frequency", () => {
+    const result = parseRecurrenceForm(form({ ...recurrence, frequency: "2" }));
+    expect(result.success && result.data.intervalWeeks).toBe(2);
+    const bad = parseRecurrenceForm(form({ ...recurrence, frequency: "12" }));
+    expect(!bad.success && bad.state.fieldErrors.frequency).toBe("Choisissez une fréquence");
+  });
+
+  it("takes the weekdays and the period of explicit dates (a 21-day chemotherapy cycle)", () => {
+    const result = parseRecurrenceForm(
+      form({ ...recurrence, frequency: "dates", weekdays: [], startDate: "", sessionDates: "07/12/2026\n16/11/2026, 2026-12-28" }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data).toMatchObject({
+      sessionDates: ["2026-11-16", "2026-12-07", "2026-12-28"],
+      weekdays: [1],
+      startDate: "2026-11-16",
+      endDate: "2026-12-28",
+      intervalWeeks: 1,
+    });
+  });
+
+  it("names the explicit dates it cannot read, and requires one", () => {
+    const bad = parseRecurrenceForm(form({ ...recurrence, frequency: "dates", sessionDates: "16/11/2026 31/02/2027" }));
+    expect(!bad.success && bad.state.fieldErrors.sessionDates).toBe("Date invalide\u00a0: 31/02/2027 (JJ/MM/AAAA)");
+    expect(!bad.success && bad.state.fieldErrors).not.toHaveProperty("weekdays");
+    const none = parseRecurrenceForm(form({ ...recurrence, frequency: "dates", sessionDates: " " }));
+    expect(!none.success && none.state.fieldErrors.sessionDates).toBe("Saisissez au moins une date de séance");
+  });
+
+  it("keeps a weekday's own time and session length, only for the days of the rhythm and when they differ", () => {
+    const result = parseRecurrenceForm(
+      form({ ...recurrence, dayTime3: "13:00", daySession3: "", dayTime5: "07:30", daySession5: "180", dayTime2: "09:00" }),
+    );
+    expect(result.success && result.data.daySchedules).toEqual([
+      { weekday: 3, appointmentMinute: 780, sessionMinutes: null },
+      { weekday: 5, appointmentMinute: null, sessionMinutes: 180 },
+    ]);
+  });
+
+  it("checks a weekday's own time, and a return of that day ending after midnight", () => {
+    const bad = parseRecurrenceForm(form({ ...recurrence, dayTime1: "7h", daySession3: "abc" }));
+    expect(!bad.success && bad.state.fieldErrors.dayTime1).toMatch(/Heure invalide/);
+    expect(!bad.success && bad.state.fieldErrors.daySession3).toMatch(/minutes entières/);
+    const late = parseRecurrenceForm(form({ ...recurrence, dayTime5: "21:30" }));
+    expect(!late.success && late.state.fieldErrors.daySession5).toMatch(/minuit/);
   });
 
   it("keeps the instructions for the crew, trimmed, within 500 characters", () => {
@@ -271,6 +322,9 @@ describe("parseRegularPatientForm («\u202fNouveau patient régulier\u202f»)", 
       startDate: "2026-11-02",
       endDate: null,
       notes: "Salle 3",
+      intervalWeeks: 1,
+      sessionDates: [],
+      daySchedules: [],
     });
   });
 

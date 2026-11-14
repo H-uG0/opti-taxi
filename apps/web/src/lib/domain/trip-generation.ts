@@ -1,6 +1,7 @@
 /**
- * Turns recurrences ("dialyse lundi, mercredi, vendredi, RDV 7 h 30") into
- * trips for a date range. Idempotent: a trip is unique per (recurrence,
+ * Turns recurrences ("dialyse lundi, mercredi, vendredi, RDV 7 h 30"; every
+ * other week; on explicit dates; with a weekday's own time:
+ * lib/domain/recurrence-rhythm.ts) into trips for a date range. Idempotent: a trip is unique per (recurrence,
  * session served, direction) — occurrenceDate, its own date unless the trip
  * was moved to another day —, so regenerating a week never duplicates, and a
  * session whose trip was moved is not served twice.
@@ -15,8 +16,9 @@
  * The server side (horizon, revival, audit) is lib/trips/completion.ts.
  */
 import type { Prisma, PrescribedMode, RecurrenceLegs, SharingScope, SharingStatus, TripDirection } from "@prisma/client";
-import { addDays, fromIsoDate, isoWeekday, toIsoDate } from "@/lib/time";
+import { addDays, fromIsoDate, toIsoDate } from "@/lib/time";
 import { NO_CANCELLATION } from "./cancellation";
+import { rhythmOccursOn, sessionTimesOn, type Rhythm } from "./recurrence-rhythm";
 import { prescriptionCovering } from "./renewal";
 import { allowedVehicleTypesFor, formatAddress, initialSharingStatus, nextSharingStatus, sharingAllowedFor } from "./rules";
 
@@ -38,8 +40,14 @@ export type RecurrenceForGeneration = {
   facilityId: string;
   prescriptionId: string;
   weekdays: number[];
+  /** Every N weeks from the week of startDate; absent: every week (lib/domain/recurrence-rhythm.ts). */
+  intervalWeeks?: number;
+  /** Explicit session dates; absent or empty: the weekly rhythm. */
+  sessionDates?: readonly Date[];
   appointmentMinute: number;
   sessionMinutes: number;
+  /** Own time or session length of some weekdays (Recurrence.daySchedules, JSON); absent: none. */
+  daySchedules?: unknown;
   legs: RecurrenceLegs;
   startDate: Date;
   endDate: Date | null;
@@ -96,15 +104,31 @@ export function prescriptionOn(
   return prescriptionCovering(own, others, new Set([rec.facilityId]), isoDate);
 }
 
-/** The recurrence plans a care session on this date (active, patient active, weekday and period), whatever the prescription. */
+/** The rhythm of a recurrence as read from the database (dates as "YYYY-MM-DD"). */
+export function rhythmOf(
+  rec: Pick<RecurrenceForGeneration, "weekdays" | "intervalWeeks" | "sessionDates" | "startDate" | "endDate">,
+): Rhythm {
+  return {
+    weekdays: rec.weekdays,
+    intervalWeeks: rec.intervalWeeks ?? 1,
+    sessionDates: (rec.sessionDates ?? []).map(toIsoDate),
+    startDate: toIsoDate(rec.startDate),
+    endDate: rec.endDate ? toIsoDate(rec.endDate) : null,
+  };
+}
+
+/**
+ * The recurrence plans a care session on this date (active, patient active, its rhythm: period, weekdays and
+ * interval, or explicit dates), whatever the prescription.
+ */
 export function recurrenceOccursOn(
-  rec: Pick<RecurrenceForGeneration, "active" | "weekdays" | "startDate" | "endDate"> & { patient: { active: boolean } },
+  rec: Pick<RecurrenceForGeneration, "active" | "weekdays" | "intervalWeeks" | "sessionDates" | "startDate" | "endDate"> & {
+    patient: { active: boolean };
+  },
   isoDate: string,
 ): boolean {
   if (!rec.active || !rec.patient.active) return false;
-  if (!rec.weekdays.includes(isoWeekday(isoDate))) return false;
-  if (isoDate < toIsoDate(rec.startDate)) return false;
-  return !rec.endDate || isoDate <= toIsoDate(rec.endDate);
+  return rhythmOccursOn(rhythmOf(rec), isoDate);
 }
 
 /** A session the recurrence plans but no prescription covers: no trip, reported to the regulator. */
@@ -135,6 +159,8 @@ export function planRecurrenceTrips(recurrences: readonly RecurrenceForGeneratio
       const home = rec.patient;
       const care = rec.facility;
       const { mode, sharing } = prescription;
+      // The weekday's own time or session length, if any.
+      const times = sessionTimesOn(rec, date);
       const common = {
         serviceDate,
         occurrenceDate: serviceDate,
@@ -158,7 +184,7 @@ export function planRecurrenceTrips(recurrences: readonly RecurrenceForGeneratio
           dropoffAddress: formatAddress(care),
           dropoffLat: care.lat,
           dropoffLng: care.lng,
-          appointmentMinute: rec.appointmentMinute,
+          appointmentMinute: times.appointmentMinute,
           sharingAllowed,
           sharingStatus: initialSharingStatus(sharingAllowed),
         });
@@ -174,7 +200,7 @@ export function planRecurrenceTrips(recurrences: readonly RecurrenceForGeneratio
           dropoffAddress: formatAddress(home),
           dropoffLat: home.lat,
           dropoffLng: home.lng,
-          readyMinute: rec.appointmentMinute + rec.sessionMinutes,
+          readyMinute: times.appointmentMinute + times.sessionMinutes,
           sharingAllowed,
           sharingStatus: initialSharingStatus(sharingAllowed),
         });

@@ -561,6 +561,52 @@ async function seedPatients(
 }
 
 // ---------------------------------------------------------------------------
+// Rhythms beyond « every week » (PAT-05).
+
+/**
+ * Three recurrences of the patients above take another rhythm (no random
+ * draw: the other patients and trips stay those of the earlier seeds): the
+ * chemotherapy in Marseille comes back every other week from this week, the
+ * chemotherapy in Gap follows 21-day cycles with sessions on day 1 and day 8
+ * (explicit dates, three cycles from this Tuesday), and a dialysis in Aix has
+ * its Friday session in the morning (own time of that weekday).
+ */
+async function seedRhythmExamples(facilities: Map<FacilityKey, CreatedFacility>, dates: Dates): Promise<void> {
+  const first = (facility: FacilityKey, appointment: string) =>
+    prisma.recurrence.findFirst({
+      where: { facilityId: lookup(facilities, facility, "Établissement").id, appointmentMinute: minute(appointment), active: true },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+  const everyOther = await first("hospitalMarseille", "11:00");
+  if (everyOther) {
+    await prisma.recurrence.update({ where: { id: everyOther.id }, data: { intervalWeeks: 2, startDate: fromIsoDate(dates.monday) } });
+  }
+  const cycles = await first("hospitalGap", "10:00");
+  if (cycles) {
+    const tuesday = addDays(dates.monday, 1);
+    const sessions = [0, 7, 21, 28, 42, 49].map((offset) => addDays(tuesday, offset));
+    await prisma.recurrence.update({
+      where: { id: cycles.id },
+      data: {
+        weekdays: [2],
+        sessionDates: sessions.map(fromIsoDate),
+        startDate: fromIsoDate(sessions[0] ?? tuesday),
+        endDate: fromIsoDate(sessions.at(-1) ?? tuesday),
+        notes: "Cure de 3 semaines : séances à J1 et J8.",
+      },
+    });
+  }
+  const ownFriday = await first("dialysisAix", "13:00");
+  if (ownFriday) {
+    await prisma.recurrence.update({
+      where: { id: ownFriday.id },
+      data: { daySchedules: [{ weekday: 5, appointmentMinute: minute("07:30"), sessionMinutes: null }] },
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Prescriptions to follow up (work list « Prescriptions »).
 
 /**
@@ -1147,6 +1193,7 @@ async function main(): Promise<void> {
   console.log("• Patients, prescriptions et récurrences");
   const names = new NameFactory(rng, Object.values(DRIVERS));
   await seedPatients(rng, names, facilities, dates);
+  await seedRhythmExamples(facilities, dates);
   // Own generator: the patients and trips drawn afterwards stay those of the earlier seeds.
   await seedPrescriptionFollowUp(new Rng(RANDOM_SEED + 5), facilities, dates);
   console.log(`• Courses générées du ${formatShortDate(dates.monday)} au ${formatShortDate(dates.lastDay)}`);

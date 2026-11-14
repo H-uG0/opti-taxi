@@ -123,7 +123,7 @@ beforeEach(() => {
     where.id === "f1" ? CLINIC : where.id === "f2" ? { ...CLINIC, id: "f2", city: "Digne-les-Bains", lat: 44.1, lng: 6.24 } : null,
   );
   // No session of its own on the other days by default: a move is free.
-  fake.recurrence.findUnique.mockResolvedValue({ active: true, weekdays: [], legs: "BOTH", startDate: fromIsoDate("2026-01-01"), endDate: null });
+  fake.recurrence.findUnique.mockResolvedValue({ active: true, weekdays: [], intervalWeeks: 1, sessionDates: [], legs: "BOTH", startDate: fromIsoDate("2026-01-01"), endDate: null });
   fake.routeStop.findMany.mockResolvedValue([]);
   fake.$queryRaw.mockResolvedValue([]);
   fake.appSettings.upsert.mockResolvedValue({ id: 1, waitBeforeAppointmentMin: 30, waitAfterSessionMin: 30, maxTotalWaitMin: 45 });
@@ -192,7 +192,7 @@ describe("updateTrip (« Modifier la course »)", () => {
     fake.trip.findUnique.mockResolvedValue(
       stored({ status: "ASSIGNED", routeId: "route1", route: { status: "PROPOSED", vehicle: { type: "TAXI", label: "Taxi 1" } } }),
     );
-    fake.recurrence.findUnique.mockResolvedValue({ active: true, weekdays: [], legs: "BOTH", startDate: fromIsoDate("2026-01-01"), endDate: null });
+    fake.recurrence.findUnique.mockResolvedValue({ active: true, weekdays: [], intervalWeeks: 1, sessionDates: [], legs: "BOTH", startDate: fromIsoDate("2026-01-01"), endDate: null });
     fake.routeStop.findMany.mockImplementation(async ({ where }: { where: { tripId?: string } }) =>
       where.tripId ? [{ routeId: "route1" }] : [],
     );
@@ -222,6 +222,8 @@ describe("updateTrip (« Modifier la course »)", () => {
     fake.recurrence.findUnique.mockResolvedValue({
       active: true,
       weekdays: [1, 2, 3, 4, 5, 6, 7],
+      intervalWeeks: 1,
+      sessionDates: [],
       legs: "BOTH",
       startDate: fromIsoDate("2026-01-01"),
       endDate: null,
@@ -253,6 +255,8 @@ describe("updateTrip (« Modifier la course »)", () => {
     fake.recurrence.findUnique.mockResolvedValue({
       active: true,
       weekdays: [1, 2, 3, 4, 5, 6, 7],
+      intervalWeeks: 1,
+      sessionDates: [],
       legs: "BOTH",
       startDate: fromIsoDate("2026-01-01"),
       endDate: null,

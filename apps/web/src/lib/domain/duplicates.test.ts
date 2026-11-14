@@ -83,6 +83,17 @@ describe("recurrenceOverlaps", () => {
     ...overrides,
   });
 
+  it("tells two rhythms every other week on alternate weeks apart, and finds explicit dates on a common day (PAT-05)", () => {
+    // Weeks of 2026-11-02 and of 2026-11-09, every other week: never the same Monday.
+    const even = rec("even", { weekdays: [1], intervalWeeks: 2, startDate: "2026-11-02" });
+    const odd = rec("odd", { weekdays: [1], intervalWeeks: 2, startDate: "2026-11-09" });
+    expect(recurrenceOverlaps([even, odd]).size).toBe(0);
+    expect(recurrenceOverlaps([even, rec("weekly", { weekdays: [1] })]).get("even")).toEqual(["weekly"]);
+    const dated = rec("dated", { sessionDates: ["2026-11-16"], startDate: "2026-11-16", endDate: "2026-11-16" });
+    expect(recurrenceOverlaps([even, dated]).get("dated")).toEqual(["even"]);
+    expect(recurrenceOverlaps([odd, dated]).size).toBe(0);
+  });
+
   it("finds two active recurrences on a common day, period and time slot", () => {
     const overlaps = recurrenceOverlaps([rec("a"), rec("b", { weekdays: [5, 6], appointmentMinute: 600 })]);
     expect(overlaps).toEqual(new Map([["a", ["b"]], ["b", ["a"]]]));
