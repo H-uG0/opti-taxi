@@ -16,6 +16,7 @@ function plan(served: number, total: number, reasons: string[]): Guarded {
       emptyKm: 0,
       emptyKmRatio: 0,
       sharedTrips: 0,
+      shareableTrips: 0,
       sharedTripRatio: 0,
       revenue: 0,
       cost: 0,

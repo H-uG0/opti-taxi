@@ -121,6 +121,7 @@ function response(routes: PlanRoute[], trips: TripResult[], violations: PlanResp
       emptyKm: 0,
       emptyKmRatio: 0,
       sharedTrips: 0,
+      shareableTrips: 0,
       sharedTripRatio: 0,
       revenue: 0,
       cost: 0,

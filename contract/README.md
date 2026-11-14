@@ -363,7 +363,10 @@ Le web enregistre une option telle quelle (« Appliquer ») après l'avoir redem
     "tripsTotal": 60, "tripsServed": 58, "tripsUnassigned": 2,
     "vehiclesUsed": 9, "tripsPerVehicle": 6.44,
     "totalKm": 1520.4, "emptyKm": 498.1, "emptyKmRatio": 0.3276,
-    "sharedTrips": 14, "sharedTripRatio": 0.2414,     // parmi les courses servies
+    "sharedTrips": 14,                  // courses servies avec un co-passager
+    "shareableTrips": 50,               // courses servies partageables (trips[].shareable) en taxi ou VSL
+    "sharedTripRatio": 0.28,            // partagées parmi les shareableTrips (périmètre de l'Assurance maladie :
+                                        // ni ambulance ni course que la prescription ou le patient garde seule)
     "revenue": 3120.5, "cost": 1610.2, "margin": 1510.3
   },
   "validation": {

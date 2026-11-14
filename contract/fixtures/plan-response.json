@@ -105,6 +105,7 @@
     "emptyKm": 98.2,
     "emptyKmRatio": 0.5,
     "sharedTrips": 0,
+    "shareableTrips": 0,
     "sharedTripRatio": 0,
     "revenue": 350.28,
     "cost": 343.2,

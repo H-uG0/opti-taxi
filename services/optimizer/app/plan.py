@@ -277,7 +277,7 @@ def build_response(ctx: PlanContext, outcome: PlanOutcome, started_at: float) ->
         routes=routes,
         trips=trip_results,
         unassigned=unassigned,
-        kpis=compute_kpis(len(ctx.request.trips), routes, trip_results),
+        kpis=compute_kpis(ctx.request, routes, trip_results),
         validation=Validation(valid=not violations, violations=violations),
         meta=Meta(
             matrix_source=ctx.matrix.source,

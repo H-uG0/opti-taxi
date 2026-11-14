@@ -110,6 +110,7 @@ function planResponse(routes: unknown[] = []) {
       emptyKm: 2,
       emptyKmRatio: 0.2,
       sharedTrips: 0,
+      shareableTrips: 0,
       sharedTripRatio: 0,
       revenue: 20,
       cost: 10,

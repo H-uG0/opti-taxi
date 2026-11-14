@@ -407,7 +407,10 @@ class Kpis(ContractModel):
     empty_km: float
     empty_km_ratio: float
     shared_trips: int
+    shareable_trips: int
+    """Served trips that may be shared (trips[].shareable) in a taxi or a VSL: the denominator of shared_trip_ratio."""
     shared_trip_ratio: float
+    """Shared trips among shareable_trips (the scope of the Assurance maladie), 0 when there is none."""
     revenue: float
     cost: float
     margin: float

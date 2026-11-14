@@ -356,6 +356,8 @@ export const kpisSchema = z.strictObject({
   emptyKm: z.number(),
   emptyKmRatio: z.number(),
   sharedTrips: z.number().int(),
+  /** Served trips that may be shared, in a taxi or a VSL: the denominator of sharedTripRatio (Assurance maladie scope). */
+  shareableTrips: z.number().int(),
   sharedTripRatio: z.number(),
   revenue: z.number(),
   cost: z.number(),
