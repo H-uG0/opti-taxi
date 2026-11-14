@@ -487,7 +487,7 @@ Mise à jour le 9 novembre 2026. La première série passe avant tout : au 1er 
 - [ ] Combien de courses par jour, et quelle part de patients réguliers ? En partie répondu le 6 novembre : environ 300 voyages (allers simples) par jour, à recouper avec « 2 courses par véhicule et par jour ».
 - [ ] La limite de 2 patients par véhicule est-elle un choix de V ou une contrainte des véhicules ?
 - [ ] Quelle tolérance d'horaire : combien de temps avant le RDV un patient accepte-t-il d'arriver ?
-- [ ] Comment connaît-on l'heure de fin de séance pour organiser le retour ?
+- [ ] Comment connaît-on l'heure de fin de séance pour organiser le retour ? (lot 23 : le chauffeur peut la signaler depuis la dépose ; l'accueil des établissements, plus tard)
 - [ ] Les chauffeurs ont-ils un smartphone professionnel ?
 
 Ajoutées après l'appel du 6 novembre (entre parenthèses, l'hypothèse retenue en attendant) :
@@ -507,6 +507,9 @@ Ajoutées après l'appel du 6 novembre (entre parenthèses, l'hypothèse retenue
 - [ ] Taux de partage : la caisse le rapportera-t-elle aux courses éligibles (prescription autorisant le partage) ou à toutes les courses en taxi et VSL ? (les deux affichés, VSL et taxi séparés ; l'éligible en premier, face aux 30 % du protocole)
 - [ ] Tableau de bord, objectifs : quelles valeurs de référence (mesurées sur l'historique, avant l'outil) et quels objectifs pour les huit indicateurs, et faut-il des objectifs propres à certains dépôts ? (à saisir dans Paramètres ; le jeu de démonstration montre des valeurs d'exemple fictives)
 - [ ] Temps de planification : faut-il compter les appels aux patients (réponses au partage, annulations) et la composition des équipages dans le temps passé à construire le planning ? (oui, comme toute action sur la journée dans le journal d'audit ; les consultations seules ne comptent pas)
+- [ ] Suivi du jour : à partir de quel retard estimé faut-il prévenir l'établissement, et une tournée sans aucun statut 15 min après sa première prise en charge prévue doit-elle déclencher un appel ? (5 min affichés, 15 min en rouge, 15 min de silence)
+- [ ] Fin de séance signalée par le chauffeur : suffit-elle pour décaler le retour, ou faut-il la confirmation de l'accueil ? (appliquée tout de suite, signalée au régulateur)
+- [ ] « Embauche » sur la feuille de route de la veille : départ du dépôt, ou une prise de service plus tôt (préparation du véhicule) ? (départ du dépôt)
 
 **Tarifs et facturation (lot tarifaire, 9 novembre 2026)**
 
