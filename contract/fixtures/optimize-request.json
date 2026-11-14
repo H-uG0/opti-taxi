@@ -92,7 +92,9 @@
       "agglomeration": false,
       "hospitalLinked": true,
       "wheelchair": false,
-      "tollAmount": 0
+      "tollAmount": 0,
+      "facilityOpenMin": 425,
+      "facilityCloseMin": 1200
     },
     {
       "id": "trip_2",
@@ -111,7 +113,9 @@
       "agglomeration": false,
       "hospitalLinked": true,
       "wheelchair": false,
-      "tollAmount": 0
+      "tollAmount": 0,
+      "facilityOpenMin": 425,
+      "facilityCloseMin": 1200
     },
     {
       "id": "trip_3",

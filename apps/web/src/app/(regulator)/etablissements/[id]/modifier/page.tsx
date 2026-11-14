@@ -5,7 +5,8 @@ import { db } from "@/lib/db";
 import { geocoderEnabled } from "@/lib/geocode";
 import { addressFormValues } from "@/components/address/address-utils";
 import { PageHeader } from "@/components/ui/layout";
-import { todayIso } from "@/lib/time";
+import { formatMinute, todayIso } from "@/lib/time";
+import { parseOpeningHours } from "@/lib/domain/facility-hours";
 import { countOpenTrips } from "@/app/(regulator)/patients/_lib/trip-counts";
 import { openTripsLabel } from "@/app/(regulator)/patients/_lib/trip-sync";
 import { updateFacility } from "../../actions";
@@ -43,6 +44,13 @@ export default async function EditFacilityPage({ params }: { params: Promise<{ i
           notes: facility.notes ?? "",
           extraServiceMin: String(facility.extraServiceMin),
           openOnHolidays: facility.openOnHolidays,
+          earliestArrival: facility.earliestArrivalMinute !== null ? formatMinute(facility.earliestArrivalMinute) : "",
+          hours: Object.fromEntries(
+            parseOpeningHours(facility.openingHours).map((h) => [
+              String(h.weekday),
+              { open: formatMinute(h.openMinute), close: formatMinute(h.closeMinute) },
+            ]),
+          ),
           address: addressFormValues(facility),
         }}
         geocoderEnabled={geocoderEnabled()}

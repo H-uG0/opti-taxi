@@ -26,6 +26,8 @@ export default async function NewFacilityPage() {
           notes: "",
           extraServiceMin: "0",
           openOnHolidays: holidayDefault("DIALYSIS"),
+          earliestArrival: "",
+          hours: {},
           address: EMPTY_ADDRESS,
         }}
         followsType

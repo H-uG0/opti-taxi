@@ -211,6 +211,12 @@ class Trip(ContractModel):
     """The patient rides in their own wheelchair (TPMR supplement in a fitted vehicle)."""
     toll_amount: float = Field(default=0, ge=0, le=1000)
     """Tolls billed on this patient's invoice (euros), outside surcharges and discounts."""
+    facility_open_min: DayMinute | None = None
+    """Hours of the facility that day (its stop: the OUTBOUND dropoff, the RETURN pickup): earliest arrival
+    accepted; None: no bound. Applied only when the trip's own time (appointment, end of session) is inside
+    [facilityOpenMin, facilityCloseMin] (model.facility_hours_apply, contract README)."""
+    facility_close_min: DayMinute | None = None
+    """Closing time of the facility that day; None: no bound."""
 
     @model_validator(mode="after")
     def _times_match_direction(self) -> Trip:
@@ -218,6 +224,9 @@ class Trip(ContractModel):
             raise ValueError("OUTBOUND trip requires appointmentMin")
         if self.direction == "RETURN" and self.ready_min is None:
             raise ValueError("RETURN trip requires readyMin")
+        opening, closing = self.facility_open_min, self.facility_close_min
+        if opening is not None and closing is not None and closing <= opening:
+            raise ValueError("facilityCloseMin must be after facilityOpenMin")
         return self
 
 

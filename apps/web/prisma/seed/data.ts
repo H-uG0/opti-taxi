@@ -157,7 +157,7 @@ export const FACILITIES = {
     distanceKm: 3.6,
     address: "18 avenue des Tamaris",
     postalCode: "13010",
-    notes: "Accueil ouvert de 7 h 30 à 18 h 30. Arrêt minute devant l'entrée principale.",
+    notes: "Arrêt minute devant l'entrée principale.",
   },
   dialysisAix: {
     name: "Centre de dialyse du Pays d'Aix (fictif)",

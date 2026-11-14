@@ -23,6 +23,8 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
     orderBy: [{ startMinute: "asc" }, { id: "asc" }],
     select: {
       id: true,
+      // The day of the route: the reception hours of each facility are those of its weekday.
+      serviceDate: true,
       status: true,
       startMinute: true,
       endMinute: true,
@@ -90,8 +92,8 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
               patient: {
                 select: { firstName: true, lastName: true, phone: true, mobility: true, accessNotes: true },
               },
-              // Notes: entrance, parking, floor of the care place, shown on its stops.
-              facility: { select: { name: true, phone: true, notes: true } },
+              // Notes: entrance, parking, floor of the care place, shown on its stops, with its reception hours.
+              facility: { select: { name: true, phone: true, notes: true, openingHours: true, earliestArrivalMinute: true } },
             },
           },
         },

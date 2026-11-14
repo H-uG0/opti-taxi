@@ -506,6 +506,36 @@ describe("trips", () => {
   });
 });
 
+describe("facility reception hours (PAT-04)", () => {
+  it("sends the hours of the trip's facility that day, and nothing without hours (the request stays the same)", () => {
+    const hours = { openMin: 435, closeMin: 1140 };
+    const { request } = buildOptimizeRequest(
+      input({
+        trips: [
+          trip("t1", { facilityHours: hours }),
+          trip("t2", { direction: "RETURN", appointmentMinute: null, readyMinute: 690, facilityHours: { openMin: null, closeMin: 1140 } }),
+          trip("t3"),
+        ],
+      }),
+    );
+    const [t1, t2, t3] = request.trips;
+    expect(t1).toMatchObject({ facilityOpenMin: 435, facilityCloseMin: 1140 });
+    expect(t2).toMatchObject({ facilityCloseMin: 1140 });
+    expect(t2).not.toHaveProperty("facilityOpenMin");
+    expect(t3).not.toHaveProperty("facilityOpenMin");
+    expect(t3).not.toHaveProperty("facilityCloseMin");
+    expect(optimizeRequestSchema.safeParse(request).success).toBe(true);
+  });
+
+  it("leaves the hours out of a trip whose own time is outside them, and says so", () => {
+    const build = buildOptimizeRequest(input({ trips: [trip("t1", { appointmentMinute: 390, facilityHours: { openMin: 420, closeMin: 1140 } })] }));
+    expect(build.request.trips[0]).not.toHaveProperty("facilityOpenMin");
+    expect(build.notes).toContain(
+      "1 course hors des horaires d'accueil de leur établissement (RDV à 06:30, avant l'accueil (07:00))\u00a0: horaires ignorés pour elle, vérifiez le rendez-vous ou les horaires.",
+    );
+  });
+});
+
 describe("tariffs", () => {
   it("sends the grid of each vehicle, in force on the date, the most recent one per type and department", () => {
     const taxi13 = tariff({ baseFare: 13, validFrom: new Date("2026-06-01T00:00:00Z") });

@@ -238,6 +238,23 @@ async function seedFacilities<K extends string>(rng: Rng, defs: Record<K, Facili
   return facilities;
 }
 
+/**
+ * Reception hours (PAT-04): the radiotherapy institute of Marseille receives from 07:30 to 18:30 on weekdays;
+ * the dialysis centre of Aix from 06:45 to 20:00, Monday to Saturday, its patients let in from 07:10 only.
+ */
+async function seedFacilityHours(facilities: Map<FacilityKey, CreatedFacility>): Promise<void> {
+  const week = (days: number[], open: string, close: string) =>
+    days.map((weekday) => ({ weekday, openMinute: minute(open), closeMinute: minute(close) }));
+  await prisma.facility.update({
+    where: { id: lookup(facilities, "radiotherapyMarseille", "Établissement").id },
+    data: { openingHours: week([1, 2, 3, 4, 5], "07:30", "18:30") },
+  });
+  await prisma.facility.update({
+    where: { id: lookup(facilities, "dialysisAix", "Établissement").id },
+    data: { openingHours: week([1, 2, 3, 4, 5, 6], "06:45", "20:00"), earliestArrivalMinute: minute("07:10") },
+  });
+}
+
 async function seedDepots(): Promise<Map<DepotKey, string>> {
   const depots = new Map<DepotKey, string>();
   for (const key of Object.keys(DEPOTS) as DepotKey[]) {
@@ -1262,6 +1279,7 @@ async function main(): Promise<void> {
   await seedSettingsAndTariffs(today);
   console.log("• Établissements");
   const facilities = await seedFacilities(rng, FACILITIES);
+  await seedFacilityHours(facilities);
   // Own generator: the patients and trips drawn afterwards stay those of the earlier seeds.
   const oneOffFacilities = await seedFacilities(new Rng(RANDOM_SEED + 6), ONE_OFF_FACILITIES);
   console.log("• Dépôts, chauffeurs, véhicules et comptes");

@@ -502,6 +502,8 @@ class _RouteCheck:
                     vehicle_id=vid,
                     excess=appointment - margin - start,
                 )
+        if (trip.direction == "OUTBOUND" and stop.kind == "DROPOFF") or (trip.direction == "RETURN" and stop.kind == "PICKUP"):
+            self._check_facility_hours(stop, trip)
         if trip.direction == "RETURN" and stop.kind == "PICKUP" and trip.ready_min is not None:
             ready = trip.ready_min
             margin = self.settings.wait_after_session_min
@@ -521,6 +523,34 @@ class _RouteCheck:
                     vehicle_id=vid,
                     excess=start - ready - margin,
                 )
+
+    def _check_facility_hours(self, stop: Stop, trip: Trip) -> None:
+        """Stop at the facility inside its hours of the day, when the trip's own time (appointment, end of
+        session) is inside them (otherwise they are ignored: contract README)."""
+        opening, closing = trip.facility_open_min, trip.facility_close_min
+        own = trip.appointment_min if trip.direction == "OUTBOUND" else trip.ready_min
+        if own is None or (opening is None and closing is None):
+            return
+        if (opening is not None and own < opening) or (closing is not None and own > closing):
+            return
+        start, vid = stop.start_min, self.vehicle.id
+        where = "Arrivée au lieu de soins" if stop.kind == "DROPOFF" else "Prise en charge au lieu de soins"
+        if opening is not None and start < opening - TIME_TOLERANCE_MIN:
+            self.out.add(
+                "TIME_WINDOW",
+                f"{where} à {hhmm(start)}, avant l'accueil de l'établissement ({hhmm(opening)})",
+                trip_id=trip.id,
+                vehicle_id=vid,
+                excess=opening - start,
+            )
+        if closing is not None and start > closing + TIME_TOLERANCE_MIN:
+            self.out.add(
+                "TIME_WINDOW",
+                f"{where} à {hhmm(start)}, après la fermeture de l'établissement ({hhmm(closing)})",
+                trip_id=trip.id,
+                vehicle_id=vid,
+                excess=start - closing,
+            )
 
     # -- shift
     def _check_shift(self) -> None:

@@ -37,7 +37,35 @@ describe("parseFacilityForm", () => {
       notes: null,
       extraServiceMin: 0,
       openOnHolidays: false,
+      openingHours: [],
+      earliestArrivalMinute: null,
     });
+  });
+
+  it("reads the reception hours of each weekday and the earliest arrival (PAT-04)", () => {
+    const parsed = parseFacilityForm(
+      form({ ...facility, hoursOpen1: "07:00", hoursClose1: "19:00", hoursOpen6: "8h", hoursClose6: "12:00", earliestArrival: "06:45" }),
+    );
+    expect(parsed.success && parsed.data.openingHours).toEqual([
+      { weekday: 1, openMinute: 420, closeMinute: 1140 },
+      { weekday: 6, openMinute: 480, closeMinute: 720 },
+    ]);
+    expect(parsed.success && parsed.data.earliestArrivalMinute).toBe(405);
+  });
+
+  it("refuses a day with one bound only, a closing before the opening, and a bad time", () => {
+    const parsed = parseFacilityForm(
+      form({ ...facility, hoursOpen1: "07:00", hoursClose2: "19:00", hoursOpen3: "19:00", hoursClose3: "07:00" }),
+    );
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(parsed.state.fieldErrors).toMatchObject({
+      hoursClose1: "Saisissez l'ouverture et la fermeture",
+      hoursOpen2: "Saisissez l'ouverture et la fermeture",
+      hoursClose3: "La fermeture doit suivre l'ouverture",
+    });
+    const bad = parseFacilityForm(form({ ...facility, earliestArrival: "25:00" }));
+    expect(!bad.success && bad.state.fieldErrors.earliestArrival).toMatch(/Heure invalide/);
   });
 
   it("reads « ouvert les jours fériés » (PAT-03), and echoes it after a refusal", () => {

@@ -159,9 +159,18 @@ export const tripSchema = z
     wheelchair: z.boolean().default(false),
     /** Tolls billed on this patient's invoice (euros), outside surcharges and discounts. */
     tollAmount: z.number().min(0).max(1000).default(0),
+    /**
+     * Hours of the facility that day (its stop: outbound drop-off, return pickup), absent or null: no bound;
+     * applied when the trip's own time is inside them (lib/domain/facility-hours.ts, contract README).
+     */
+    facilityOpenMin: dayMinute.nullish(),
+    facilityCloseMin: dayMinute.nullish(),
   })
   .refine((t) => t.direction !== "OUTBOUND" || t.appointmentMin !== null, {
     message: "OUTBOUND trip requires appointmentMin",
+  })
+  .refine((t) => t.facilityOpenMin == null || t.facilityCloseMin == null || t.facilityCloseMin > t.facilityOpenMin, {
+    message: "facilityCloseMin must be after facilityOpenMin",
   })
   .refine((t) => t.direction !== "RETURN" || t.readyMin !== null, {
     message: "RETURN trip requires readyMin",

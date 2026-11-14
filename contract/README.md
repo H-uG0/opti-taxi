@@ -102,7 +102,9 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
     "agglomeration": false,             //   course entièrement dans l'agglomération du siège (forfait agglomération)
     "hospitalLinked": true,             //   hospitalisation, dialyse, chimiothérapie, radiothérapie (retour à vide taxi)
     "wheelchair": false,                //   patient transporté dans son fauteuil (supplément TPMR)
-    "tollAmount": 0                     //   péages de la facture de ce patient, € (0..1000)
+    "tollAmount": 0,                    //   péages de la facture de ce patient, € (0..1000)
+    "facilityOpenMin": 425,             // facultatifs, absents ou null = aucune borne : heures d'accueil de
+    "facilityCloseMin": 1140            //   l'établissement ce jour-là (voir « Fenêtres horaires dérivées »)
   }],
   "tariffs": [{                         // les grilles citées par les véhicules et les courses, ids uniques
     "id": "taxi_13",
@@ -212,6 +214,17 @@ requête est la même qu'avant. Le solveur, le calcul des horaires et le validat
 - Si `waitBeforeAppointmentMin + waitAfterSessionMin` dépasse `maxTotalWaitMin`, les fenêtres de
   l'aller et du retour d'un même patient sont resserrées (la marge avant le RDV d'abord) ; une
   course sans son aller ou son retour attend au plus `maxTotalWaitMin`.
+- **Heures d'accueil de l'établissement** (`trips[].facilityOpenMin`, `trips[].facilityCloseMin`,
+  facultatifs) : l'arrêt à l'établissement (dépose d'un aller, prise en charge d'un retour) commence
+  au plus tôt à `facilityOpenMin` et au plus tard à `facilityCloseMin`, en plus de la fenêtre
+  ci-dessus. Elles ne s'appliquent que si l'heure propre de la course (RDV d'un aller, fin de séance
+  d'un retour) est dans `[facilityOpenMin, facilityCloseMin]` : une heure en dehors est une erreur de
+  saisie, les heures sont alors ignorées et `meta.warnings` le dit (« Course trip_9 : rendez-vous à
+  06:30 hors des heures d'accueil de l'établissement, heures ignorées ») ; la fenêtre bornée n'est
+  ainsi jamais vide. Le web les calcule pour le jour de la semaine de la date (`Facility.openingHours`,
+  arrivée la plus tôt `Facility.earliestArrivalMinute` à la place de l'ouverture) et ne les envoie pas
+  sans horaire saisi : la requête est alors la même qu'avant. Le validateur revérifie l'arrêt
+  (`TIME_WINDOW`, « Arrivée au lieu de soins à 06:40, avant l'accueil de l'établissement (07:00) »).
 
 ### Attente à bord au lieu de soins et temps à bord
 
@@ -425,7 +438,7 @@ compte chaque course seule, sur la distance directe, sans retour à vide ni abat
 | `VEHICLE_TYPE` | type de véhicule non autorisé pour la course |
 | `CAPACITY` | plus de patients à bord que la capacité |
 | `EXCLUSIVE_RIDE` | patient non partageable transporté avec un autre patient |
-| `TIME_WINDOW` | arrivée hors fenêtre (retard au RDV, trop tôt, prise en charge hors fenêtre) |
+| `TIME_WINDOW` | arrivée hors fenêtre (retard au RDV, trop tôt, prise en charge hors fenêtre, hors des heures d'accueil de l'établissement) |
 | `TOTAL_WAIT` | attente au lieu de soins, attente à bord comprise, > `maxTotalWaitMin` : aller + retour d'un patient, ou un trajet sans son pendant |
 | `RIDE_TIME` | temps à bord > trajet direct + `maxRideExtraMin` |
 | `DETOUR` | détour > `min(maxDetourKmPerExtraPatient * co-passagers, maxDetourKmTotal)` |

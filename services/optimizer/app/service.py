@@ -9,6 +9,7 @@ import time
 from app import insertion
 from app.context import make_context, request_points
 from app.matrix import build_matrix, configured_osrm_url
+from app.model import facility_hours_warnings
 from app.plan import PlanOutcome, build_response
 from app.schemas import EvaluateRequest, InsertRequest, InsertResponse, OptimizeRequest, PlanResponse
 from app.solver import solve
@@ -27,6 +28,7 @@ def optimize(request: OptimizeRequest) -> PlanResponse:
     matrix, warnings = build_matrix(request_points(request), configured_osrm_url())
     ctx = make_context(request, with_traffic(matrix, request.settings.traffic))
     warnings.extend(ctx.tariffs.missing_warnings(request.vehicles))
+    warnings.extend(facility_hours_warnings(request))
     solve_started = time.perf_counter()
     outcome = solve(ctx, request.initial_routes or ())
     solve_ms = round((time.perf_counter() - solve_started) * 1000)
@@ -71,6 +73,7 @@ def evaluate(request: EvaluateRequest) -> PlanResponse:
     matrix, warnings = build_matrix(request_points(request), configured_osrm_url())
     ctx = make_context(request, with_traffic(matrix, request.settings.traffic))
     warnings.extend(ctx.tariffs.missing_warnings(request.vehicles))
+    warnings.extend(facility_hours_warnings(request))
     sequences, reference_violations, reference_warnings = check_plan_references(request, request.routes)
     warnings.extend(reference_warnings)
     response = build_response(

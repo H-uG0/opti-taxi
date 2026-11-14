@@ -22,6 +22,7 @@ import { addFacilityClosure, deleteFacilityClosure } from "../closure-actions";
 import { ClosureForm } from "../_components/closure-form";
 import { ConfirmAction } from "@/components/ui/confirm-action";
 import { closureText } from "@/lib/domain/facility-calendar";
+import { describeOpeningHours, parseOpeningHours } from "@/lib/domain/facility-hours";
 import { recordAbsenceFrom } from "@/lib/domain/patient-absences";
 import { BackLink } from "@/components/ui/back-link";
 import { Notice } from "@/components/ui/notice";
@@ -71,6 +72,7 @@ export default async function FacilityPage({
       a.patient.firstName.localeCompare(b.patient.firstName, "fr") ||
       a.appointmentMinute - b.appointmentMinute,
   );
+  const hoursText = describeOpeningHours(parseOpeningHours(facility.openingHours));
   const activePatients = new Set(recurrences.filter((r) => r.patient.active).map((r) => r.patient.id));
 
   return (
@@ -136,6 +138,18 @@ export default async function FacilityPage({
               ) : (
                 <span className="text-amber-700">Non renseigné — nécessaire pour prévenir des arrivées partagées</span>
               )}
+            </Item>
+            <Item label="Horaires d'accueil" className="sm:col-span-2">
+              {hoursText ? (
+                <span className="tabular">{hoursText}</span>
+              ) : (
+                <span className="text-slate-500">Non renseignés (aucune contrainte)</span>
+              )}
+              {facility.earliestArrivalMinute !== null ? (
+                <span className="tabular mt-0.5 block text-xs text-slate-600">
+                  Arrivée des patients acceptée dès {formatMinute(facility.earliestArrivalMinute)}
+                </span>
+              ) : null}
             </Item>
             <Item label="Temps d'arrêt en plus">
               {facility.extraServiceMin > 0 ? (

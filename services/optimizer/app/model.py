@@ -3,7 +3,8 @@
 - Derived time windows (single source of truth, contract README):
   OUTBOUND dropoff service starts in [appointment - waitBefore, appointment];
   RETURN pickup service starts in [ready, ready + waitAfter]; other stops are free (the vehicle
-  shift bounds them).
+  shift bounds them). The facility's hours of the day (facilityOpenMin, facilityCloseMin) narrow
+  the window of its stop, when the trip's own time is inside them (facility_hours_apply).
 - Total wait at the facility: when waitBefore + waitAfter exceeds maxTotalWait, the windows of a
   patient's same-day OUTBOUND/RETURN pair are tightened so that any schedule inside them respects
   the budget (the arrival margin keeps priority); a leg alone waits at most maxTotalWait. The wait
@@ -21,6 +22,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 
+from app.labels import hhmm
 from app.schemas import MINUTES_PER_DAY, BreakRule, DayRequest, Settings, StopKind, Trip, Vehicle
 
 HORIZON_MIN = 2 * MINUTES_PER_DAY
@@ -87,6 +89,41 @@ def same_day_pairs(trips: Sequence[Trip]) -> list[tuple[Trip, Trip]]:
     return pairs
 
 
+def facility_hours_apply(trip: Trip) -> bool:
+    """The facility's hours bound the trip's stop there: some are given, and its own time (appointment
+    of an OUTBOUND trip, end of session of a RETURN) is inside them. A time outside them is a data
+    error the regulator must see (warning), never a trip made impossible."""
+    if trip.facility_open_min is None and trip.facility_close_min is None:
+        return False
+    key = trip.appointment_min if trip.direction == "OUTBOUND" else trip.ready_min
+    if key is None:
+        return False
+    if trip.facility_open_min is not None and key < trip.facility_open_min:
+        return False
+    return trip.facility_close_min is None or key <= trip.facility_close_min
+
+
+def facility_hours_warnings(request: DayRequest) -> list[str]:
+    """French warnings for the trips whose own time is outside the facility's hours given (ignored)."""
+    warnings: list[str] = []
+    for trip in request.trips:
+        if (trip.facility_open_min is None and trip.facility_close_min is None) or facility_hours_apply(trip):
+            continue
+        what = "rendez-vous" if trip.direction == "OUTBOUND" else "fin de séance"
+        key = trip.appointment_min if trip.direction == "OUTBOUND" else trip.ready_min
+        warnings.append(
+            f"Course {trip.id}\u00a0: {what} à {hhmm(key or 0)} hors des heures d'accueil de l'établissement, heures ignorées"
+        )
+    return warnings
+
+
+def _bounded(window: Window, trip: Trip) -> Window:
+    """The window narrowed by the facility's hours (facility_hours_apply checked by the caller)."""
+    open_ = window.open if trip.facility_open_min is None else max(window.open, trip.facility_open_min)
+    close = window.close if trip.facility_close_min is None else min(window.close, trip.facility_close_min)
+    return Window(open_, close)
+
+
 def derive_windows(request: DayRequest) -> dict[str, TripWindows]:
     """Service time windows of every trip, keyed by trip id."""
     settings = request.settings
@@ -105,10 +142,14 @@ def derive_windows(request: DayRequest) -> dict[str, TripWindows]:
         if trip.direction == "OUTBOUND":
             appointment = trip.appointment_min if trip.appointment_min is not None else HORIZON_MIN
             dropoff = Window(max(0, appointment - before_budget[trip.id]), appointment)
+            if facility_hours_apply(trip):
+                dropoff = _bounded(dropoff, trip)
             windows[trip.id] = TripWindows(pickup=FREE_WINDOW, dropoff=dropoff)
         else:
             ready = trip.ready_min if trip.ready_min is not None else 0
             pickup = Window(ready, min(HORIZON_MIN, ready + after_budget[trip.id]))
+            if facility_hours_apply(trip):
+                pickup = _bounded(pickup, trip)
             windows[trip.id] = TripWindows(pickup=pickup, dropoff=FREE_WINDOW)
     return windows
 

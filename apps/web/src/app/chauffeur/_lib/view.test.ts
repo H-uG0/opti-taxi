@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { StopKind, TripDirection, TripStatus } from "@prisma/client";
+import type { Prisma, StopKind, TripDirection, TripStatus } from "@prisma/client";
 import type { DriverRoute, DriverRouteStop } from "./load";
 import { buildRouteView } from "./view";
 
@@ -19,6 +19,9 @@ function makeStop(
     payer?: "CPAM" | "PRIVATE";
     accessNotes?: string;
     facilityNotes?: string | null;
+    /** Facility.openingHours (JSON) and earliest arrival; absent: none entered. */
+    openingHours?: unknown;
+    earliestArrivalMinute?: number | null;
     notes?: string | null;
     oneOffAddress?: boolean;
   },
@@ -57,7 +60,13 @@ function makeStop(
       recurrenceId: null,
       facilityId: "facility_1",
       patient: { firstName, lastName, phone: "06 12 34 56 78", mobility: "SEATED", accessNotes: trip.accessNotes ?? "  " },
-      facility: { name: "Centre de dialyse du Prado", phone: "04 91 00 00 00", notes: trip.facilityNotes ?? null },
+      facility: {
+        name: "Centre de dialyse du Prado",
+        phone: "04 91 00 00 00",
+        notes: trip.facilityNotes ?? null,
+        openingHours: (trip.openingHours ?? []) as Prisma.JsonValue,
+        earliestArrivalMinute: trip.earliestArrivalMinute ?? null,
+      },
     },
   };
 }
@@ -65,6 +74,8 @@ function makeStop(
 function makeRoute(stops: DriverRouteStop[], overrides: Partial<DriverRoute> = {}): DriverRoute {
   return {
     id: "route_1",
+    // Tuesday 3 November 2026.
+    serviceDate: new Date("2026-11-03T00:00:00.000Z"),
     status: "PROPOSED",
     startMinute: 450,
     endMinute: 600,
@@ -351,6 +362,20 @@ describe("buildRouteView", () => {
     expect(carePickup?.accessNotes).toBeNull();
     expect(carePickup?.facility?.notes).toBe(care);
     expect(homeDropoff).toMatchObject({ accessNotes: home, facility: null });
+  });
+
+  it("gives the facility's reception hours of the route's weekday at the care place (PAT-04)", () => {
+    // Tuesday (2): 07:00 – 19:00, patients let in from 06:45; Wednesday has no hours.
+    const hours = [
+      { weekday: 2, openMinute: 420, closeMinute: 1140 },
+      { weekday: 3, openMinute: 480, closeMinute: 1080 },
+    ];
+    const leg = { ...A, openingHours: hours, earliestArrivalMinute: 405 };
+    const view = buildRouteView(makeRoute([makeStop(0, "trip_a", "PICKUP", leg), makeStop(1, "trip_a", "DROPOFF", leg)]), DRIVER, true);
+    expect(view.stops[1]?.facility?.hours).toBe("Accueil de 06:45 à 19:00");
+    expect(view.stops[0]?.facility).toBeNull();
+    const none = buildRouteView(makeRoute([makeStop(0, "trip_a", "PICKUP", A), makeStop(1, "trip_a", "DROPOFF", A)]), DRIVER, true);
+    expect(none.stops[1]?.facility?.hours).toBeNull();
   });
 
   it("shows the regulator's note, and keeps the home access notes off a one-off address", () => {

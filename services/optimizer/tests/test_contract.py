@@ -63,6 +63,16 @@ def test_insert_response_fixture_round_trips() -> None:
     assert response.model_dump(mode="json", by_alias=True) == raw
 
 
+def test_facility_hours_are_optional_and_ordered() -> None:
+    raw = load("optimize-request.json")
+    request = OptimizeRequest.model_validate(raw)
+    assert (request.trips[0].facility_open_min, request.trips[0].facility_close_min) == (425, 1200)
+    assert request.trips[2].facility_open_min is None
+    raw["trips"][0]["facilityCloseMin"] = 400
+    with pytest.raises(ValidationError):
+        OptimizeRequest.model_validate(raw)
+
+
 def test_outbound_requires_appointment() -> None:
     raw = load("optimize-request.json")
     raw["trips"][0]["appointmentMin"] = None

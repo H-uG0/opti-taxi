@@ -25,7 +25,14 @@ describe("loadDriverRoutes", () => {
   it("reads the facility's and the depot's instructions, and the payer, for the crew", async () => {
     await loadDriverRoutes("drv_1", "2026-11-10", "2026-11-09");
 
-    expect(selectAt(["stops", "trip", "facility"])).toEqual({ name: true, phone: true, notes: true });
+    // With its reception hours (PAT-04), read for the route's day.
+    expect(selectAt(["stops", "trip", "facility"])).toEqual({
+      name: true,
+      phone: true,
+      notes: true,
+      openingHours: true,
+      earliestArrivalMinute: true,
+    });
     expect(selectAt(["vehicle", "depot"])).toMatchObject({ name: true, address: true, notes: true });
     expect(selectAt(["stops", "trip"])).toMatchObject({ payer: true, notes: true, oneOffAddress: true });
     // Home access notes come with the patient; nothing else of the patient's record.

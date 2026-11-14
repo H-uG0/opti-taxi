@@ -31,6 +31,7 @@ import type {
   TripStatus,
   VehicleType,
 } from "@prisma/client";
+import { contractFacilityHours, facilityHoursOn, outsideHoursText, type DayHours } from "@/lib/domain/facility-hours";
 import { isShareable } from "@/lib/domain/rules";
 import { getSettings } from "@/lib/domain/settings";
 import { loadTrafficZones, toContractTraffic, type TrafficInput } from "@/lib/domain/traffic";
@@ -161,6 +162,8 @@ export type TripInput = {
   tollAmount?: number | null;
   /** Exceptional ambulance proposed by a regulator (TAR-03): billed at the VSL tariff while locked on an ambulance. */
   exceptionalAmbulanceAt?: Date | null;
+  /** Reception hours of the trip's facility that day (facilityHoursOn); absent or null: none entered. */
+  facilityHours?: DayHours | null;
 };
 
 /** Stop durations (Paramètres « Temps d'arrêt »); absent fields: no surcharge, ambulance as taxi and VSL. */
@@ -586,6 +589,21 @@ export function exceptionalAmbulanceGrid<T extends Pick<TariffGrid, "vehicleType
 }
 
 /** Pure: the optimizer request of input.date, plus everything left out and why. */
+/** The trip's own time: appointment of an outbound trip, end of session of a return. */
+function keyMinuteOf(trip: Pick<TripInput, "direction" | "appointmentMinute" | "readyMinute">): number | null {
+  return trip.direction === "OUTBOUND" ? trip.appointmentMinute : trip.readyMinute;
+}
+
+/** One note for the trips outside their facility's hours (the hours are not sent for them). */
+export function outsideHoursNotes(texts: readonly string[]): string[] {
+  if (texts.length === 0) return [];
+  const shown = texts.slice(0, 3).join("\u202f; ");
+  const more = texts.length > 3 ? ` et ${texts.length - 3} autre${texts.length > 4 ? "s" : ""}` : "";
+  return [
+    `${texts.length === 1 ? "1 course" : `${texts.length} courses`} hors des horaires d'accueil de leur établissement (${shown}${more})\u00a0: horaires ignorés pour ${texts.length === 1 ? "elle" : "elles"}, vérifiez le rendez-vous ou les horaires.`,
+  ];
+}
+
 export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
   const billing = input.billing ?? NO_BILLING;
   const { available: decided, crews, skipped, notes } = resolveVehicleAvailability(input.vehicles, input.date);
@@ -615,6 +633,8 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
   const excludedTrips: ExcludedTrip[] = [];
   // Ambulances carrying an exceptional seated trip without a VSL grid that day (the optimizer falls back to theirs).
   const seatedGridMissing = new Set<string>();
+  // Trips whose appointment or end of session is outside their facility's hours (data to check).
+  const outsideHours: string[] = [];
 
   for (const raw of input.trips) {
     if (EXCLUDED_TRIP_STATUSES.includes(raw.status)) continue;
@@ -667,7 +687,11 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
       ...(service.dropoffServiceMin !== null ? { dropoffServiceMin: service.dropoffServiceMin } : {}),
       tariffId,
       ...tripBillingFlags(trip, areas, headOffice),
+      // The facility's hours, only when the trip's own time is inside them (otherwise noted below).
+      ...contractFacilityHours(trip.facilityHours, keyMinuteOf(trip)),
     });
+    const outside = outsideHoursText(trip.facilityHours ?? null, trip.direction, keyMinuteOf(trip));
+    if (outside) outsideHours.push(outside);
   }
 
   const tariffs = [...used.values()]
@@ -691,6 +715,7 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
     excludedTrips,
     notes: [
       ...notes,
+      ...outsideHoursNotes(outsideHours),
       ...[...seatedGridMissing].map(
         (label) =>
           `${label}\u00a0: recours exceptionnel sans grille VSL en vigueur ce jour, la course est estimée au tarif ambulance. Créez la grille VSL dans Grilles tarifaires.`,
@@ -929,7 +954,7 @@ export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): 
       select: {
         ...tripInputSelect,
         patient: { select: { mobility: true } },
-        facility: { select: { extraServiceMin: true, type: true } },
+        facility: { select: { extraServiceMin: true, type: true, openingHours: true, earliestArrivalMinute: true } },
       },
       orderBy: [{ appointmentMinute: "asc" }, { readyMinute: "asc" }, { id: "asc" }],
     }),
@@ -941,6 +966,7 @@ export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): 
     mobility: patient.mobility,
     facilityExtraServiceMin: facility?.extraServiceMin ?? 0,
     facilityType: facility?.type ?? null,
+    facilityHours: facility ? facilityHoursOn(facility, isoDate) : null,
   }));
   return {
     date: isoDate,

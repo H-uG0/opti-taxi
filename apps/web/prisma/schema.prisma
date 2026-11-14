@@ -291,9 +291,15 @@ model Facility {
   lng        Float
   /// Accueil, prévenu des arrivées en transport partagé.
   phone      String?
+  /// Consignes de dépose (entrée, code, emplacement ambulance, étage), montrées au chauffeur à l'arrêt.
   notes      String?
   /// Minutes ajoutées au temps d'arrêt à l'établissement (dépose d'un aller, prise en charge d'un retour) : accueil, étages.
   extraServiceMin Int     @default(0)
+  /// Horaires d'accueil par jour de semaine (ISO) : [{ "weekday": 1, "openMinute": 420, "closeMinute": 1140 }] ;
+  /// un jour sans entrée n'a pas de borne. L'optimiseur borne l'arrêt à l'établissement (lib/domain/facility-hours.ts).
+  openingHours Json     @default("[]")
+  /// Arrivée des patients acceptée dès cette heure, tous les jours (à la place de l'ouverture) ; null : l'ouverture.
+  earliestArrivalMinute Int?
   /// Ouvert les jours fériés (PublicHoliday) : sinon, les courses vers lui ces jours-là sont signalées sur le
   /// planning et dans Courses (« Jour férié : N courses vers des établissements fermés »). Coché pour la dialyse.
   openOnHolidays Boolean  @default(false)

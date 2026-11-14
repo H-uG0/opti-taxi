@@ -10,6 +10,8 @@ import { ErrorFocus } from "@/components/ui/error-focus";
 import { FormFooter } from "@/components/ui/form-footer";
 import { echoed, echoedCheckbox, IDLE_STATE, refusalKey, type FormState } from "@/lib/forms";
 import { FACILITY_TYPES, holidayDefault } from "../_lib/options";
+import { hoursCloseField, hoursOpenField } from "../_lib/hours-fields";
+import { OpeningHoursFields, WEEKDAYS } from "./opening-hours-fields";
 
 export type FacilityFormInitial = {
   name: string;
@@ -20,6 +22,10 @@ export type FacilityFormInitial = {
   extraServiceMin: string;
   /** Works on public holidays (« ouvert les jours fériés »). */
   openOnHolidays: boolean;
+  /** Earliest accepted arrival ("HH:MM" or ""). */
+  earliestArrival: string;
+  /** Reception hours by ISO weekday ("1" … "7"): "HH:MM" or "" each. */
+  hours: Record<string, { open: string; close: string }>;
   address: AddressFormValues;
 };
 
@@ -42,7 +48,7 @@ export function FacilityForm({
 }) {
   const [state, formAction, isPending] = useActionState(action, IDLE_STATE);
   const errors = state.fieldErrors;
-  const value = (key: keyof Omit<FacilityFormInitial, "address" | "openOnHolidays">) => echoed(state, key, initial[key]);
+  const value = (key: keyof Omit<FacilityFormInitial, "address" | "openOnHolidays" | "hours">) => echoed(state, key, initial[key]);
   // « Ouvert les jours fériés » follows the type of a new facility until it is ticked or unticked by hand.
   const [openOnHolidays, setOpenOnHolidays] = useState(() => echoedCheckbox(state, "openOnHolidays", initial.openOnHolidays));
   const [holidaysTouched, setHolidaysTouched] = useState(!followsType);
@@ -126,7 +132,35 @@ export function FacilityForm({
         geocoderEnabled={geocoderEnabled}
       />
 
-      <Fieldset legend="Jours fériés">
+      <Fieldset legend="Horaires d'accueil et jours fériés">
+        <OpeningHoursFields
+          initial={Object.fromEntries(
+            WEEKDAYS.map((d) => [
+              String(d),
+              {
+                open: echoed(state, hoursOpenField(d), initial.hours[String(d)]?.open ?? ""),
+                close: echoed(state, hoursCloseField(d), initial.hours[String(d)]?.close ?? ""),
+              },
+            ]),
+          )}
+          errors={errors}
+        />
+        <Field
+          label="Arrivée des patients acceptée dès (facultatif)"
+          htmlFor="earliestArrival"
+          error={errors.earliestArrival}
+          hint="Tous les jours, à la place de l'ouverture&nbsp;: ex. 06:45 si les patients entrent avant l'ouverture de l'accueil. Vide&nbsp;: l'ouverture du jour."
+          className="sm:max-w-md"
+        >
+          <Input
+            id="earliestArrival"
+            name="earliestArrival"
+            type="time"
+            defaultValue={value("earliestArrival")}
+            className="tabular sm:max-w-40"
+            aria-invalid={errors.earliestArrival ? true : undefined}
+          />
+        </Field>
         <Checkbox
           name="openOnHolidays"
           checked={openOnHolidays}

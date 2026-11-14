@@ -50,6 +50,14 @@ describe("optimizer contract fixtures", () => {
     expect(parsed.rejected[0]?.kind).toBe("SHIFT");
   });
 
+  it("takes the facility's hours of a trip as optional, closing after opening (PAT-04)", () => {
+    const request = optimizeRequestSchema.parse(load("optimize-request.json"));
+    expect(request.trips[0]).toMatchObject({ facilityOpenMin: 425, facilityCloseMin: 1200 });
+    const raw = load("optimize-request.json") as { trips: Array<Record<string, unknown>> };
+    raw.trips[0] = { ...raw.trips[0], facilityCloseMin: 400 };
+    expect(optimizeRequestSchema.safeParse(raw).success).toBe(false);
+  });
+
   it("rejects an OUTBOUND trip without appointmentMin", () => {
     const request = load("optimize-request.json") as { trips: Array<Record<string, unknown>> };
     request.trips[0] = { ...request.trips[0], appointmentMin: null };

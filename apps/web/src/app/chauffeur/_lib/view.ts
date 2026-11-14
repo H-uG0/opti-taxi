@@ -4,7 +4,8 @@
  * import from ./load is type-only), so it is unit-tested with plain objects.
  */
 import type { Mobility, RouteStatus, StopKind, VehicleType } from "@prisma/client";
-import { minuteOfDay } from "@/lib/time";
+import { dayHoursText, facilityHoursOn } from "@/lib/domain/facility-hours";
+import { minuteOfDay, toIsoDate } from "@/lib/time";
 import type { DriverRoute } from "./load";
 import { phoneContact, telHref, type PhoneContact } from "./links";
 import { plannedTapMinute, recordedLateness, type RecordedLateness } from "./punctuality";
@@ -71,8 +72,11 @@ export type StopView = {
   /** A home-side stop at an address typed for this trip only (the patient is staying elsewhere). */
   oneOffAddress: boolean;
   tripNotes: string | null;
-  /** Facility of a facility stop (outbound dropoff, return pickup), with its instructions (entrance, parking, floor). */
-  facility: { name: string; phone: string | null; phoneHref: string | null; notes: string | null } | null;
+  /**
+   * Facility of a facility stop (outbound dropoff, return pickup), with its instructions (entrance, parking,
+   * floor) and its reception hours that day (« Accueil de 07:00 à 19:00 »; null when none entered).
+   */
+  facility: { name: string; phone: string | null; phoneHref: string | null; notes: string | null; hours: string | null } | null;
   /** Private client (no CPAM billing): the crew collects the fare on board. */
   payOnBoard: boolean;
   keyTime: { label: string; minute: number } | null;
@@ -118,6 +122,19 @@ export type RouteView = {
 };
 
 const NOT_RIDING = new Set(["NO_SHOW", "CANCELLED"]);
+
+/** « Accueil de 07:00 à 19:00 » on the route's day, null when the facility has no hours (or when not loaded). */
+function facilityHoursText(
+  facility: { openingHours?: unknown; earliestArrivalMinute?: number | null },
+  serviceDate: Date | undefined,
+): string | null {
+  if (!serviceDate || facility.openingHours === undefined) return null;
+  const hours = facilityHoursOn(
+    { openingHours: facility.openingHours, earliestArrivalMinute: facility.earliestArrivalMinute ?? null },
+    toIsoDate(serviceDate),
+  );
+  return hours ? dayHoursText(hours) : null;
+}
 
 /** Patients on board after each stop, walking the route with riding patients only. */
 function onBoardAfterStops(stops: readonly StopLike[]): Map<string, number> {
@@ -222,6 +239,7 @@ export function buildRouteView(
                 phone: trip.facility.phone,
                 phoneHref: telHref(trip.facility.phone),
                 notes: trip.facility.notes?.trim() || null,
+                hours: facilityHoursText(trip.facility, route.serviceDate),
               }
             : null,
         payOnBoard: trip.payer === "PRIVATE",
