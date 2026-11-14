@@ -14,8 +14,8 @@ import { formatAddress } from "@/lib/domain/rules";
 import { geocoderEnabled } from "@/lib/geocode";
 import { DIRECTION_LABELS, FACILITY_TYPE_LABELS } from "@/lib/labels";
 import { formatPersonName } from "@/lib/names";
-import { formatLongDate, formatMinute, formatShortDate, todayIso, toIsoDate } from "@/lib/time";
-import { describeRhythmDays } from "@/lib/domain/recurrence-rhythm";
+import { formatLongDate, formatMinute, formatShortDate, isoWeekday, todayIso, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
+import { describeRhythmDays, sessionTimesOn } from "@/lib/domain/recurrence-rhythm";
 import { canEditTime, keyMinute } from "../../trip-rules";
 import { EditTripForm, type EditTripInitial } from "./edit-trip-form";
 
@@ -71,6 +71,8 @@ export default async function EditTripPage({
           intervalWeeks: true,
           sessionDates: true,
           appointmentMinute: true,
+          sessionMinutes: true,
+          daySchedules: true,
           facility: { select: { name: true } },
         },
       },
@@ -115,6 +117,9 @@ export default async function EditTripPage({
   const back = fromRecord ? `/patients/${trip.patient.id}` : `/courses?date=${date}`;
   const occurrence = trip.occurrenceDate ? toIsoDate(trip.occurrenceDate) : null;
   const recurrence = trip.recurrence;
+  // The session the trip serves may be at its weekday's own time (« Ven 07:30 » on a « Lun Mer Ven 13:00 »).
+  const sessionDay = occurrence ?? date;
+  const sessionMinute = recurrence ? sessionTimesOn(recurrence, sessionDay).appointmentMinute : null;
   const exceptional = isExceptionalAmbulanceTrip(trip, () => trip.lockedVehicle?.type);
 
   return (
@@ -129,6 +134,9 @@ export default async function EditTripPage({
           <Notice size="sm" tone="info">
             Course de la récurrence {describeRhythmDays({ ...recurrence, sessionDates: recurrence.sessionDates.map(toIsoDate) })}{" "}
             {formatMinute(recurrence.appointmentMinute)}
+            {sessionMinute !== null && sessionMinute !== recurrence.appointmentMinute
+              ? `, le ${WEEKDAY_LABELS[isoWeekday(sessionDay)]?.toLowerCase()} à ${formatMinute(sessionMinute)}`
+              : ""}
             {recurrence.label ? ` (${recurrence.label})` : ` (${recurrence.facility.name})`}&nbsp;: les changements ne valent que pour
             cette course, qui reste rattachée à sa récurrence.
             {occurrence && occurrence !== date ? ` Elle remplace la séance du ${formatShortDate(occurrence)}.` : ""}{" "}

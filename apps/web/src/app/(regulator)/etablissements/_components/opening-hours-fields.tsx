@@ -39,6 +39,7 @@ export function OpeningHoursFields({ initial, errors }: { initial: Record<string
           const openName = hoursOpenField(day);
           const closeName = hoursCloseField(day);
           const error = errors[openName] ?? errors[closeName];
+          const errorId = `${openName}-error`;
           const value = hours[String(day)] ?? { open: "", close: "" };
           return (
             <div key={day} className="contents">
@@ -50,6 +51,7 @@ export function OpeningHoursFields({ initial, errors }: { initial: Record<string
                 onChange={(e) => set(day, "open", e.target.value)}
                 aria-label={`Ouverture le ${label.toLowerCase()}`}
                 aria-invalid={errors[openName] ? true : undefined}
+                aria-describedby={error ? errorId : undefined}
                 className="tabular"
               />
               <Input
@@ -59,9 +61,14 @@ export function OpeningHoursFields({ initial, errors }: { initial: Record<string
                 onChange={(e) => set(day, "close", e.target.value)}
                 aria-label={`Fermeture le ${label.toLowerCase()}`}
                 aria-invalid={errors[closeName] ? true : undefined}
+                aria-describedby={error ? errorId : undefined}
                 className="tabular"
               />
-              {error ? <p className="text-xs font-medium text-red-700 sm:col-span-3 sm:col-start-2">{error}</p> : null}
+              {error ? (
+                <p id={errorId} className="text-xs font-medium text-red-700 sm:col-span-3 sm:col-start-2">
+                  {error}
+                </p>
+              ) : null}
             </div>
           );
         })}

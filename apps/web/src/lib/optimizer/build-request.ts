@@ -164,6 +164,8 @@ export type TripInput = {
   exceptionalAmbulanceAt?: Date | null;
   /** Reception hours of the trip's facility that day (facilityHoursOn); absent or null: none entered. */
   facilityHours?: DayHours | null;
+  /** Name of the trip's facility: the note of a trip outside its hours names it. */
+  facilityName?: string | null;
 };
 
 /** Stop durations (Paramètres « Temps d'arrêt »); absent fields: no surcharge, ambulance as taxi and VSL. */
@@ -588,22 +590,35 @@ export function exceptionalAmbulanceGrid<T extends Pick<TariffGrid, "vehicleType
   return gridForVehicle(inForce, { type: "VSL", department: ambulance.department }, status);
 }
 
-/** Pure: the optimizer request of input.date, plus everything left out and why. */
 /** The trip's own time: appointment of an outbound trip, end of session of a return. */
 function keyMinuteOf(trip: Pick<TripInput, "direction" | "appointmentMinute" | "readyMinute">): number | null {
   return trip.direction === "OUTBOUND" ? trip.appointmentMinute : trip.readyMinute;
 }
 
-/** One note for the trips outside their facility's hours (the hours are not sent for them). */
-export function outsideHoursNotes(texts: readonly string[]): string[] {
-  if (texts.length === 0) return [];
-  const shown = texts.slice(0, 3).join("\u202f; ");
-  const more = texts.length > 3 ? ` et ${texts.length - 3} autre${texts.length > 4 ? "s" : ""}` : "";
-  return [
-    `${texts.length === 1 ? "1 course" : `${texts.length} courses`} hors des horaires d'accueil de leur établissement (${shown}${more})\u00a0: horaires ignorés pour ${texts.length === 1 ? "elle" : "elles"}, vérifiez le rendez-vous ou les horaires.`,
-  ];
+/** A trip outside its facility's hours: the facility's name and why (outsideHoursText). */
+export type OutsideHours = { facility: string; text: string };
+
+/**
+ * One note per facility for the trips outside its hours (the hours are not sent for them), naming the facility
+ * and each distinct time: « Institut… : 3 courses hors des horaires d'accueil (RDV à 07:15, avant l'accueil
+ * (07:30) pour 2 courses ; …) ».
+ */
+export function outsideHoursNotes(trips: readonly OutsideHours[]): string[] {
+  const byFacility = new Map<string, Map<string, number>>();
+  for (const { facility, text } of trips) {
+    const texts = byFacility.get(facility) ?? new Map<string, number>();
+    texts.set(text, (texts.get(text) ?? 0) + 1);
+    byFacility.set(facility, texts);
+  }
+  return [...byFacility].map(([facility, texts]) => {
+    const count = [...texts.values()].reduce((sum, n) => sum + n, 0);
+    const listed = [...texts].map(([text, n]) => (n > 1 ? `${text} pour ${n} courses` : text));
+    const more = listed.length > 3 ? ` et ${listed.length - 3} autre${listed.length > 4 ? "s" : ""}` : "";
+    return `${facility}\u00a0: ${count === 1 ? "1 course" : `${count} courses`} hors des horaires d'accueil (${listed.slice(0, 3).join("\u202f; ")}${more})\u00a0: horaires ignorés pour ${count === 1 ? "elle" : "elles"}, vérifiez le rendez-vous ou les horaires de l'établissement.`;
+  });
 }
 
+/** Pure: the optimizer request of input.date, plus everything left out and why. */
 export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
   const billing = input.billing ?? NO_BILLING;
   const { available: decided, crews, skipped, notes } = resolveVehicleAvailability(input.vehicles, input.date);
@@ -634,7 +649,7 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
   // Ambulances carrying an exceptional seated trip without a VSL grid that day (the optimizer falls back to theirs).
   const seatedGridMissing = new Set<string>();
   // Trips whose appointment or end of session is outside their facility's hours (data to check).
-  const outsideHours: string[] = [];
+  const outsideHours: OutsideHours[] = [];
 
   for (const raw of input.trips) {
     if (EXCLUDED_TRIP_STATUSES.includes(raw.status)) continue;
@@ -691,7 +706,7 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
       ...contractFacilityHours(trip.facilityHours, keyMinuteOf(trip)),
     });
     const outside = outsideHoursText(trip.facilityHours ?? null, trip.direction, keyMinuteOf(trip));
-    if (outside) outsideHours.push(outside);
+    if (outside) outsideHours.push({ facility: trip.facilityName ?? "Établissement de la course", text: outside });
   }
 
   const tariffs = [...used.values()]
@@ -954,7 +969,7 @@ export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): 
       select: {
         ...tripInputSelect,
         patient: { select: { mobility: true } },
-        facility: { select: { extraServiceMin: true, type: true, openingHours: true, earliestArrivalMinute: true } },
+        facility: { select: { name: true, extraServiceMin: true, type: true, openingHours: true, earliestArrivalMinute: true } },
       },
       orderBy: [{ appointmentMinute: "asc" }, { readyMinute: "asc" }, { id: "asc" }],
     }),
@@ -967,6 +982,7 @@ export async function loadOptimizeInput(prisma: PrismaClient, isoDate: string): 
     facilityExtraServiceMin: facility?.extraServiceMin ?? 0,
     facilityType: facility?.type ?? null,
     facilityHours: facility ? facilityHoursOn(facility, isoDate) : null,
+    facilityName: facility?.name ?? null,
   }));
   return {
     date: isoDate,

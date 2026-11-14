@@ -5,9 +5,10 @@
  * cancelled trip. Pure module (dates "YYYY-MM-DD", times in minutes): shared
  * by the server actions, the pages and the tests.
  */
-import type { TripDirection, TripStatus } from "@prisma/client";
+import type { PatientAbsenceKind, TripDirection, TripStatus } from "@prisma/client";
 import { addDays, formatMinute } from "@/lib/time";
-import { hasSessionDates, intervalOf, rhythmOccursOn } from "./recurrence-rhythm";
+import { periodText, planningAbsenceLabel, type DatedPeriod } from "./patient-absences";
+import { hasSessionDates, intervalOf, rhythmOccursOn, sessionTimesOn } from "./recurrence-rhythm";
 
 // ---------------------------------------------------------------- trips of a day
 
@@ -114,6 +115,8 @@ export type OverlapRecurrence = {
   sessionDates?: string[];
   appointmentMinute: number;
   sessionMinutes: number;
+  /** Own time or session length of some weekdays (Recurrence.daySchedules, JSON); absent: none. */
+  daySchedules?: unknown;
   startDate: string;
   endDate: string | null;
 };
@@ -121,26 +124,44 @@ export type OverlapRecurrence = {
 /** Weeks of the common period looked at for two rhythms that are not plain weekly ones (a year). */
 const OVERLAP_LOOKAHEAD_DAYS = 371;
 
-/** A day both recurrences plan a session on: a common weekday for two weekly rhythms, else a common date. */
-function shareADay(a: OverlapRecurrence, b: OverlapRecurrence): boolean {
+/** Do the two sessions of `day` ([appointment, appointment + session], each with its weekday's own time) meet? */
+function sessionsMeetOn(a: OverlapRecurrence, b: OverlapRecurrence, day: string): boolean {
+  const x = sessionTimesOn(a, day);
+  const y = sessionTimesOn(b, day);
+  return x.appointmentMinute < y.appointmentMinute + y.sessionMinutes && y.appointmentMinute < x.appointmentMinute + x.sessionMinutes;
+}
+
+/** A date of the given ISO weekday (2026-01-05 is a Monday): what sessionTimesOn needs for a weekly rhythm. */
+function dateOfWeekday(weekday: number): string {
+  return addDays("2026-01-05", weekday - 1);
+}
+
+/**
+ * A day both recurrences plan a session on, at times that meet (each weekday's own time when it has one): a
+ * common weekday for two weekly rhythms, else a common date.
+ */
+function shareASession(a: OverlapRecurrence, b: OverlapRecurrence): boolean {
   const plain = (r: OverlapRecurrence) => intervalOf(r) === 1 && !hasSessionDates(r);
-  if (plain(a) && plain(b)) return a.weekdays.some((d) => b.weekdays.includes(d));
+  if (plain(a) && plain(b)) return a.weekdays.some((d) => b.weekdays.includes(d) && sessionsMeetOn(a, b, dateOfWeekday(d)));
   const from = a.startDate > b.startDate ? a.startDate : b.startDate;
   const ends = [a.endDate, b.endDate, addDays(from, OVERLAP_LOOKAHEAD_DAYS)].filter((d): d is string => d !== null);
   const to = ends.sort()[0] ?? from;
   const [sparse, other] = hasSessionDates(a) ? [a, b] : [b, a];
-  if (hasSessionDates(sparse)) return (sparse.sessionDates ?? []).some((d) => d >= from && d <= to && rhythmOccursOn(other, d));
+  if (hasSessionDates(sparse)) {
+    return (sparse.sessionDates ?? []).some((d) => d >= from && d <= to && rhythmOccursOn(other, d) && sessionsMeetOn(a, b, d));
+  }
   for (let day = from; day <= to; day = addDays(day, 1)) {
-    if (rhythmOccursOn(a, day) && rhythmOccursOn(b, day)) return true;
+    if (rhythmOccursOn(a, day) && rhythmOccursOn(b, day) && sessionsMeetOn(a, b, day)) return true;
   }
   return false;
 }
 
 /**
- * Active recurrences of one patient that overlap: a common session day
- * (weekday, or date for rhythms every N weeks or on explicit dates), periods
- * that meet, and sessions ([appointment, appointment + session]) that meet.
- * For each recurrence, the ids of those it overlaps.
+ * Active recurrences of one patient that overlap: periods that meet, and a
+ * common session day (weekday, or date for rhythms every N weeks or on
+ * explicit dates) whose sessions ([appointment, appointment + session], the
+ * weekday's own time when it has one) meet. For each recurrence, the ids of
+ * those it overlaps.
  */
 export function recurrenceOverlaps(recurrences: readonly OverlapRecurrence[]): Map<string, string[]> {
   const active = recurrences.filter((r) => r.active);
@@ -149,10 +170,7 @@ export function recurrenceOverlaps(recurrences: readonly OverlapRecurrence[]): M
     for (const b of active) {
       if (a.id === b.id) continue;
       const periods = (a.endDate === null || b.startDate <= a.endDate) && (b.endDate === null || a.startDate <= b.endDate);
-      const commonDay = periods && shareADay(a, b);
-      const sessions =
-        a.appointmentMinute < b.appointmentMinute + b.sessionMinutes && b.appointmentMinute < a.appointmentMinute + a.sessionMinutes;
-      if (commonDay && periods && sessions) overlaps.set(a.id, [...(overlaps.get(a.id) ?? []), b.id]);
+      if (periods && shareASession(a, b)) overlaps.set(a.id, [...(overlaps.get(a.id) ?? []), b.id]);
     }
   }
   return overlaps;
@@ -220,6 +238,50 @@ export function similarPatients<P extends PatientIdentity & { id: string }>(
 
 // ---------------------------------------------------------------- restoring a trip
 
+/** The patient's absence covering the trip's date (its kind and dates: the planning wording, never its note). */
+export type CoveringAbsence = DatedPeriod & { kind: PatientAbsenceKind };
+
+/**
+ * Why a cancelled trip cannot come back on its date because of the calendar,
+ * or null: the patient is absent that day, or the trip's facility closed by a
+ * dated closure. Whoever cancelled it: it comes back by shortening the absence
+ * or removing the closure (the trips the application cancelled then come back
+ * by themselves). Shared by « Rétablir » in Courses and on the patient record.
+ */
+export function calendarRestoreBlocker(absence: CoveringAbsence | null | undefined, closure: DatedPeriod | null | undefined): string | null {
+  if (absence) {
+    // The planning wording (« hospitalisation », « absence du patient »): never the precise kind nor the note.
+    const what = planningAbsenceLabel(absence.kind).toLowerCase();
+    return `Le patient est absent ce jour-là (${what} ${periodText(absence)})\u00a0: raccourcissez ou supprimez l'absence sur sa fiche d'abord.`;
+  }
+  if (closure) {
+    return `L'établissement est fermé ce jour-là (fermeture ${periodText(closure)})\u00a0: supprimez la fermeture sur sa fiche d'abord.`;
+  }
+  return null;
+}
+
+/**
+ * What Courses says after « Nouvelle course » or « Modifier la course » put a
+ * trip on a day the patient is absent or its facility is closed: a warning,
+ * never a refusal (a transport may still be needed that day: a discharge from
+ * hospital…); the absence or the closure no longer cancels it unless it is
+ * extended over a new day. Planning wording only (never the absence's note).
+ */
+export function calendarWarnings(
+  absence: CoveringAbsence | null | undefined,
+  closure: (DatedPeriod & { facilityName: string }) | null | undefined,
+): string[] {
+  const warnings: string[] = [];
+  if (absence) warnings.push(`le patient est absent ce jour-là (${planningAbsenceLabel(absence.kind).toLowerCase()} ${periodText(absence)})`);
+  if (closure) warnings.push(`${closure.facilityName} est fermé ce jour-là (fermeture ${periodText(closure)})`);
+  return warnings;
+}
+
+/** The first period covering the date ("YYYY-MM-DD" bounds, inclusive), if any. */
+export function coveringPeriod<P extends DatedPeriod>(periods: readonly P[], isoDate: string): P | null {
+  return periods.find((p) => p.startDate <= isoDate && isoDate <= p.endDate) ?? null;
+}
+
 export type RestoreCheck = {
   serviceDate: string;
   payer: "CPAM" | "PRIVATE";
@@ -228,6 +290,10 @@ export type RestoreCheck = {
   recurrenceActive: boolean | null;
   /** The validity of the trip's prescription, null when it has none. */
   prescription: { validFrom: string; validTo: string } | null;
+  /** The patient's absence covering serviceDate, if any. */
+  absence?: CoveringAbsence | null;
+  /** The dated closure of the trip's facility covering serviceDate, if any. */
+  closure?: DatedPeriod | null;
 };
 
 /** Why a cancelled trip cannot be restored, or null. */
@@ -239,6 +305,8 @@ export function restoreBlocker(trip: RestoreCheck, todayIso: string): string | n
   if (trip.recurrenceActive === false) {
     return "La récurrence de cette course est désactivée\u00a0: réactivez-la d'abord\u202f; ses courses à partir de demain reviennent alors d'elles-mêmes, celles d'aujourd'hui se rétablissent ici.";
   }
+  const calendar = calendarRestoreBlocker(trip.absence, trip.closure);
+  if (calendar) return calendar;
   if (trip.payer === "CPAM") {
     const p = trip.prescription;
     if (!p || trip.serviceDate < p.validFrom || trip.serviceDate > p.validTo) {

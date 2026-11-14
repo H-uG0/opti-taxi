@@ -36,8 +36,11 @@ describe("facility reception hours", () => {
     expect(facilityHoursOn({ openingHours: WEEK, earliestArrivalMinute: null }, "2026-11-03")).toEqual({ openMin: 420, closeMin: 1140 });
     expect(facilityHoursOn({ openingHours: WEEK, earliestArrivalMinute: 405 }, "2026-11-03")).toEqual({ openMin: 405, closeMin: 1140 });
     expect(facilityHoursOn({ openingHours: WEEK, earliestArrivalMinute: null }, "2026-11-08")).toBeNull();
-    expect(facilityHoursOn({ openingHours: WEEK, earliestArrivalMinute: 405 }, "2026-11-08")).toEqual({ openMin: 405, closeMin: null });
+    // A day without hours has no bound, the earliest arrival included (« Un jour sans horaire n'a pas de contrainte »).
+    expect(facilityHoursOn({ openingHours: WEEK, earliestArrivalMinute: 405 }, "2026-11-08")).toBeNull();
     expect(facilityHoursOn({ openingHours: [], earliestArrivalMinute: null }, "2026-11-03")).toBeNull();
+    // No hours at all: the earliest arrival holds every day.
+    expect(facilityHoursOn({ openingHours: [], earliestArrivalMinute: 405 }, "2026-11-08")).toEqual({ openMin: 405, closeMin: null });
   });
 
   it("sends the bounds only for a trip whose own time is inside them", () => {

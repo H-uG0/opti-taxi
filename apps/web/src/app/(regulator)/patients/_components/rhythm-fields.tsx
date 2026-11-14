@@ -12,7 +12,7 @@ import {
   seriesDates,
   weekdaysOfDates,
 } from "@/lib/domain/recurrence-rhythm";
-import { formatDayDate, formatShortDate, isIsoDate, WEEKDAY_LABELS } from "@/lib/time";
+import { formatDayDate, formatDuration, formatShortDate, isIsoDate, WEEKDAY_LABELS } from "@/lib/time";
 import { DATES_FREQUENCY, dayTimeField, daySessionField, MAX_SESSION_MINUTES } from "../_lib/options";
 
 /** « Fréquence » choices: every week to every MAX_INTERVAL_WEEKS weeks, then explicit dates. */
@@ -53,12 +53,27 @@ export function SessionDatesField({
   const [every, setEvery] = useState("21");
   const [count, setCount] = useState("6");
   const { dates, invalid } = parseSessionDates(value);
+  // Why « Ajouter ces dates » added nothing (a series that cannot be built), until the series is changed.
+  const [seriesError, setSeriesError] = useState<string | null>(null);
   const addSeries = () => {
     const added = seriesDates(first, Number(every), Number(count));
-    if (added.length === 0) return;
+    if (added.length === 0) {
+      setSeriesError(
+        !isIsoDate(first)
+          ? "Saisissez la date de la première séance."
+          : "«\u202fTous les (jours)\u202f» et «\u202fNombre de séances\u202f» attendent un nombre entier, 1 au moins.",
+      );
+      return;
+    }
+    setSeriesError(null);
     const merged = [...new Set([...dates, ...added])].sort();
     onChange(merged.map(formatShortDate).join("\n"));
   };
+  const changeSeries = (set: (value: string) => void) => (value: string) => {
+    setSeriesError(null);
+    set(value);
+  };
+  const seriesErrorId = seriesError ? `${ids}-series-error` : undefined;
   return (
     <div className="space-y-3">
       <Field
@@ -96,7 +111,14 @@ export function SessionDatesField({
             <label htmlFor={`${ids}-first`} className="block text-xs font-medium text-slate-600">
               Première séance
             </label>
-            <Input id={`${ids}-first`} type="date" value={first} onChange={(e) => setFirst(e.target.value)} className="tabular" />
+            <Input
+              id={`${ids}-first`}
+              type="date"
+              value={first}
+              onChange={(e) => changeSeries(setFirst)(e.target.value)}
+              className="tabular"
+              aria-describedby={seriesErrorId}
+            />
           </div>
           <div className="space-y-1">
             <label htmlFor={`${ids}-every`} className="block text-xs font-medium text-slate-600">
@@ -106,8 +128,9 @@ export function SessionDatesField({
               id={`${ids}-every`}
               inputMode="numeric"
               value={every}
-              onChange={(e) => setEvery(e.target.value)}
+              onChange={(e) => changeSeries(setEvery)(e.target.value)}
               className="tabular w-24"
+              aria-describedby={seriesErrorId}
             />
           </div>
           <div className="space-y-1">
@@ -118,14 +141,20 @@ export function SessionDatesField({
               id={`${ids}-count`}
               inputMode="numeric"
               value={count}
-              onChange={(e) => setCount(e.target.value)}
+              onChange={(e) => changeSeries(setCount)(e.target.value)}
               className="tabular w-24"
+              aria-describedby={seriesErrorId}
             />
           </div>
           <Button type="button" variant="secondary" size="sm" onClick={addSeries}>
             Ajouter ces dates
           </Button>
         </div>
+        {seriesError ? (
+          <p id={seriesErrorId} role="alert" className="mt-2 text-xs font-medium text-red-700">
+            {seriesError}
+          </p>
+        ) : null}
         <p className="mt-2 text-xs text-slate-600">
           Ex. cycle de 21&nbsp;jours avec séances à J1 et J8&nbsp;: une série à partir du J1 tous les 21&nbsp;jours, puis une
           autre à partir du J8.
@@ -155,6 +184,9 @@ export function DaySchedulesFields({
   commonSession: string;
 }) {
   const anyOwn = weekdays.some((d) => (dayTimes[String(d)] ?? "") !== "" || (daySessions[String(d)] ?? "") !== "");
+  // The common length as the rest of the form says it (« 4 h 00 »).
+  const commonMinutes = /^\d+$/.test(commonSession.trim()) ? Number(commonSession.trim()) : null;
+  const commonDuration = commonMinutes !== null && commonMinutes > 0 ? formatDuration(commonMinutes) : "";
   const anyError = weekdays.some((d) => errors[dayTimeField(d)] || errors[daySessionField(d)]);
   if (weekdays.length === 0) return null;
   return (
@@ -162,9 +194,15 @@ export function DaySchedulesFields({
       <summary className="cursor-pointer text-sm font-medium text-slate-700">Horaire différent selon le jour (facultatif)</summary>
       <p className="mt-2 text-xs text-slate-600">
         Laissez vide pour garder l&apos;heure et la durée communes ({commonTime || "—"}
-        {commonSession ? `, ${commonSession} min` : ""}).
+        {commonDuration ? `, ${commonDuration}` : ""}).
       </p>
       <div className="mt-3 space-y-2">
+        {/* Column headings (each field keeps its own label for screen readers). */}
+        <div aria-hidden className="hidden gap-3 text-xs font-medium text-slate-500 sm:grid sm:grid-cols-[6rem_minmax(0,10rem)_minmax(0,10rem)]">
+          <span />
+          <span>Heure du RDV</span>
+          <span>Durée de séance (min)</span>
+        </div>
         {weekdays.map((day) => {
           const timeName = dayTimeField(day);
           const sessionName = daySessionField(day);

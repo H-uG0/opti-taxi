@@ -26,17 +26,26 @@
  *   (/equipages: everyone's absences of the day), staff_list.view
  *   (/chauffeurs: everyone's situation tomorrow, absences included);
  * - referentials: patient.*, prescription.*, recurrence.* (create, update,
- *   delete, deactivate, reactivate, attach_renewal), facility.*;
+ *   delete, deactivate, reactivate, attach_renewal), facility.*,
+ *   patient_absence.create/update/delete (on the PatientAbsence, details:
+ *   patientId only — never its reason nor its note), facility_closure.create
+ *   (details: facilityId, startDate, endDate) and facility_closure.delete
+ *   (details: facilityId);
  * - trips: trip.generate (a trip created from a recurrence, one event per
  *   trip; lib/trips/completion.ts — older events: one per service day,
  *   entityId null, details.created), trip.revive (a trip the
  *   referential sync had cancelled, brought back once the cause is gone),
  *   trip.generate_week (before the rolling horizon), trip.create,
- *   trip.cancel (the reason stays on the trip), trip.detach (taken off its
- *   route by a referential change, not cancelled), trip.restore,
- *   trip.reschedule, trip.update (« Modifier la course »: details.fields, the
- *   names of what changed — date, time, home, facility, care_place, notes,
- *   prescription —, details.serviceDate { from, to } when it moved to another
+ *   trip.cancel (the reason stays on the trip; details.bulk for « Annuler la
+ *   sélection », « Annuler ce jour » and the banner of a public holiday, whose
+ *   cancellations also carry details.cause "closed_facility"), trip.detach
+ *   (taken off its route by a referential change, not cancelled),
+ *   trip.restore, trip.reschedule, trip.update (« Modifier la course »:
+ *   details.fields, the names of what changed — date, time, home, facility,
+ *   care_place, notes, prescription —; a patient's absence changed: the trips
+ *   it had cancelled take its new reason and dates, details.fields
+ *   ["cancellation_reason", "cancellation_note"] and details.cause
+ *   "patient_absence"; details.serviceDate { from, to } when it moved to another
  *   day, details.detached when it left its route, details.lockedVehicleId
  *   { from, to: null } when it lost its lock, with a trip.unlock — and a
  *   trip.exceptional_ambulance_withdrawn when that lock carried an exceptional

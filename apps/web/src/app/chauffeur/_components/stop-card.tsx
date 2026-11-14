@@ -114,7 +114,7 @@ function StopDetails({ stop }: { stop: StopView }) {
 
       {stop.accessNotes ? <Instructions label="Accès domicile">{stop.accessNotes}</Instructions> : null}
 
-      {stop.facility?.notes ? <Instructions label="Consignes de l'établissement">{stop.facility.notes}</Instructions> : null}
+      {stop.facility?.notes ? <Instructions label="Consignes de dépose">{stop.facility.notes}</Instructions> : null}
 
       {stop.tripNotes ? (
         <Line icon={<MessageSquareText className="size-5 text-slate-500" />}>

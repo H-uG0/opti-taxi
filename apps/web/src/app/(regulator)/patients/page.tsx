@@ -291,7 +291,7 @@ export default async function PatientsPage({
                       ) : (
                         <ul className="tabular space-y-0.5">
                           {patient.recurrences.map((r) => (
-                            <li key={r.id} className="whitespace-nowrap">
+                            <li key={r.id} className="min-w-48">
                               {formatRecurrenceSummary({
                                 weekdays: r.weekdays,
                                 intervalWeeks: r.intervalWeeks,

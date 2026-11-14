@@ -138,7 +138,10 @@ export async function completeTrips(
  * writable: from tomorrow on) that the application cancelled and that the
  * recurrences plan again with the same data the generation would create now.
  * A trip moved to another day is matched by the session it serves
- * (occurrenceDate) and stays on its day. Returns how many.
+ * (occurrenceDate) and stays on its day. A trip stays cancelled while the
+ * patient is absent on its day, or its own facility (changed by hand on the
+ * trip, maybe: the one a closure cancels it for) or the recurrence's is
+ * closed that day. Returns how many.
  */
 async function reviveRecurrenceTrips(tx: Client, actor: AuditActor, where: Prisma.TripWhereInput, days: DateRange): Promise<number> {
   const window = { gte: fromIsoDate(days.from), lte: fromIsoDate(days.to) };
@@ -149,7 +152,18 @@ async function reviveRecurrenceTrips(tx: Client, actor: AuditActor, where: Prism
         { recurrenceId: { not: null }, status: "CANCELLED", cancellationOrigin: "SYSTEM", serviceDate: window, occurrenceDate: window },
       ],
     },
-    select: { id: true, recurrenceId: true, serviceDate: true, occurrenceDate: true, direction: true, sharingStatus: true },
+    select: {
+      id: true,
+      recurrenceId: true,
+      serviceDate: true,
+      occurrenceDate: true,
+      direction: true,
+      sharingStatus: true,
+      // The trip's own facility: a closure cancels the trips by it (etablissements/closure-actions.ts).
+      facility: {
+        select: { closures: { where: { startDate: { lte: window.lte }, endDate: { gte: window.gte } }, select: { startDate: true, endDate: true } } },
+      },
+    },
   });
   if (candidates.length === 0) return 0;
   const occurrenceOf = (t: (typeof candidates)[number]) => toIsoDate(t.occurrenceDate ?? t.serviceDate);
@@ -168,9 +182,11 @@ async function reviveRecurrenceTrips(tx: Client, actor: AuditActor, where: Prism
     const day = toIsoDate(trip.serviceDate);
     const again = planned.get(recurrenceTripKey(trip.recurrenceId ?? "", occurrenceOf(trip), trip.direction));
     if (!again) continue;
-    // A trip moved to another day stays cancelled while the patient is absent, or the facility closed, on that day.
+    // A trip moved to another day stays cancelled while the patient is absent, or the facility closed, on that day;
+    // and so does a trip whose own facility (changed on the trip) is closed that day.
     const rec = recurrenceById.get(trip.recurrenceId ?? "");
     if (coveredOn(rec?.patient.absences, day) || coveredOn(rec?.facility.closures, day)) continue;
+    if (coveredOn(trip.facility?.closures, day)) continue;
     // Guarded: a trip restored or changed meanwhile is left as it is.
     const { count } = await tx.trip.updateMany({
       where: { id: trip.id, status: "CANCELLED", cancellationOrigin: "SYSTEM" },

@@ -1,9 +1,10 @@
 /**
  * Reception hours of a care facility (« Horaires d'accueil »): per weekday an
- * opening and a closing time, and an earliest accepted arrival for every day
- * (patients let in before the opening, or only after it). On a day, the
- * facility receives the patients from the earliest arrival (or else the
- * opening) to the closing time; a weekday without hours has no bound.
+ * opening and a closing time, and an earliest accepted arrival (patients let
+ * in before the opening, or only after it). On a day, the facility receives
+ * the patients from the earliest arrival (or else the opening) to the closing
+ * time. A weekday without hours has no bound, unless the facility has no
+ * hours at all: its earliest arrival then holds every day.
  *
  * The optimizer narrows the window of the trip's stop at the facility (an
  * outbound drop-off, a return pickup) to them, and its validator checks them
@@ -39,12 +40,18 @@ export function parseOpeningHours(raw: unknown): OpeningHours[] {
   return [...byDay.values()].sort((a, b) => a.weekday - b.weekday);
 }
 
-/** The hours of `isoDate`: the earliest arrival (else the opening of that weekday), the closing; null: none at all. */
+/**
+ * The hours of `isoDate`: the earliest arrival (else the opening of that weekday), the closing; null: none at all.
+ * A weekday without hours of a facility that has some is a day without bound (the form says so): the earliest
+ * arrival holds only on the days with hours, or every day when no day has any.
+ */
 export function facilityHoursOn(
   facility: { openingHours: unknown; earliestArrivalMinute: number | null },
   isoDate: string,
 ): DayHours | null {
-  const day = parseOpeningHours(facility.openingHours).find((h) => h.weekday === isoWeekday(isoDate));
+  const week = parseOpeningHours(facility.openingHours);
+  const day = week.find((h) => h.weekday === isoWeekday(isoDate));
+  if (!day && week.length > 0) return null;
   const openMin = facility.earliestArrivalMinute ?? day?.openMinute ?? null;
   const closeMin = day?.closeMinute ?? null;
   if (openMin === null && closeMin === null) return null;

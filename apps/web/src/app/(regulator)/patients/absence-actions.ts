@@ -25,12 +25,15 @@ import { SYNC_TX_OPTIONS, syncOpenTrips } from "./_lib/trip-sync-db";
 /**
  * Dated absences of a patient (« Absences » on the record). Each change is
  * followed, in its transaction, by the patient's trips: the open trips of the
- * absent days (from today on) are cancelled by the application with the
- * absence's reason (hospitalisation, else « absence du patient ») and its
- * dates as note; the days no longer covered get their trips back (those the
- * application cancelled, from tomorrow on, and the sessions not generated
- * yet), as after any change of the referential (lib/trips/completion.ts).
- * Traced with ids only: the reason and the note stay on the absence.
+ * days it newly covers (from today on: all its days for a new absence) are
+ * cancelled by the application with the absence's reason (hospitalisation,
+ * else « absence du patient ») and its dates as note — a trip a person kept,
+ * created or restored on a day already covered is left alone when the
+ * absence is changed —; the days no longer covered get their trips back
+ * (those the application cancelled, from tomorrow on, and the sessions not
+ * generated yet), as after any change of the referential
+ * (lib/trips/completion.ts). Traced with ids only: the reason and the note
+ * stay on the absence.
  */
 
 const PATIENT_GONE = "Fiche introuvable : elle a peut-être été supprimée. Rechargez la page.";
@@ -43,12 +46,17 @@ function refreshPages(patientId: string, summary: SyncSummary) {
   if (!isEmptySync(summary)) revalidatePath("/", "layout");
 }
 
-/** Cancels the open trips of `period` (from today on) for the absence, then completes the horizon. */
+/**
+ * Cancels the open trips (from today on) of the days `absence` covers and `previous` (its period before the
+ * change, null for a new absence) did not, relabels those the application cancelled for it, then completes
+ * the horizon.
+ */
 async function followAbsences(
   tx: Prisma.TransactionClient,
   user: Actor,
   patientId: string,
   absence: (DatedPeriod & { kind: PatientAbsenceKind }) | null,
+  previous: DatedPeriod | null,
   leftRoutes: Set<string>,
 ): Promise<SyncSummary> {
   const today = todayIso();
@@ -58,21 +66,45 @@ async function followAbsences(
     const reason = absenceCancellationReason(absence.kind);
     const note = absenceCancellationNote(absence);
     const window = { gte: fromIsoDate(days.startDate), lte: fromIsoDate(days.endDate) };
-    summary = await syncOpenTrips(tx, { patientId, serviceDate: window }, () => CANCEL, today, leftRoutes, user, {
+    // Only the days the change adds: a trip still open on a day already covered was kept, created or restored by a
+    // person (fixing the note or the reason never cancels it).
+    const added: Prisma.TripWhereInput = previous
+      ? { NOT: { serviceDate: { gte: fromIsoDate(previous.startDate), lte: fromIsoDate(previous.endDate) } } }
+      : {};
+    summary = await syncOpenTrips(tx, { patientId, serviceDate: window, ...added }, () => CANCEL, today, leftRoutes, user, {
       cause: note,
       reason,
     });
-    // Trips of these days the application already cancelled for an absence (its dates or reason changed): the new ones.
-    await tx.trip.updateMany({
+    // Trips of these days the application already cancelled for an absence (its dates or reason changed): the new
+    // ones, each traced (trip.update, the field name only: the reason may be a hospitalisation).
+    const relabelled = await tx.trip.findMany({
       where: {
         patientId,
         status: "CANCELLED",
         cancellationOrigin: "SYSTEM",
         cancellationReason: { in: ["HOSPITALIZATION", "PATIENT_ABSENCE"] },
         serviceDate: window,
+        NOT: { cancellationReason: reason, cancellationNote: note },
       },
-      data: { cancellationReason: reason, cancellationNote: note },
+      select: { id: true, serviceDate: true },
     });
+    if (relabelled.length > 0) {
+      await tx.trip.updateMany({
+        where: { id: { in: relabelled.map((t) => t.id) }, status: "CANCELLED", cancellationOrigin: "SYSTEM" },
+        data: { cancellationReason: reason, cancellationNote: note },
+      });
+      await audit(
+        tx,
+        user,
+        relabelled.map((t) => ({
+          action: "trip.update",
+          entity: "Trip",
+          entityId: t.id,
+          serviceDate: toIsoDate(t.serviceDate),
+          details: { fields: ["cancellation_reason", "cancellation_note"], cause: "patient_absence" },
+        })),
+      );
+    }
   }
   // Days no longer covered: their trips come back (from tomorrow on), and the sessions not generated yet are created.
   const completion = await completeTrips(tx, user, await currentHorizon(tx, today), { patientId });
@@ -128,7 +160,7 @@ export async function addPatientAbsence(patientId: string, _state: FormState, fo
       entityId: absence.id,
       details: { patientId: patient.id },
     });
-    return followAbsences(tx, user, patient.id, parsed.data, leftRoutes);
+    return followAbsences(tx, user, patient.id, parsed.data, null, leftRoutes);
   }, SYNC_TX_OPTIONS);
   refreshPages(patient.id, summary);
   return answer("Absence enregistrée.", summary, leftRoutes);
@@ -149,7 +181,7 @@ export async function updatePatientAbsence(
   if (!parsed.success) return invalidState(parsed.error, values);
   const existing = await db.patientAbsence.findFirst({
     where: { id: absence.data, patientId: patient.data },
-    select: { id: true, patientId: true },
+    select: { id: true, patientId: true, startDate: true, endDate: true },
   });
   if (!existing) return messageState(ABSENCE_GONE);
   const other = await overlapping(existing.patientId, parsed.data, existing.id);
@@ -169,7 +201,8 @@ export async function updatePatientAbsence(
       entityId: existing.id,
       details: { patientId: existing.patientId },
     });
-    return followAbsences(tx, user, existing.patientId, parsed.data, leftRoutes);
+    const previous = { startDate: toIsoDate(existing.startDate), endDate: toIsoDate(existing.endDate) };
+    return followAbsences(tx, user, existing.patientId, parsed.data, previous, leftRoutes);
   }, SYNC_TX_OPTIONS);
   if (!summary) return messageState(ABSENCE_GONE);
   refreshPages(existing.patientId, summary);
@@ -187,7 +220,7 @@ export async function deletePatientAbsence(patientId: string, absenceId: string)
     const removed = await tx.patientAbsence.deleteMany({ where: { id: aid, patientId: pid } });
     if (removed.count === 0) return null;
     await audit(tx, user, { action: "patient_absence.delete", entity: "PatientAbsence", entityId: aid, details: { patientId: pid } });
-    return followAbsences(tx, user, pid, null, leftRoutes);
+    return followAbsences(tx, user, pid, null, null, leftRoutes);
   }, SYNC_TX_OPTIONS);
   if (!summary) {
     revalidatePath(`/patients/${pid}`);

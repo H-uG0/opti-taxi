@@ -31,9 +31,9 @@ export const RECENT_ABSENCE_DAYS = 30;
 
 export type DatedPeriod = { startDate: string; endDate: string };
 
-/** The reason a planning screen shows: « Hospitalisation », else « Absence ». */
+/** The reason a planning screen shows: « Hospitalisation », else « Absence du patient » (as the cancellation reason). */
 export function planningAbsenceLabel(kind: PatientAbsenceKind): string {
-  return kind === "HOSPITALIZATION" ? "Hospitalisation" : "Absence";
+  return kind === "HOSPITALIZATION" ? "Hospitalisation" : "Absence du patient";
 }
 
 /** The cancellation reason of the trips an absence cancels. */

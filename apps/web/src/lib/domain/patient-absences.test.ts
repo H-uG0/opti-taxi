@@ -13,8 +13,8 @@ import {
 describe("patient absences", () => {
   it("names a hospitalisation on the planning screens, and nothing more precise for the other reasons", () => {
     expect(planningAbsenceLabel("HOSPITALIZATION")).toBe("Hospitalisation");
-    expect(planningAbsenceLabel("HOLIDAY")).toBe("Absence");
-    expect(planningAbsenceLabel("OTHER")).toBe("Absence");
+    expect(planningAbsenceLabel("HOLIDAY")).toBe("Absence du patient");
+    expect(planningAbsenceLabel("OTHER")).toBe("Absence du patient");
     expect(absenceCancellationReason("HOSPITALIZATION")).toBe("HOSPITALIZATION");
     expect(absenceCancellationReason("HOLIDAY")).toBe("PATIENT_ABSENCE");
   });

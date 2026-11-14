@@ -45,7 +45,7 @@ export type WorkItem = {
   uncovered: { from: string; to: string } | null;
   /** Days until the end of the prescription (negative once ended). */
   daysLeft: number;
-  /** Summaries of the recurrences still attached ("Lun Mer Ven 07:30 — Dialyse"). */
+  /** Summaries of the recurrences still attached ("Lun Mer Ven · 07:30 — Dialyse"). */
   recurrences: string[];
 };
 

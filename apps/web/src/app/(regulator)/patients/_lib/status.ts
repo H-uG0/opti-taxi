@@ -4,7 +4,7 @@
  */
 import type { Mobility, PrescribedMode } from "@prisma/client";
 import { describeRhythmDays } from "@/lib/domain/recurrence-rhythm";
-import { addDays, formatMinute, formatShortDate, fromIsoDate, toIsoDate, WEEKDAY_SHORT } from "@/lib/time";
+import { addDays, formatDayDate, formatMinute, formatShortDate, fromIsoDate, toIsoDate, WEEKDAY_SHORT } from "@/lib/time";
 
 /** A prescription ending within this many days is flagged. */
 export const EXPIRY_WARNING_DAYS = 14;
@@ -241,8 +241,8 @@ export function formatWeekdays(weekdays: number[]): string {
 }
 
 /**
- * "Lun Mer Ven 07:30 — Dialyse", "Lun, une semaine sur deux 07:30 — …", "6 dates (…) 09:00 — …" (the facility
- * name stands in for a missing label).
+ * "Lun Mer Ven · 07:30 — Dialyse", "Lun, une semaine sur deux · 07:30 — …", "6 dates jusqu'au 29/12 · 09:00 — …"
+ * (the facility name stands in for a missing label; the time after « · », as on the record).
  */
 export function formatRecurrenceSummary(r: {
   weekdays: number[];
@@ -252,8 +252,12 @@ export function formatRecurrenceSummary(r: {
   label: string | null;
   facilityName?: string | null;
 }): string {
-  const days = describeRhythmDays(r);
+  const dates = [...(r.sessionDates ?? [])].sort();
+  const last = dates.at(-1);
+  const days = last
+    ? `${dates.length === 1 ? "1 date" : `${dates.length} dates`} ${dates.length === 1 ? "le" : "jusqu'au"} ${formatDayDate(last)}`
+    : describeRhythmDays(r);
   const what = r.label?.trim() || r.facilityName?.trim() || "";
-  const head = `${days} ${formatMinute(r.appointmentMinute)}`.trim();
+  const head = [days, formatMinute(r.appointmentMinute)].filter(Boolean).join(" · ");
   return what ? `${head} — ${what}` : head;
 }

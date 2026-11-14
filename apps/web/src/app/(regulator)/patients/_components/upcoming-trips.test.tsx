@@ -59,11 +59,22 @@ const days = () =>
 describe("UpcomingTrips (« Prochaines courses » of the record)", () => {
   it("cancels a whole day with one reason, after the question", async () => {
     render(<UpcomingTrips days={days()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Annuler ce jour (aller et retour)" }));
-    fireEvent.change(screen.getByLabelText("Motif de l'annulation"), { target: { value: "PATIENT" } });
+    // Each day's button names its day.
+    fireEvent.click(screen.getByRole("button", { name: "Annuler ce jour (aller et retour), le 16/11/2026" }));
+    // The form takes the focus (its reason), its hint describes the note.
+    const reason = screen.getByLabelText("Motif de l'annulation");
+    expect(document.activeElement).toBe(reason);
+    expect(screen.getByLabelText(/^Précision/).getAttribute("aria-describedby")).toBe(
+      screen.getByText(/Aucune information médicale/).getAttribute("id"),
+    );
+    fireEvent.change(reason, { target: { value: "PATIENT" } });
     fireEvent.click(screen.getByRole("button", { name: "Annuler les 2 courses" }));
     // The text matcher compares with collapsed spaces: the narrow no-break space before « ? » is one of them.
     expect(screen.getByText("Annuler l'aller et le retour du 16/11/2026 ? 1 course sera retirée de sa tournée.")).toBeTruthy();
+    // « Garder » gives the focus back to the button that asked.
+    fireEvent.click(screen.getByRole("button", { name: "Garder" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Annuler les 2 courses" }));
+    fireEvent.click(screen.getByRole("button", { name: "Annuler les 2 courses" }));
     expect(actions.cancelTrips).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Oui, annuler les 2 courses" }));
     await waitFor(() => expect(actions.cancelTrips).toHaveBeenCalledTimes(1));
@@ -78,6 +89,34 @@ describe("UpcomingTrips (« Prochaines courses » of the record)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rétablir la course du 18/11/2026 (aller)" }));
     await waitFor(() => expect(actions.restoreTrip).toHaveBeenCalledTimes(1));
     expect(actions.restoreTrip.mock.calls[0]![1].get("tripId")).toBe("a2");
+    expect(await screen.findByText("Course rétablie.")).toBeTruthy();
+  });
+
+  it("gives the focus back to the button that opened a form once it is closed", () => {
+    render(<UpcomingTrips days={days()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Annuler la course du 16/11/2026 (aller)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fermer" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Annuler la course du 16/11/2026 (aller)" }));
+  });
+
+  it("shows the pending label on the trip being restored only", async () => {
+    let finish: (value: { ok: boolean; message: string }) => void = () => {};
+    actions.restoreTrip.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    const twoCancelled = upcomingDays(
+      [
+        trip("a2", { serviceDate: fromIsoDate("2026-11-18"), status: "CANCELLED", cancellationReason: "PATIENT" }),
+        trip("a3", { serviceDate: fromIsoDate("2026-11-19"), status: "CANCELLED", cancellationReason: "PATIENT" }),
+      ],
+      [],
+      "p1",
+      "2026-11-14",
+    );
+    render(<UpcomingTrips days={twoCancelled} />);
+    fireEvent.click(screen.getByRole("button", { name: "Rétablir la course du 18/11/2026 (aller)" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Rétablir la course du 18/11/2026 (aller)" }).getAttribute("aria-busy")).toBe("true"));
+    expect(screen.getByRole("button", { name: "Rétablir la course du 19/11/2026 (aller)" }).getAttribute("aria-busy")).toBe("false");
+    expect(screen.getByRole("button", { name: "Rétablir la course du 19/11/2026 (aller)" }).textContent).toBe("Rétablir");
+    finish({ ok: true, message: "Course rétablie." });
     expect(await screen.findByText("Course rétablie.")).toBeTruthy();
   });
 

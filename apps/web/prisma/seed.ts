@@ -610,15 +610,21 @@ async function seedRhythmExamples(facilities: Map<FacilityKey, CreatedFacility>,
   if (cycles) {
     const tuesday = addDays(dates.monday, 1);
     const sessions = [0, 7, 21, 28, 42, 49].map((offset) => addDays(tuesday, offset));
-    await prisma.recurrence.update({
+    // The crew gets a logistical instruction; the cycle (treatment) stays on the prescription.
+    const updated = await prisma.recurrence.update({
       where: { id: cycles.id },
       data: {
         weekdays: [2],
         sessionDates: sessions.map(fromIsoDate),
         startDate: fromIsoDate(sessions[0] ?? tuesday),
         endDate: fromIsoDate(sessions.at(-1) ?? tuesday),
-        notes: "Cure de 3 semaines : séances à J1 et J8.",
+        notes: "Entrée hôpital de jour, 2e étage.",
       },
+      select: { prescription: { select: { id: true, notes: true } } },
+    });
+    await prisma.prescription.update({
+      where: { id: updated.prescription.id },
+      data: { notes: [updated.prescription.notes, "Cure de 3 semaines : séances à J1 et J8."].filter(Boolean).join(" ") },
     });
   }
   const ownFriday = await first("dialysisAix", "13:00");

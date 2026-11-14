@@ -6,13 +6,24 @@ import { FormMessage } from "@/components/ui/form";
 import { Card, CardBody, EmptyState, PageHeader, Stat } from "@/components/ui/layout";
 import { auditRead } from "@/lib/audit";
 import { cancellationLabel } from "@/lib/domain/cancellation";
-import { conflictLabel, tripConflicts } from "@/lib/domain/duplicates";
+import { calendarWarnings, conflictLabel, tripConflicts } from "@/lib/domain/duplicates";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { OUTBOUND_NO_SHOW_ADVICE, returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
 import { compareLabels, compareVehiclesByDepot } from "@/lib/fleet/order";
 import { formatPercent, PRESCRIBED_MODE_LABELS, SHARING_SCOPE_LABELS } from "@/lib/labels";
-import { addDays, formatDayDate, formatLongDate, formatShortDate, fromIsoDate, isIsoDate, startOfIsoWeek, todayIso, tomorrowIso } from "@/lib/time";
+import {
+  addDays,
+  formatDayDate,
+  formatLongDate,
+  formatShortDate,
+  fromIsoDate,
+  isIsoDate,
+  startOfIsoWeek,
+  todayIso,
+  tomorrowIso,
+  toIsoDate,
+} from "@/lib/time";
 import { currentHorizon, inHorizon } from "@/lib/trips/completion";
 import { loadRecurrencesWithoutTrip } from "@/lib/trips/missing-load";
 import { generationStateOf, MissingRecurrencesNote } from "@/components/trips/missing-recurrences";
@@ -61,6 +72,35 @@ export async function generateMetadata({ searchParams }: { searchParams: Promise
 }
 
 type SearchParams = Record<string, string | string[] | undefined>;
+
+/** The absence of the patient and the dated closure of the facility covering `isoDate`, for the trips just created or changed. */
+async function calendarNotice(
+  trips: readonly { patientId: string; facilityId: string | null }[],
+  isoDate: string,
+): Promise<string[]> {
+  if (trips.length === 0) return [];
+  const day = fromIsoDate(isoDate);
+  const covering = { startDate: { lte: day }, endDate: { gte: day } };
+  const facilityIds = [...new Set(trips.flatMap((t) => (t.facilityId ? [t.facilityId] : [])))];
+  const [absence, closure] = await Promise.all([
+    db.patientAbsence.findFirst({
+      where: { patientId: { in: [...new Set(trips.map((t) => t.patientId))] }, ...covering },
+      select: { kind: true, startDate: true, endDate: true },
+    }),
+    facilityIds.length > 0
+      ? db.facilityClosure.findFirst({
+          where: { facilityId: { in: facilityIds }, ...covering },
+          select: { startDate: true, endDate: true, facility: { select: { name: true } } },
+        })
+      : null,
+  ]);
+  return calendarWarnings(
+    absence ? { kind: absence.kind, startDate: toIsoDate(absence.startDate), endDate: toIsoDate(absence.endDate) } : null,
+    closure
+      ? { facilityName: closure.facility.name, startDate: toIsoDate(closure.startDate), endDate: toIsoDate(closure.endDate) }
+      : null,
+  );
+}
 
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -196,6 +236,11 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
   const noticeIds = notice ? (notice.kind === "created" ? notice.tripIds : [notice.tripId]) : [];
   const noticeTrips = noticeIds.flatMap((id) => trips.filter((trip) => trip.id === id));
   const noticeConflicts = [...new Set(noticeTrips.flatMap((trip) => conflicts.get(trip.id) ?? []))];
+  // A trip created or moved to a day the patient is absent or its facility closed: said, never refused.
+  const noticeCalendar = await calendarNotice(
+    noticeTrips.filter((trip) => trip.status !== "CANCELLED" && trip.status !== "NO_SHOW"),
+    date,
+  );
   // « Où la placer ? » once the day has routes (J+1 before « Optimiser demain », J+2…: the coming optimization places it).
   const placeable = date >= today && summary.assigned > 0;
   const unplaced = noticeTrips.filter((trip) => trip.routeId === null && trip.status !== "CANCELLED" && trip.status !== "NO_SHOW");
@@ -320,6 +365,15 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
             <Notice size="sm" tone={refreshAdvice(notice.refresh) ? "warning" : "info"}>
               {[refreshNotice(notice.refresh), refreshAdvice(notice.refresh)].filter(Boolean).join(" ")}
             </Notice>
+          ) : null}
+          {noticeCalendar.length > 0 ? (
+            <p role="note" className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-amber-700" />
+              <span>
+                Attention&nbsp;: {noticeCalendar.join("\u202f; ")}. La course reste prévue&nbsp;: annulez-la si elle n&apos;a
+                pas lieu d&apos;être.
+              </span>
+            </p>
           ) : null}
           {noticeConflicts.length > 0 ? (
             <p role="note" className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">

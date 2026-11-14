@@ -51,18 +51,40 @@ describe("upcomingDays", () => {
       ["2026-11-16", false, "Hospitalisation", ["a2", "r2"]],
       ["2026-11-17", false, "Hospitalisation", ["a3"]],
     ]);
-    // Cancelled by the application for the absence: shortening the absence brings it back, not « Rétablir ».
+    // A day of absence: shortening the absence brings the trip back, not « Rétablir » (whoever cancelled it).
     expect(days[2]?.trips[0]?.canRestore).toBe(false);
     const [first, second] = days;
     expect(first?.trips[0]).toMatchObject({ canCancel: true, canRestore: false, inRoute: true, plannedText: "prise en charge 07:00" });
     expect(first?.trips[1]).toMatchObject({ canCancel: false, canRestore: false, editHref: null, timeText: "Fin de séance 11:30" });
     expect(second?.trips[0]).toMatchObject({
       canCancel: false,
-      canRestore: true,
+      canRestore: false,
       cancellation: "Hospitalisation (du 16/11/2026 au 18/11/2026)",
       ariaName: "du 16/11/2026 (aller)",
     });
     expect(second?.coursesHref).toBe("/courses?date=2026-11-16&patient=p1");
+  });
+
+  it("restores a cancelled trip only outside an absence and a closure of its facility, as restoreTrip (PAT-02, PAT-03)", () => {
+    const closed = { name: "Hôpital de jour", closures: [{ startDate: fromIsoDate("2026-11-19"), endDate: fromIsoDate("2026-11-19") }] };
+    const days = upcomingDays(
+      [
+        trip("free", "2026-11-15", { status: "CANCELLED", cancellationReason: "PATIENT", cancellationOrigin: "USER" }),
+        trip("holiday", "2026-11-16", { status: "CANCELLED", cancellationReason: "PATIENT", cancellationOrigin: "USER" }),
+        trip("closed", "2026-11-19", { status: "CANCELLED", cancellationReason: "FACILITY_CLOSED", cancellationOrigin: "SYSTEM", facility: closed }),
+        trip("open", "2026-11-20", { status: "CANCELLED", cancellationReason: "PATIENT", cancellationOrigin: "USER", facility: closed }),
+      ],
+      [{ kind: "HOLIDAY", startDate: "2026-11-16", endDate: "2026-11-16" }],
+      "p1",
+      "2026-11-14",
+    );
+    expect(days.map((d) => [d.trips[0]?.id, d.absence, d.trips[0]?.canRestore])).toEqual([
+      ["free", null, true],
+      // The record names the kind of absence.
+      ["holiday", "Vacances", false],
+      ["closed", null, false],
+      ["open", null, true],
+    ]);
   });
 
   it("never offers to restore a trip of a past day", () => {

@@ -285,13 +285,26 @@ describe("recurrence summary", () => {
     expect(formatWeekdays([7, 0, 8])).toBe("Dim");
   });
 
-  it("formats «\u202fLun Mer Ven 07:30 — Dialyse\u202f»", () => {
+  it("formats «\u202fLun Mer Ven · 07:30 — Dialyse\u202f»", () => {
     expect(formatRecurrenceSummary({ weekdays: [1, 3, 5], appointmentMinute: 450, label: "Dialyse" })).toBe(
-      "Lun Mer Ven 07:30 — Dialyse",
+      "Lun Mer Ven · 07:30 — Dialyse",
     );
     expect(
       formatRecurrenceSummary({ weekdays: [2], appointmentMinute: 840, label: " ", facilityName: "Centre de dialyse de Gap" }),
-    ).toBe("Mar 14:00 — Centre de dialyse de Gap");
-    expect(formatRecurrenceSummary({ weekdays: [4], appointmentMinute: 600, label: null })).toBe("Jeu 10:00");
+    ).toBe("Mar · 14:00 — Centre de dialyse de Gap");
+    expect(formatRecurrenceSummary({ weekdays: [4], appointmentMinute: 600, label: null })).toBe("Jeu · 10:00");
+  });
+
+  it("keeps the rhythms every N weeks or on dates short (PAT-05)", () => {
+    expect(formatRecurrenceSummary({ weekdays: [1], intervalWeeks: 2, appointmentMinute: 660, label: "Chimiothérapie" })).toBe(
+      "Lun, une semaine sur deux · 11:00 — Chimiothérapie",
+    );
+    const dates = ["2099-12-29", "2099-11-10", "2099-11-17"];
+    expect(formatRecurrenceSummary({ weekdays: [2], sessionDates: dates, appointmentMinute: 600, label: "Chimiothérapie" })).toBe(
+      "3 dates jusqu'au 29/12/2099 · 10:00 — Chimiothérapie",
+    );
+    expect(formatRecurrenceSummary({ weekdays: [2], sessionDates: ["2099-11-10"], appointmentMinute: 600, label: null })).toBe(
+      "1 date le 10/11/2099 · 10:00",
+    );
   });
 });

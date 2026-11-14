@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  calendarRestoreBlocker,
+  calendarWarnings,
   conflictLabel,
+  coveringPeriod,
   nameKey,
   phoneKey,
   recurrenceOverlaps,
@@ -105,6 +108,21 @@ describe("recurrenceOverlaps", () => {
     expect(recurrenceOverlaps([rec("a", { endDate: "2026-03-31" }), rec("b", { startDate: "2026-04-01" })]).size).toBe(0);
     expect(recurrenceOverlaps([rec("a"), rec("b", { active: false })]).size).toBe(0);
   });
+
+  it("compares the sessions of each common day with that weekday's own time (PAT-05)", () => {
+    const hour = (appointmentMinute: number) => ({ appointmentMinute, sessionMinutes: 60 });
+    // Mon + Wed 08:00 for 1 h, Wednesday at 14:00.
+    const own = rec("own", { weekdays: [1, 3], ...hour(480), daySchedules: [{ weekday: 3, appointmentMinute: 840 }] });
+    // Wed 08:00: Wednesday's session of `own` is at 14:00, no overlap.
+    expect(recurrenceOverlaps([own, rec("morning", { weekdays: [3], ...hour(480) })]).size).toBe(0);
+    // Wed 14:00: the same session as Wednesday's of `own`.
+    expect(recurrenceOverlaps([own, rec("afternoon", { weekdays: [3], ...hour(840) })]).get("own")).toEqual(["afternoon"]);
+    // Every other week, and on explicit dates: the date's weekday decides the time too (2026-11-18 is a Wednesday).
+    const everyOther = rec("every-other", { weekdays: [3], intervalWeeks: 2, startDate: "2026-11-16", ...hour(840) });
+    expect(recurrenceOverlaps([own, everyOther]).get("every-other")).toEqual(["own"]);
+    const dated = rec("dated", { sessionDates: ["2026-11-18"], startDate: "2026-11-18", endDate: "2026-11-18", ...hour(480) });
+    expect(recurrenceOverlaps([own, dated]).size).toBe(0);
+  });
 });
 
 describe("similarPatients", () => {
@@ -154,5 +172,45 @@ describe("restoreBlocker", () => {
     expect(restoreBlocker({ ...cancelled, prescription: { validFrom: "2026-11-01", validTo: "2026-11-11" } }, "2026-11-09")).toMatch(
       /prescription valide/,
     );
+  });
+
+  it("refuses a day the patient is absent or the facility closed, whoever cancelled the trip (PAT-02, PAT-03)", () => {
+    const absence = { kind: "HOSPITALIZATION" as const, startDate: "2026-11-11", endDate: "2026-11-13" };
+    expect(restoreBlocker({ ...cancelled, absence }, "2026-11-09")).toBe(
+      "Le patient est absent ce jour-là (hospitalisation du 11/11/2026 au 13/11/2026)\u00a0: raccourcissez ou supprimez l'absence sur sa fiche d'abord.",
+    );
+    // Holidays and other absences: « absence du patient », never more on a planning screen.
+    expect(calendarRestoreBlocker({ ...absence, kind: "HOLIDAY" }, null)).toMatch(/^Le patient est absent ce jour-là \(absence du patient du 11/);
+    expect(restoreBlocker({ ...cancelled, closure: { startDate: "2026-11-12", endDate: "2026-11-12" } }, "2026-11-09")).toBe(
+      "L'établissement est fermé ce jour-là (fermeture le 12/11/2026)\u00a0: supprimez la fermeture sur sa fiche d'abord.",
+    );
+    expect(calendarRestoreBlocker(null, null)).toBeNull();
+  });
+});
+
+describe("calendarWarnings", () => {
+  it("names the absence (planning wording) and the closed facility of a trip created or moved there", () => {
+    expect(
+      calendarWarnings(
+        { kind: "HOLIDAY", startDate: "2026-11-16", endDate: "2026-11-20" },
+        { facilityName: "Hôpital de jour d'Aix", startDate: "2026-11-19", endDate: "2026-11-19" },
+      ),
+    ).toEqual([
+      "le patient est absent ce jour-là (absence du patient du 16/11/2026 au 20/11/2026)",
+      "Hôpital de jour d'Aix est fermé ce jour-là (fermeture le 19/11/2026)",
+    ]);
+    expect(calendarWarnings(null, null)).toEqual([]);
+  });
+});
+
+describe("coveringPeriod", () => {
+  it("finds the period covering a date, bounds included", () => {
+    const periods = [
+      { id: "a", startDate: "2026-11-10", endDate: "2026-11-12" },
+      { id: "b", startDate: "2026-11-20", endDate: "2026-11-20" },
+    ];
+    expect(coveringPeriod(periods, "2026-11-12")?.id).toBe("a");
+    expect(coveringPeriod(periods, "2026-11-20")?.id).toBe("b");
+    expect(coveringPeriod(periods, "2026-11-13")).toBeNull();
   });
 });

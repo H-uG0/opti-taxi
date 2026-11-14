@@ -105,7 +105,7 @@ beforeEach(() => {
 
 describe("addPatientAbsence", () => {
   it("cancels the patient's open trips of those days as the application, with the reason and the dates only", async () => {
-    fake.trip.findMany.mockResolvedValue([openTripRow("t1", "2026-11-16"), openTripRow("t2", "2026-11-18")]);
+    fake.trip.findMany.mockResolvedValueOnce([openTripRow("t1", "2026-11-16"), openTripRow("t2", "2026-11-18")]);
 
     const state = await addPatientAbsence("p1", IDLE_STATE, form(ABSENCE));
 
@@ -146,12 +146,26 @@ describe("addPatientAbsence", () => {
   });
 
   it("gives a holiday the reason « absence du patient », and cancels from today on only", async () => {
+    // No open trip; one the application had cancelled for an absence, under another reason.
+    fake.trip.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: "t7", serviceDate: new Date("2026-11-16T00:00:00.000Z") }]);
     await addPatientAbsence("p1", IDLE_STATE, form({ ...ABSENCE, kind: "HOLIDAY", startDate: "2026-11-10" }));
     const loaded = fake.trip.findMany.mock.calls[0]![0].where.AND[0];
     expect(loaded.serviceDate.gte).toEqual(new Date("2026-11-14T00:00:00.000Z"));
+    const stale = fake.trip.findMany.mock.calls[1]![0].where;
+    expect(stale).toMatchObject({
+      status: "CANCELLED",
+      cancellationOrigin: "SYSTEM",
+      NOT: { cancellationReason: "PATIENT_ABSENCE", cancellationNote: "du 10/11/2026 au 18/11/2026" },
+    });
     const relabel = fake.trip.updateMany.mock.calls.at(-1)![0];
     expect(relabel.data).toEqual({ cancellationReason: "PATIENT_ABSENCE", cancellationNote: "du 10/11/2026 au 18/11/2026" });
-    expect(relabel.where).toMatchObject({ status: "CANCELLED", cancellationOrigin: "SYSTEM" });
+    expect(relabel.where).toEqual({ id: { in: ["t7"] }, status: "CANCELLED", cancellationOrigin: "SYSTEM" });
+    // Each trip relabelled is traced, with the field names only.
+    expect(recorded().at(-1)).toEqual({
+      action: "trip.update",
+      entityId: "t7",
+      details: { fields: ["cancellation_reason", "cancellation_note"], cause: "patient_absence" },
+    });
   });
 
   it("refuses an absence over another one of the patient, without writing", async () => {
@@ -165,8 +179,32 @@ describe("addPatientAbsence", () => {
 });
 
 describe("updatePatientAbsence and deletePatientAbsence", () => {
+  it("cancels only the open trips of the days a change adds: a trip kept on a day already covered stays", async () => {
+    fake.patientAbsence.findFirst.mockResolvedValueOnce({
+      id: "abs1",
+      patientId: "p1",
+      startDate: new Date("2026-11-16T00:00:00.000Z"),
+      endDate: new Date("2026-11-18T00:00:00.000Z"),
+    });
+    fake.patientAbsence.updateMany.mockResolvedValue({ count: 1 });
+
+    await updatePatientAbsence("p1", "abs1", IDLE_STATE, form({ ...ABSENCE, endDate: "2026-11-19", note: "Autre service" }));
+
+    const loaded = fake.trip.findMany.mock.calls[0]![0].where.AND[0];
+    expect(loaded).toEqual({
+      patientId: "p1",
+      serviceDate: { gte: new Date("2026-11-16T00:00:00.000Z"), lte: new Date("2026-11-19T00:00:00.000Z") },
+      NOT: { serviceDate: { gte: new Date("2026-11-16T00:00:00.000Z"), lte: new Date("2026-11-18T00:00:00.000Z") } },
+    });
+  });
+
   it("brings back the trips of the days no longer covered (completion of the horizon, one-off trips)", async () => {
-    fake.patientAbsence.findFirst.mockResolvedValueOnce({ id: "abs1", patientId: "p1" });
+    fake.patientAbsence.findFirst.mockResolvedValueOnce({
+      id: "abs1",
+      patientId: "p1",
+      startDate: new Date("2026-11-16T00:00:00.000Z"),
+      endDate: new Date("2026-11-18T00:00:00.000Z"),
+    });
     fake.patientAbsence.updateMany.mockResolvedValue({ count: 1 });
     fake.completeTrips.mockResolvedValue({ created: 0, revived: 2, createdByDay: new Map(), skipped: [] });
     fake.reviveOneOffTrips.mockResolvedValue(1);

@@ -6,6 +6,7 @@ import {
   CONTRACT_MAX_TIME_LIMIT_SEC,
   effectiveTimeLimitSec,
   isStaleRun,
+  outsideHoursNotes,
   resolveVehicleAvailability,
   STALE_RUN_MARGIN_SEC,
   toContractSettings,
@@ -528,11 +529,28 @@ describe("facility reception hours (PAT-04)", () => {
   });
 
   it("leaves the hours out of a trip whose own time is outside them, and says so", () => {
-    const build = buildOptimizeRequest(input({ trips: [trip("t1", { appointmentMinute: 390, facilityHours: { openMin: 420, closeMin: 1140 } })] }));
+    const build = buildOptimizeRequest(
+      input({ trips: [trip("t1", { appointmentMinute: 390, facilityHours: { openMin: 420, closeMin: 1140 }, facilityName: "Institut Sud" })] }),
+    );
     expect(build.request.trips[0]).not.toHaveProperty("facilityOpenMin");
     expect(build.notes).toContain(
-      "1 course hors des horaires d'accueil de leur établissement (RDV à 06:30, avant l'accueil (07:00))\u00a0: horaires ignorés pour elle, vérifiez le rendez-vous ou les horaires.",
+      "Institut Sud\u00a0: 1 course hors des horaires d'accueil (RDV à 06:30, avant l'accueil (07:00))\u00a0: horaires ignorés pour elle, vérifiez le rendez-vous ou les horaires de l'établissement.",
     );
+  });
+
+  it("groups the trips outside hours by facility, each time once with its count", () => {
+    expect(
+      outsideHoursNotes([
+        { facility: "Institut Sud", text: "RDV à 07:15, avant l'accueil (07:30)" },
+        { facility: "Centre Nord", text: "Fin de séance à 20:30, après la fermeture (20:00)" },
+        { facility: "Institut Sud", text: "RDV à 07:15, avant l'accueil (07:30)" },
+        { facility: "Institut Sud", text: "Fin de séance à 19:00, après la fermeture (18:30)" },
+      ]),
+    ).toEqual([
+      "Institut Sud\u00a0: 3 courses hors des horaires d'accueil (RDV à 07:15, avant l'accueil (07:30) pour 2 courses\u202f; Fin de séance à 19:00, après la fermeture (18:30))\u00a0: horaires ignorés pour elles, vérifiez le rendez-vous ou les horaires de l'établissement.",
+      "Centre Nord\u00a0: 1 course hors des horaires d'accueil (Fin de séance à 20:30, après la fermeture (20:00))\u00a0: horaires ignorés pour elle, vérifiez le rendez-vous ou les horaires de l'établissement.",
+    ]);
+    expect(outsideHoursNotes([])).toEqual([]);
   });
 });
 

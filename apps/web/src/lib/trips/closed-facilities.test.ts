@@ -14,8 +14,15 @@ describe("closedFacilitiesNoteProps", () => {
     ).toEqual({
       title: "Jour férié (Armistice 1918) : 3 courses vers des établissements fermés",
       lines: [
-        { facilityId: "f1", name: "Radiothérapie", reason: "fermé les jours fériés", count: 2 },
-        { facilityId: "f3", name: "Clinique", reason: "fermé du 10/11/2026 au 12/11/2026", count: 1 },
+        { facilityId: "f1", name: "Radiothérapie", reason: "fermé les jours fériés", holiday: true, count: 2, tripIds: ["t1", "t2"] },
+        {
+          facilityId: "f3",
+          name: "Clinique",
+          reason: "fermé du 10/11/2026 au 12/11/2026",
+          holiday: false,
+          count: 1,
+          tripIds: ["t3"],
+        },
       ],
     });
   });

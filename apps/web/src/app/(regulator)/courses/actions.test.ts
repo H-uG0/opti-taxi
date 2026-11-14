@@ -345,16 +345,18 @@ describe("restoreTrip", () => {
       direction: "OUTBOUND",
       appointmentMinute: 450,
       readyMinute: null,
-      patient: { active: true },
+      patient: { active: true, absences: [] },
+      facility: { closures: [] },
       recurrence: { active: true },
       prescription: { validFrom: new Date("2020-01-01T00:00:00.000Z"), validTo: new Date("2099-12-31T00:00:00.000Z") },
       ...overrides,
     };
   }
+  const tomorrow = () => new Date(`${addDays(today, 1)}T00:00:00.000Z`);
 
   it("refuses an inactive patient, a past date or a CPAM trip without a valid prescription, writing nothing", async () => {
     for (const overrides of [
-      { patient: { active: false } },
+      { patient: { active: false, absences: [] } },
       { recurrence: { active: false } },
       { serviceDate: new Date(`${addDays(today, -1)}T00:00:00.000Z`) },
       { prescription: null },
@@ -363,6 +365,24 @@ describe("restoreTrip", () => {
       const result = await restoreTrip(INITIAL_ACTION_RESULT, form({ tripId: "t1" }));
       expect(result.ok).toBe(false);
     }
+    expect(fake.trip.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses a day the patient is absent or the facility closed: the absence or closure changes first (PAT-02, PAT-03)", async () => {
+    const day = { startDate: tomorrow(), endDate: tomorrow() };
+    const hospitalised = { active: true, absences: [{ kind: "HOSPITALIZATION", ...day }] };
+    fake.trip.findUnique.mockResolvedValueOnce(cancelled({ patient: hospitalised }));
+    const absent = await restoreTrip(INITIAL_ACTION_RESULT, form({ tripId: "t1" }));
+    expect(absent).toEqual({
+      ok: false,
+      message: expect.stringMatching(/^Le patient est absent ce jour-là \(hospitalisation le .*raccourcissez/),
+    });
+    fake.trip.findUnique.mockResolvedValueOnce(cancelled({ facility: { closures: [day] } }));
+    const closed = await restoreTrip(INITIAL_ACTION_RESULT, form({ tripId: "t1" }));
+    expect(closed).toEqual({ ok: false, message: expect.stringMatching(/^L'établissement est fermé ce jour-là .*supprimez la fermeture/) });
+    // Only the absences and closures not over yet are read.
+    const read = fake.trip.findUnique.mock.calls[0]![0].select;
+    expect(read.patient.select.absences.where).toEqual({ endDate: { gte: new Date(`${today}T00:00:00.000Z`) } });
     expect(fake.trip.updateMany).not.toHaveBeenCalled();
   });
 

@@ -9,7 +9,7 @@ import { db } from "@/lib/db";
 import { errorState, type ActionResult, type FormState } from "@/lib/forms";
 import { GENERATION_INCLUDE, prescriptionOn } from "@/lib/domain/trip-generation";
 import { CANCELLATION_REASON_LABELS, isLateCancellation, NO_CANCELLATION, userCancellation } from "@/lib/domain/cancellation";
-import { conflictLabel, restoreBlocker, tripConflicts } from "@/lib/domain/duplicates";
+import { conflictLabel, coveringPeriod, restoreBlocker, tripConflicts } from "@/lib/domain/duplicates";
 import { isSameEpisode } from "@/lib/domain/no-show";
 import { allowedVehicleTypesFor, formatAddress, sharingAllowedFor } from "@/lib/domain/rules";
 import { formatEuros } from "@/lib/labels";
@@ -480,48 +480,73 @@ export async function cancelTrips(_prev: ActionResult, formData: FormData): Prom
   };
 }
 
-/** What a restoration checks first, and the patient's other trips of the day (a duplicate is warned about). */
-const RESTORE_SELECT = {
-  id: true,
-  status: true,
-  serviceDate: true,
-  payer: true,
-  patientId: true,
-  recurrenceId: true,
-  facilityId: true,
-  direction: true,
-  appointmentMinute: true,
-  readyMinute: true,
-  patient: { select: { active: true } },
-  recurrence: { select: { active: true } },
-  prescription: { select: { validFrom: true, validTo: true } },
-} satisfies Prisma.TripSelect;
+/**
+ * What a restoration checks first, and the patient's other trips of the day (a duplicate is warned about). The
+ * absences and closures read are those not over by `todayIso` (a past date is refused anyway).
+ */
+const restoreSelect = (todayIso: string) =>
+  ({
+    id: true,
+    status: true,
+    serviceDate: true,
+    payer: true,
+    patientId: true,
+    recurrenceId: true,
+    facilityId: true,
+    direction: true,
+    appointmentMinute: true,
+    readyMinute: true,
+    patient: {
+      select: {
+        active: true,
+        absences: { where: { endDate: { gte: fromIsoDate(todayIso) } }, select: { kind: true, startDate: true, endDate: true } },
+      },
+    },
+    facility: {
+      select: { closures: { where: { endDate: { gte: fromIsoDate(todayIso) } }, select: { startDate: true, endDate: true } } },
+    },
+    recurrence: { select: { active: true } },
+    prescription: { select: { validFrom: true, validTo: true } },
+  }) satisfies Prisma.TripSelect;
+
+/** A period read from the database (@db.Date bounds), with "YYYY-MM-DD" bounds. */
+function isoPeriod<P extends { startDate: Date; endDate: Date }>(
+  p: P,
+): Omit<P, "startDate" | "endDate"> & { startDate: string; endDate: string } {
+  return { ...p, startDate: toIsoDate(p.startDate), endDate: toIsoDate(p.endDate) };
+}
 
 /**
  * « Rétablir la course » : refused on a past date, for an inactive patient or
- * recurrence (reactivating them brings their trips back), or for a CPAM trip
- * no prescription covers; a trip of the same patient, day and leg is warned
- * about (two vehicles for one patient), without blocking.
+ * recurrence (reactivating them brings their trips back), on a day the patient
+ * is absent or the facility closed (shortening the absence or removing the
+ * closure brings them back), or for a CPAM trip no prescription covers; a trip
+ * of the same patient, day and leg is warned about (two vehicles for one
+ * patient), without blocking.
  */
 export async function restoreTrip(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
   const user = await requireUser("REGULATOR");
   const parsed = tripIdSchema.safeParse(formData.get("tripId"));
   if (!parsed.success) return failure("Course introuvable.");
 
-  const trip = await db.trip.findUnique({ where: { id: parsed.data }, select: RESTORE_SELECT });
+  const today = todayIso();
+  const trip = await db.trip.findUnique({ where: { id: parsed.data }, select: restoreSelect(today) });
   if (!trip) return failure("Course introuvable.");
   if (!canRestore(trip.status)) return failure("Seule une course annulée peut être rétablie.");
+  const serviceDay = toIsoDate(trip.serviceDate);
   const blocker = restoreBlocker(
     {
-      serviceDate: toIsoDate(trip.serviceDate),
+      serviceDate: serviceDay,
       payer: trip.payer,
       patientActive: trip.patient.active,
       recurrenceActive: trip.recurrence ? trip.recurrence.active : null,
       prescription: trip.prescription
         ? { validFrom: toIsoDate(trip.prescription.validFrom), validTo: toIsoDate(trip.prescription.validTo) }
         : null,
+      absence: coveringPeriod(trip.patient.absences.map(isoPeriod), serviceDay),
+      closure: trip.facility ? coveringPeriod(trip.facility.closures.map(isoPeriod), serviceDay) : null,
     },
-    todayIso(),
+    today,
   );
   if (blocker) return failure(blocker);
 

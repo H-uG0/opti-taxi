@@ -30,9 +30,10 @@ vi.mock("@/lib/planning/detach", async (original) => ({
   removeTripStops: vi.fn(async () => ({ nowAlone: [], routeIds: [] })),
 }));
 
-function form(entries: Record<string, string>): FormData {
+function form(entries: Record<string, string>, tripIds: string[] = []): FormData {
   const fd = new FormData();
   for (const [key, value] of Object.entries(entries)) fd.set(key, value);
+  for (const id of tripIds) fd.append("tripId", id);
   return fd;
 }
 
@@ -51,7 +52,7 @@ describe("cancelClosedFacilityTrips (« Annuler ces N courses »)", () => {
       { id: "t2", facility: radio },
     ]);
 
-    const result = await cancelClosedFacilityTrips(INITIAL_ACTION_RESULT, form({ date: "2026-11-11" }));
+    const result = await cancelClosedFacilityTrips(INITIAL_ACTION_RESULT, form({ date: "2026-11-11" }, ["t1", "t2"]));
 
     // Only the facilities closed that day: not working holidays, or under a closure.
     expect(fake.trip.findMany.mock.calls[0]![0].where.facility.OR[0]).toEqual({ openOnHolidays: false });
@@ -75,10 +76,30 @@ describe("cancelClosedFacilityTrips (« Annuler ces N courses »)", () => {
     expect(result).toEqual({ ok: true, message: "2 courses annulées (établissement fermé)." });
   });
 
-  it("refuses a past date and says when nothing is left", async () => {
-    expect((await cancelClosedFacilityTrips(INITIAL_ACTION_RESULT, form({ date: "2026-11-09" }))).ok).toBe(false);
+  it("cancels only the trips the banner showed: never one listed since, and says those no longer to cancel", async () => {
+    const radio = { id: "f1", name: "Radiothérapie", openOnHolidays: false, closures: [] };
+    const consult = { id: "f2", name: "Consultations", openOnHolidays: false, closures: [] };
+    // t3 appeared since the page was shown (its facility unticked « ouvert les jours fériés »); t9 is gone.
+    fake.trip.findMany.mockResolvedValue([
+      { id: "t1", facility: radio },
+      { id: "t3", facility: consult },
+    ]);
+
+    const result = await cancelClosedFacilityTrips(INITIAL_ACTION_RESULT, form({ date: "2026-11-11" }, ["t1", "t9"]));
+
+    expect(fake.trip.updateMany.mock.calls.map(([args]) => args.where.id)).toEqual(["t1"]);
+    expect(result).toEqual({ ok: true, message: "1 course annulée (établissement fermé). 1 course n'était plus à annuler." });
+  });
+
+  it("refuses a past date or no trip posted, and says when nothing is left", async () => {
+    expect((await cancelClosedFacilityTrips(INITIAL_ACTION_RESULT, form({ date: "2026-11-09" }, ["t1"]))).ok).toBe(false);
+    expect(await cancelClosedFacilityTrips(INITIAL_ACTION_RESULT, form({ date: "2026-11-11" }))).toEqual({
+      ok: false,
+      message: "Liste de courses invalide\u00a0: rechargez la page.",
+    });
     fake.trip.findMany.mockResolvedValue([]);
-    const none = await cancelClosedFacilityTrips(INITIAL_ACTION_RESULT, form({ date: "2026-11-11" }));
-    expect(none).toEqual({ ok: false, message: "Plus aucune course vers un établissement fermé ce jour." });
+    const none = await cancelClosedFacilityTrips(INITIAL_ACTION_RESULT, form({ date: "2026-11-11" }, ["t1"]));
+    expect(none).toEqual({ ok: false, message: "Plus aucune de ces courses n'est à annuler\u00a0: rechargez la page." });
+    expect(fake.trip.updateMany).not.toHaveBeenCalled();
   });
 });

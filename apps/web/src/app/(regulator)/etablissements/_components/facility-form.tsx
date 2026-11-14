@@ -149,7 +149,7 @@ export function FacilityForm({
           label="Arrivée des patients acceptée dès (facultatif)"
           htmlFor="earliestArrival"
           error={errors.earliestArrival}
-          hint="Tous les jours, à la place de l'ouverture&nbsp;: ex. 06:45 si les patients entrent avant l'ouverture de l'accueil. Vide&nbsp;: l'ouverture du jour."
+          hint="Les jours qui ont des horaires (tous les jours s'il n'y en a aucun), à la place de l'ouverture&nbsp;: ex. 06:45 si les patients entrent avant l'ouverture de l'accueil. Vide&nbsp;: l'ouverture du jour."
           className="sm:max-w-md"
         >
           <Input
@@ -177,9 +177,9 @@ export function FacilityForm({
         </p>
       </Fieldset>
 
-      <Fieldset legend="Consignes de dépose">
+      <Fieldset legend="Pour le chauffeur">
         <Field
-          label="Consignes pour le chauffeur (facultatif)"
+          label="Consignes de dépose (facultatif)"
           htmlFor="notes"
           error={errors.notes}
           hint="Entrée à utiliser, code d'accès, emplacement ambulance, service à l'étage…&nbsp;: montrées au chauffeur à la dépose et à la prise en charge ici."

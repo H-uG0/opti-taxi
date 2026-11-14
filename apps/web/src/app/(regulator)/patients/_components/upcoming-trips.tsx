@@ -1,11 +1,11 @@
 "use client";
 
-import { Fragment, useActionState, useId, useState, type FormEvent } from "react";
+import { Fragment, useActionState, useCallback, useId, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { Undo2, X } from "lucide-react";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button, LinkButton } from "@/components/ui/button";
-import { ConfirmPanel } from "@/components/ui/confirm-action";
+import { ConfirmPanel, useConfirmStep } from "@/components/ui/confirm-action";
 import { Input, Select } from "@/components/ui/form";
 import { TBody, Td, Th, THead } from "@/components/ui/table";
 import { CANCELLATION_NOTE_MAX, CANCELLATION_REASON_LABELS, USER_CANCELLATION_REASONS } from "@/lib/domain/cancellation";
@@ -20,12 +20,35 @@ import { dayCancelLabel, dayCancelQuestion, type UpcomingDay, type UpcomingTrip 
  * was cancelled; « Annuler ce jour (aller et retour) » cancels every open trip
  * of the day with one reason. The cancellations are those of « Courses »
  * (cancelTrips: who, when, late or not, out of its route, traced trip by trip).
+ * A cancellation form takes the focus when it opens (its reason) and gives it
+ * back to the button that opened it when it closes, as in Courses.
  */
 export function UpcomingTrips({ days }: { days: UpcomingDay[] }) {
   // One cancellation form open at a time: a day ("day:2026-11-17") or a trip ("trip:<id>").
   const [open, setOpen] = useState<string | null>(null);
-  // « Rétablir » answers here: the trip's row loses its button once restored, the message stays.
+  // The button of the form just closed takes the focus back when it is mounted again (a callback ref runs at commit).
+  const returnFocus = useRef<string | null>(null);
+  const openForm = useCallback((key: string) => {
+    returnFocus.current = null;
+    setOpen(key);
+  }, []);
+  const closeForm = () => {
+    returnFocus.current = open;
+    setOpen(null);
+  };
+  const triggerRef = useCallback(
+    (key: string) => (node: HTMLButtonElement | null) => {
+      if (node && returnFocus.current === key) {
+        returnFocus.current = null;
+        node.focus();
+      }
+    },
+    [],
+  );
+  // « Rétablir » answers here: the trip's row loses its button once restored, the message stays. Only the trip
+  // clicked shows the pending label.
   const [restored, restoreAction, restoring] = useActionState(restoreTrip, INITIAL_ACTION_RESULT);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
   return (
     <div className="overflow-x-auto">
       {restored.message ? (
@@ -68,7 +91,14 @@ export function UpcomingTrips({ days }: { days: UpcomingDay[] }) {
                         ) : null}
                       </p>
                       {openTrips.length > 0 && open !== dayKey ? (
-                        <Button variant="ghost" size="sm" className="text-red-700 hover:bg-red-50" onClick={() => setOpen(dayKey)}>
+                        <Button
+                          ref={triggerRef(dayKey)}
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-700 hover:bg-red-50"
+                          onClick={() => openForm(dayKey)}
+                          aria-label={`${dayCancelLabel(openTrips)}, le ${day.label}`}
+                        >
                           <X aria-hidden className="size-4" />
                           {dayCancelLabel(openTrips)}
                         </Button>
@@ -79,7 +109,7 @@ export function UpcomingTrips({ days }: { days: UpcomingDay[] }) {
                         tripIds={openTrips.map((t) => t.id)}
                         question={dayCancelQuestion(day.label, openTrips)}
                         confirmLabel={openTrips.length > 1 ? `Oui, annuler les ${openTrips.length} courses` : "Oui, annuler la course"}
-                        onClose={() => setOpen(null)}
+                        onClose={closeForm}
                       />
                     ) : null}
                   </td>
@@ -89,9 +119,16 @@ export function UpcomingTrips({ days }: { days: UpcomingDay[] }) {
                     key={t.id}
                     trip={t}
                     cancelling={open === `trip:${t.id}`}
-                    onCancel={() => setOpen(`trip:${t.id}`)}
-                    onClose={() => setOpen(null)}
-                    restore={{ action: restoreAction, pending: restoring }}
+                    onCancel={() => openForm(`trip:${t.id}`)}
+                    onClose={closeForm}
+                    cancelRef={triggerRef(`trip:${t.id}`)}
+                    restore={{
+                      action: restoreAction,
+                      // Set on submit, outside the action's transition: shown while it runs.
+                      onStart: () => setRestoringId(t.id),
+                      pending: restoring && restoringId === t.id,
+                      busy: restoring,
+                    }}
                   />
                 ))}
               </Fragment>
@@ -108,13 +145,16 @@ function TripRow({
   cancelling,
   onCancel,
   onClose,
+  cancelRef,
   restore,
 }: {
   trip: UpcomingTrip;
   cancelling: boolean;
   onCancel: () => void;
   onClose: () => void;
-  restore: { action: (formData: FormData) => void; pending: boolean };
+  cancelRef: (node: HTMLButtonElement | null) => void;
+  /** `pending`: this trip's « Rétablir » is under way; `busy`: one is (every « Rétablir » waits). */
+  restore: { action: (formData: FormData) => void; onStart: () => void; pending: boolean; busy: boolean };
 }) {
   return (
     <>
@@ -153,7 +193,14 @@ function TripRow({
               </LinkButton>
             ) : null}
             {trip.canCancel && !cancelling ? (
-              <Button variant="ghost" size="sm" className="text-red-700 hover:bg-red-50" onClick={onCancel} aria-label={`Annuler la course ${trip.ariaName}`}>
+              <Button
+                ref={cancelRef}
+                variant="ghost"
+                size="sm"
+                className="text-red-700 hover:bg-red-50"
+                onClick={onCancel}
+                aria-label={`Annuler la course ${trip.ariaName}`}
+              >
                 Annuler
               </Button>
             ) : null}
@@ -182,17 +229,21 @@ function RestoreButton({
   tripId,
   ariaName,
   action,
+  onStart,
   pending,
+  busy,
 }: {
   tripId: string;
   ariaName: string;
   action: (formData: FormData) => void;
+  onStart: () => void;
   pending: boolean;
+  busy: boolean;
 }) {
   return (
-    <form action={action}>
+    <form action={action} onSubmit={onStart}>
       <input type="hidden" name="tripId" value={tripId} />
-      <Button type="submit" variant="ghost" size="sm" disabled={pending} aria-busy={pending} aria-label={`Rétablir la course ${ariaName}`}>
+      <Button type="submit" variant="ghost" size="sm" disabled={busy} aria-busy={pending} aria-label={`Rétablir la course ${ariaName}`}>
         {pending ? (
           PENDING_LABEL
         ) : (
@@ -222,8 +273,11 @@ function CancelForm({
   const [reason, setReason] = useState("");
   const [note, setNote] = useState("");
   const [confirming, setConfirming] = useState(false);
+  // « Garder » gives the focus back to the button that asked (mounted again).
+  const { triggerRef: submitRef, close: keepAsking } = useConfirmStep();
   const reasonId = useId();
   const noteId = useId();
+  const hintId = useId();
   const submit = (event: FormEvent<HTMLFormElement>) => {
     if (confirming) return;
     event.preventDefault();
@@ -257,7 +311,8 @@ function CancelForm({
           <label htmlFor={reasonId} className="block text-xs font-medium text-slate-600">
             Motif de l&apos;annulation
           </label>
-          <Select id={reasonId} name="reason" required value={reason} onChange={(e) => setReason(e.target.value)}>
+          {/* Opened by a button that leaves the screen: the focus goes to the first field. */}
+          <Select id={reasonId} name="reason" required value={reason} onChange={(e) => setReason(e.target.value)} autoFocus>
             <option value="" disabled>
               Choisir un motif…
             </option>
@@ -278,13 +333,14 @@ function CancelForm({
             maxLength={CANCELLATION_NOTE_MAX}
             required={reason === "OTHER"}
             placeholder="Ex. prévenu par sa fille"
+            aria-describedby={hintId}
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
         </div>
         {confirming ? null : (
           <div className="flex items-center gap-2">
-            <Button type="submit" variant="secondary" size="sm" className="text-red-700 hover:bg-red-50">
+            <Button ref={submitRef} type="submit" variant="secondary" size="sm" className="text-red-700 hover:bg-red-50">
               {tripIds.length > 1 ? `Annuler les ${tripIds.length} courses` : "Annuler la course"}
             </Button>
             <Button variant="ghost" size="sm" onClick={onClose}>
@@ -293,9 +349,19 @@ function CancelForm({
           </div>
         )}
       </div>
-      <p className="text-xs text-slate-500">Aucune information médicale dans la précision&nbsp;: le motif choisi suffit.</p>
+      <p id={hintId} className="text-xs text-slate-500">
+        Aucune information médicale dans la précision&nbsp;: le motif choisi suffit.
+      </p>
       {confirming ? (
-        <ConfirmPanel question={question} confirmLabel={confirmLabel} keepLabel="Garder" onKeep={() => setConfirming(false)} />
+        <ConfirmPanel
+          question={question}
+          confirmLabel={confirmLabel}
+          keepLabel="Garder"
+          onKeep={() => {
+            keepAsking();
+            setConfirming(false);
+          }}
+        />
       ) : null}
       <ActionMessage result={state} />
     </form>

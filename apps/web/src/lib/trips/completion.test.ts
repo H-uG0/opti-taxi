@@ -166,6 +166,65 @@ describe("completeTrips", () => {
     expect(result.revived).toBe(1);
     expect(events(tx)).toContainEqual({ action: "trip.revive", entityId: "t-moved", details: undefined });
   });
+
+  describe("a trip on a day of absence or closure (PAT-02, PAT-03)", () => {
+    const dayAfter = addDays(TOMORROW, 1);
+    const day = (iso: string) => ({ startDate: fromIsoDate(iso), endDate: fromIsoDate(iso) });
+    /** The recurrence plans tomorrow only; its trip of tomorrow's session was moved to the day after, then cancelled. */
+    function movedTrip(facility: { closures: { startDate: Date; endDate: Date }[] } | null = { closures: [] }) {
+      return {
+        id: "t-moved",
+        recurrenceId: "rec1",
+        serviceDate: fromIsoDate(dayAfter),
+        occurrenceDate: fromIsoDate(TOMORROW),
+        direction: "OUTBOUND",
+        sharingStatus: "NOT_PROPOSED",
+        facility,
+      };
+    }
+    function tomorrowOnly(change: (rec: ReturnType<typeof recurrence>) => void = () => {}) {
+      const rec = recurrence();
+      rec.weekdays = [isoWeekday(TOMORROW)];
+      change(rec);
+      tx.recurrence.findMany.mockResolvedValue([rec]);
+    }
+    const complete = () => completeTrips(tx as unknown as Prisma.TransactionClient, ACTOR, { from: TOMORROW, to: dayAfter });
+
+    it("leaves a trip moved to a day the patient is absent cancelled, and brings it back once the absence no longer covers it", async () => {
+      tomorrowOnly((rec) => Object.assign(rec.patient, { absences: [day(dayAfter)] }));
+      tx.trip.findMany.mockResolvedValue([movedTrip()]);
+      expect((await complete()).revived).toBe(0);
+      expect(tx.trip.updateMany).not.toHaveBeenCalled();
+
+      // The absence shortened to another day: the trip comes back on its day.
+      tomorrowOnly((rec) => Object.assign(rec.patient, { absences: [day(addDays(dayAfter, 1))] }));
+      expect((await complete()).revived).toBe(1);
+      expect(tx.trip.updateMany.mock.calls[0]![0].where).toMatchObject({ id: "t-moved" });
+    });
+
+    it("leaves a trip moved to a day its recurrence's facility is closed cancelled", async () => {
+      tomorrowOnly((rec) => Object.assign(rec.facility, { closures: [day(dayAfter)] }));
+      tx.trip.findMany.mockResolvedValue([movedTrip()]);
+      expect((await complete()).revived).toBe(0);
+    });
+
+    it("leaves a trip whose own facility (changed by hand) is closed that day cancelled: the closure is not undone", async () => {
+      tomorrowOnly();
+      tx.trip.findMany.mockResolvedValue([movedTrip({ closures: [day(dayAfter)] })]);
+      expect((await complete()).revived).toBe(0);
+      // Only the closures over the days completed are read.
+      expect(tx.trip.findMany.mock.calls[0]![0].select.facility.select.closures.where).toEqual({
+        startDate: { lte: fromIsoDate(dayAfter) },
+        endDate: { gte: fromIsoDate(TOMORROW) },
+      });
+
+      // The closure removed: the trip comes back (a trip without facility too).
+      tx.trip.findMany.mockResolvedValue([movedTrip({ closures: [] })]);
+      expect((await complete()).revived).toBe(1);
+      tx.trip.findMany.mockResolvedValue([movedTrip(null)]);
+      expect((await complete()).revived).toBe(1);
+    });
+  });
 });
 
 describe("reviveOneOffTrips", () => {
@@ -194,5 +253,37 @@ describe("reviveOneOffTrips", () => {
     expect(revived).toBe(1);
     expect(tx.trip.updateMany.mock.calls.map(([args]) => args.where.id)).toEqual(["back"]);
     expect(tx.trip.findMany.mock.calls[0]![0].where.AND[1]).toMatchObject({ recurrenceId: null, cancellationOrigin: "SYSTEM" });
+  });
+
+  it("leaves a one-off trip cancelled while the patient is absent or its facility closed that day (PAT-02, PAT-03)", async () => {
+    const day = { startDate: fromIsoDate(TOMORROW), endDate: fromIsoDate(TOMORROW) };
+    const base = {
+      serviceDate: fromIsoDate(TOMORROW),
+      direction: "OUTBOUND",
+      payer: "PRIVATE",
+      sharingStatus: "NOT_ELIGIBLE",
+      pickupAddress: "x",
+      pickupLat: 1,
+      pickupLng: 1,
+      dropoffAddress: "Centre",
+      dropoffLat: 2,
+      dropoffLng: 2,
+      prescription: null,
+    };
+    const facility = { ...PLACE, active: true, closures: [] as (typeof day)[] };
+    tx.trip.findMany.mockResolvedValue([
+      { ...base, id: "absent", patient: { ...PLACE, active: true, absences: [day] }, facility },
+      { ...base, id: "closed", patient: { ...PLACE, active: true, absences: [] }, facility: { ...facility, closures: [day] } },
+      { ...base, id: "back", patient: { ...PLACE, active: true, absences: [] }, facility },
+    ]);
+
+    const revived = await reviveOneOffTrips(tx as unknown as Prisma.TransactionClient, ACTOR, { patientId: "p1" });
+
+    expect(revived).toBe(1);
+    expect(tx.trip.updateMany.mock.calls.map(([args]) => args.where.id)).toEqual(["back"]);
+    // The patient's absences and the facility's closures are read with the trips.
+    const select = tx.trip.findMany.mock.calls[0]![0].select;
+    expect(select.patient.select.absences).toEqual({ select: { startDate: true, endDate: true } });
+    expect(select.facility.select.closures).toEqual({ select: { startDate: true, endDate: true } });
   });
 });

@@ -5,7 +5,8 @@
  */
 import type { CancellationOrigin, CancellationReason, PatientAbsenceKind, SharingStatus, TripDirection, TripStatus } from "@prisma/client";
 import { cancellationLabel } from "@/lib/domain/cancellation";
-import { planningAbsenceLabel } from "@/lib/domain/patient-absences";
+import { calendarRestoreBlocker, coveringPeriod } from "@/lib/domain/duplicates";
+import { PATIENT_ABSENCE_KIND_LABELS } from "@/lib/domain/patient-absences";
 import { DIRECTION_LABELS, SHARING_STATUS_LABELS, TRIP_STATUS_LABELS } from "@/lib/labels";
 import { formatMinute, formatShortDate, toIsoDate } from "@/lib/time";
 
@@ -51,7 +52,7 @@ export type UpcomingDay = {
   /** "17/11/2026". */
   label: string;
   today: boolean;
-  /** « Hospitalisation » / « Absence » when the patient is absent that day (planning wording, never the note). */
+  /** « Hospitalisation », « Vacances »… when the patient is absent that day (its kind, never the note). */
   absence: string | null;
   coursesHref: string;
   trips: UpcomingTrip[];
@@ -74,7 +75,8 @@ export type UpcomingTripInput = {
   cancellationOrigin: CancellationOrigin | null;
   cancellationNote: string | null;
   lateCancellation: boolean;
-  facility: { name: string } | null;
+  /** `closures`: its dated closures not over yet (a trip cancelled on a closed day comes back by removing the closure). */
+  facility: { name: string; closures?: readonly { startDate: Date; endDate: Date }[] } | null;
 };
 
 const OPEN: readonly TripStatus[] = ["PLANNED", "ASSIGNED"];
@@ -93,14 +95,15 @@ export function upcomingDays(
   const days = new Map<string, UpcomingDay>();
   for (const t of sorted) {
     const date = toIsoDate(t.serviceDate);
+    const absence = coveringPeriod(absences, date);
+    const closures = (t.facility?.closures ?? []).map((c) => ({ startDate: toIsoDate(c.startDate), endDate: toIsoDate(c.endDate) }));
     let day = days.get(date);
     if (!day) {
-      const absence = absences.find((a) => a.startDate <= date && date <= a.endDate);
       day = {
         date,
         label: formatShortDate(date),
         today: date === todayIso,
-        absence: absence ? planningAbsenceLabel(absence.kind) : null,
+        absence: absence ? PATIENT_ABSENCE_KIND_LABELS[absence.kind] : null,
         coursesHref: `/courses?${new URLSearchParams({ date, patient: patientId }).toString()}`,
         trips: [],
       };
@@ -127,9 +130,10 @@ export function upcomingDays(
       sharingRefused: t.sharingStatus === "REFUSED",
       inRoute: t.routeId !== null,
       canCancel: open,
-      // A past day is never restored (restoreTrip refuses it too); a trip the application cancelled on a day the
-      // patient is absent comes back by shortening the absence.
-      canRestore: t.status === "CANCELLED" && date >= todayIso && !(day.absence !== null && t.cancellationOrigin === "SYSTEM"),
+      // A past day is never restored, nor a day the patient is absent or the facility closed (the rule of
+      // restoreTrip): the trip comes back by shortening the absence or removing the closure.
+      canRestore:
+        t.status === "CANCELLED" && date >= todayIso && calendarRestoreBlocker(absence, coveringPeriod(closures, date)) === null,
       editHref: open ? `/courses/${encodeURIComponent(t.id)}/modifier?retour=patient` : null,
       ariaName: `du ${formatShortDate(date)} (${direction.toLowerCase()})`,
     });

@@ -9,7 +9,13 @@ import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { recurrenceOverlaps } from "@/lib/domain/duplicates";
-import { describeDaySchedules, describeRhythmDays, nextSessionDates, parseDaySchedules } from "@/lib/domain/recurrence-rhythm";
+import {
+  describeDaySchedules,
+  describeRhythmDays,
+  nextSessionDates,
+  parseDaySchedules,
+  type Rhythm,
+} from "@/lib/domain/recurrence-rhythm";
 import {
   DEFAULT_LATE_CANCELLATION_HOURS,
   PATIENT_HISTORY_DAYS,
@@ -39,7 +45,7 @@ import { ConfirmAction } from "@/components/ui/confirm-action";
 import {
   absenceText,
   currentAbsence,
-  planningAbsenceLabel,
+  PATIENT_ABSENCE_KIND_LABELS,
   recordAbsenceFrom,
 } from "@/lib/domain/patient-absences";
 import {
@@ -121,7 +127,13 @@ export default async function PatientPage({
     db.trip.findMany({
       where: { patientId: id, serviceDate: { gte: fromIsoDate(today), lte: fromIsoDate(lastDay) } },
       orderBy: [{ serviceDate: "asc" }, { direction: "asc" }],
-      include: { facility: { select: { name: true } }, recurrence: { select: { active: true } } },
+      include: {
+        // Its closures not over yet: a trip cancelled on a closed day is not restored (the rule of « Rétablir »).
+        facility: {
+          select: { name: true, closures: { where: { endDate: { gte: fromIsoDate(today) } }, select: { startDate: true, endDate: true } } },
+        },
+        recurrence: { select: { active: true } },
+      },
     }),
     countOpenTripsByRecurrence({ patientId: id }, today),
     // Absences and cancellations of the last days (PATIENT_HISTORY_DAYS), counted on the record.
@@ -218,11 +230,19 @@ export default async function PatientPage({
       sessionDates: r.sessionDates.map(toIsoDate),
       appointmentMinute: r.appointmentMinute,
       sessionMinutes: r.sessionMinutes,
+      daySchedules: r.daySchedules,
       startDate: toIsoDate(r.startDate),
       endDate: r.endDate ? toIsoDate(r.endDate) : null,
     })),
   );
   const recurrenceById = new Map(patient.recurrences.map((r) => [r.id, r]));
+  // No trip on the coming days (every other week, a cycle between two series): when the next session is.
+  const nextSessionAfter =
+    trips.length === 0
+      ? (activeRecurrences
+          .flatMap((r) => nextSessionDates(rhythmOfRecurrence(r), addDays(lastDay, 1), 1))
+          .sort()[0] ?? null)
+      : null;
 
   return (
     <div className="space-y-6">
@@ -235,7 +255,7 @@ export default async function PatientPage({
               <Badge tone={patient.active ? "success" : "neutral"}>{patient.active ? "Actif" : "Désactivé"}</Badge>
               {absentNow ? (
                 <Badge tone="warning" className="tabular">
-                  {planningAbsenceLabel(absentNow.kind)} jusqu&apos;au {formatShortDate(absentNow.endDate)}
+                  {PATIENT_ABSENCE_KIND_LABELS[absentNow.kind]} jusqu&apos;au {formatShortDate(absentNow.endDate)}
                 </Badge>
               ) : null}
             </span>
@@ -688,11 +708,9 @@ export default async function PatientPage({
                   }
                   const rhythmDates = r.sessionDates.map(toIsoDate);
                   const ownTimes = describeDaySchedules(parseDaySchedules(r.daySchedules));
-                  const nextSessions = nextSessionDates(
-                    { weekdays: r.weekdays, sessionDates: rhythmDates, startDate: toIsoDate(r.startDate), endDate: null },
-                    today,
-                    4,
-                  );
+                  // Explicit dates or every N weeks: which days have a session is not obvious, the next ones are listed.
+                  const listSessions = r.active && (rhythmDates.length > 0 || r.intervalWeeks > 1);
+                  const nextSessions = listSessions ? nextSessionDates(rhythmOfRecurrence(r), today, 4) : [];
                   return (
                     <tr key={r.id} className={r.active ? "align-top" : "align-top text-slate-500"}>
                       <Td>
@@ -709,7 +727,7 @@ export default async function PatientPage({
                         {ownTimes.length > 0 ? (
                           <span className="tabular block text-xs text-slate-600">Horaire propre&nbsp;: {ownTimes.join(", ")}</span>
                         ) : null}
-                        {rhythmDates.length > 0 ? (
+                        {listSessions ? (
                           <span className="tabular block max-w-xs text-xs text-slate-500">
                             {nextSessions.length > 0 ? `Prochaines séances\u00a0: ${nextSessions.map((d) => formatDayDate(d)).join(", ")}` : "Toutes les séances sont passées"}
                           </span>
@@ -807,8 +825,9 @@ export default async function PatientPage({
         {trips.length === 0 ? (
           <CardBody>
             <p className="text-sm text-slate-600">
-              Aucune course prévue sur les {UPCOMING_DAYS} prochains jours. Les courses régulières apparaissent une fois
-              générées depuis les récurrences.
+              {nextSessionAfter
+                ? `Aucune course prévue sur les ${UPCOMING_DAYS} prochains jours\u00a0: prochaine séance le ${formatDayDate(nextSessionAfter)}.`
+                : `Aucune course prévue sur les ${UPCOMING_DAYS} prochains jours. Les courses régulières apparaissent une fois générées depuis les récurrences.`}
             </p>
           </CardBody>
         ) : (
@@ -817,6 +836,23 @@ export default async function PatientPage({
       </Card>
     </div>
   );
+}
+
+/** The rhythm of a recurrence as read here (dates as "YYYY-MM-DD"). */
+function rhythmOfRecurrence(r: {
+  weekdays: number[];
+  intervalWeeks: number;
+  sessionDates: Date[];
+  startDate: Date;
+  endDate: Date | null;
+}): Rhythm {
+  return {
+    weekdays: r.weekdays,
+    intervalWeeks: r.intervalWeeks,
+    sessionDates: r.sessionDates.map(toIsoDate),
+    startDate: toIsoDate(r.startDate),
+    endDate: r.endDate ? toIsoDate(r.endDate) : null,
+  };
 }
 
 function Item({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
