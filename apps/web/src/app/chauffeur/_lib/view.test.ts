@@ -19,6 +19,8 @@ function makeStop(
     payer?: "CPAM" | "PRIVATE";
     accessNotes?: string;
     facilityNotes?: string | null;
+    notes?: string | null;
+    oneOffAddress?: boolean;
   },
   completedAt: string | null = null,
   /** Driver id of the account that recorded completedAt (null: a regulator, or not recorded). */
@@ -48,7 +50,8 @@ function makeStop(
       status: trip.status ?? "ASSIGNED",
       appointmentMinute: trip.appointmentMinute ?? null,
       readyMinute: trip.readyMinute ?? null,
-      notes: null,
+      notes: trip.notes ?? null,
+      oneOffAddress: trip.oneOffAddress ?? false,
       payer: trip.payer ?? "CPAM",
       patientId: `patient_${tripId}`,
       recurrenceId: null,
@@ -348,6 +351,20 @@ describe("buildRouteView", () => {
     expect(carePickup?.accessNotes).toBeNull();
     expect(carePickup?.facility?.notes).toBe(care);
     expect(homeDropoff).toMatchObject({ accessNotes: home, facility: null });
+  });
+
+  it("shows the regulator's note, and keeps the home access notes off a one-off address", () => {
+    const home = "Code 4521B, 2e étage";
+    const away = { ...A, accessNotes: home, oneOffAddress: true, notes: "Salle 3, apporter le coussin" };
+    const view = buildRouteView(
+      makeRoute([makeStop(0, "trip_a", "PICKUP", away), makeStop(1, "trip_a", "DROPOFF", away)]),
+      DRIVER,
+      true,
+    );
+    const [pickup, dropoff] = view.stops;
+    expect(pickup).toMatchObject({ accessNotes: null, oneOffAddress: true, tripNotes: "Salle 3, apporter le coussin" });
+    // The care place is not the one-off address.
+    expect(dropoff).toMatchObject({ accessNotes: null, oneOffAddress: false, tripNotes: "Salle 3, apporter le coussin" });
   });
 
   it("keeps the home access notes off a private client's free destination", () => {

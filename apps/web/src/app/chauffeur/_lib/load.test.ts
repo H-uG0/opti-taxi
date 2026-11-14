@@ -27,7 +27,7 @@ describe("loadDriverRoutes", () => {
 
     expect(selectAt(["stops", "trip", "facility"])).toEqual({ name: true, phone: true, notes: true });
     expect(selectAt(["vehicle", "depot"])).toMatchObject({ name: true, address: true, notes: true });
-    expect(selectAt(["stops", "trip"])).toMatchObject({ payer: true, notes: true });
+    expect(selectAt(["stops", "trip"])).toMatchObject({ payer: true, notes: true, oneOffAddress: true });
     // Home access notes come with the patient; nothing else of the patient's record.
     expect(selectAt(["stops", "trip", "patient"])).toEqual({
       firstName: true,

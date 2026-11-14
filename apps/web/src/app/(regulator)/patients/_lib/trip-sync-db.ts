@@ -18,6 +18,7 @@ export const SYNC_TX_OPTIONS = { maxWait: 15_000, timeout: 60_000 } as const;
 const syncTripSelect = {
   id: true,
   serviceDate: true,
+  occurrenceDate: true,
   direction: true,
   status: true,
   payer: true,
@@ -35,6 +36,8 @@ const syncTripSelect = {
   dropoffAddress: true,
   dropoffLat: true,
   dropoffLng: true,
+  oneOffAddress: true,
+  notes: true,
   recurrenceId: true,
   routeId: true,
   lockedVehicleId: true,
@@ -58,9 +61,10 @@ export async function loadOpenTrips(
     select: syncTripSelect,
     orderBy: [{ serviceDate: "asc" }, { id: "asc" }],
   });
-  return rows.map(({ serviceDate, route, lockedVehicle, prescription, ...trip }) => ({
+  return rows.map(({ serviceDate, occurrenceDate, route, lockedVehicle, prescription, ...trip }) => ({
     ...trip,
     serviceDate: toIsoDate(serviceDate),
+    occurrenceDate: occurrenceDate ? toIsoDate(occurrenceDate) : null,
     routeVehicleType: route?.vehicle.type ?? null,
     lockedVehicleType: lockedVehicle?.type ?? null,
     prescriptionValidity: prescription

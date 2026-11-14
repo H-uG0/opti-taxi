@@ -5,8 +5,10 @@ import {
   GENERATION_INCLUDE,
   generateTrips,
   planRecurrenceTrips,
+  plannedTripKey,
   planTripsFromRecurrences,
   prescriptionOn,
+  recurrenceTripKey,
   recurrenceOccursOn,
   revivalData,
   type PrescriptionForGeneration,
@@ -464,5 +466,33 @@ describe("revivalData", () => {
 
   it("keeps a refusal of shared transport on record", () => {
     expect(revivalData(planned!, { sharingStatus: "REFUSED" }).sharingStatus).toBe("REFUSED");
+  });
+
+  it("sends a one-off address back home and keeps the date and notes of the row", () => {
+    const data = revivalData(planned!, { sharingStatus: "NOT_PROPOSED" });
+    expect(data).toMatchObject({ oneOffAddress: false, pickupAddress: planned!.pickupAddress });
+    expect(data).not.toHaveProperty("occurrenceDate");
+    expect(data).not.toHaveProperty("notes");
+  });
+});
+
+describe("session served and instructions", () => {
+  it("gives each trip the session it serves, its own date", () => {
+    const trips = planTripsFromRecurrences([recurrence()], MONDAY, SUNDAY);
+    for (const trip of trips) expect(trip.occurrenceDate).toEqual(trip.serviceDate);
+    expect(plannedTripKey(trips[0]!)).toBe(recurrenceTripKey("rec_1", MONDAY, "OUTBOUND"));
+  });
+
+  it("keys a planned trip by the session it serves, not by its day", () => {
+    const [trip] = planTripsFromRecurrences([recurrence()], MONDAY, MONDAY);
+    const moved = { ...trip!, serviceDate: fromIsoDate("2026-11-03") };
+    expect(plannedTripKey(moved)).toBe("rec_1|2026-11-02|OUTBOUND");
+  });
+
+  it("copies the recurrence's instructions to its trips, trimmed", () => {
+    const trips = planTripsFromRecurrences([recurrence({ notes: "  Salle 3, apporter le coussin " })], MONDAY, MONDAY);
+    expect(trips.map((t) => t.notes)).toEqual(["Salle 3, apporter le coussin", "Salle 3, apporter le coussin"]);
+    expect(planTripsFromRecurrences([recurrence({ notes: "   " })], MONDAY, MONDAY).map((t) => t.notes)).toEqual([null, null]);
+    expect(planTripsFromRecurrences([recurrence()], MONDAY, MONDAY).map((t) => t.notes)).toEqual([null, null]);
   });
 });

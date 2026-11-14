@@ -77,6 +77,7 @@ export default async function NewRecurrencePage({ params }: { params: Promise<{ 
             legs: "BOTH",
             startDate: today,
             endDate: "",
+            notes: "",
           }}
           facilities={facilities}
           prescriptions={prescriptions}

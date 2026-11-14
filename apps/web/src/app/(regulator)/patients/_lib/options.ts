@@ -9,3 +9,6 @@ export const ISO_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const;
 
 /** Longest session the recurrence form accepts (12 h). */
 export const MAX_SESSION_MINUTES = 720;
+
+/** Longest instructions of a recurrence: copied to its trips, whose notes hold 500 characters. */
+export const RECURRENCE_NOTES_MAX = 500;

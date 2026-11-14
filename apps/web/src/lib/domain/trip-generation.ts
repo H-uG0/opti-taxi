@@ -1,7 +1,9 @@
 /**
  * Turns recurrences ("dialyse lundi, mercredi, vendredi, RDV 7 h 30") into
- * trips for a date range. Idempotent: a trip is unique per
- * (recurrence, date, direction), so regenerating a week never duplicates.
+ * trips for a date range. Idempotent: a trip is unique per (recurrence,
+ * session served, direction) — occurrenceDate, its own date unless the trip
+ * was moved to another day —, so regenerating a week never duplicates, and a
+ * session whose trip was moved is not served twice.
  *
  * A trip needs a prescription valid on its date: the recurrence's own, or,
  * once it has ended (the renewal is not attached yet), its renewal — and
@@ -42,6 +44,8 @@ export type RecurrenceForGeneration = {
   startDate: Date;
   endDate: Date | null;
   active: boolean;
+  /** Instructions for the crew, copied to every trip generated (never medical). */
+  notes?: string | null;
   /** `prescriptions`: all the patient's prescriptions, to fall back on a renewal not attached yet (or the PMT renewed). */
   patient: Place & { active: boolean; prescriptions?: readonly PrescriptionForGeneration[] };
   facility: Place;
@@ -108,6 +112,11 @@ export type SkippedOccurrence = { recurrenceId: string; patientId: string; date:
 
 export type RecurrencePlan = { trips: Prisma.TripCreateManyInput[]; skipped: SkippedOccurrence[] };
 
+/** The recurrence's instructions as a trip note: trimmed, null when empty. */
+export function recurrenceNotes(rec: { notes?: string | null }): string | null {
+  return rec.notes?.trim() || null;
+}
+
 /** Pure planning step: which trips the recurrences produce between fromIso and toIso (inclusive), and which sessions they skip. */
 export function planRecurrenceTrips(recurrences: readonly RecurrenceForGeneration[], fromIso: string, toIso: string): RecurrencePlan {
   const trips: Prisma.TripCreateManyInput[] = [];
@@ -128,12 +137,14 @@ export function planRecurrenceTrips(recurrences: readonly RecurrenceForGeneratio
       const { mode, sharing } = prescription;
       const common = {
         serviceDate,
+        occurrenceDate: serviceDate,
         patientId: rec.patientId,
         prescriptionId: prescription.id,
         recurrenceId: rec.id,
         facilityId: rec.facilityId,
         payer: "CPAM" as const,
         allowedVehicleTypes: allowedVehicleTypesFor(mode, "CPAM"),
+        notes: recurrenceNotes(rec),
       };
 
       if (rec.legs === "OUTBOUND" || rec.legs === "BOTH") {
@@ -182,20 +193,21 @@ export function planTripsFromRecurrences(
   return planRecurrenceTrips(recurrences, fromIso, toIso).trips;
 }
 
-/** Key of a recurrence trip, as the database's unique (recurrence, date, direction). */
-export function recurrenceTripKey(recurrenceId: string, isoDate: string, direction: TripDirection): string {
-  return `${recurrenceId}|${isoDate}|${direction}`;
+/** Key of a recurrence trip, as the database's unique (recurrence, session served, direction). */
+export function recurrenceTripKey(recurrenceId: string, occurrenceIso: string, direction: TripDirection): string {
+  return `${recurrenceId}|${occurrenceIso}|${direction}`;
 }
 
 export function plannedTripKey(trip: Prisma.TripCreateManyInput): string {
-  return recurrenceTripKey(trip.recurrenceId ?? "", toIsoDate(new Date(trip.serviceDate)), trip.direction);
+  return recurrenceTripKey(trip.recurrenceId ?? "", toIsoDate(new Date(trip.occurrenceDate ?? trip.serviceDate)), trip.direction);
 }
 
 /**
  * What a trip the application cancelled becomes once its recurrence plans it
  * again (the cause is gone): the trip the generation would create now, on the
- * same row (its id, notes and audit trail stay). A refusal of shared transport
- * stays recorded; the planning starts afresh.
+ * same row (its id, date, notes and audit trail stay; a one-off address goes
+ * back to the patient's home). A refusal of shared transport stays recorded;
+ * the planning starts afresh.
  */
 export function revivalData(
   planned: Prisma.TripCreateManyInput,
@@ -208,6 +220,7 @@ export function revivalData(
     prescriptionId: planned.prescriptionId,
     facilityId: planned.facilityId,
     allowedVehicleTypes: planned.allowedVehicleTypes,
+    oneOffAddress: false,
     pickupAddress: planned.pickupAddress,
     pickupLat: planned.pickupLat,
     pickupLng: planned.pickupLng,

@@ -303,6 +303,9 @@ model Recurrence {
   legs              RecurrenceLegs @default(BOTH)
   startDate         DateTime       @db.Date
   endDate           DateTime?      @db.Date
+  /// Consignes pour l'équipage (salle, matériel à prévoir…), recopiées sur chaque course générée et
+  /// montrées au chauffeur. Jamais d'information médicale : le motif des soins reste sur la PMT.
+  notes             String?
   active            Boolean        @default(true)
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
@@ -324,11 +327,18 @@ model Trip {
   patientId           String
   prescriptionId      String?
   recurrenceId        String?
+  /// Course d'une récurrence : date de la séance qu'elle assure, égale à serviceDate sauf quand la course
+  /// a été déplacée à un autre jour (« Modifier la course ») ; null pour une course ponctuelle. La
+  /// génération reconnaît une séance déjà servie par (recurrenceId, occurrenceDate, direction).
+  occurrenceDate      DateTime?     @db.Date
   facilityId          String?
   payer               Payer         @default(CPAM)
   allowedVehicleTypes VehicleType[]
 
   // Address snapshot taken when the trip is created.
+  /// Adresse ponctuelle : le côté domicile (prise en charge d'un aller, dépose d'un retour) a été
+  /// changé pour cette course seulement (patient hébergé ailleurs) ; un déménagement ne la change pas.
+  oneOffAddress  Boolean @default(false)
   pickupAddress  String
   pickupLat      Float
   pickupLng      Float
@@ -397,7 +407,7 @@ model Trip {
   exceptionalAmbulanceBy User?     @relation("TripExceptionalAmbulanceBy", fields: [exceptionalAmbulanceById], references: [id], onDelete: SetNull)
   stops              RouteStop[]
 
-  @@unique([recurrenceId, serviceDate, direction])
+  @@unique([recurrenceId, occurrenceDate, direction])
   @@index([serviceDate])
   @@index([patientId, serviceDate])
   // Sync of a changed prescription or a moved facility: its trips to come (patients/_lib/trip-sync-db.ts).

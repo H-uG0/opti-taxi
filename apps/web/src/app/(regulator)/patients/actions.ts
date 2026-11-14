@@ -584,14 +584,15 @@ function sameSchedule(a: RecurrenceSchedule, b: RecurrenceSchedule): boolean {
     a.sessionMinutes === b.sessionMinutes &&
     a.legs === b.legs &&
     a.startDate === b.startDate &&
-    a.endDate === b.endDate
+    a.endDate === b.endDate &&
+    a.notes === b.notes
   );
 }
 
 /**
  * Saves the recurrence. Its open trips to come follow (see recurrenceTarget):
- * new time, facility and prescription; trips that no longer fit its days,
- * legs or period are cancelled.
+ * new time, facility, prescription and notes; trips that no longer fit its
+ * days, legs or period are cancelled.
  */
 export async function updateRecurrence(
   patientId: string,
@@ -618,6 +619,7 @@ export async function updateRecurrence(
       legs: true,
       startDate: true,
       endDate: true,
+      notes: true,
     },
   });
   if (!existing) return messageState(NOT_FOUND, null);
@@ -643,6 +645,7 @@ export async function updateRecurrence(
     legs: existing.legs,
     startDate: toIsoDate(existing.startDate),
     endDate: existing.endDate ? toIsoDate(existing.endDate) : null,
+    notes: existing.notes,
   };
   const after: RecurrenceSchedule = {
     facilityId: rest.facilityId,
@@ -653,6 +656,7 @@ export async function updateRecurrence(
     legs: rest.legs,
     startDate,
     endDate,
+    notes: rest.notes,
   };
   const today = todayIso();
 

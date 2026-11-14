@@ -166,7 +166,15 @@ describe("parseRecurrenceForm", () => {
       legs: "BOTH",
       startDate: "2026-11-02",
       endDate: null,
+      notes: null,
     });
+  });
+
+  it("keeps the instructions for the crew, trimmed, within 500 characters", () => {
+    const result = parseRecurrenceForm(form({ ...recurrence, notes: "  Salle 3, apporter le coussin  " }));
+    expect(result.success && result.data.notes).toBe("Salle 3, apporter le coussin");
+    const tooLong = parseRecurrenceForm(form({ ...recurrence, notes: "x".repeat(501) }));
+    expect(!tooLong.success && tooLong.state.fieldErrors.notes).toMatch(/Texte des consignes trop long/);
   });
 
   it("requires at least one weekday and rejects invalid ones", () => {

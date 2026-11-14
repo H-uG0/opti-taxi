@@ -1,12 +1,12 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { cn } from "@/components/ui/cn";
-import { Field, Fieldset, FormMessage, Input, Select } from "@/components/ui/form";
+import { Field, Fieldset, FormMessage, Input, Select, Textarea } from "@/components/ui/form";
 import { RECURRENCE_LEGS_LABELS } from "@/lib/labels";
-import { formatDuration, formatMinute, isIsoDate, parseMinute, WEEKDAY_LABELS, WEEKDAY_SHORT } from "@/lib/time";
+import { formatDuration, formatMinute, isIsoDate, parseMinute } from "@/lib/time";
 import { echoed, echoedList, IDLE_STATE, refusalKey, type FormState } from "@/lib/forms";
-import { ISO_WEEKDAYS, MAX_SESSION_MINUTES, RECURRENCE_LEGS } from "../_lib/options";
+import { MAX_SESSION_MINUTES, RECURRENCE_LEGS, RECURRENCE_NOTES_MAX } from "../_lib/options";
+import { WeekdayPicker } from "./weekday-picker";
 import { recurrenceFormNotices, type FormPrescription } from "../_lib/status";
 import { submitWithoutReset } from "./form-submit";
 import { ErrorFocus } from "@/components/ui/error-focus";
@@ -23,16 +23,11 @@ export type RecurrenceFormInitial = {
   legs: string;
   startDate: string;
   endDate: string;
+  notes: string;
 };
 
 export type FacilityOption = { id: string; name: string; city: string; active: boolean };
 export type PrescriptionOption = FormPrescription & { id: string; label: string };
-
-const PRESETS: { label: string; days: number[] }[] = [
-  { label: "Lun Mer Ven", days: [1, 3, 5] },
-  { label: "Mar Jeu Sam", days: [2, 4, 6] },
-  { label: "Lun → Ven", days: [1, 2, 3, 4, 5] },
-];
 
 export function RecurrenceForm({
   action,
@@ -62,14 +57,6 @@ export function RecurrenceForm({
   const [appointmentTime, setAppointmentTime] = useState(value("appointmentTime"));
   const [sessionMinutes, setSessionMinutes] = useState(value("sessionMinutes"));
   const [legs, setLegs] = useState(value("legs"));
-
-  const toggleDay = (day: string, checked: boolean) =>
-    setWeekdays((current) => {
-      const next = new Set(current);
-      if (checked) next.add(day);
-      else next.delete(day);
-      return next;
-    });
 
   const prescription = prescriptions.find((p) => p.id === prescriptionId) ?? null;
   const validityNotices =
@@ -129,59 +116,11 @@ export function RecurrenceForm({
             aria-invalid={errors.label ? true : undefined}
           />
         </Field>
+        <RecurrenceNotesField defaultValue={value("notes")} error={errors.notes} />
       </Fieldset>
 
       <Fieldset legend="Rythme et horaires">
-        <fieldset aria-describedby={errors.weekdays ? "weekdays-error" : undefined}>
-          <legend className="mb-2 block text-sm font-medium text-slate-700">Jours de séance</legend>
-          <div className="flex flex-wrap gap-2">
-            {ISO_WEEKDAYS.map((day) => {
-              const key = String(day);
-              const checked = weekdays.has(key);
-              return (
-                <label
-                  key={day}
-                  title={WEEKDAY_LABELS[day]}
-                  className={cn(
-                    "inline-flex h-9 min-w-14 cursor-pointer items-center justify-center gap-1.5 rounded-md border px-2.5 text-sm font-medium transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-brand-600",
-                    checked
-                      ? "border-brand-600 bg-brand-50 text-brand-800"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    name="weekdays"
-                    value={key}
-                    checked={checked}
-                    onChange={(e) => toggleDay(key, e.target.checked)}
-                    className="sr-only"
-                  />
-                  {WEEKDAY_SHORT[day]}
-                  <span className="sr-only">{WEEKDAY_LABELS[day]}</span>
-                </label>
-              );
-            })}
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <span>Raccourcis&nbsp;:</span>
-            {PRESETS.map((preset) => (
-              <button
-                key={preset.label}
-                type="button"
-                onClick={() => setWeekdays(new Set(preset.days.map(String)))}
-                className="rounded px-1.5 py-0.5 font-medium text-brand-700 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-brand-600"
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-          {errors.weekdays ? (
-            <p id="weekdays-error" className="mt-1 text-xs font-medium text-red-600">
-              {errors.weekdays[0]}
-            </p>
-          ) : null}
-        </fieldset>
+        <WeekdayPicker value={weekdays} onChange={setWeekdays} error={errors.weekdays} />
 
         <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Heure du rendez-vous" htmlFor="appointmentTime" error={errors.appointmentTime}>
@@ -278,5 +217,34 @@ export function RecurrenceForm({
       <FormFooter cancelHref={cancelHref} submitLabel={submitLabel} pending={isPending} />
       <ErrorFocus refusal={refusalKey(state)} />
     </form>
+  );
+}
+
+/** Hint of the recurrence's notes: where they go, and what never goes there. */
+export const RECURRENCE_NOTES_HINT =
+  "Recopiées sur chaque course et montrées au chauffeur (salle, matériel à prévoir…). Aucune information médicale\u00a0: le motif des soins reste sur la prescription.";
+
+/** « Consignes pour le chauffeur » of a recurrence (form field `notes`). */
+export function RecurrenceNotesField({
+  name = "notes",
+  defaultValue,
+  error,
+}: {
+  name?: string;
+  defaultValue: string;
+  error?: string;
+}) {
+  return (
+    <Field label="Consignes pour le chauffeur (facultatif)" htmlFor={name} error={error} hint={RECURRENCE_NOTES_HINT}>
+      <Textarea
+        id={name}
+        name={name}
+        defaultValue={defaultValue}
+        maxLength={RECURRENCE_NOTES_MAX}
+        rows={2}
+        placeholder="Ex. salle 3, apporter le coussin"
+        aria-invalid={error ? true : undefined}
+      />
+    </Field>
   );
 }

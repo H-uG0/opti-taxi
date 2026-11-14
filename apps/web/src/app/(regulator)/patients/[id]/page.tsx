@@ -568,6 +568,11 @@ export default async function PatientPage({
                           {formatWeekdays(r.weekdays)} · {formatMinute(r.appointmentMinute)}
                         </span>
                         {r.label ? <span className="block text-xs text-slate-600">{r.label}</span> : null}
+                        {r.notes ? (
+                          <span className="mt-0.5 block max-w-xs text-xs whitespace-pre-line text-slate-500" title="Consignes pour le chauffeur, recopiées sur les courses">
+                            Consignes&nbsp;: {r.notes}
+                          </span>
+                        ) : null}
                         {warnings.length > 0 ? (
                           <div className="mt-1.5 max-w-md space-y-1">
                             {warnings.map((w) => (

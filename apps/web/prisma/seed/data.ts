@@ -831,6 +831,8 @@ export type PatientSpec = {
   endsNextWeekOn?: number;
   accessNotes?: string;
   prescriptionNote?: string;
+  /** Instructions of the recurrence for the crew, copied to its trips (never medical). */
+  recurrenceNote?: string;
 };
 
 const MWF = [1, 3, 5];
@@ -841,7 +843,7 @@ export const PATIENTS: readonly PatientSpec[] = [
   // Dialysis — Marseille
   { area: "marseille12", mobility: "SEATED", sharing: "BOTH", treatment: "DIALYSIS", facility: "dialysisMarseille", weekdays: MWF, appointment: "07:30" },
   { area: "marseille12", mobility: "SEATED", sharing: "BOTH", treatment: "DIALYSIS", facility: "dialysisMarseille", weekdays: MWF, appointment: "07:30" },
-  { area: "marseille12", mobility: "WHEELCHAIR", sharing: "RETURN", treatment: "DIALYSIS", facility: "dialysisMarseille", weekdays: MWF, appointment: "07:30", accessNotes: "Fauteuil roulant pliable, transfert avec aide." },
+  { area: "marseille12", mobility: "WHEELCHAIR", sharing: "RETURN", treatment: "DIALYSIS", facility: "dialysisMarseille", weekdays: MWF, appointment: "07:30", accessNotes: "Fauteuil roulant pliable, transfert avec aide.", recurrenceNote: "Salle 3, poste 12. Accompagner jusqu'au fauteuil de dialyse." },
   { area: "marseille5", mobility: "LYING", sharing: "NONE", treatment: "DIALYSIS", facility: "dialysisMarseille", weekdays: MWF, appointment: "13:00", accessNotes: "Brancard : ascenseur assez large, 2e étage." },
   { area: "marseille4", mobility: "SEATED", sharing: "BOTH", treatment: "DIALYSIS", facility: "dialysisMarseille", weekdays: MWF, appointment: "13:00", active: false, accessNotes: "Hospitalisé : transports suspendus jusqu'à nouvel ordre." },
   { area: "marseille6", mobility: "LYING", sharing: "NONE", treatment: "DIALYSIS", facility: "dialysisMarseille", weekdays: TTS, appointment: "07:30" },
@@ -854,7 +856,7 @@ export const PATIENTS: readonly PatientSpec[] = [
   { area: "aixSud", mobility: "LYING", sharing: "NONE", treatment: "DIALYSIS", facility: "dialysisAix", weekdays: TTS, appointment: "13:00" },
   { area: "pertuis", mobility: "WHEELCHAIR", sharing: "BOTH", treatment: "DIALYSIS", facility: "dialysisAix", weekdays: TTS, appointment: "07:30" },
   // Dialysis — Manosque
-  { area: "forcalquier", mobility: "SEATED", sharing: "BOTH", treatment: "DIALYSIS", facility: "dialysisManosque", weekdays: MWF, appointment: "07:30" },
+  { area: "forcalquier", mobility: "SEATED", sharing: "BOTH", treatment: "DIALYSIS", facility: "dialysisManosque", weekdays: MWF, appointment: "07:30", recurrenceNote: "Apporter le coussin du patient (siège arrière)." },
   { area: "manosqueNord", mobility: "SEATED", sharing: "BOTH", treatment: "DIALYSIS", facility: "dialysisManosque", weekdays: MWF, appointment: "07:30" },
   { area: "manosque", mobility: "SEATED", sharing: "BOTH", treatment: "DIALYSIS", facility: "dialysisManosque", weekdays: TTS, appointment: "13:00" },
   { area: "manosque", mobility: "SEATED", sharing: "OUTBOUND", treatment: "DIALYSIS", facility: "dialysisManosque", weekdays: TTS, appointment: "13:00" },

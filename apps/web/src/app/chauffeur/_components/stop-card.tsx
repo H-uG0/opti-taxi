@@ -93,6 +93,9 @@ function StopDetails({ stop }: { stop: StopView }) {
     <>
       <Line icon={<MapPin className="size-5 text-slate-500" />}>
         <p className="text-base text-slate-900">{stop.address}</p>
+        {stop.oneOffAddress ? (
+          <p className="mt-0.5 text-sm font-semibold text-amber-900">Adresse inhabituelle, pour cette course seulement</p>
+        ) : null}
       </Line>
 
       {stop.facility || stop.keyTime ? (

@@ -48,8 +48,9 @@ export default async function EditRecurrencePage({
         {openTrips > 0 ? (
           <>
             {openTripsLabel(openTrips)} de cette récurrence {openTrips === 1 ? "suivra" : "suivront"} la modification
-            (horaire, établissement, prescription). Une course qui ne tombe plus un jour, un trajet ou une période prévus
-            sera annulée&#x202F;; une course dont l&apos;horaire a été changé à la main garde son horaire.
+            (horaire, établissement, prescription, consignes). Une course qui ne tombe plus un jour, un trajet ou une
+            période prévus sera annulée&#x202F;; une course dont l&apos;horaire, l&apos;établissement ou les consignes ont été
+            changés à la main les garde.
           </>
         ) : (
           "Les modifications s'appliquent aux courses générées ensuite."
@@ -68,6 +69,7 @@ export default async function EditRecurrencePage({
           legs: recurrence.legs,
           startDate: toIsoDate(recurrence.startDate),
           endDate: recurrence.endDate ? toIsoDate(recurrence.endDate) : "",
+          notes: recurrence.notes ?? "",
         }}
         facilities={facilities}
         prescriptions={prescriptions}

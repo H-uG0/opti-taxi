@@ -77,7 +77,10 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
               status: true,
               appointmentMinute: true,
               readyMinute: true,
+              // The regulator's note: a recurrence's instructions, copied, or typed on the trip.
               notes: true,
+              // A one-off address on the home side (patient staying elsewhere): the home access notes do not apply.
+              oneOffAddress: true,
               // A private client pays on board (no CPAM billing).
               payer: true,
               // Server-side only: pair the return leg with its outbound leg (never sent to the client).

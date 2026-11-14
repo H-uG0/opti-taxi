@@ -8,7 +8,7 @@ import { readAddressForm } from "@/components/address/address-utils";
 import { isIsoDate, parseMinute } from "@/lib/time";
 import { optionalPhone, optionalText, parseForm, type ParseResult } from "./form-parse";
 import { formCheckbox, formString, formStrings, type FormValues } from "@/lib/forms";
-import { MAX_SESSION_MINUTES, MOBILITIES, PRESCRIBED_MODES, RECURRENCE_LEGS, SHARING_SCOPES } from "./options";
+import { MAX_SESSION_MINUTES, MOBILITIES, PRESCRIBED_MODES, RECURRENCE_LEGS, RECURRENCE_NOTES_MAX, SHARING_SCOPES } from "./options";
 
 function requiredDate(label: string) {
   return z
@@ -135,6 +135,7 @@ export const recurrenceSchema = z
     legs: z.enum(RECURRENCE_LEGS, { error: "Choisissez les trajets" }),
     startDate: requiredDate("Date de début"),
     endDate: optionalDate("Date de fin"),
+    notes: optionalText(RECURRENCE_NOTES_MAX, "Texte des consignes"),
   })
   .superRefine((r, ctx) => {
     if (r.endDate !== null && isIsoDate(r.startDate) && r.endDate < r.startDate) {
@@ -168,6 +169,7 @@ export function readRecurrenceForm(formData: FormData): FormValues {
     legs: formString(formData, "legs"),
     startDate: formString(formData, "startDate"),
     endDate: formString(formData, "endDate"),
+    notes: formString(formData, "notes"),
   };
 }
 

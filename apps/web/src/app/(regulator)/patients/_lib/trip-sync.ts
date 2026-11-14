@@ -35,6 +35,8 @@ export type PrescriptionRules = { id: string; mode: PrescribedMode; sharing: Sha
 export type SyncTrip = {
   id: string;
   serviceDate: string;
+  /** Session of its recurrence the trip serves ("YYYY-MM-DD"): its own date unless moved to another day; null for a one-off trip. */
+  occurrenceDate: string | null;
   direction: TripDirection;
   status: TripStatus;
   payer: Payer;
@@ -52,6 +54,10 @@ export type SyncTrip = {
   dropoffAddress: string;
   dropoffLat: number;
   dropoffLng: number;
+  /** The home side was changed for this trip only (« Modifier la course »): a home move leaves it. */
+  oneOffAddress: boolean;
+  /** Instructions for the crew (a recurrence's notes, copied, or typed on the trip). */
+  notes: string | null;
   /** Recurrence that generated the trip (null for a one-off trip). */
   recurrenceId: string | null;
   routeId: string | null;
@@ -75,6 +81,8 @@ export type TripTarget =
       destination?: { facilityId: string; place: Place };
       /** Appointment (outbound) or end of session (return). */
       keyMinute?: number;
+      /** New instructions for the crew (the recurrence's notes). */
+      notes?: string | null;
     };
 
 export const CANCEL: TripTarget = { kind: "cancel" };
@@ -96,6 +104,7 @@ export type TripPatch = {
   dropoffAddress?: string;
   dropoffLat?: number;
   dropoffLng?: number;
+  notes?: string | null;
   lockedVehicleId?: null;
   routeId?: null;
   plannedPickupMinute?: null;
@@ -209,7 +218,8 @@ export function planTripChange(trip: SyncTrip, target: TripTarget, todayIso: str
 
   const homeSide: Side = trip.direction === "OUTBOUND" ? "pickup" : "dropoff";
   const careSide: Side = trip.direction === "OUTBOUND" ? "dropoff" : "pickup";
-  if (target.home) moved = setPlace(data, trip, homeSide, target.home) || moved;
+  // A one-off address (the patient staying elsewhere that day) is not the home: a move does not change it.
+  if (target.home && !trip.oneOffAddress) moved = setPlace(data, trip, homeSide, target.home) || moved;
   if (target.destination) {
     if (trip.facilityId !== target.destination.facilityId) data.facilityId = target.destination.facilityId;
     moved = setPlace(data, trip, careSide, target.destination.place) || moved;
@@ -223,6 +233,8 @@ export function planTripChange(trip: SyncTrip, target: TripTarget, todayIso: str
       moved = true;
     }
   }
+  // Notes change nothing on the road: the trip keeps its route.
+  if (target.notes !== undefined && (trip.notes ?? null) !== target.notes) data.notes = target.notes;
 
   if (Object.keys(data).length === 0) return { type: "none" };
 
@@ -267,6 +279,8 @@ export type RecurrenceSchedule = {
   legs: RecurrenceLegs;
   startDate: string;
   endDate: string | null;
+  /** Instructions copied to the trips (null when none). */
+  notes: string | null;
 };
 
 /** Does the recurrence still produce a trip on this date and leg? */
@@ -283,11 +297,13 @@ export function recurrenceSchedules(
 
 /**
  * A recurrence changed: its trips that no longer fit its days, legs or period
- * are cancelled. The others take the new prescription when it covers their
- * date (otherwise they keep the one in force that day, or take `fallback`,
- * the one the generation would give them that day — a renewal or the PMT
- * renewed —, and are cancelled only when none covers it), the new facility,
- * and the new time — except trips whose time was changed by hand, which keep it.
+ * are cancelled (a trip moved to another day is judged on the session it
+ * serves, occurrenceDate). The others take the new prescription when it
+ * covers their date (otherwise they keep the one in force that day, or take
+ * `fallback`, the one the generation would give them that day — a renewal or
+ * the PMT renewed —, and are cancelled only when none covers it), the new
+ * facility, the new time and the new notes — except trips whose facility,
+ * time or notes were changed by hand, which keep them.
  */
 export function recurrenceTarget(
   trip: SyncTrip,
@@ -295,7 +311,7 @@ export function recurrenceTarget(
   after: RecurrenceSchedule & { prescription: PrescriptionRules & DateRange; facility: Place },
   fallback: PrescriptionRules | null = null,
 ): TripTarget {
-  if (!recurrenceSchedules(after, trip.serviceDate, trip.direction)) return CANCEL;
+  if (!recurrenceSchedules(after, trip.occurrenceDate ?? trip.serviceDate, trip.direction)) return CANCEL;
 
   let prescription: PrescriptionRules | undefined;
   if (coversDate(after.prescription, trip.serviceDate)) {
@@ -321,7 +337,9 @@ export function recurrenceTarget(
       ? { facilityId: after.facilityId, place: after.facility }
       : undefined;
 
-  return { kind: "update", prescription, keyMinute, destination };
+  const notes = before.notes !== after.notes && (trip.notes ?? null) === before.notes ? after.notes : undefined;
+
+  return { kind: "update", prescription, keyMinute, destination, notes };
 }
 
 /** Recurrences moved to a renewed prescription: trips inside its validity are attached to it. */

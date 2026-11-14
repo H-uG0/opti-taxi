@@ -554,6 +554,7 @@ async function seedPatients(
         legs: spec.legs ?? "BOTH",
         startDate: fromIsoDate(validFrom),
         endDate: endDate ? fromIsoDate(endDate) : null,
+        notes: spec.recurrenceNote ?? null,
       },
     });
   }

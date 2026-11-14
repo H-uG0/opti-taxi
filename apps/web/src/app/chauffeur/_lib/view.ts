@@ -66,8 +66,10 @@ export type StopView = {
   phone: string | null;
   phoneHref: string | null;
   mobility: Mobility;
-  /** The patient's home access notes (code, floor, lift), on the stops at home only. */
+  /** The patient's home access notes (code, floor, lift), on the stops at home only (not at a one-off address). */
   accessNotes: string | null;
+  /** A home-side stop at an address typed for this trip only (the patient is staying elsewhere). */
+  oneOffAddress: boolean;
   tripNotes: string | null;
   /** Facility of a facility stop (outbound dropoff, return pickup), with its instructions (entrance, parking, floor). */
   facility: { name: string; phone: string | null; phoneHref: string | null; notes: string | null } | null;
@@ -210,7 +212,8 @@ export function buildRouteView(
         phone: trip.patient.phone,
         phoneHref: telHref(trip.patient.phone),
         mobility: trip.patient.mobility,
-        accessNotes: careStop ? null : trip.patient.accessNotes?.trim() || null,
+        accessNotes: careStop || trip.oneOffAddress ? null : trip.patient.accessNotes?.trim() || null,
+        oneOffAddress: !careStop && trip.oneOffAddress,
         tripNotes: trip.notes?.trim() || null,
         facility:
           facilityStop && trip.facility

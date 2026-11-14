@@ -136,25 +136,23 @@ export async function completeTrips(
  * Brings back the trips of recurrences (matching `where`) of `days` (already
  * writable: from tomorrow on) that the application cancelled and that the
  * recurrences plan again with the same data the generation would create now.
- * Returns how many.
+ * A trip moved to another day is matched by the session it serves
+ * (occurrenceDate) and stays on its day. Returns how many.
  */
 async function reviveRecurrenceTrips(tx: Client, actor: AuditActor, where: Prisma.TripWhereInput, days: DateRange): Promise<number> {
+  const window = { gte: fromIsoDate(days.from), lte: fromIsoDate(days.to) };
   const candidates = await tx.trip.findMany({
     where: {
       AND: [
         where,
-        {
-          recurrenceId: { not: null },
-          status: "CANCELLED",
-          cancellationOrigin: "SYSTEM",
-          serviceDate: { gte: fromIsoDate(days.from), lte: fromIsoDate(days.to) },
-        },
+        { recurrenceId: { not: null }, status: "CANCELLED", cancellationOrigin: "SYSTEM", serviceDate: window, occurrenceDate: window },
       ],
     },
-    select: { id: true, recurrenceId: true, serviceDate: true, direction: true, sharingStatus: true },
+    select: { id: true, recurrenceId: true, serviceDate: true, occurrenceDate: true, direction: true, sharingStatus: true },
   });
   if (candidates.length === 0) return 0;
-  const dates = candidates.map((t) => toIsoDate(t.serviceDate)).sort();
+  const occurrenceOf = (t: (typeof candidates)[number]) => toIsoDate(t.occurrenceDate ?? t.serviceDate);
+  const dates = candidates.map(occurrenceOf).sort();
   const first = dates[0] ?? days.from;
   const last = dates.at(-1) ?? days.to;
   const recurrences = await tx.recurrence.findMany({
@@ -166,7 +164,7 @@ async function reviveRecurrenceTrips(tx: Client, actor: AuditActor, where: Prism
   const events: AuditEntry[] = [];
   for (const trip of candidates) {
     const day = toIsoDate(trip.serviceDate);
-    const again = planned.get(recurrenceTripKey(trip.recurrenceId ?? "", day, trip.direction));
+    const again = planned.get(recurrenceTripKey(trip.recurrenceId ?? "", occurrenceOf(trip), trip.direction));
     if (!again) continue;
     // Guarded: a trip restored or changed meanwhile is left as it is.
     const { count } = await tx.trip.updateMany({

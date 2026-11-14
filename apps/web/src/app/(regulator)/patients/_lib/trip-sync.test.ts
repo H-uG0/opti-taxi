@@ -34,6 +34,7 @@ function trip(overrides: Partial<SyncTrip> = {}): SyncTrip {
   return {
     id: "t1",
     serviceDate: TOMORROW,
+    occurrenceDate: null,
     direction: "OUTBOUND",
     status: "PLANNED",
     payer: "CPAM",
@@ -51,6 +52,8 @@ function trip(overrides: Partial<SyncTrip> = {}): SyncTrip {
     dropoffAddress: CLINIC.address,
     dropoffLat: CLINIC.lat,
     dropoffLng: CLINIC.lng,
+    oneOffAddress: false,
+    notes: null,
     recurrenceId: "r1",
     routeId: null,
     routeVehicleType: null,
@@ -235,6 +238,7 @@ describe("recurrenceTarget", () => {
     legs: "BOTH",
     startDate: "2026-09-01",
     endDate: null,
+    notes: null,
   };
   const after = (changes: Partial<RecurrenceSchedule> = {}, prescription: PrescriptionRules & DateRange = TAP_BOTH) => ({
     ...before,
@@ -267,6 +271,23 @@ describe("recurrenceTarget", () => {
     expect(recurrenceTarget(back, before, after({ sessionMinutes: 210 }))).toMatchObject({ keyMinute: 660 });
   });
 
+  it("judges a trip moved to another day on the session it serves", () => {
+    // Monday's session moved to Tuesday (not a day of the recurrence): kept while Monday stays a day of it.
+    const moved = trip({ serviceDate: TOMORROW, occurrenceDate: TODAY });
+    expect(recurrenceTarget(moved, before, after({ appointmentMinute: 480 }))).toMatchObject({ kind: "update", keyMinute: 480 });
+    expect(recurrenceTarget(moved, before, after({ weekdays: [3, 5] }))).toEqual(CANCEL);
+  });
+
+  it("copies new notes, except notes changed by hand", () => {
+    const copied = trip({ serviceDate: wednesday, notes: "Salle 3" });
+    const old = { ...before, notes: "Salle 3" };
+    expect(recurrenceTarget(copied, old, after({ notes: "Salle 5" }))).toMatchObject({ notes: "Salle 5" });
+    expect(recurrenceTarget(copied, old, after({ notes: null }))).toMatchObject({ notes: null });
+    const typed = trip({ serviceDate: wednesday, notes: "Chez sa fille cette semaine" });
+    expect(recurrenceTarget(typed, old, after({ notes: "Salle 5" }))).toMatchObject({ notes: undefined });
+    expect(recurrenceTarget(copied, old, after({ notes: "Salle 3" }))).toMatchObject({ notes: undefined });
+  });
+
   it("sends the trips to the new facility", () => {
     expect(recurrenceTarget(trip({ serviceDate: wednesday }), before, after({ facilityId: "f2" }))).toMatchObject({
       destination: { facilityId: "f2", place: CLINIC },
@@ -293,6 +314,28 @@ describe("recurrenceTarget", () => {
     expect(
       recurrenceTarget(uncovered, before, after({ prescriptionId: "p2" }, { ...renewal, validFrom: "2027-03-10" }), bridge),
     ).toMatchObject({ kind: "update", prescription: bridge });
+  });
+});
+
+describe("one-off address and notes", () => {
+  it("never moves a one-off address with the patient's home", () => {
+    const elsewhere = { address: "8 rue des Lilas, 04000 Digne-les-Bains", lat: 44.09, lng: 6.23 };
+    const oneOff = trip({ oneOffAddress: true, pickupAddress: elsewhere.address, pickupLat: elsewhere.lat, pickupLng: elsewhere.lng });
+    expect(planTripChange(oneOff, { kind: "update", home: { address: "Nouveau domicile", lat: 43.9, lng: 5.8 } }, TODAY)).toEqual({
+      type: "none",
+    });
+    // The care side still follows its facility.
+    const moved = planTripChange(oneOff, { kind: "update", destination: { facilityId: "f2", place: CLINIC } }, TODAY);
+    expect(moved).toMatchObject({ type: "change", change: { data: { facilityId: "f2" } } });
+  });
+
+  it("writes new notes without taking the trip out of its route", () => {
+    const routed = trip({ status: "ASSIGNED", routeId: "route1", routeVehicleType: "TAXI", notes: "Salle 3" });
+    expect(planTripChange(routed, { kind: "update", notes: "Salle 5" }, TODAY)).toEqual({
+      type: "change",
+      change: { tripId: "t1", expectedStatus: "ASSIGNED", cancel: false, detach: false, data: { notes: "Salle 5" } },
+    });
+    expect(planTripChange(routed, { kind: "update", notes: "Salle 3" }, TODAY)).toEqual({ type: "none" });
   });
 });
 
