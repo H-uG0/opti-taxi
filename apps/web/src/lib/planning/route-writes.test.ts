@@ -134,8 +134,13 @@ describe("planStopWrites with stops done", () => {
     expect(writes.updates[3]).toMatchObject({ id: "t2-DROPOFF", data: { sequence: 4, startMinute: 604 } });
     expect(writes.deleteIds).toEqual(["t3-PICKUP", "t3-DROPOFF"]);
     expect(writes.creates.map((c) => `${c.tripId}:${c.kind}`)).toEqual(["t7:PICKUP", "t7:DROPOFF"]);
-    // A stop done the plan leaves out stays (never the case: the optimizer heads each started route with its stops done).
-    expect(planStopWrites(stored[0]!.stops, [], new Set(["t1-PICKUP"])).deleteIds).not.toContain("t1-PICKUP");
+    // A stop done the plan no longer carries (its trip closed since: an interrupted transport) stays, after the plan's stops.
+    const closed = planStopWrites(stored[0]!.stops, [stopRow("t2", "PICKUP", 0)], new Set(["t1-PICKUP", "t2-PICKUP"]));
+    expect(closed.deleteIds).not.toContain("t1-PICKUP");
+    expect(closed.updates).toEqual([
+      { id: "t2-PICKUP", data: { sequence: 0 } },
+      { id: "t1-PICKUP", data: { sequence: 1 } },
+    ]);
   });
 });
 

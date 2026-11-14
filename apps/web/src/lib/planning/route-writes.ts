@@ -46,7 +46,12 @@ export function planStopWrites(
       creates.push(row);
     }
   }
-  // A frozen stop never leaves its route: the plans of a day under way always keep it.
+  // A frozen stop never leaves its route. One the plan no longer carries (its trip closed since, an interrupted
+  // transport) keeps its row, after the plan's stops, in its former order: never a position another stop holds.
+  let next = rows.length;
+  for (const stop of stored) {
+    if (frozen.has(stop.id) && !kept.has(stop.id)) updates.push({ id: stop.id, data: { sequence: next++ } });
+  }
   return { deleteIds: stored.filter((stop) => !kept.has(stop.id) && !frozen.has(stop.id)).map((stop) => stop.id), updates, creates };
 }
 
