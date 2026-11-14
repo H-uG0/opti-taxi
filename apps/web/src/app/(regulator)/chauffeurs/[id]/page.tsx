@@ -24,6 +24,7 @@ import { BackLink } from "@/components/ui/back-link";
 import { Notice } from "@/components/ui/notice";
 import { formatPersonName } from "@/lib/names";
 import { DropNoticeParams } from "@/components/ui/notice-params";
+import { RecordStats } from "@/app/(regulator)/tableau-de-bord/record-stats";
 
 /** The tab names the person (« MARTIN Jean »). */
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -128,6 +129,10 @@ export default async function EditDriverPage({
           </FormMessage>
         </div>
       ) : null}
+
+      <div className="mb-6">
+        <RecordStats owner={{ personId: driver.id }} />
+      </div>
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <DriverForm

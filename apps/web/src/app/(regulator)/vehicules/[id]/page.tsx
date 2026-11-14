@@ -31,6 +31,7 @@ import { vehicleFormValues } from "../schema";
 import { VehicleForm } from "../vehicle-form";
 import { BackLink } from "@/components/ui/back-link";
 import { DropNoticeParams } from "@/components/ui/notice-params";
+import { RecordStats } from "@/app/(regulator)/tableau-de-bord/record-stats";
 
 /** The tab names the record (never a patient: titles stay in the browser history). */
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -116,6 +117,7 @@ export default async function EditVehiclePage({
       ) : null}
 
       <div className="space-y-6">
+        <RecordStats owner={{ vehicleId: vehicle.id, costPerKm: vehicle.costPerKm }} />
         <VehicleForm
           action={updateVehicle.bind(null, vehicle.id)}
           initial={vehicleFormValues(vehicle)}

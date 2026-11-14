@@ -1,5 +1,6 @@
 /** Number and date formatting of the dashboard (French, "—" for unknown values). */
-import type { DayKpis } from "@/lib/kpis";
+import type { DayKpis, Granularity } from "@/lib/kpis";
+import type { IndicatorUnit } from "@/lib/kpis-targets";
 import { formatPercent } from "@/lib/labels";
 import { formatDateTime, formatDuration, fromIsoDate } from "@/lib/time";
 
@@ -159,4 +160,51 @@ export function lateThreshold(toleranceMin: number): string {
 /** Label of the lateness indicator: « Retards (après l'heure du RDV) », « Retards (> 5 min) ». */
 export function lateLabel(toleranceMin: number): string {
   return toleranceMin > 0 ? `Retards (> ${formatDuration(toleranceMin)})` : "Retards (après l'heure du RDV)";
+}
+
+const monthLong = new Intl.DateTimeFormat("fr-FR", { timeZone: "UTC", month: "long", year: "numeric" });
+const monthShort = new Intl.DateTimeFormat("fr-FR", { timeZone: "UTC", month: "short", year: "2-digit" });
+
+/** A step of a trend in words: « mar. 03/11 », « sem. du 02/11 », « Novembre 2026 ». */
+export function formatStep(key: string, granularity: Granularity): string {
+  if (granularity === "week") return `sem. du ${formatDayMonth(key)}`;
+  if (granularity === "month") return capitalize(monthLong.format(fromIsoDate(key)));
+  return formatDayShort(key);
+}
+
+/** A step under the first and last bars: « 03/11 », « nov. 26 ». */
+export function formatStepEdge(key: string, granularity: Granularity): string {
+  return granularity === "month" ? monthShort.format(fromIsoDate(key)) : formatDayMonth(key);
+}
+
+/** Bars of a single-series chart: « Par jour », « Par semaine », « Par mois ». */
+export const STEP_LABELS: Record<Granularity, string> = { day: "Par jour", week: "Par semaine", month: "Par mois" };
+
+/** A value of an indicator in its unit: « 23,4 % », « 4,2 », « 35 min », « 12 € ». */
+export function formatIndicator(unit: IndicatorUnit, value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  switch (unit) {
+    case "rate":
+      return formatRate(value);
+    case "decimal":
+      return formatDecimal(value);
+    case "minutes":
+      return formatDuration(value);
+    case "euros":
+      return formatEurosRounded(value);
+  }
+}
+
+/** A gap in the unit of its indicator, signed: « +2,1 pts », « −0,3 », « +5 min », « −3 € ». */
+export function formatIndicatorGap(unit: IndicatorUnit, gap: number): string {
+  switch (unit) {
+    case "rate":
+      return formatDeltaPoints(gap);
+    case "decimal":
+      return formatDeltaDecimal(gap);
+    case "minutes":
+      return formatDeltaMinutes(gap);
+    case "euros":
+      return formatDeltaEuros(gap);
+  }
 }

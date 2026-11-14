@@ -59,7 +59,17 @@ describe("consumptionStats", () => {
       fill("2026-10-15", 50_900, 45, 80),
       fill("2026-10-20", 51_100, 12, 21, false), // after the last full tank: not counted yet
     ]);
-    expect(stats).toEqual({ odometerKm: 51_100, odometerDate: "2026-10-20", measuredKm: 900, per100Km: 6.1, costPerKm: 0.109 });
+    expect(stats).toEqual({
+      odometerKm: 51_100,
+      odometerDate: "2026-10-20",
+      measuredKm: 900,
+      per100Km: 6.1,
+      costPerKm: 0.109,
+      measuredQuantity: 55,
+      measuredCost: 98,
+      fromDate: "2026-10-01",
+      toDate: "2026-10-15",
+    });
   });
 
   it("needs two full tanks to measure, and gives the last reading anyway", () => {

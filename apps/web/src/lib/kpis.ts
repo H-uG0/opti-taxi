@@ -15,12 +15,21 @@ import { addDays, formatShortDate, fromIsoDate, isIsoDate } from "@/lib/time";
 import { addDemand, demandOfDay, emptyDemand, serviceRate, type DemandTotals } from "./kpis-demand";
 import { addFleet, fleetOfDay, fleetUseRate, type FleetTotals } from "./kpis-fleet";
 import {
+  addPlanningTime,
+  emptyPlanningTime,
+  medianInitialMinutes,
+  planningTimeOfDay,
+  type DayPlanningTime,
+  type PlanningTimeTotals,
+} from "./kpis-planning-time";
+import {
   DEFAULT_KPI_OPTIONS,
   isRealizedTrip,
   isServedTrip,
   isUsedRoute,
   minuteOfServiceDay,
   ratio,
+  type KpiActivity,
   type KpiData,
   type KpiFleetDay,
   type KpiFrozenPlan,
@@ -41,6 +50,7 @@ export {
   quantile,
   ratio,
   SERVED_TRIP_STATUSES,
+  type KpiActivity,
   type KpiData,
   type KpiFleetDay,
   type KpiFrozenPlan,
@@ -125,7 +135,7 @@ export type KpiRates = {
   lateRate: number | null;
   /** Share of the planned outbound trips planned less than the margin before the appointment. */
   tightRate: number | null;
-  /** Placed ÷ to carry (kpis-demand.ts). */
+  /** Placed ÷ to carry (kpis-demand.ts); null for rows narrowed to a depot or a type (the demand belongs to none). */
   serviceRate: number | null;
   /** Served trips per vehicle available (kpis-fleet.ts). */
   tripsPerAvailableVehicle: number | null;
@@ -166,8 +176,18 @@ export type DayKpis = KpiTotals &
     firstRunAt: Date | null;
     /** Latest route validation, when the whole day is validated. */
     validatedAt: Date | null;
-    /** 5. Temps passé à construire le planning: first run -> last validation, in minutes. */
+    /**
+     * 5. Temps passé à construire le planning: active minutes of the initial
+     * build, from the audit trail (kpis-planning-time.ts); null while the date
+     * was never validated or when its actions are unknown.
+     */
     planningMinutes: number | null;
+    /** The detail: initial build, touch-ups, sessions, interventions (null: no recorded action). */
+    planningTime: DayPlanningTime | null;
+    /** Wall clock from the first optimization to the last validation (the former measure, for comparison). */
+    clockMinutes: number | null;
+    /** The rows were narrowed to a depot or a vehicle type (kpis-scope.ts). */
+    scoped: boolean;
     /** Distance sources of the day's routes, sorted (km and planned delays compare only within one). */
     matrixSources: string[];
     /**
@@ -194,9 +214,14 @@ export type PeriodKpis = KpiTotals &
     /** Days with at least one route. */
     plannedDays: number;
     validatedDays: number;
-    /** Validated days whose planning time could be measured. */
+    /** Validated days whose planning time could be measured (initial build from the audit trail). */
     measuredPlanningDays: number;
-    averagePlanningMinutes: number | null;
+    /** Median initial build of those days (minutes): a reopened day does not drag it as a mean would. */
+    medianPlanningMinutes: number | null;
+    /** Planning time of the days (kpis-planning-time.ts): initial builds, touch-ups, interventions. */
+    planning: PlanningTimeTotals;
+    /** Some day was narrowed to a depot or a vehicle type. */
+    scoped: boolean;
     /** Distance sources of the period's routes, sorted: more than one, its days do not compare. */
     matrixSources: string[];
     /** Days produced by the history simulation. */
@@ -292,8 +317,11 @@ function addTotals(sum: KpiTotals, day: KpiTotals): KpiTotals {
   };
 }
 
-/** Rates derived from counters: the same formulas for a day and for a period. */
-export function deriveRates(totals: KpiTotals, parts: KpiParts): KpiRates {
+/**
+ * Rates derived from counters: the same formulas for a day and for a period.
+ * `scoped`: rows narrowed to a depot or a type, whose demand is partial.
+ */
+export function deriveRates(totals: KpiTotals, parts: KpiParts, scoped = false): KpiRates {
   return {
     tripsPerVehiclePlanned: ratio(totals.servedTrips, totals.vehicles),
     tripsPerVehicleRealized: ratio(totals.realizedTrips, totals.realizedVehicles),
@@ -302,7 +330,7 @@ export function deriveRates(totals: KpiTotals, parts: KpiParts): KpiRates {
     measuredSharedRate: measuredSharedRate(parts.sharing),
     lateRate: ratio(totals.lateArrivals, totals.measuredOutbound),
     tightRate: ratio(totals.tightOutbound, totals.plannedOutbound),
-    serviceRate: serviceRate(parts.demand),
+    serviceRate: scoped ? null : serviceRate(parts.demand),
     tripsPerAvailableVehicle: parts.fleet ? ratio(totals.servedTrips, parts.fleet.available) : null,
     useRate: fleetUseRate(parts.fleet),
     marginPerTrip: ratio(totals.servedRevenue - totals.cost, totals.servedTrips),
@@ -313,13 +341,15 @@ export function deriveRates(totals: KpiTotals, parts: KpiParts): KpiRates {
 // Per-day computation
 // ---------------------------------------------------------------------------
 
-/** Rows of the dashboard, the fleet and the frozen plans optional. */
+/** Rows of the dashboard, the fleet, the frozen plans and the planning actions optional. */
 export type KpiRows = {
   routes: readonly KpiRoute[];
   trips: readonly KpiTrip[];
   runs: readonly KpiRun[];
   fleet?: readonly KpiFleetDay[];
   plans?: readonly KpiFrozenPlan[];
+  activity?: readonly KpiActivity[];
+  scoped?: boolean;
 };
 
 /**
@@ -403,7 +433,9 @@ export function computeDayKpis(date: string, rows: KpiRows, today: string, optio
       ? "NOT_VALIDATED"
       : "NONE";
   const elapsed = validatedAt && firstRunAt ? (validatedAt.getTime() - firstRunAt.getTime()) / 60_000 : null;
-  const rates = deriveRates(totals, parts);
+  const scoped = rows.scoped === true;
+  const rates = deriveRates(totals, parts, scoped);
+  const planningTime = rows.activity ? planningTimeOfDay(rows.activity.filter((a) => a.serviceDate === date), runs) : null;
 
   return {
     date,
@@ -417,8 +449,11 @@ export function computeDayKpis(date: string, rows: KpiRows, today: string, optio
     planningStatus,
     firstRunAt,
     validatedAt,
+    planningMinutes: planningTime?.initialMinutes ?? null,
+    planningTime,
     // A validation older than the first run means the routes did not come from these runs.
-    planningMinutes: elapsed !== null && elapsed >= 0 ? elapsed : null,
+    clockMinutes: elapsed !== null && elapsed >= 0 ? elapsed : null,
+    scoped,
     matrixSources: distinctSources(routes),
     simulated: runs.some((run) => run.simulated === true),
     frozen: rows.plans?.find((plan) => plan.serviceDate === date) ?? null,
@@ -446,12 +481,21 @@ export function computeKpisByDay(from: string, to: string, data: KpiData, today:
 
 /** Indicators of the given dates, in their order (comparison days that are not consecutive). */
 export function computeKpisForDates(dates: readonly string[], data: KpiData, today: string, options: KpiOptions = DEFAULT_KPI_OPTIONS): DayKpis[] {
-  type Bucket = { routes: KpiRoute[]; trips: KpiTrip[]; runs: KpiRun[]; fleet: KpiFleetDay[]; plans: KpiFrozenPlan[] };
+  type Bucket = {
+    routes: KpiRoute[];
+    trips: KpiTrip[];
+    runs: KpiRun[];
+    fleet: KpiFleetDay[];
+    plans: KpiFrozenPlan[];
+    activity?: KpiActivity[];
+    scoped: boolean;
+  };
+  const scoped = data.scoped === true;
   const byDate = new Map<string, Bucket>();
   const bucket = (date: string) => {
     let rows = byDate.get(date);
     if (!rows) {
-      rows = { routes: [], trips: [], runs: [], fleet: [], plans: [] };
+      rows = { routes: [], trips: [], runs: [], fleet: [], plans: [], ...(data.activity ? { activity: [] } : {}), scoped };
       byDate.set(date, rows);
     }
     return rows;
@@ -461,8 +505,10 @@ export function computeKpisForDates(dates: readonly string[], data: KpiData, tod
   for (const run of data.runs) bucket(run.serviceDate).runs.push(run);
   for (const day of data.fleet ?? []) bucket(day.serviceDate).fleet.push(day);
   for (const plan of data.plans ?? []) bucket(plan.serviceDate).plans.push(plan);
+  for (const action of data.activity ?? []) bucket(action.serviceDate).activity?.push(action);
 
-  return dates.map((date) => computeDayKpis(date, byDate.get(date) ?? { routes: [], trips: [], runs: [] }, today, options));
+  const none: KpiRows = { routes: [], trips: [], runs: [], ...(data.activity ? { activity: [] } : {}), scoped };
+  return dates.map((date) => computeDayKpis(date, byDate.get(date) ?? none, today, options));
 }
 
 /** Day with planning activity (an optimization or a route). */
@@ -490,8 +536,8 @@ export function summarizePeriod(days: readonly DayKpis[]): PeriodKpis {
     sharing: planned.reduce((sum, d) => addSharing(sum, d.sharing), emptySharing()),
     waits: days.reduce((sum, d) => addWaits(sum, d.waits), emptyWaits()),
   };
-  const measured = days.filter((d) => d.planningMinutes !== null);
-  const planningSum = measured.reduce((sum, d) => sum + (d.planningMinutes ?? 0), 0);
+  const planning = days.reduce((sum, d) => addPlanningTime(sum, d.planningTime), emptyPlanningTime());
+  const scoped = days.some((d) => d.scoped);
   return {
     from: days[0]?.date ?? "",
     to: days[days.length - 1]?.date ?? "",
@@ -499,13 +545,15 @@ export function summarizePeriod(days: readonly DayKpis[]): PeriodKpis {
     inProgressDate: days.find((d) => d.inProgress)?.date ?? null,
     plannedDays: days.filter((d) => d.vehicles > 0).length,
     validatedDays: days.filter((d) => d.planningStatus === "VALIDATED").length,
-    measuredPlanningDays: measured.length,
-    averagePlanningMinutes: ratio(planningSum, measured.length),
+    measuredPlanningDays: planning.initial.length,
+    medianPlanningMinutes: medianInitialMinutes(planning),
+    planning,
+    scoped,
     matrixSources: [...new Set(days.flatMap((day) => day.matrixSources))].sort(),
     simulatedDays: days.filter((d) => d.simulated).length,
     ...totals,
     ...parts,
-    ...deriveRates(totals, parts),
+    ...deriveRates(totals, parts, scoped),
   };
 }
 
@@ -514,17 +562,51 @@ export function summarizePeriod(days: readonly DayKpis[]): PeriodKpis {
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_RANGE_DAYS = 14;
+/** Longest range shown day by day. */
 export const MAX_RANGE_DAYS = 92;
+/** Longest range shown by week or by month (12 months and the current one). */
+export const MAX_AGGREGATED_RANGE_DAYS = 400;
+/** Up to this many days the automatic step is the week, beyond it the month. */
+export const AUTO_WEEK_MAX_DAYS = 190;
 
-export type KpiRange = { from: string; to: string; error: string | null };
+/** Step of the trends and of the detail table: a bar and a row per day, ISO week or month. */
+export type Granularity = "day" | "week" | "month";
+
+/** Values of ?pas= in the address. */
+export const GRANULARITY_PARAMS: Record<Granularity, string> = { day: "jour", week: "semaine", month: "mois" };
+
+export function parseGranularity(raw: string | null | undefined): Granularity | null {
+  const entry = Object.entries(GRANULARITY_PARAMS).find(([, value]) => value === raw?.trim());
+  return entry ? (entry[0] as Granularity) : null;
+}
+
+/** The step a range is shown with when none is chosen: by day up to MAX_RANGE_DAYS, then by week, then by month. */
+export function autoGranularity(days: number): Granularity {
+  if (days <= MAX_RANGE_DAYS) return "day";
+  return days <= AUTO_WEEK_MAX_DAYS ? "week" : "month";
+}
+
+export type KpiRange = {
+  from: string;
+  to: string;
+  granularity: Granularity;
+  /** The step was chosen in the address (?pas=), not deduced from the range. */
+  explicitGranularity: boolean;
+  error: string | null;
+};
 
 /**
  * Date range of the dashboard from the query string. Default: the
  * DEFAULT_RANGE_DAYS days ending tomorrow (J+1). Invalid input falls back to
- * the default with a message; a reversed range is swapped; a range longer
- * than MAX_RANGE_DAYS is shortened from the start.
+ * the default with a message; a reversed range is swapped. Shown day by day,
+ * a range is at most MAX_RANGE_DAYS long, by week or month
+ * MAX_AGGREGATED_RANGE_DAYS: a longer one is shortened from the start. Without
+ * a step chosen (?pas=), autoGranularity picks it.
  */
-export function resolveKpiRange(input: { from?: string | null; to?: string | null }, tomorrow: string): KpiRange {
+export function resolveKpiRange(
+  input: { from?: string | null; to?: string | null; granularity?: string | null },
+  tomorrow: string,
+): KpiRange {
   const errors: string[] = [];
   const rawFrom = input.from?.trim() || null;
   const rawTo = input.to?.trim() || null;
@@ -543,11 +625,18 @@ export function resolveKpiRange(input: { from?: string | null; to?: string | nul
     [from, to] = [to, from];
     errors.push("La date de début était après la date de fin\u00a0: les deux dates ont été inversées.");
   }
-  if (dayCount(from, to) > MAX_RANGE_DAYS) {
-    from = addDays(to, -(MAX_RANGE_DAYS - 1));
-    errors.push(`La période est limitée à ${MAX_RANGE_DAYS} jours\u00a0: elle commence le ${formatShortDate(from)}.`);
+  const chosen = parseGranularity(input.granularity);
+  const granularity = chosen ?? autoGranularity(dayCount(from, to));
+  const max = granularity === "day" ? MAX_RANGE_DAYS : MAX_AGGREGATED_RANGE_DAYS;
+  if (dayCount(from, to) > max) {
+    from = addDays(to, -(max - 1));
+    errors.push(
+      granularity === "day"
+        ? `Jour par jour, la période est limitée à ${MAX_RANGE_DAYS} jours (par semaine ou par mois, ${MAX_AGGREGATED_RANGE_DAYS})\u00a0: elle commence le ${formatShortDate(from)}.`
+        : `La période est limitée à ${MAX_AGGREGATED_RANGE_DAYS} jours\u00a0: elle commence le ${formatShortDate(from)}.`,
+    );
   }
-  return { from, to, error: errors.length > 0 ? errors.join(" ") : null };
+  return { from, to, granularity, explicitGranularity: chosen !== null, error: errors.length > 0 ? errors.join(" ") : null };
 }
 
 /** Tolerances offered for a late arrival (minutes after the appointment): the PO decides V's. */

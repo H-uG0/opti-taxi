@@ -31,7 +31,8 @@ export type AuditEntity =
   | "TariffArea"
   | "CompanyCertification"
   | "PublicHoliday"
-  | "AppSettings";
+  | "AppSettings"
+  | "KpiTarget";
 
 type DetailValue = string | number | boolean | null;
 

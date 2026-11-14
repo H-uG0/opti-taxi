@@ -20,7 +20,11 @@ import {
   lateThreshold,
   plural,
 } from "./format";
-import { dashboardHref } from "./range-form";
+import { dashboardHref, type HrefState } from "./query";
+
+/** Why the demand columns are empty for a depot or a type. */
+export const SCOPED_DEMAND =
+  "Une course non affectée, annulée ou confiée n'appartient à aucun dépôt ni type de véhicule\u00a0: la demande se lit sans filtre.";
 
 /** Columns after the day column (colSpan of days without planning). */
 const DATA_COLUMNS = 13;
@@ -143,7 +147,7 @@ export function KpiTable({
   days,
   period,
   highlighted,
-  range,
+  base,
   tolerance,
   today,
   tomorrow,
@@ -152,11 +156,13 @@ export function KpiTable({
   period: PeriodKpis;
   /** The days shown at the top of the page. */
   highlighted: readonly string[];
-  range: { from: string; to: string };
+  /** The address of the page: a day's link keeps its filters. */
+  base: HrefState;
   tolerance: number;
   today: string;
   tomorrow: string;
 }) {
+  const range = { from: base.from, to: base.to };
   const rows = [...days].reverse();
   const periodLate = lateCell(period.lateArrivals, period.measuredOutbound);
   const periodTight = tightCell(period.tightOutbound, period.plannedOutbound);
@@ -192,7 +198,12 @@ export function KpiTable({
           <HeadCell colSpan={2} scope="colgroup" align="center" divider>
             Ponctualité
           </HeadCell>
-          <HeadCell rowSpan={2} divider className="align-bottom">
+          <HeadCell
+            rowSpan={2}
+            divider
+            className="align-bottom"
+            title="Temps actif de construction du planning, d'après le journal des actions (onglet Planification)"
+          >
             Planning
           </HeadCell>
           <HeadCell rowSpan={2} divider className="align-bottom" title="CA estimé des courses servies (absents exclus)">
@@ -224,7 +235,7 @@ export function KpiTable({
           const dayCell = (
             <th scope="row" className={cn("sticky left-0 z-10 px-3 py-2 text-left font-normal whitespace-nowrap", background)}>
               <Link
-                href={dashboardHref({ ...range, day: day.date, tolerance })}
+                href={dashboardHref({ ...base, day: day.date })}
                 aria-current={isHighlighted ? "true" : undefined}
                 title={`Afficher le ${formatLongDate(day.date)} en tête de page`}
                 className={cn(
@@ -278,13 +289,21 @@ export function KpiTable({
           return (
             <tr key={day.date} className={background}>
               {dayCell}
-              <Num title={demandTitle(day.demand)}>{tripsToCarry(day.demand)}</Num>
-              <Num tone="strong" title={`${placedTrips(day.demand)} placées sur ${tripsToCarry(day.demand)} à transporter`}>
-                {formatPercent(day.serviceRate, 1)}
-              </Num>
-              <Num tone={lost > 0 ? "warn" : "muted"} title={`${day.demand.unassigned} non affectées · ${day.demand.handedOver} confiées`}>
-                {lost}
-              </Num>
+              {day.scoped ? (
+                <td colSpan={3} className="px-2 py-2 text-center text-xs text-slate-500" title={SCOPED_DEMAND}>
+                  non ventilée
+                </td>
+              ) : (
+                <>
+                  <Num title={demandTitle(day.demand)}>{tripsToCarry(day.demand)}</Num>
+                  <Num tone="strong" title={`${placedTrips(day.demand)} placées sur ${tripsToCarry(day.demand)} à transporter`}>
+                    {formatPercent(day.serviceRate, 1)}
+                  </Num>
+                  <Num tone={lost > 0 ? "warn" : "muted"} title={`${day.demand.unassigned} non affectées · ${day.demand.handedOver} confiées`}>
+                    {lost}
+                  </Num>
+                </>
+              )}
               <Num
                 divider
                 title={
@@ -332,8 +351,10 @@ export function KpiTable({
                 tone={planningTone(day)}
                 title={
                   day.planningStatus === "VALIDATED" && day.planningMinutes === null
-                    ? "Validé sans optimisation enregistrée : durée non mesurable"
-                    : plural(day.optimizationRuns, "optimisation")
+                    ? "Validé sans action enregistrée dans le journal\u00a0: durée non mesurable"
+                    : day.planningTime
+                      ? `${plural(day.planningTime.sessions, "session")} · retouches ${formatDuration(day.planningTime.touchUpMinutes)} · ${plural(day.optimizationRuns, "optimisation")}`
+                      : plural(day.optimizationRuns, "optimisation")
                 }
               >
                 {formatPlanningTime(day)}
@@ -362,11 +383,19 @@ export function KpiTable({
               </span>
             ) : null}
           </th>
-          <Num tone="strong" title={demandTitle(period.demand)}>
-            {tripsToCarry(period.demand)}
-          </Num>
-          <Num tone="strong">{formatPercent(period.serviceRate, 1)}</Num>
-          <Num tone={periodLost > 0 ? "warn" : "strong"}>{periodLost}</Num>
+          {period.scoped ? (
+            <td colSpan={3} className="px-2 py-2 text-center text-xs font-normal text-slate-500" title={SCOPED_DEMAND}>
+              non ventilée
+            </td>
+          ) : (
+            <>
+              <Num tone="strong" title={demandTitle(period.demand)}>
+                {tripsToCarry(period.demand)}
+              </Num>
+              <Num tone="strong">{formatPercent(period.serviceRate, 1)}</Num>
+              <Num tone={periodLost > 0 ? "warn" : "strong"}>{periodLost}</Num>
+            </>
+          )}
           <Num divider tone="strong" title="Journées-véhicules utilisées / disponibles">
             {period.fleet ? `${period.vehicles} / ${period.fleet.available}` : period.vehicles}
             <span className="block text-[11px] font-normal text-slate-600">journées-véhicules</span>
@@ -402,8 +431,8 @@ export function KpiTable({
             {periodLate.text}
           </Num>
           <Num tone={periodTight.tone === "default" ? "strong" : periodTight.tone}>{periodTight.text}</Num>
-          <Num divider tone="strong" title="Moyenne des jours validés dont la durée est mesurable">
-            {period.averagePlanningMinutes === null ? "—" : `moy. ${formatDuration(period.averagePlanningMinutes)}`}
+          <Num divider tone="strong" title="Médiane des jours validés dont le temps actif est mesurable">
+            {period.medianPlanningMinutes === null ? "—" : `méd. ${formatDuration(period.medianPlanningMinutes)}`}
           </Num>
           <Num divider tone="strong">
             {formatEurosRounded(period.servedRevenue)}

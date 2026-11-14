@@ -146,6 +146,7 @@ async function wipe(): Promise<void> {
     liftAuditGuard(prisma),
     prisma.auditEvent.deleteMany(),
     prisma.validatedPlan.deleteMany(),
+    prisma.kpiTarget.deleteMany(),
     prisma.fuelLog.deleteMany(),
     prisma.maintenanceDeadline.deleteMany(),
     prisma.vehicleUnavailability.deleteMany(),
@@ -253,6 +254,33 @@ async function seedFacilityHours(facilities: Map<FacilityKey, CreatedFacility>):
   await prisma.facility.update({
     where: { id: lookup(facilities, "dialysisAix", "Établissement").id },
     data: { openingHours: week([1, 2, 3, 4, 5, 6], "06:45", "20:00"), earliestArrivalMinute: minute("07:10") },
+  });
+}
+
+/**
+ * Reference values and objectives of the dashboard (KPI-09), entered in
+ * Paramètres: illustrative values of the demonstration, to be replaced by V's
+ * (measured on its history before the tool). The company's, and Gap's own
+ * trips per vehicle (a mountain depot with longer runs). Rates are fractions,
+ * the planning time minutes, the margin euros.
+ */
+async function seedKpiTargets(depots: Map<DepotKey, string>, regulatorId: string): Promise<void> {
+  const company = [
+    { indicator: "serviceRate", reference: 0.95, objective: 0.98 },
+    { indicator: "tripsPerVehicle", reference: 4.5, objective: 5.5 },
+    { indicator: "useRate", reference: null, objective: 0.9 },
+    { indicator: "emptyKmShare", reference: 0.55, objective: 0.45 },
+    { indicator: "sharedRate", reference: 0.2, objective: 0.3 },
+    { indicator: "lateRate", reference: 0.05, objective: 0.02 },
+    { indicator: "planningMinutes", reference: 120, objective: 45 },
+    { indicator: "marginPerTrip", reference: null, objective: 10 },
+  ];
+  const gap = lookup(depots, "gap", "Dépôt");
+  await prisma.kpiTarget.createMany({
+    data: [
+      ...company.map((row) => ({ ...row, depotId: null, updatedById: regulatorId })),
+      { indicator: "tripsPerVehicle", depotId: gap, reference: 3.5, objective: 4.5, updatedById: regulatorId },
+    ],
   });
 }
 
@@ -1297,6 +1325,7 @@ async function main(): Promise<void> {
   // Own generator: the patients and trips drawn afterwards stay those of the earlier seeds.
   await seedFleetPlanning(new Rng(RANDOM_SEED + 4), dates);
   const { regulatorId, accounts } = await seedUsers(drivers, vehicleOfDriver);
+  await seedKpiTargets(depots, regulatorId);
   console.log("• Patients, prescriptions et récurrences");
   const names = new NameFactory(rng, Object.values(DRIVERS));
   await seedPatients(rng, names, facilities, dates);

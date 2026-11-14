@@ -27,9 +27,19 @@ export type KpiRoute = {
   vehicleId: string;
   /** Type of the route's vehicle: the shared rate of the Assurance maladie counts taxis and VSL apart. */
   vehicleType?: VehicleType;
-  /** Depot of the vehicle and driver of the route: breakdowns (KPI-02). */
+  /** Depot of the vehicle, driver and crew mate of the route: breakdowns (KPI-02). */
   depotId?: string | null;
   driverId?: string | null;
+  crewMateId?: string | null;
+  /**
+   * Planned minutes of the route (end - start, its break taken out), the
+   * minutes with a patient on board and those the vehicle waits at a place of
+   * care before its stop starts (kpis-load.ts routeTimings): unit economics
+   * and planned hours (KPI-02, KPI-10). Absent: unknown.
+   */
+  activeMinutes?: number;
+  onboardMinutes?: number;
+  facilityWaitMinutes?: number;
   distanceKm: number;
   emptyKm: number;
   revenue: number;
@@ -94,8 +104,18 @@ export type KpiTrip = {
   plannedRideMinutes?: number | null;
 };
 
-/** `simulated`: a run of the history simulation (pnpm db:history), whose day is marked « simulé ». */
-export type KpiRun = { serviceDate: string; startedAt: Date; simulated?: boolean };
+/**
+ * `simulated`: a run of the history simulation (pnpm db:history), whose day is marked « simulé ».
+ * `requestedById`: the account that launched it (the click starts a planning session, kpis-planning-time.ts).
+ */
+export type KpiRun = { serviceDate: string; startedAt: Date; simulated?: boolean; requestedById?: string | null };
+
+/**
+ * A regulator's action on the planning of a date, from the audit trail
+ * (AuditEvent with that service date): the planning time is measured from
+ * them (kpis-planning-time.ts). Action names as lib/audit.ts writes them.
+ */
+export type KpiActivity = { serviceDate: string; at: Date; action: string; userId: string | null };
 
 /**
  * Vehicles of a day (ids): active, unavailable (maintenance, on-call duty…)
@@ -116,6 +136,14 @@ export type KpiData = {
   fleet?: KpiFleetDay[];
   /** Frozen validated plans of the dates that have one. */
   plans?: KpiFrozenPlan[];
+  /** Planning actions of the regulators (audit trail); absent: the planning time is unknown (« — »). */
+  activity?: KpiActivity[];
+  /**
+   * The rows were narrowed to a depot or a vehicle type (kpis-scope.ts): the
+   * trips left without a vehicle belong to no depot, so the demand-based
+   * indicators (service rate, lost trips) are not measured (« — »).
+   */
+  scoped?: boolean;
 };
 
 /** Settings of the indicators: the business rules they are measured against. */
@@ -209,7 +237,7 @@ export function isTapType(type: VehicleType | null | undefined): type is TapType
   return type === "VSL" || type === "TAXI";
 }
 
-/** Stop rows as the loader reads them, for the per-trip timings (kpis-load.ts). */
+/** Stop rows as the loader reads them, for the per-trip timings and the route timings (kpis-load.ts). */
 export type KpiStopRow = {
   routeId: string;
   tripId: string;
@@ -217,4 +245,8 @@ export type KpiStopRow = {
   startMinute: number;
   departureMinute: number;
   completedAt: Date | null;
+  /** Absent in older callers: the route timings are then unknown. */
+  sequence?: number;
+  arrivalMinute?: number;
+  loadAfter?: number;
 };

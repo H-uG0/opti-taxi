@@ -67,8 +67,9 @@ export function periodSummaryLines(period: PeriodKpis): string[] {
         `attente au retour médiane ${orDash(quantile(waits.afterWaits, 0.5), minutes)}, p90 ${orDash(quantile(waits.afterWaits, 0.9), minutes)}`,
     ],
     [
-      "Temps de planification moyen",
-      `${orDash(period.averagePlanningMinutes, (v) => `${whole.format(v)} min`)} (${plural(period.optimizationRuns, "optimisation")})`,
+      "Temps de planification (actif, médiane)",
+      `${orDash(period.medianPlanningMinutes, (v) => `${whole.format(v)} min`)} sur ${plural(period.measuredPlanningDays, "jour validé", "jours validés")} ` +
+        `(${plural(period.optimizationRuns, "optimisation")})`,
     ],
     [
       "CA estimé / coût / marge",

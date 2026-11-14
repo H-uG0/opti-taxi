@@ -39,7 +39,7 @@ import {
 } from "@/lib/domain/trip-generation";
 import { computeKpisByDay, listDates, summarizePeriod } from "@/lib/kpis";
 import { loadKpiFleet } from "@/lib/kpis-fleet-load";
-import { loadKpiRows } from "@/lib/kpis-load";
+import { loadKpiRows, loadPlanningActivity } from "@/lib/kpis-load";
 import { logError } from "@/lib/log";
 import { formatAddress } from "@/lib/domain/rules";
 import { addDays, formatShortDate, fromIsoDate, isoWeekday, todayIso, toIsoDate } from "@/lib/time";
@@ -350,8 +350,12 @@ async function main(): Promise<void> {
     }
   }
 
-  const [rows, fleet] = await Promise.all([loadKpiRows(prisma, { from: first, to: last }), loadKpiFleet(prisma, listDates(first, last))]);
-  const days = computeKpisByDay(first, last, { ...rows, fleet }, today);
+  const [rows, fleet, activity] = await Promise.all([
+    loadKpiRows(prisma, { from: first, to: last }),
+    loadKpiFleet(prisma, listDates(first, last)),
+    loadPlanningActivity(prisma, { from: first, to: last }),
+  ]);
+  const days = computeKpisByDay(first, last, { ...rows, fleet, activity }, today);
   console.log("\nIndicateurs du tableau de bord sur la période (calcul de @/lib/kpis, comme /tableau-de-bord) :");
   for (const line of periodSummaryLines(summarizePeriod(days))) console.log(`  ${line}`);
 

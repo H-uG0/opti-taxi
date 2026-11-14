@@ -89,3 +89,30 @@ describe("describeSeries", () => {
     );
   });
 });
+
+describe("chartGeometry: moving average and dashed lines (KPI-09)", () => {
+  it("puts the objective and the reference in the scale and joins the average across days off", () => {
+    const g = chartGeometry(
+      [
+        { date: "a", value: 2, average: 2 },
+        { date: "b", value: null, average: null },
+        { date: "c", value: 4, average: 3 },
+      ],
+      66,
+      { reference: 1, objective: 8 },
+    );
+    // The objective (8) is the top of the scale: PAD_TOP.
+    expect(g.objectiveY).toBe(6);
+    expect(g.referenceY).not.toBeNull();
+    expect(g.referenceY!).toBeGreaterThan(g.objectiveY!);
+    expect(g.segments).toHaveLength(1);
+    expect(g.segments[0]).toMatchObject({ x1: g.shapes[0]!.centerPct, x2: g.shapes[2]!.centerPct });
+    expect(g.shapes[1]!.lineY).toBeNull();
+  });
+
+  it("draws no dashed line on a chart without data", () => {
+    const g = chartGeometry([{ date: "a", value: null }], 64, { objective: 5 });
+    expect(g.objectiveY).toBeNull();
+    expect(g.segments).toEqual([]);
+  });
+});

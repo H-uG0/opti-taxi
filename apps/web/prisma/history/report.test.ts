@@ -94,7 +94,7 @@ describe("periodSummaryLines", () => {
     const lines = periodSummaryLines(empty);
     expect(lines[0]).toContain("du 12/10/2026 au 13/10/2026");
     expect(lines.find((l) => l.startsWith("Part des km à vide"))).toContain("—");
-    expect(lines.find((l) => l.startsWith("Temps de planification moyen"))).toContain("—");
+    expect(lines.find((l) => l.startsWith("Temps de planification"))).toContain("—");
   });
 
   it("formats rates as percentages", () => {
@@ -118,7 +118,8 @@ describe("periodSummaryLines", () => {
     };
     const lines = periodSummaryLines(summarizePeriod(computeKpisByDay("2026-10-12", "2026-10-12", data, "2026-11-02")));
     expect(lines.find((l) => l.startsWith("Part des km à vide"))).toMatch(/25,0\s?%/);
-    expect(lines.find((l) => l.startsWith("Temps de planification moyen"))).toContain("40 min (1 optimisation)");
+    // No planning action passed: the active time is not measured (the wall clock is no longer the measure).
+    expect(lines.find((l) => l.startsWith("Temps de planification"))).toContain("— sur 0 jour validé (1 optimisation)");
     expect(lines[0]).toContain("(1 jour planifié, 1 validé)");
   });
 });

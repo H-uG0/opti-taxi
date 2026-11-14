@@ -10,6 +10,7 @@ import { FACTOR_FIELDS, loadTrafficZones, TRAFFIC_BANDS } from "@/lib/domain/tra
 import { loadObservedFactors } from "@/lib/domain/traffic-observed";
 import { invalidState, messageState, readForm, successState, type FormState } from "@/lib/forms";
 import { settingsSavedMessage, settingsSchema } from "./schema";
+import { targetChanges, targetsSchema, toTargetRows } from "./targets-schema";
 import { toTrafficUpdate, trafficChanged, trafficSchema, type TrafficUpdate } from "./traffic-schema";
 
 export async function saveSettings(_state: FormState, formData: FormData): Promise<FormState> {
@@ -103,4 +104,37 @@ function trafficChanges(settings: AppSettings, zones: readonly TrafficZone[], up
 
 function prefixed(prefix: string, details: AuditDetails): AuditDetails {
   return Object.fromEntries(Object.entries(details).map(([key, value]) => [`${prefix}.${key}`, value]));
+}
+
+/**
+ * Saves the reference values and objectives of the dashboard for one scope
+ * (`depotId`, null for the whole company, KPI-09): the scope's rows are
+ * replaced in one transaction, traced kpi_target.update with the changes.
+ */
+export async function saveKpiTargets(depotId: string | null, _state: FormState, formData: FormData): Promise<FormState> {
+  const user = await requireUser("REGULATOR");
+  if (depotId !== null && !(await db.depot.findUnique({ where: { id: depotId }, select: { id: true } }))) {
+    return messageState("Dépôt introuvable\u00a0: rechargez la page.");
+  }
+  const values = readForm(formData);
+  const parsed = targetsSchema().safeParse(values);
+  if (!parsed.success) return invalidState(parsed.error, values);
+
+  const next = toTargetRows(parsed.data, depotId);
+  const previous = await db.kpiTarget.findMany({ where: { depotId }, select: { indicator: true, depotId: true, reference: true, objective: true } });
+  const changes = targetChanges(previous, next);
+  if (Object.keys(changes).length === 0) return successState("Objectifs inchangés.");
+  await db.$transaction(async (tx) => {
+    await tx.kpiTarget.deleteMany({ where: { depotId } });
+    if (next.length > 0) await tx.kpiTarget.createMany({ data: next.map((row) => ({ ...row, updatedById: user.id })) });
+    await audit(tx, user, {
+      action: "kpi_target.update",
+      entity: "KpiTarget",
+      entityId: depotId,
+      details: { ...(depotId ? { depotId } : {}), ...changes },
+    });
+  });
+  revalidatePath("/parametres");
+  revalidatePath("/tableau-de-bord");
+  return successState("Objectifs enregistrés\u00a0: ils sont tracés en pointillés sur les graphiques du tableau de bord.");
 }

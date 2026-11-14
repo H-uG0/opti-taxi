@@ -7,6 +7,7 @@ import {
   deltaTrend,
   kpiDelta,
   listDates,
+  MAX_AGGREGATED_RANGE_DAYS,
   MAX_RANGE_DAYS,
   minuteOfServiceDay,
   mixedDistanceSources,
@@ -263,7 +264,7 @@ describe("computeDayKpis", () => {
       expect(onlyEmptied.vehicles).toBe(0);
       expect(onlyEmptied.tripsPerVehiclePlanned).toBeNull();
       expect(onlyEmptied.planningStatus).toBe("VALIDATED");
-      expect(onlyEmptied.planningMinutes).toBe(30);
+      expect(onlyEmptied.clockMinutes).toBe(30);
     });
 
     it("counts each vehicle once", () => {
@@ -422,7 +423,7 @@ describe("computeDayKpis", () => {
   });
 
   describe("5. temps passé à construire le planning", () => {
-    it("runs from the first optimization to the last validation, over multiple runs", () => {
+    it("keeps the wall clock from the first optimization to the last validation, over multiple runs", () => {
       const kpis = day({
         routes: [
           route({ validatedAt: paris("2026-11-02", "18:45") }),
@@ -434,7 +435,7 @@ describe("computeDayKpis", () => {
       expect(kpis.firstRunAt).toEqual(paris("2026-11-02", "18:00"));
       expect(kpis.validatedAt).toEqual(paris("2026-11-02", "18:50"));
       expect(kpis.planningStatus).toBe("VALIDATED");
-      expect(kpis.planningMinutes).toBe(50);
+      expect(kpis.clockMinutes).toBe(50);
     });
 
     it("is not validated while one route is still proposed", () => {
@@ -444,21 +445,21 @@ describe("computeDayKpis", () => {
       });
       expect(kpis.planningStatus).toBe("NOT_VALIDATED");
       expect(kpis.validatedAt).toBeNull();
-      expect(kpis.planningMinutes).toBeNull();
+      expect(kpis.clockMinutes).toBeNull();
     });
 
     it("is not validated when optimizations ran but produced no route", () => {
       const kpis = day({ runs: [run(paris("2026-11-02", "18:00")), run(paris("2026-11-02", "18:05"))] });
       expect(kpis.optimizationRuns).toBe(2);
       expect(kpis.planningStatus).toBe("NOT_VALIDATED");
-      expect(kpis.planningMinutes).toBeNull();
+      expect(kpis.clockMinutes).toBeNull();
     });
 
     it("cannot be measured for a validated day without optimization run", () => {
       const kpis = day({ routes: [route({ validatedAt: paris("2026-11-02", "18:45") })] });
       expect(kpis.planningStatus).toBe("VALIDATED");
       expect(kpis.firstRunAt).toBeNull();
-      expect(kpis.planningMinutes).toBeNull();
+      expect(kpis.clockMinutes).toBeNull();
     });
 
     it("ignores a validation older than the first run", () => {
@@ -467,7 +468,7 @@ describe("computeDayKpis", () => {
         runs: [run(paris("2026-11-02", "18:00"))],
       });
       expect(kpis.planningStatus).toBe("VALIDATED");
-      expect(kpis.planningMinutes).toBeNull();
+      expect(kpis.clockMinutes).toBeNull();
     });
 
     it("keeps fractions of minutes", () => {
@@ -475,7 +476,32 @@ describe("computeDayKpis", () => {
         routes: [route({ validatedAt: new Date("2026-11-02T17:10:30Z") })],
         runs: [run(new Date("2026-11-02T17:00:00Z"))],
       });
-      expect(kpis.planningMinutes).toBe(10.5);
+      expect(kpis.clockMinutes).toBe(10.5);
+    });
+
+    it("measures the active time of the initial build from the planning actions", () => {
+      const at = (hhmm: string, date = "2026-11-02") => paris(date, hhmm);
+      const kpis = computeDayKpis(
+        DAY,
+        {
+          routes: [route({ validatedAt: at("06:55", DAY) })],
+          trips: [],
+          runs: [{ serviceDate: DAY, startedAt: at("17:00"), requestedById: "u1" }],
+          activity: [
+            { serviceDate: DAY, at: at("17:02"), action: "plan.optimize", userId: "u1" },
+            { serviceDate: DAY, at: at("17:20"), action: "plan.validate", userId: "u1" },
+            // Reopened on the day itself for a call, validated again.
+            { serviceDate: DAY, at: at("06:45", DAY), action: "plan.reopen", userId: "u1" },
+            { serviceDate: DAY, at: at("06:55", DAY), action: "plan.validate", userId: "u1" },
+            { serviceDate: "2026-11-04", at: at("18:00", DAY), action: "plan.optimize", userId: "u1" },
+          ],
+        },
+        TODAY,
+      );
+      // 17:00 → 17:02 → 17:20 would be one session only if the 18 min gap were under 15 min: two sessions of 2 and 1 min.
+      expect(kpis.planningMinutes).toBe(3);
+      expect(kpis.planningTime?.touchUpMinutes).toBe(10);
+      expect(kpis.clockMinutes).toBe(13 * 60 + 55);
     });
   });
 });
@@ -594,8 +620,9 @@ describe("summarizePeriod", () => {
     };
     const period = summarizePeriod(computeKpisByDay("2026-11-02", "2026-11-04", data, "2026-11-03"));
     expect(period.validatedDays).toBe(2);
-    expect(period.measuredPlanningDays).toBe(2);
-    expect(period.averagePlanningMinutes).toBe(45); // (30 + 60) / 2
+    // No action of the audit trail passed: the planning time is not measured (the wall clock is no longer it).
+    expect(period.measuredPlanningDays).toBe(0);
+    expect(period.medianPlanningMinutes).toBeNull();
     expect(period.optimizationRuns).toBe(4);
     expect(period.lateArrivals).toBe(2);
     expect(period.measuredOutbound).toBe(3);
@@ -637,9 +664,9 @@ describe("summarizePeriod", () => {
       eligibleSharedRate: null,
       serviceRate: null,
       lateRate: null,
-      averagePlanningMinutes: null,
+      medianPlanningMinutes: null,
     });
-    expect(summarizePeriod([])).toMatchObject({ from: "", to: "", days: 0, averagePlanningMinutes: null });
+    expect(summarizePeriod([])).toMatchObject({ from: "", to: "", days: 0, medianPlanningMinutes: null });
   });
 });
 
@@ -647,17 +674,18 @@ describe("resolveKpiRange", () => {
   const tomorrow = "2026-11-03";
 
   it("defaults to the 14 days ending tomorrow", () => {
-    expect(resolveKpiRange({}, tomorrow)).toEqual({ from: "2026-10-21", to: tomorrow, error: null });
-    expect(resolveKpiRange({ from: "", to: "  " }, tomorrow)).toEqual({ from: "2026-10-21", to: tomorrow, error: null });
+    const byDay = { granularity: "day", explicitGranularity: false, error: null };
+    expect(resolveKpiRange({}, tomorrow)).toEqual({ from: "2026-10-21", to: tomorrow, ...byDay });
+    expect(resolveKpiRange({ from: "", to: "  " }, tomorrow)).toEqual({ from: "2026-10-21", to: tomorrow, ...byDay });
   });
 
   it("keeps a valid range and derives a missing start from the end", () => {
-    expect(resolveKpiRange({ from: "2026-10-01", to: "2026-10-31" }, tomorrow)).toEqual({
+    expect(resolveKpiRange({ from: "2026-10-01", to: "2026-10-31" }, tomorrow)).toMatchObject({
       from: "2026-10-01",
       to: "2026-10-31",
       error: null,
     });
-    expect(resolveKpiRange({ to: "2026-10-31" }, tomorrow)).toEqual({ from: "2026-10-18", to: "2026-10-31", error: null });
+    expect(resolveKpiRange({ to: "2026-10-31" }, tomorrow)).toMatchObject({ from: "2026-10-18", to: "2026-10-31", error: null });
   });
 
   it("falls back on invalid dates with a message", () => {
@@ -674,11 +702,24 @@ describe("resolveKpiRange", () => {
     expect(range.error).toContain("inversées");
   });
 
-  it("limits the range length", () => {
-    const range = resolveKpiRange({ from: "2025-01-01", to: "2026-11-03" }, tomorrow);
+  it("limits a range shown day by day to MAX_RANGE_DAYS", () => {
+    const range = resolveKpiRange({ from: "2025-01-01", to: "2026-11-03", granularity: "jour" }, tomorrow);
     expect(range.to).toBe("2026-11-03");
     expect(dayCount(range.from, range.to)).toBe(MAX_RANGE_DAYS);
+    expect(range).toMatchObject({ granularity: "day", explicitGranularity: true });
     expect(range.error).toContain(`${MAX_RANGE_DAYS} jours`);
+  });
+
+  it("raises the limit by week or month, and picks the step of a long range itself", () => {
+    expect(resolveKpiRange({ from: "2026-07-01", to: "2026-11-03" }, tomorrow)).toMatchObject({ granularity: "week", error: null });
+    const year = resolveKpiRange({ from: "2025-11-01", to: "2026-11-03" }, tomorrow);
+    expect(year).toMatchObject({ from: "2025-11-01", granularity: "month", explicitGranularity: false, error: null });
+    const tooLong = resolveKpiRange({ from: "2024-01-01", to: "2026-11-03", granularity: "semaine" }, tomorrow);
+    expect(dayCount(tooLong.from, tooLong.to)).toBe(MAX_AGGREGATED_RANGE_DAYS);
+    expect(tooLong.granularity).toBe("week");
+    expect(tooLong.error).toContain(`${MAX_AGGREGATED_RANGE_DAYS} jours`);
+    // An unknown step falls back on the automatic one.
+    expect(resolveKpiRange({ granularity: "trimestre" }, tomorrow)).toMatchObject({ granularity: "day", explicitGranularity: false });
   });
 });
 

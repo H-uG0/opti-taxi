@@ -99,7 +99,10 @@
  *   runId), tariff.create/update/delete (details: changed fields; the deleted
  *   grid), billing.update (head office and readings of the conventions),
  *   certification.create/delete, tariff_area.create/update/delete,
- *   holiday.create, holiday.create_legal (details.added), holiday.delete;
+ *   holiday.create, holiday.create_legal (details.added), holiday.delete,
+ *   kpi_target.update (the dashboard's references and objectives of a scope,
+ *   on the KpiTarget scope: entityId the depot, null for the company;
+ *   details: « indicator.field » { from, to } as typed, and depotId);
  * - accounts: driver.*, account.* (create, update, password_reset,
  *   password_change, password_change_failed: a wrong current password,
  *   deactivate, reactivate), session.login, session.logout,

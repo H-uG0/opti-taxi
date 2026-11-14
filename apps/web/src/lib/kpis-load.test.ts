@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { encodePlanFigures, emptyPlanFigures } from "./kpis-plan";
-import { loadKpiRows, serviceDateFilter, toKpiData, type KpiClient, type KpiQueryRows } from "./kpis-load";
+import { loadKpiRows, routeTimings, serviceDateFilter, toKpiData, type KpiClient, type KpiQueryRows, type TimedStop } from "./kpis-load";
 
 const day = new Date("2026-10-12T00:00:00.000Z");
 const validatedAt = new Date("2026-10-11T15:40:00.000Z");
@@ -176,7 +176,7 @@ describe("loadKpiRows", () => {
     expect(calls.stops).toMatchObject({ where: { route: { serviceDate: range } } });
     // Every trip of the dates: the demand counts them all, not only the served ones.
     expect(calls.trips).toMatchObject({ where: { serviceDate: range } });
-    expect(calls.runs).toEqual({ where: { serviceDate: range }, select: { id: true, serviceDate: true, startedAt: true } });
+    expect(calls.runs).toEqual({ where: { serviceDate: range }, select: { id: true, serviceDate: true, startedAt: true, requestedById: true } });
     expect(calls.plans).toMatchObject({ where: { serviceDate: range } });
   });
 
@@ -184,5 +184,38 @@ describe("loadKpiRows", () => {
     expect(serviceDateFilter({ dates: ["2026-10-06", "2026-10-13"] })).toEqual({
       in: [new Date("2026-10-06T00:00:00.000Z"), new Date("2026-10-13T00:00:00.000Z")],
     });
+  });
+});
+
+describe("routeTimings", () => {
+  const stop = (sequence: number, tripId: string, kind: "PICKUP" | "DROPOFF", arrival: number, start: number, departure: number, loadAfter: number): TimedStop => ({
+    sequence,
+    tripId,
+    kind,
+    arrivalMinute: arrival,
+    startMinute: start,
+    departureMinute: departure,
+    loadAfter,
+  });
+  const direction = (id: string): "OUTBOUND" | "RETURN" => (id.startsWith("out") ? "OUTBOUND" : "RETURN");
+
+  it("counts the planned minutes, those with a patient on board and the waits at the places of care", () => {
+    const stops = [
+      // Home → clinic (outbound), waits 10 min for the drop-off window.
+      stop(1, "out1", "PICKUP", 420, 420, 425, 1),
+      stop(2, "out1", "DROPOFF", 450, 460, 465, 0),
+      // Back to the clinic for the end of a session: waits 20 min, then takes the patient home.
+      stop(3, "ret1", "PICKUP", 600, 620, 625, 1),
+      stop(4, "ret1", "DROPOFF", 655, 655, 660, 0),
+    ];
+    expect(routeTimings({ startMinute: 400, endMinute: 700, breakStartMinute: 480, breakEndMinute: 510 }, stops.reverse(), direction)).toEqual({
+      activeMinutes: 270,
+      onboardMinutes: 35 + 30,
+      facilityWaitMinutes: 10 + 20,
+    });
+  });
+
+  it("leaves the planned minutes unknown without the route's times", () => {
+    expect(routeTimings({}, [], direction)).toEqual({ onboardMinutes: 0, facilityWaitMinutes: 0 });
   });
 });

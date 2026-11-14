@@ -12,6 +12,7 @@ import { lostVehicleDays } from "@/lib/kpis-fleet";
 import { planRates } from "@/lib/kpis-plan";
 import { eligibleSharedRate, measuredSharedRate, SHARING_OBJECTIVE, tapTotal } from "@/lib/kpis-sharing";
 import type { TapType } from "@/lib/kpis-rows";
+import { KPI_INDICATORS, targetGap, type EffectiveTargets, type KpiIndicator } from "@/lib/kpis-targets";
 import { formatKm } from "@/lib/labels";
 import { addDays, formatDuration, formatLongDate } from "@/lib/time";
 import {
@@ -23,6 +24,8 @@ import {
   formatDeltaEuros,
   formatDeltaPoints,
   formatEurosRounded,
+  formatIndicator,
+  formatIndicatorGap,
   formatInstant,
   formatRate,
   lateLabel,
@@ -91,6 +94,46 @@ function Compare({
   );
 }
 
+/**
+ * The value against the objective and the reference of its indicator (KPI-09):
+ * « Objectif 4,5 · −0,3 · réf. 3,8 ». The gap to the objective reads better or
+ * worse in words for screen readers, never by its colour alone.
+ */
+function TargetHint({ indicator, value, targets }: { indicator: KpiIndicator; value: number | null; targets: EffectiveTargets }) {
+  const target = targets[indicator];
+  if (target.objective === null && target.reference === null) return null;
+  const { unit, higherIsBetter } = KPI_INDICATORS[indicator];
+  const gap = targetGap(value, target.objective);
+  const better = gap === null ? null : higherIsBetter ? gap >= 0 : gap <= 0;
+  const referenceGap = targetGap(value, target.reference);
+  return (
+    <span className="mt-1 flex flex-wrap items-center gap-x-1">
+      {target.objective !== null ? (
+        <span>
+          Objectif <span className="tabular">{formatIndicator(unit, target.objective)}</span>
+          {target.objectiveSource === "protocol" ? " (protocole)" : ""}
+          {gap !== null ? (
+            <>
+              {" · "}
+              <span className={cn("tabular font-medium", better ? "text-emerald-700" : "text-red-700")}>{formatIndicatorGap(unit, gap)}</span>
+              <span className="sr-only">{better ? " (atteint)" : " (non atteint)"}</span>
+            </>
+          ) : null}
+        </span>
+      ) : null}
+      {target.reference !== null ? (
+        <span title="Valeur de référence, mesurée avant l'outil">
+          {target.objective !== null ? "· " : ""}réf. <span className="tabular">{formatIndicator(unit, target.reference)}</span>
+          {referenceGap !== null ? <span className="tabular"> ({formatIndicatorGap(unit, referenceGap)})</span> : null}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** Why the demand of a depot or a type is not measured. */
+const SCOPED_SERVICE = "Non ventilé\u00a0: une course sans véhicule n'appartient à aucun dépôt ni type";
+
 function BlockTitle({ id, title, date, badges, children }: { id: string; title: string; date: string; badges: ReactNode; children?: ReactNode }) {
   return (
     <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -144,12 +187,14 @@ export function RealizedBlock({
   today,
   tomorrow,
   toleranceMin,
+  targets,
 }: {
   day: DayKpis;
   comparison: RealizedComparison;
   today: string;
   tomorrow: string;
   toleranceMin: number;
+  targets: EffectiveTargets;
 }) {
   const { previous, fourWeeks } = comparison;
   const prev = (value: (d: KpiSummary) => number | null) => (previous ? { date: previous.date, value: value(previous) } : null);
@@ -186,9 +231,12 @@ export function RealizedBlock({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <Stat
           label="Taux de service"
-          tone={lost > 0 ? "warn" : "default"}
+          tone={!day.scoped && lost > 0 ? "warn" : "default"}
           value={formatRate(day.serviceRate)}
           hint={
+            day.scoped ? (
+              <Line>{SCOPED_SERVICE}</Line>
+            ) : (
             <>
               <Line>
                 {placedTrips(day.demand)} placées sur {plural(tripsToCarry(day.demand), "course à transporter", "courses à transporter")}
@@ -206,7 +254,9 @@ export function RealizedBlock({
                 formatDelta={formatDeltaPoints}
                 formatValue={formatRate}
               />
+              <TargetHint indicator="serviceRate" value={day.serviceRate} targets={targets} />
             </>
+            )
           }
         />
         <Stat
@@ -230,6 +280,7 @@ export function RealizedBlock({
                 formatDelta={formatDeltaDecimal}
                 formatValue={(v) => formatDecimal(v)}
               />
+              <TargetHint indicator="tripsPerVehicle" value={day.tripsPerVehicleRealized} targets={targets} />
             </>
           }
         />
@@ -254,6 +305,7 @@ export function RealizedBlock({
                   formatDelta={formatDeltaPoints}
                   formatValue={formatRate}
                 />
+                <TargetHint indicator="useRate" value={day.useRate} targets={targets} />
               </>
             ) : (
               <Line>Flotte du jour inconnue</Line>
@@ -278,6 +330,7 @@ export function RealizedBlock({
                 formatDelta={formatDeltaPoints}
                 formatValue={formatRate}
               />
+              <TargetHint indicator="sharedRate" value={sharedRateOf(measuredBasis, day)} targets={targets} />
             </>
           }
         />
@@ -306,6 +359,7 @@ export function RealizedBlock({
                 formatDelta={formatDeltaPoints}
                 formatValue={formatRate}
               />
+              <TargetHint indicator="lateRate" value={day.measuredOutbound > 0 ? day.lateRate : null} targets={targets} />
             </>
           }
         />
@@ -332,6 +386,7 @@ export function RealizedBlock({
                 formatDelta={(delta) => `${formatDeltaEuros(delta)} / course`}
                 formatValue={(v) => `${formatEurosRounded(v)} / course`}
               />
+              <TargetHint indicator="marginPerTrip" value={day.marginPerTrip} targets={targets} />
             </>
           }
         />
@@ -355,7 +410,7 @@ function PlannedServedDone({ day }: { day: DayKpis }) {
     },
     {
       label: "Partagées (périmètre CPAM)",
-      planned: plan ? `${tapTotal(plan.eligibleShared)} / ${tapTotal(plan.eligible)}` : "—",
+      planned: plan && !plan.partial ? `${tapTotal(plan.eligibleShared)} / ${tapTotal(plan.eligible)}` : "—",
       served: `${tapTotal(day.sharing.eligibleShared)} / ${tapTotal(day.sharing.eligible)}`,
       done: measured > 0 ? `${tapTotal(day.sharing.measuredShared)} / ${measured}` : "—",
       title: "Courses partagées sur les courses éligibles\u202f; réalisé\u00a0: mesuré aux horodatages des équipages",
@@ -430,12 +485,14 @@ export function PlannedBlock({
   comparison,
   today,
   tomorrow,
+  targets,
 }: {
   day: DayKpis;
   plan: PlanView | null;
   comparison: PlannedComparison;
   today: string;
   tomorrow: string;
+  targets: EffectiveTargets;
 }) {
   const title = day.date === tomorrow ? "Demain (prévu)" : "Prévu";
   const rates = plan ? planRates(plan.figures) : null;
@@ -465,7 +522,11 @@ export function PlannedBlock({
 
       {!figures || !rates ? (
         <p className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-xs">
-          Pas encore de tournée&nbsp;: {plural(placedTrips(day.demand) + day.demand.unassigned, "course à planifier", "courses à planifier")}.{" "}
+          {day.scoped ? (
+            <>Pas encore de tournée pour ces véhicules.</>
+          ) : (
+            <>Pas encore de tournée&nbsp;: {plural(placedTrips(day.demand) + day.demand.unassigned, "course à planifier", "courses à planifier")}.</>
+          )}{" "}
           <Link href={`/planning?date=${day.date}`} className="font-medium text-brand-700 underline underline-offset-2">
             Ouvrir le planning
           </Link>
@@ -474,9 +535,12 @@ export function PlannedBlock({
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
           <Stat
             label="Taux de service prévu"
-            tone={figures.unassigned + figures.handedOver > 0 ? "warn" : "default"}
+            tone={!figures.partial && figures.unassigned + figures.handedOver > 0 ? "warn" : "default"}
             value={formatRate(rates.serviceRate)}
             hint={
+              figures.partial ? (
+                <Line>{SCOPED_SERVICE}</Line>
+              ) : (
               <>
                 <Line>
                   {figures.served} servies · {plural(figures.unassigned, "non affectée", "non affectées")}
@@ -490,7 +554,9 @@ export function PlannedBlock({
                   formatDelta={formatDeltaPoints}
                   formatValue={formatRate}
                 />
+                <TargetHint indicator="serviceRate" value={rates.serviceRate} targets={targets} />
               </>
+              )
             }
           />
           <Stat
@@ -512,6 +578,7 @@ export function PlannedBlock({
                   formatDelta={formatDeltaDecimal}
                   formatValue={(v) => formatDecimal(v)}
                 />
+                <TargetHint indicator="tripsPerVehicle" value={rates.tripsPerVehicle} targets={targets} />
               </>
             }
           />
@@ -532,6 +599,7 @@ export function PlannedBlock({
                   formatDelta={formatDeltaPoints}
                   formatValue={formatRate}
                 />
+                <TargetHint indicator="emptyKmShare" value={rates.emptyKmShare} targets={targets} />
               </>
             }
           />
@@ -556,13 +624,14 @@ export function PlannedBlock({
                   formatDelta={formatDeltaPoints}
                   formatValue={formatRate}
                 />
+                <TargetHint indicator="sharedRate" value={rates.sharedRate} targets={targets} />
               </>
             }
           />
           <Stat
             label="Allers serrés"
             tone={figures.tightOutbound > 0 ? "warn" : "default"}
-            value={String(figures.tightOutbound)}
+            value={figures.partial && figures.plannedOutbound === 0 ? "—" : String(figures.tightOutbound)}
             hint={
               <>
                 <Line>
@@ -598,6 +667,7 @@ export function PlannedBlock({
                   formatDelta={(delta) => `${formatDeltaEuros(delta)} / course`}
                   formatValue={(v) => `${formatEurosRounded(v)} / course`}
                 />
+                <TargetHint indicator="marginPerTrip" value={rates.marginPerTrip} targets={targets} />
               </>
             }
           />

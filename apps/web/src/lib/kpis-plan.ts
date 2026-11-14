@@ -62,6 +62,12 @@ export type PlanFigures = {
   plannedOutbound: number;
   tightOutbound: number;
   byVehicle: PlanVehicleFigures[];
+  /**
+   * Figures of a depot or a vehicle type only (kpis-scope.ts): trips, km and
+   * money of its vehicles; the trips left aside, the sharing and the tight
+   * outbound trips belong to no vehicle and are unknown (their rates « — »).
+   */
+  partial?: boolean;
 };
 
 /** One line per route with stops of `date`: its trips, km and money (breakdowns by vehicle, type, depot). */
@@ -115,6 +121,7 @@ export function planFiguresOf(day: DayKpis, byVehicle: PlanVehicleFigures[] = []
     plannedOutbound: day.plannedOutbound,
     tightOutbound: day.tightOutbound,
     byVehicle,
+    ...(day.scoped ? { partial: true } : {}),
   };
 }
 
@@ -145,6 +152,30 @@ function sumTap(a: ByTap, b: ByTap): ByTap {
   return { VSL: a.VSL + b.VSL, TAXI: a.TAXI + b.TAXI };
 }
 
+/**
+ * The frozen plan of the vehicles `keep` accepts (a depot, a type): the sum of
+ * their lines, marked partial (kpis-scope.ts).
+ */
+export function partialPlanFigures(figures: PlanFigures, keep: (line: PlanVehicleFigures) => boolean): PlanFigures {
+  const lines = figures.byVehicle.filter(keep);
+  const sum = (value: (line: PlanVehicleFigures) => number) => lines.reduce((total, line) => total + value(line), 0);
+  const revenue = sum((l) => l.revenue);
+  const cost = sum((l) => l.cost);
+  return {
+    ...emptyPlanFigures(),
+    served: sum((l) => l.trips),
+    vehicles: lines.length,
+    distanceKm: sum((l) => l.distanceKm),
+    emptyKm: sum((l) => l.emptyKm),
+    revenue,
+    cost,
+    margin: revenue - cost,
+    sharedTrips: sum((l) => l.sharedTrips),
+    byVehicle: lines,
+    partial: true,
+  };
+}
+
 /** Sum of plans (the four weeks of a comparison); the vehicle lines are not summed. */
 export function addPlanFigures(a: PlanFigures, b: PlanFigures): PlanFigures {
   return {
@@ -166,6 +197,7 @@ export function addPlanFigures(a: PlanFigures, b: PlanFigures): PlanFigures {
     plannedOutbound: a.plannedOutbound + b.plannedOutbound,
     tightOutbound: a.tightOutbound + b.tightOutbound,
     byVehicle: [],
+    ...(a.partial || b.partial ? { partial: true } : {}),
   };
 }
 
@@ -184,7 +216,7 @@ export type PlanRates = {
 export function planRates(plan: PlanFigures): PlanRates {
   const placed = plan.served + plan.noShows;
   return {
-    serviceRate: ratio(placed, placed + plan.unassigned + plan.handedOver),
+    serviceRate: plan.partial ? null : ratio(placed, placed + plan.unassigned + plan.handedOver),
     tripsPerVehicle: ratio(plan.served, plan.vehicles),
     emptyKmShare: ratio(plan.emptyKm, plan.distanceKm),
     sharedRate: ratio(tapTotal(plan.eligibleShared), tapTotal(plan.eligible)),
@@ -229,6 +261,7 @@ const figuresSchema = z.object({
       cost: z.number(),
     }),
   ),
+  partial: z.boolean().optional(),
 });
 
 /** ValidatedPlan.figures: versioned, so an older format is still read (or ignored) after a change. */

@@ -22,6 +22,12 @@ export type ConsumptionStats = {
   per100Km: number | null;
   /** Energy cost per km (€), null when not measurable yet. */
   costPerKm: number | null;
+  /** Fuel (L or kWh) and money of the measured interval, unrounded (sums over several vehicles). */
+  measuredQuantity: number;
+  measuredCost: number;
+  /** First and last full tanks bounding the measured interval (null when not measurable). */
+  fromDate: string | null;
+  toDate: string | null;
 };
 
 /** Unit of the quantity of a fill: kWh for an electric vehicle, litres otherwise. */
@@ -33,7 +39,17 @@ export function consumptionStats(entries: readonly FuelEntry[]): ConsumptionStat
   const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date) || a.odometerKm - b.odometerKm);
   const last = sorted.reduce<FuelEntry | null>((best, e) => (!best || e.odometerKm >= best.odometerKm ? e : best), null);
   const fullIndexes = sorted.flatMap((e, i) => (e.fullTank ? [i] : []));
-  const empty = { odometerKm: last?.odometerKm ?? null, odometerDate: last?.date ?? null, measuredKm: 0, per100Km: null, costPerKm: null };
+  const empty = {
+    odometerKm: last?.odometerKm ?? null,
+    odometerDate: last?.date ?? null,
+    measuredKm: 0,
+    per100Km: null,
+    costPerKm: null,
+    measuredQuantity: 0,
+    measuredCost: 0,
+    fromDate: null,
+    toDate: null,
+  };
   if (fullIndexes.length < 2) return empty;
   const first = fullIndexes[0]!;
   const lastFull = fullIndexes[fullIndexes.length - 1]!;
@@ -47,5 +63,9 @@ export function consumptionStats(entries: readonly FuelEntry[]): ConsumptionStat
     measuredKm: km,
     per100Km: Math.round((quantity / km) * 1000) / 10,
     costPerKm: Math.round((cost / km) * 1000) / 1000,
+    measuredQuantity: quantity,
+    measuredCost: cost,
+    fromDate: sorted[first]!.date,
+    toDate: sorted[lastFull]!.date,
   };
 }

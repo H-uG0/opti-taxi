@@ -494,8 +494,9 @@ model Depot {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  vehicles Vehicle[]
-  drivers  Driver[]
+  vehicles   Vehicle[]
+  drivers    Driver[]
+  kpiTargets KpiTarget[]
 }
 
 model Vehicle {
@@ -943,6 +944,26 @@ model ValidatedPlan {
   validatedBy User? @relation("ValidatedPlanBy", fields: [validatedById], references: [id], onDelete: SetNull)
 }
 
+/// Valeur de référence (mesurée avant l'outil) et objectif d'un indicateur du tableau de bord, pour toute
+/// l'entreprise (depotId null) ou pour un dépôt. Saisis dans Paramètres (valeurs à fournir par V) ; tracés en
+/// pointillés sur les graphiques, l'écart affiché dans les tuiles. Taux en fraction (0.3 = 30 %), temps en minutes,
+/// montants en euros. Une ligne par indicateur et par portée : l'enregistrement remplace toute la portée.
+model KpiTarget {
+  id          String   @id @default(cuid())
+  /// Clé de l'indicateur (lib/kpis-targets.ts KPI_INDICATORS), ex. « tripsPerVehicle ».
+  indicator   String
+  depotId     String?
+  reference   Float?
+  objective   Float?
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+
+  depot     Depot? @relation(fields: [depotId], references: [id], onDelete: Cascade)
+  updatedBy User?  @relation("KpiTargetUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([indicator, depotId])
+}
+
 model User {
   id             String   @id @default(cuid())
   email          String   @unique
@@ -969,6 +990,7 @@ model User {
   exceptionalAmbulanceTrips Trip[]   @relation("TripExceptionalAmbulanceBy")
   dayCrews         DayCrew[]         @relation("DayCrewUpdatedBy")
   validatedPlans   ValidatedPlan[]   @relation("ValidatedPlanBy")
+  kpiTargets       KpiTarget[]       @relation("KpiTargetUpdatedBy")
   auditEvents      AuditEvent[]
 }
 
@@ -1007,4 +1029,5 @@ model AuditEvent {
   @@index([entity, entityId])
   @@index([userId, at])
   @@index([at])
+  @@index([serviceDate, at])
 }

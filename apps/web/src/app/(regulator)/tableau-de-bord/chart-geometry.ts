@@ -6,12 +6,18 @@
  */
 
 export type ChartPoint = {
+  /** Date of the day, or first day of the week or month: the key of the step. */
   date: string;
   /** Bar value; null = no data that day (nothing drawn, distinct from 0). */
   value: number | null;
   /** Optional second series drawn as a dot on the same scale. */
   secondary?: number | null;
+  /** Optional moving average drawn as a line on the same scale (KPI-09). */
+  average?: number | null;
 };
+
+/** Reference and objective of the indicator, drawn as dashed horizontal lines (KPI-09). */
+export type ChartGuides = { reference?: number | null; objective?: number | null };
 
 export type BarShape = {
   date: string;
@@ -24,6 +30,8 @@ export type BarShape = {
   bar: { y: number; height: number; negative: boolean } | null;
   /** Y of the secondary dot in pixels, null when unknown. */
   dotY: number | null;
+  /** Y of the moving average in pixels, null when unknown. */
+  lineY: number | null;
 };
 
 export type ChartGeometry = {
@@ -33,6 +41,11 @@ export type ChartGeometry = {
   barWidth: number;
   radius: number;
   shapes: BarShape[];
+  /** Y of the dashed lines in pixels, null when there is none. */
+  referenceY: number | null;
+  objectiveY: number | null;
+  /** Segments of the moving average between consecutive known values (x in percent, y in pixels). */
+  segments: { x1: number; y1: number; x2: number; y2: number }[];
 };
 
 /** Room above the tallest mark (dot radius + its ring) and below the lowest one. */
@@ -49,11 +62,21 @@ export function barWidthFor(count: number): number {
   return 3;
 }
 
-export function chartGeometry(points: readonly ChartPoint[], height = 64): ChartGeometry {
+function known(value: number | null | undefined): value is number {
+  return value !== null && value !== undefined && Number.isFinite(value);
+}
+
+export function chartGeometry(points: readonly ChartPoint[], height = 64, guides: ChartGuides = {}): ChartGeometry {
   const values: number[] = [];
   for (const p of points) {
-    if (p.value !== null && Number.isFinite(p.value)) values.push(p.value);
-    if (p.secondary !== undefined && p.secondary !== null && Number.isFinite(p.secondary)) values.push(p.secondary);
+    if (known(p.value)) values.push(p.value);
+    if (known(p.secondary)) values.push(p.secondary);
+    if (known(p.average)) values.push(p.average);
+  }
+  // The dashed lines are in the scale only when the chart has data: they never draw an empty chart's axis.
+  if (values.length > 0) {
+    if (known(guides.reference)) values.push(guides.reference);
+    if (known(guides.objective)) values.push(guides.objective);
   }
   const min = Math.min(0, ...values);
   // All zero (or no data): keep the baseline at the bottom.
@@ -75,18 +98,37 @@ export function chartGeometry(points: readonly ChartPoint[], height = 64): Chart
       const negative = p.value < 0;
       bar = { y: negative ? zeroY : zeroY - size, height: size, negative };
     }
-    const secondary = p.secondary;
     return {
       date: p.date,
       centerPct: (i + 0.5) * slotWidthPct,
       slotPct: i * slotWidthPct,
       slotWidthPct,
       bar,
-      dotY: secondary !== undefined && secondary !== null && Number.isFinite(secondary) ? y(secondary) : null,
+      dotY: known(p.secondary) ? y(p.secondary) : null,
+      lineY: known(p.average) ? y(p.average) : null,
     };
   });
 
-  return { height, zeroY, barWidth, radius: Math.min(4, barWidth / 2), shapes };
+  // The moving average runs over working days: it joins its known values across the days off between them.
+  const segments: ChartGeometry["segments"] = [];
+  let previous: BarShape | null = null;
+  for (const shape of shapes) {
+    if (shape.lineY === null) continue;
+    if (previous && previous.lineY !== null) segments.push({ x1: previous.centerPct, y1: previous.lineY, x2: shape.centerPct, y2: shape.lineY });
+    previous = shape;
+  }
+  const guideY = (value: number | null | undefined) => (values.length > 0 && known(value) ? y(value) : null);
+
+  return {
+    height,
+    zeroY,
+    barWidth,
+    radius: Math.min(4, barWidth / 2),
+    shapes,
+    referenceY: guideY(guides.reference),
+    objectiveY: guideY(guides.objective),
+    segments,
+  };
 }
 
 /**
