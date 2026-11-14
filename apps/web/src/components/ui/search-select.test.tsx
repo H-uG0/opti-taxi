@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { useState } from "react";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { filterGroups, SearchSelect, type SearchSelectGroup, type SearchSelectOption } from "./search-select";
+import { filterGroups, remoteStatusText, SearchSelect, type SearchSelectGroup, type SearchSelectOption } from "./search-select";
 
 afterEach(cleanup);
 
@@ -96,5 +96,81 @@ describe("SearchSelect", () => {
     ]);
     expect(filterGroups(OPTIONS, "")).toHaveLength(3);
     expect(filterGroups(OPTIONS, "zzz")).toEqual([]);
+  });
+});
+
+describe("SearchSelect with a server search", () => {
+  type Answer = { status: "ok" | "short"; options: SearchSelectOption[]; more?: boolean };
+
+  function Remote({ search, onChange = () => {} }: { search: (q: string) => Promise<Answer>; onChange?: (v: string) => void }) {
+    const [value, setValue] = useState("");
+    return (
+      <SearchSelect
+        value={value}
+        onChange={(v) => {
+          setValue(v);
+          onChange(v);
+        }}
+        search={search}
+        searchHint="Tapez au moins 2 lettres."
+        selectedLabel={value || "Choisissez un patient…"}
+        label="Patient"
+        emptyText="Aucun patient actif ne correspond."
+      />
+    );
+  }
+
+  async function typeAndWait(text: string) {
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: text } });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+  }
+
+  it("asks the server only once 2 characters are typed, and drops an answer that arrives late", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending: { query: string; resolve: (a: Answer) => void }[] = [];
+      const search = vi.fn((query: string) => new Promise<Answer>((resolve) => pending.push({ query, resolve })));
+      const onChange = vi.fn();
+      render(<Remote search={search} onChange={onChange} />);
+      fireEvent.click(screen.getByRole("button", { name: /Patient/ }));
+      await act(async () => {
+        vi.advanceTimersByTime(10);
+      });
+      expect(screen.getByText("Tapez au moins 2 lettres.")).toBeTruthy();
+
+      await typeAndWait("h");
+      expect(search).not.toHaveBeenCalled();
+
+      await typeAndWait("ha");
+      await typeAndWait("ham");
+      expect(search.mock.calls.map((c) => c[0])).toEqual(["ha", "ham"]);
+      // « ham » answers first, then the stale « ha »: only « ham » is listed.
+      await act(async () => pending[1]!.resolve({ status: "ok", options: [{ value: "p1", label: "HAMIDI Chantal", hint: "13100 Aix" }] }));
+      await act(async () =>
+        pending[0]!.resolve({ status: "ok", options: [{ value: "p9", label: "HAAS Paul" }, { value: "p1", label: "HAMIDI Chantal" }] }),
+      );
+      expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["HAMIDI Chantal13100 Aix"]);
+      expect(screen.getByText("1 résultat")).toBeTruthy();
+
+      const field = screen.getByRole("combobox");
+      fireEvent.keyDown(field, { key: "ArrowDown" });
+      fireEvent.keyDown(field, { key: "Enter" });
+      expect(onChange).toHaveBeenCalledWith("p1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says when nothing matches, when more match than shown, and when the search failed", () => {
+    expect(remoteStatusText({ status: "ok", options: [], more: false }, "hint", "Aucun patient actif ne correspond.")).toBe(
+      "Aucun patient actif ne correspond.",
+    );
+    expect(remoteStatusText({ status: "ok", options: [1, 2], more: true }, "hint", "vide")).toBe(
+      "2 résultats affichés, d'autres correspondent\u00a0: précisez la recherche.",
+    );
+    expect(remoteStatusText({ status: "error", options: [], more: false }, "hint", "vide")).toMatch(/n'a pas abouti/);
+    expect(remoteStatusText({ status: "loading", options: [], more: false }, "hint", "vide")).toBe("Recherche…");
   });
 });

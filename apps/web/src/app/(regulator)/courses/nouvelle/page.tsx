@@ -1,18 +1,28 @@
 import type { Metadata } from "next";
 import { LinkButton } from "@/components/ui/button";
 import { BackLink } from "@/components/ui/back-link";
+import { FormMessage } from "@/components/ui/form";
 import { Card, CardBody, EmptyState, PageHeader } from "@/components/ui/layout";
-import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { geocoderEnabled } from "@/lib/geocode";
-import { FACILITY_TYPE_LABELS, MOBILITY_LABELS, PRESCRIBED_MODE_LABELS, SHARING_SCOPE_LABELS } from "@/lib/labels";
-import { formatShortDate, fromIsoDate, isIsoDate, todayIso, toIsoDate, tomorrowIso } from "@/lib/time";
-import { NewTripForm, type FacilityOption, type PatientOption } from "./new-trip-form";
-import { formatPersonName } from "@/lib/names";
+import { FACILITY_TYPE_LABELS } from "@/lib/labels";
+import { isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
+import { NewTripForm, type FacilityOption } from "./new-trip-form";
+import { loadTripPatient } from "./trip-patient";
 
 export const metadata: Metadata = { title: "Nouvelle course" };
 
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+/**
+ * « Nouvelle course » : the patient is searched on the server as the regulator
+ * types (never the whole list in the page); ?patient= (the button of the
+ * patient's record) opens the form on that patient, their usual facility
+ * proposed; ?date= the day.
+ */
 export default async function NewTripPage({
   searchParams,
 }: {
@@ -20,74 +30,41 @@ export default async function NewTripPage({
 }) {
   const user = await requireUser("REGULATOR");
   const params = await searchParams;
-  const rawDate = Array.isArray(params.date) ? params.date[0] : params.date;
+  const rawDate = firstParam(params.date);
   const today = todayIso();
   const initialDate = isIsoDate(rawDate) && rawDate >= today ? rawDate : tomorrowIso();
+  const patientId = firstParam(params.patient);
 
-  const [patients, facilities] = await Promise.all([
-    db.patient.findMany({
-      where: { active: true },
-      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        city: true,
-        mobility: true,
-        prescriptions: {
-          where: { validTo: { gte: fromIsoDate(today) } },
-          orderBy: { validFrom: "asc" },
-          select: { id: true, mode: true, sharing: true, validFrom: true, validTo: true, prescriber: true },
-        },
-      },
-    }),
+  const [anyPatient, facilities, initialPatient] = await Promise.all([
+    db.patient.findFirst({ where: { active: true }, select: { id: true } }),
     db.facility.findMany({
       where: { active: true },
       orderBy: { name: "asc" },
       select: { id: true, name: true, city: true, type: true },
     }),
-    // Every active patient, with mobility and prescriptions, is in the patient choice.
-    auditRead(user, { action: "patient_list.view", entity: "Patient", entityId: null }),
+    // The patient of the record the form was opened from (traced patient.view).
+    patientId && patientId.length <= 64 ? loadTripPatient(user, patientId, today) : null,
   ]);
-
-  const patientOptions: PatientOption[] = patients.map((patient) => ({
-    id: patient.id,
-    label: `${formatPersonName(patient)} — ${patient.city}`,
-    mobilityLabel: MOBILITY_LABELS[patient.mobility],
-    prescriptions: patient.prescriptions.map((p) => {
-      const validFrom = toIsoDate(p.validFrom);
-      const validTo = toIsoDate(p.validTo);
-      return {
-        id: p.id,
-        mode: p.mode,
-        sharing: p.sharing,
-        validFrom,
-        validTo,
-        label: [
-          PRESCRIBED_MODE_LABELS[p.mode],
-          `partage ${SHARING_SCOPE_LABELS[p.sharing].toLowerCase()}`,
-          `du ${formatShortDate(validFrom)} au ${formatShortDate(validTo)}`,
-          p.prescriber,
-        ]
-          .filter(Boolean)
-          .join(" · "),
-      };
-    }),
-  }));
 
   const facilityOptions: FacilityOption[] = facilities.map((facility) => ({
     id: facility.id,
     label: `${facility.name} — ${facility.city} (${FACILITY_TYPE_LABELS[facility.type]})`,
   }));
+  const back = initialPatient ? `/patients/${initialPatient.id}` : `/courses?date=${initialDate}`;
 
   return (
     <div className="max-w-3xl">
-      <BackLink href={`/courses?date=${initialDate}`}>Courses</BackLink>
+      <BackLink href={back}>{initialPatient ? "Fiche patient" : "Courses"}</BackLink>
       <PageHeader
         title="Nouvelle course"
-        description="Course ponctuelle, hors récurrence&nbsp;: elle sera placée dans une tournée à la prochaine optimisation."
+        description="Course ponctuelle, hors récurrence&nbsp;: un trajet, ou l'aller et le retour d'une consultation."
       />
-      {patientOptions.length === 0 ? (
+      {initialPatient && firstParam(params.pmt) === "1" ? (
+        <div className="mb-4">
+          <FormMessage tone="success">Prescription enregistrée&nbsp;: elle est proposée ci-dessous si elle couvre la date.</FormMessage>
+        </div>
+      ) : null}
+      {!anyPatient ? (
         <EmptyState
           title="Aucun patient actif"
           action={
@@ -102,7 +79,7 @@ export default async function NewTripPage({
         <Card>
           <CardBody>
             <NewTripForm
-              patients={patientOptions}
+              initialPatient={initialPatient}
               facilities={facilityOptions}
               initialDate={initialDate}
               today={today}

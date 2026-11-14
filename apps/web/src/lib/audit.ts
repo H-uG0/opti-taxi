@@ -10,9 +10,12 @@
  * (lib/auth/request-origin.ts).
  *
  * Action names are `<entity>.<verb>` in snake_case. In use:
- * - reads (day shown in serviceDate): patient_list.view (/patients, and the
- *   patient choice of /courses/nouvelle), patient.view (record, edit form,
- *   new prescription and new recurrence forms), prescription.view and
+ * - reads (day shown in serviceDate): patient_list.view (/patients, the
+ *   fiches proches of a new patient, and each answer of the patient search of
+ *   /courses/nouvelle: details.source "trip_search" and details.shown, never
+ *   the text typed), patient.view (record, edit form, new prescription and
+ *   new recurrence forms, the patient chosen in /courses/nouvelle),
+ *   trip.view (« Modifier la course »), prescription.view and
  *   recurrence.view (edit forms, on the Patient: a prescription can be
  *   deleted), facility.view (patients treated there), trip_list.view
  *   (/courses), plan.view (/planning: the day's patients, addresses, phones,
@@ -31,7 +34,10 @@
  *   trip.generate_week (before the rolling horizon), trip.create,
  *   trip.cancel (the reason stays on the trip), trip.detach (taken off its
  *   route by a referential change, not cancelled), trip.restore,
- *   trip.reschedule, trip.sharing_accept, trip.sharing_refuse, trip.move
+ *   trip.reschedule, trip.update (« Modifier la course »: details.fields, the
+ *   names of what changed — date, time, home, facility, care_place, notes,
+ *   prescription —, details.serviceDate { from, to } when it moved to another
+ *   day, details.detached when it left its route; never an address or a note), trip.sharing_accept, trip.sharing_refuse, trip.move
  *   (« Déplacer vers… »: no details, the day is then re-optimized; « Où placer
  *   cette course ? »: details.mode "insert", details.vehicleId and
  *   details.lockedVehicleId as { from, to }, and on a validated or started day

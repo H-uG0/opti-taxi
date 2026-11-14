@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useActionState, useId, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useFormStatus } from "react-dom";
 import type { Payer, SharingStatus, TripDirection, TripStatus, VehicleType } from "@prisma/client";
-import { CalendarClock, Check, ChevronDown, Lock, TriangleAlert, Undo2, UserX, Users, X } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, Lock, Pencil, TriangleAlert, Undo2, UserX, Users, X } from "lucide-react";
 import { Badge, VEHICLE_TYPE_COLORS, VehicleTypeBadge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, LinkButton } from "@/components/ui/button";
 import { ConfirmPanel, useConfirmStep, type ConfirmStep } from "@/components/ui/confirm-action";
 import { cn } from "@/components/ui/cn";
 import { Checkbox, Input, Select, Textarea, UnitInput } from "@/components/ui/form";
@@ -58,6 +58,8 @@ export type TripRowData = {
   facilityName: string | null;
   pickupAddress: string;
   dropoffAddress: string;
+  /** The patient's side of the trip is an address for this trip only (« Modifier la course »). */
+  oneOffAddress?: boolean;
   allowedVehicleTypes: VehicleType[];
   /** "Assis (taxi ou VSL) · partage aller et retour", or why there is no prescription. */
   prescriptionLabel: string;
@@ -326,9 +328,21 @@ function TripDetails({ trip }: { trip: TripRowData }) {
         </p>
       ) : null}
       <Panel title="Course">
+        {canEditTime(trip.status) ? (
+          <LinkButton href={`/courses/${encodeURIComponent(trip.id)}/modifier`} size="sm" variant="secondary">
+            <Pencil aria-hidden className="size-4" />
+            Modifier la course
+          </LinkButton>
+        ) : null}
         <dl className="space-y-1.5 text-sm">
-          <Detail label="Prise en charge">{trip.pickupAddress}</Detail>
-          <Detail label="Dépose">{trip.dropoffAddress}</Detail>
+          <Detail label="Prise en charge">
+            {trip.pickupAddress}
+            {trip.oneOffAddress && trip.direction === "OUTBOUND" ? <OneOffHint /> : null}
+          </Detail>
+          <Detail label="Dépose">
+            {trip.dropoffAddress}
+            {trip.oneOffAddress && trip.direction === "RETURN" ? <OneOffHint /> : null}
+          </Detail>
           <Detail label="Payeur">{PAYER_LABELS[trip.payer]}</Detail>
           <Detail label="Véhicules possibles">{trip.allowedVehicleTypes.map((type) => VEHICLE_TYPE_SHORT[type]).join(", ")}</Detail>
           <Detail label="Prescription">{trip.prescriptionLabel}</Detail>
@@ -375,7 +389,11 @@ function TripDetails({ trip }: { trip: TripRowData }) {
               <span className="tabular">{formatEuros(trip.estimatedRevenue)}</span>
             </Detail>
           ) : null}
-          {trip.notes ? <Detail label="Notes">{trip.notes}</Detail> : null}
+          {trip.notes ? (
+            <Detail label="Notes">
+              <span className="whitespace-pre-line">{trip.notes}</span>
+            </Detail>
+          ) : null}
         </dl>
         <TollForm trip={trip} />
         <LifecycleForm trip={trip} />
@@ -390,6 +408,11 @@ function TripDetails({ trip }: { trip: TripRowData }) {
       </Panel>
     </div>
   );
+}
+
+/** Under the patient's address of a trip: not the home of the record. */
+function OneOffHint() {
+  return <span className="block text-xs font-medium text-amber-800">Adresse ponctuelle, pour cette course seulement</span>;
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {

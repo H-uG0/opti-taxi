@@ -29,6 +29,11 @@ export type SearchSelectGroup = {
  * chooses, Échap closes (the focus returns to the button), Tab leaves.
  * Combobox pattern of the ARIA practices (the search field controls a
  * listbox, the active option is read with aria-activedescendant).
+ *
+ * With `search`, the options come from the server as the user types (a
+ * patient among thousands): nothing is listed before `searchHint`'s minimum,
+ * answers arriving out of order are dropped, and a polite live region tells
+ * how many were found.
  */
 export function SearchSelect({
   value,
@@ -42,11 +47,20 @@ export function SearchSelect({
   emptyText = "Aucun résultat",
   className,
   describedBy,
+  search,
+  searchHint = "Tapez au moins 2 caractères.",
+  id: buttonId,
 }: {
   value: string;
   onChange: (value: string) => void;
-  /** Built when the list opens (and again at each keystroke): may be costly. */
-  options: () => readonly (SearchSelectOption | SearchSelectGroup)[];
+  /** Built when the list opens (and again at each keystroke): may be costly. Unused with `search`. */
+  options?: () => readonly (SearchSelectOption | SearchSelectGroup)[];
+  /** Server search: the options matching what is typed ("short": too little typed, nothing searched). */
+  search?: (query: string) => Promise<{ status: "ok" | "short"; options: readonly SearchSelectOption[]; more?: boolean }>;
+  /** Shown while too little is typed for `search`. */
+  searchHint?: string;
+  /** Id of the button (a <label htmlFor> points at it). */
+  id?: string;
   /** What the closed button shows. */
   selectedLabel: string;
   /** Accessible name (« Chauffeur de Taxi 12 »). */
@@ -62,13 +76,47 @@ export function SearchSelect({
   const [query, setQuery] = useState("");
   const [active, setActive] = useState<string | null>(null);
   const [place, setPlace] = useState<{ left: number; top?: number; bottom?: number; width: number; maxHeight: number } | null>(null);
+  const [remote, setRemote] = useState<{ query: string; status: "idle" | "loading" | "ok" | "short" | "error"; options: readonly SearchSelectOption[]; more: boolean }>(
+    { query: "", status: "idle", options: [], more: false },
+  );
+  const latest = useRef(0);
   const id = useId();
   const listId = `${id}-list`;
   const button = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
 
-  const groups = useMemo(() => (open ? filterGroups(options(), query) : []), [open, options, query]);
+  const groups = useMemo(() => {
+    if (!open) return [];
+    if (search) return remote.options.length > 0 ? [{ label: "", options: [...remote.options] }] : [];
+    return filterGroups(options?.() ?? [], query);
+  }, [open, options, query, search, remote.options]);
+
+  // Server search: debounced, the latest answer only.
+  useEffect(() => {
+    if (!search || !open) return;
+    const request = ++latest.current;
+    const timer = window.setTimeout(
+      () => {
+        // Too little typed: nothing is asked of the server.
+        if (query.trim().length < 2) {
+          setRemote({ query, status: "short", options: [], more: false });
+          return;
+        }
+        setRemote((current) => ({ ...current, query, status: "loading" }));
+        search(query)
+          .then((answer) => {
+            if (request !== latest.current) return;
+            setRemote({ query, status: answer.status, options: answer.options, more: answer.more ?? false });
+          })
+          .catch(() => {
+            if (request === latest.current) setRemote({ query, status: "error", options: [], more: false });
+          });
+      },
+      query.trim() === "" ? 0 : 250,
+    );
+    return () => window.clearTimeout(timer);
+  }, [search, open, query]);
   const enabled = useMemo(() => groups.flatMap((g) => g.options.filter((o) => !o.disabled)), [groups]);
   const optionId = (v: string) => `${id}-o-${encodeURIComponent(v)}`;
 
@@ -115,6 +163,7 @@ export function SearchSelect({
   const show = () => {
     if (disabled) return;
     setQuery("");
+    if (search) setRemote({ query: "", status: "idle", options: [], more: false });
     setActive(value);
     setOpen(true);
   };
@@ -156,6 +205,7 @@ export function SearchSelect({
     <div className={cn("relative", className)}>
       <button
         ref={button}
+        id={buttonId}
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -211,8 +261,13 @@ export function SearchSelect({
               className="h-9 w-full rounded border border-field pr-2 pl-8 text-sm focus:border-brand-600 focus:outline-2 focus:outline-brand-600"
             />
           </div>
+          {search ? (
+            <p aria-live="polite" className={cn("px-3 pt-2 text-xs text-slate-500", remote.status === "ok" && remote.options.length > 0 && "sr-only")}>
+              {remoteStatusText(remote, searchHint, emptyText)}
+            </p>
+          ) : null}
           <div id={listId} role="listbox" aria-label={label} className="min-h-0 flex-1 overflow-y-auto py-1">
-            {groups.length === 0 ? <p className="px-3 py-2 text-sm text-slate-500">{emptyText}</p> : null}
+            {groups.length === 0 && !search ? <p className="px-3 py-2 text-sm text-slate-500">{emptyText}</p> : null}
             {groups.map((group, index) => (
               <div key={`${group.label}-${index}`} role="group" aria-labelledby={group.label ? `${id}-g-${index}` : undefined}>
                 {group.label ? (
@@ -251,6 +306,29 @@ export function SearchSelect({
       ) : null}
     </div>
   );
+}
+
+/** What the live region of a server search says: the hint, « Recherche… », how many were found. */
+export function remoteStatusText(
+  remote: { status: "idle" | "loading" | "ok" | "short" | "error"; options: readonly unknown[]; more: boolean },
+  hint: string,
+  emptyText: string,
+): string {
+  switch (remote.status) {
+    case "idle":
+    case "short":
+      return hint;
+    case "loading":
+      return "Recherche…";
+    case "error":
+      return "La recherche n'a pas abouti\u00a0: réessayez.";
+    case "ok": {
+      const n = remote.options.length;
+      if (n === 0) return emptyText;
+      const found = n === 1 ? "1 résultat" : `${n} résultats`;
+      return remote.more ? `${found} affichés, d'autres correspondent\u00a0: précisez la recherche.` : found;
+    }
+  }
 }
 
 /** The groups whose options match every word of `query` (label and hint, accents aside); empty groups are dropped. */

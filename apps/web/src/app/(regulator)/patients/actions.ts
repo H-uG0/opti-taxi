@@ -19,7 +19,7 @@ import {
 } from "@/lib/planning/refresh-routes";
 import { GENERATION_INCLUDE, prescriptionOn } from "@/lib/domain/trip-generation";
 import { completeTrips, currentHorizon, reviveOneOffTrips, type Completion } from "@/lib/trips/completion";
-import { formatShortDate, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
+import { formatShortDate, fromIsoDate, isIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import { activationEvent, alreadyInStateMessage, renewalEvents } from "./_lib/audit-events";
 import { idSchema } from "./_lib/form-parse";
 import { errorState, formString, messageState, type ActionResult, type FormState } from "@/lib/forms";
@@ -297,7 +297,17 @@ export async function setPatientActive(_prev: ActionResult, formData: FormData):
 
 // ---------------------------------------------------------------- prescriptions
 
-export async function createPrescription(patientId: string, _prev: FormState, formData: FormData): Promise<FormState> {
+/**
+ * Saves a new prescription. `returnDate`: opened from « Nouvelle course »
+ * (a CPAM trip without a valid PMT that day), the form goes back to the new
+ * trip on that day, for that patient.
+ */
+export async function createPrescription(
+  patientId: string,
+  returnDate: string | null,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   const user = await requireUser("REGULATOR");
   const id = idSchema.safeParse(patientId);
   const parsed = parsePrescriptionForm(formData);
@@ -319,6 +329,9 @@ export async function createPrescription(patientId: string, _prev: FormState, fo
   }, SYNC_TX_OPTIONS);
   revalidatePatients();
   revalidateTrips(summary);
+  if (returnDate && isIsoDate(returnDate)) {
+    redirect(`/courses/nouvelle?${new URLSearchParams({ patient: patient.id, date: returnDate, pmt: "1" }).toString()}`);
+  }
   redirect(withSyncNotice(`/patients/${patient.id}#prescriptions`, summary));
 }
 

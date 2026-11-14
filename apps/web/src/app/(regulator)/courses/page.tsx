@@ -43,6 +43,9 @@ import {
   UNASSIGNED,
 } from "./trip-list";
 import { placeTripHref, planningTripHref } from "@/lib/planning/links";
+import { refreshAdvice, refreshNotice } from "@/lib/planning/refresh-routes";
+import { Notice } from "@/components/ui/notice";
+import { readTripNotice, updatedSentence } from "./trip-notices";
 import type { TripRowData } from "./trip-row";
 import { TripTable } from "./trip-table";
 import { keyMinute } from "./trip-rules";
@@ -85,6 +88,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
         readyMinute: true,
         pickupAddress: true,
         dropoffAddress: true,
+        oneOffAddress: true,
         allowedVehicleTypes: true,
         routeId: true,
         plannedPickupMinute: true,
@@ -182,8 +186,14 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
   const conflicts = new Map(
     trips.map((trip) => [trip.id, tripConflicts(trip, trips).map((c) => conflictLabel(c, trip.direction))] as const),
   );
-  const createdId = Array.isArray(params.course) ? params.course[0] : params.course;
-  const createdConflicts = createdId ? (conflicts.get(createdId) ?? []) : [];
+  // After « Nouvelle course » (one trip, or both legs) or « Modifier la course »: the banner names the trips.
+  const notice = readTripNotice(params);
+  const noticeIds = notice ? (notice.kind === "created" ? notice.tripIds : [notice.tripId]) : [];
+  const noticeTrips = noticeIds.flatMap((id) => trips.filter((trip) => trip.id === id));
+  const noticeConflicts = [...new Set(noticeTrips.flatMap((trip) => conflicts.get(trip.id) ?? []))];
+  // « Où la placer ? » once the day has routes (J+1 before « Optimiser demain », J+2…: the coming optimization places it).
+  const placeable = date >= today && summary.assigned > 0;
+  const unplaced = noticeTrips.filter((trip) => trip.routeId === null && trip.status !== "CANCELLED" && trip.status !== "NO_SHOW");
 
   const rows: TripRowData[] = visible.map((trip) => {
     const answer = sharingAnswerTrace(trip);
@@ -202,6 +212,7 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
       facilityName: trip.facility?.name ?? null,
       pickupAddress: trip.pickupAddress,
       dropoffAddress: trip.dropoffAddress,
+      oneOffAddress: trip.oneOffAddress,
       allowedVehicleTypes: trip.allowedVehicleTypes,
       prescriptionLabel:
         trip.payer === "PRIVATE"
@@ -267,28 +278,47 @@ export default async function CoursesPage({ searchParams }: { searchParams: Prom
         }
       />
 
-      {params.notice === "created" ? (
+      {notice ? (
         <div className="mb-4 space-y-2">
-          {createdId && date >= today && summary.assigned > 0 ? (
-            // The same assistant as on the planning: placed now in a route in place, the others untouched. Only once
-            // the day has routes (J+1 before « Optimiser demain », J+2…: the coming optimization places it).
-            <div className="flex flex-wrap items-center gap-3">
-              <FormMessage tone="success">
-                Course créée. Elle peut entrer dès maintenant dans une tournée en place, sans réoptimiser la journée.
-              </FormMessage>
-              <LinkButton href={placeTripHref(date, createdId)} size="sm" variant="primary">
-                <Search aria-hidden className="size-4" />
-                Où la placer&#x202F;?
-              </LinkButton>
-            </div>
-          ) : (
-            <FormMessage tone="success">Course créée. Elle sera placée à la prochaine optimisation du planning.</FormMessage>
-          )}
-          {createdConflicts.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <FormMessage tone="success">
+              {notice.kind === "created"
+                ? noticeIds.length > 1
+                  ? "Aller et retour créés."
+                  : "Course créée."
+                : `${updatedSentence(notice.changes)}${notice.detached ? " Elle a quitté sa tournée." : ""}`}{" "}
+              {unplaced.length === 0
+                ? notice.kind === "updated" && !notice.detached && noticeTrips.some((trip) => trip.routeId !== null)
+                  ? "Elle reste dans sa tournée."
+                  : ""
+                : placeable
+                  ? noticeIds.length > 1
+                    ? "Elles peuvent entrer dès maintenant dans une tournée en place, sans réoptimiser la journée."
+                    : "Elle peut entrer dès maintenant dans une tournée en place, sans réoptimiser la journée."
+                  : noticeIds.length > 1
+                    ? "Elles seront placées à la prochaine optimisation du planning."
+                    : "Elle sera placée à la prochaine optimisation du planning."}
+            </FormMessage>
+            {placeable
+              ? unplaced.map((trip) => (
+                  // The same assistant as on the planning: placed now in a route in place, the others untouched.
+                  <LinkButton key={trip.id} href={placeTripHref(date, trip.id)} size="sm" variant="primary">
+                    <Search aria-hidden className="size-4" />
+                    {unplaced.length > 1 ? (trip.direction === "OUTBOUND" ? "Où placer l'aller\u202f?" : "Où placer le retour\u202f?") : "Où la placer\u202f?"}
+                  </LinkButton>
+                ))
+              : null}
+          </div>
+          {notice.kind === "updated" && notice.refresh ? (
+            <Notice size="sm" tone={refreshAdvice(notice.refresh) ? "warning" : "info"}>
+              {[refreshNotice(notice.refresh), refreshAdvice(notice.refresh)].filter(Boolean).join(" ")}
+            </Notice>
+          ) : null}
+          {noticeConflicts.length > 0 ? (
             <p role="note" className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
               <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-amber-700" />
               <span>
-                Attention&nbsp;: {createdConflicts.join("\u202f; ")}. Vérifiez qu&apos;il ne s&apos;agit pas d&apos;un doublon (deux
+                Attention&nbsp;: {noticeConflicts.join("\u202f; ")}. Vérifiez qu&apos;il ne s&apos;agit pas d&apos;un doublon (deux
                 véhicules pour un même patient)&#x202F;; sinon, annulez l&apos;une des deux courses.
               </span>
             </p>

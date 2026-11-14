@@ -1,19 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
-import type { Payer, PrescribedMode, SharingScope, TripDirection } from "@prisma/client";
+import { useActionState, useCallback, useState, useTransition } from "react";
+import type { Payer, PrescribedMode, SharingScope } from "@prisma/client";
 import { VehicleTypeBadge } from "@/components/ui/badge";
-import { AddressLookup } from "@/components/address/address-fields";
-import { formatCoordinate, type GeocodeSuggestion } from "@/components/address/address-utils";
 import { ErrorFocus } from "@/components/ui/error-focus";
-import { Field, Fieldset, FormMessage, Input, Select, Textarea } from "@/components/ui/form";
+import { Field, fieldIds, Fieldset, FormMessage, Input, Select, Textarea } from "@/components/ui/form";
 import { FormFooter } from "@/components/ui/form-footer";
+import { SearchSelect } from "@/components/ui/search-select";
 import { allowedVehicleTypesFor, sharingAllowedFor } from "@/lib/domain/rules";
-import { formatShortDate } from "@/lib/time";
+import { formatMinute, formatShortDate, parseMinute } from "@/lib/time";
 import { createTrip, type NewTripState } from "../actions";
+import { PlaceFields, RadioGroup } from "../place-fields";
+import type { NewTripDirection } from "../trip-form";
 import { prescriptionValidOn, timeFieldHint, timeFieldLabel } from "../trip-rules";
 import { IDLE_STATE, refusalKey, valueOf } from "@/lib/forms";
+import { loadPatientForTrip, searchTripPatients } from "./actions";
+import { suggestedReturnMinute } from "./usual-facility";
 
 export type PrescriptionOption = {
   id: string;
@@ -24,48 +27,99 @@ export type PrescriptionOption = {
   label: string;
 };
 
+/** The patient chosen, as the form needs them (loaded on the server once chosen: never the whole list). */
 export type PatientOption = {
   id: string;
   label: string;
   mobilityLabel: string;
   prescriptions: PrescriptionOption[];
+  /** Facility of their regular care (or of their latest trip), proposed first. */
+  usualFacilityId: string | null;
+  /** Session length there, to suggest the end of session of « Aller et retour ». */
+  usualSessionMinutes: number | null;
 };
 
 export type FacilityOption = { id: string; label: string };
 
 type Props = {
-  patients: PatientOption[];
+  /** The patient of ?patient= (from their record), already loaded. */
+  initialPatient: PatientOption | null;
   facilities: FacilityOption[];
   initialDate: string;
   today: string;
   geocoder: boolean;
 };
 
+const DIRECTION_OPTIONS: { value: NewTripDirection; label: string }[] = [
+  { value: "OUTBOUND", label: "Aller (domicile → soins)" },
+  { value: "RETURN", label: "Retour (soins → domicile)" },
+  { value: "BOTH", label: "Aller et retour" },
+];
+
 export function NewTripForm(props: Props) {
-  const initialState: NewTripState = { ...IDLE_STATE, values: { serviceDate: props.initialDate, payer: "CPAM", direction: "OUTBOUND" } };
+  const initialState: NewTripState = {
+    ...IDLE_STATE,
+    values: {
+      serviceDate: props.initialDate,
+      payer: "CPAM",
+      direction: "OUTBOUND",
+      patientId: props.initialPatient?.id ?? "",
+      facilityId: props.initialPatient?.usualFacilityId ?? "",
+    },
+  };
   const [state, action] = useActionState(createTrip, initialState);
+  // Held above the remounted fields: a refused save keeps the patient chosen and their prescriptions.
+  const [patient, setPatient] = useState<PatientOption | null>(props.initialPatient);
   // A new key after each server answer remounts the fields with the submitted values.
-  return <NewTripFields key={state.submissionId} state={state} action={action} {...props} />;
+  return <NewTripFields key={state.submissionId} state={state} action={action} patient={patient} onPatient={setPatient} {...props} />;
 }
 
 function NewTripFields({
   state,
   action,
-  patients,
+  patient,
+  onPatient,
   facilities,
   today,
   geocoder,
-}: Props & { state: NewTripState; action: (formData: FormData) => void }) {
+}: Props & {
+  state: NewTripState;
+  action: (formData: FormData) => void;
+  patient: PatientOption | null;
+  onPatient: (patient: PatientOption | null) => void;
+}) {
   const v = (key: string) => valueOf(state.values ?? {}, key);
   const errors = state.fieldErrors;
-  const [patientId, setPatientId] = useState(v("patientId"));
+  const [loading, startLoading] = useTransition();
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [payer, setPayer] = useState<Payer>(v("payer") === "PRIVATE" ? "PRIVATE" : "CPAM");
-  const [direction, setDirection] = useState<TripDirection>(v("direction") === "RETURN" ? "RETURN" : "OUTBOUND");
+  const [direction, setDirection] = useState<NewTripDirection>(
+    v("direction") === "RETURN" ? "RETURN" : v("direction") === "BOTH" ? "BOTH" : "OUTBOUND",
+  );
   const [serviceDate, setServiceDate] = useState(v("serviceDate"));
   const [prescriptionId, setPrescriptionId] = useState(v("prescriptionId"));
   const [facilityId, setFacilityId] = useState(v("facilityId"));
+  const [time, setTime] = useState(v("time"));
+  const [returnTime, setReturnTime] = useState(v("returnTime"));
+  const [returnTouched, setReturnTouched] = useState(v("returnTime") !== "");
 
-  const patient = patients.find((p) => p.id === patientId) ?? null;
+  const choosePatient = (id: string) => {
+    setLoadError(null);
+    startLoading(async () => {
+      const loaded = await loadPatientForTrip(id).catch(() => null);
+      if (!loaded) {
+        setLoadError("Ce patient n'a pas pu être chargé (désactivé entre-temps ?) : cherchez-le à nouveau.");
+        return;
+      }
+      const previousUsual = patient?.usualFacilityId ?? null;
+      onPatient(loaded);
+      setPrescriptionId("");
+      // The usual facility is proposed; a facility chosen by hand stays (one proposed for the previous patient follows).
+      setFacilityId((current) => (current === "" || current === previousUsual ? (loaded.usualFacilityId ?? "") : current));
+    });
+  };
+  const search = useCallback((query: string) => searchTripPatients(query), []);
+
   const validPrescriptions = patient?.prescriptions.filter((p) => prescriptionValidOn(p, serviceDate)) ?? [];
   // The chosen prescription while it stays valid on the date, otherwise the first valid one.
   const effectivePrescriptionId = validPrescriptions.some((p) => p.id === prescriptionId)
@@ -76,44 +130,60 @@ function NewTripFields({
 
   const mode = payer === "CPAM" ? (prescription?.mode ?? null) : null;
   const vehicleTypes = allowedVehicleTypesFor(mode, payer);
-  const shareable = sharingAllowedFor(payer === "CPAM" ? (prescription?.sharing ?? null) : null, direction, mode, payer);
+  const legs = direction === "BOTH" ? (["OUTBOUND", "RETURN"] as const) : ([direction] as const);
+  const shareableLegs = legs.filter((leg) => sharingAllowedFor(payer === "CPAM" ? (prescription?.sharing ?? null) : null, leg, mode, payer));
+  const usual = patient?.usualFacilityId ? facilities.find((f) => f.id === patient.usualFacilityId) : undefined;
+  const sessionMinutes = facilityId !== "" && facilityId === patient?.usualFacilityId ? patient.usualSessionMinutes : null;
+
+  const changeTime = (next: string) => {
+    setTime(next);
+    // « Aller et retour »: the end of session follows the appointment (usual session length) until typed by hand.
+    if (!returnTouched) {
+      const suggested = suggestedReturnMinute(parseMinute(next), sessionMinutes);
+      setReturnTime(suggested !== null ? formatMinute(suggested) : "");
+    }
+  };
 
   const invalid = (field: string) => (errors[field] ? true : undefined);
-  const [destination, setDestination] = useState(v("destinationAddress"));
-  const [destinationLat, setDestinationLat] = useState(v("destinationLat"));
-  const [destinationLng, setDestinationLng] = useState(v("destinationLng"));
-  const [located, setLocated] = useState<string | null>(null);
-  const chooseDestination = (suggestion: GeocodeSuggestion) => {
-    setDestination(suggestion.label);
-    setDestinationLat(formatCoordinate(suggestion.lat));
-    setDestinationLng(formatCoordinate(suggestion.lng));
-    setLocated(suggestion.label);
-  };
+  const newPrescriptionHref = patient
+    ? `/patients/${patient.id}/prescriptions/nouvelle?${new URLSearchParams({ course: serviceDate || today }).toString()}`
+    : null;
 
   return (
     <form action={action} className="space-y-5" noValidate>
       <FormMessage>{state.message}</FormMessage>
 
       <Fieldset legend="Patient et prise en charge">
-        <Field label="Patient" htmlFor="patientId" error={errors.patientId} hint={patient ? `Mobilité\u00a0: ${patient.mobilityLabel}` : undefined}>
-          <Select
-            id="patientId"
-            name="patientId"
-            required
-            value={patientId}
-            onChange={(e) => setPatientId(e.target.value)}
-            aria-invalid={invalid("patientId")}
-          >
-            <option value="">Choisissez un patient…</option>
-            {patients.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </Select>
+        <Field
+          label="Patient"
+          htmlFor="patientId-search"
+          error={errors.patientId ?? loadError ?? undefined}
+          hint={
+            loading
+              ? "Chargement des prescriptions…"
+              : patient
+                ? `Mobilité : ${patient.mobilityLabel}`
+                : "Nom, prénom, ville, code postal ou numéro de téléphone."
+          }
+        >
+          <SearchSelect
+            id="patientId-search"
+            label="Patient"
+            value={patient?.id ?? ""}
+            selectedLabel={patient?.label ?? "Choisissez un patient…"}
+            onChange={choosePatient}
+            search={search}
+            searchHint="Tapez au moins 2 lettres du nom, ou les chiffres du téléphone."
+            placeholder="Nom, ville ou téléphone…"
+            emptyText="Aucun patient actif ne correspond."
+            invalid={Boolean(errors.patientId ?? loadError)}
+            describedBy={errors.patientId || loadError ? fieldIds("patientId-search").error : fieldIds("patientId-search").hint}
+          />
         </Field>
+        <input type="hidden" name="patientId" value={patient?.id ?? ""} />
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        {/* The payer at its width, the three directions on one line beside it. */}
+        <div className="grid gap-4 sm:grid-cols-[auto_minmax(0,1fr)] sm:gap-6">
           <RadioGroup
             legend="Payeur"
             name="payer"
@@ -129,11 +199,8 @@ function NewTripFields({
             legend="Sens"
             name="direction"
             value={direction}
-            onChange={(value) => setDirection(value as TripDirection)}
-            options={[
-              { value: "OUTBOUND", label: "Aller (domicile → soins)" },
-              { value: "RETURN", label: "Retour (soins → domicile)" },
-            ]}
+            onChange={(value) => setDirection(value as NewTripDirection)}
+            options={DIRECTION_OPTIONS}
             error={errors.direction}
           />
         </div>
@@ -147,11 +214,13 @@ function NewTripFields({
           >
             {patient && validPrescriptions.length === 0 ? (
               <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                Aucune prescription valide le {serviceDate ? formatShortDate(serviceDate) : "jour choisi"} pour ce patient.
-                <Link href={`/patients/${patient.id}/prescriptions/nouvelle`} className="font-medium underline underline-offset-2">
-                  Saisir sa nouvelle prescription
-                </Link>{" "}
-                ou facturer la course en client privé.
+                Aucune prescription valide le {serviceDate ? formatShortDate(serviceDate) : "jour choisi"} pour ce patient.{" "}
+                {newPrescriptionHref ? (
+                  <Link href={newPrescriptionHref} className="font-medium underline underline-offset-2">
+                    Nouvelle prescription
+                  </Link>
+                ) : null}{" "}
+                (retour ensuite à cette course), ou facturer la course en client privé.
               </p>
             ) : (
               <Select
@@ -180,6 +249,7 @@ function NewTripFields({
           label={payer === "CPAM" ? "Établissement de soins" : "Établissement (facultatif)"}
           htmlFor="facilityId"
           error={errors.facilityId}
+          hint={usual ? (facilityId === usual.id ? "Établissement habituel du patient." : `Habituel : ${usual.label}`) : undefined}
         >
           <Select
             id="facilityId"
@@ -192,74 +262,23 @@ function NewTripFields({
             <option value="">{payer === "CPAM" ? "Choisissez un établissement…" : "Autre adresse (saisie libre)"}</option>
             {facilities.map((f) => (
               <option key={f.id} value={f.id}>
-                {f.label}
+                {f.id === patient?.usualFacilityId ? `${f.label} — habituel` : f.label}
               </option>
             ))}
           </Select>
         </Field>
 
         {freeDestination ? (
-          <div className="space-y-4 rounded-md border border-dashed border-slate-300 p-3">
-            <Field
-              label={direction === "OUTBOUND" ? "Adresse de destination" : "Adresse de prise en charge"}
-              htmlFor="destinationAddress"
-              error={errors.destinationAddress}
-              hint="Numéro, rue, code postal et ville."
-            >
-              <Input
-                id="destinationAddress"
-                name="destinationAddress"
-                required
-                maxLength={200}
-                autoComplete="off"
-                placeholder="ex. 12 rue de Rome, 13001 Marseille"
-                value={destination}
-                onChange={(e) => setDestination(e.target.value)}
-                aria-invalid={invalid("destinationAddress")}
-              />
-            </Field>
-            {/* The same lookup as the patient and facility addresses; without it the server geocodes on save. */}
-            <AddressLookup
-              query={destination}
-              onChoose={chooseDestination}
-              geocoderEnabled={geocoder}
-              changed={located !== null && located !== destination}
-            />
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field
-                label="Latitude"
-                htmlFor="destinationLat"
-                error={errors.destinationLat}
-                hint={geocoder ? "Remplie par «\u202fLocaliser l'adresse\u202f», ou laissée vide\u00a0: l'adresse est localisée à l'enregistrement." : "Obligatoire (géocodage non configuré)."}
-              >
-                <Input
-                  id="destinationLat"
-                  name="destinationLat"
-                  inputMode="decimal"
-                  placeholder="43,2965"
-                  value={destinationLat}
-                  onChange={(e) => setDestinationLat(e.target.value)}
-                  className="tabular"
-                  aria-invalid={invalid("destinationLat")}
-                />
-              </Field>
-              <Field label="Longitude" htmlFor="destinationLng" error={errors.destinationLng}>
-                <Input
-                  id="destinationLng"
-                  name="destinationLng"
-                  inputMode="decimal"
-                  placeholder="5,3698"
-                  value={destinationLng}
-                  onChange={(e) => setDestinationLng(e.target.value)}
-                  className="tabular"
-                  aria-invalid={invalid("destinationLng")}
-                />
-              </Field>
-            </div>
-          </div>
+          <PlaceFields
+            prefix="destination"
+            label={direction === "RETURN" ? "Adresse de prise en charge" : "Adresse de destination"}
+            defaults={{ address: v("destinationAddress"), lat: v("destinationLat"), lng: v("destinationLng") }}
+            errors={errors}
+            geocoder={geocoder}
+          />
         ) : null}
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className={direction === "BOTH" ? "grid gap-4 sm:grid-cols-3" : "grid gap-4 sm:grid-cols-2"}>
           <Field label="Date" htmlFor="serviceDate" error={errors.serviceDate}>
             <Input
               id="serviceDate"
@@ -273,17 +292,49 @@ function NewTripFields({
               aria-invalid={invalid("serviceDate")}
             />
           </Field>
-          <Field label={timeFieldLabel(direction)} htmlFor="time" error={errors.time} hint={timeFieldHint(direction)}>
+          <Field
+            label={timeFieldLabel(direction === "RETURN" ? "RETURN" : "OUTBOUND")}
+            htmlFor="time"
+            error={errors.time}
+            hint={timeFieldHint(direction === "RETURN" ? "RETURN" : "OUTBOUND")}
+          >
             <Input
               id="time"
               name="time"
               type="time"
               required
-              defaultValue={v("time")}
+              value={time}
+              onChange={(e) => changeTime(e.target.value)}
               className="tabular"
               aria-invalid={invalid("time")}
             />
           </Field>
+          {direction === "BOTH" ? (
+            <Field
+              label="Fin de séance (retour)"
+              htmlFor="returnTime"
+              error={errors.returnTime}
+              hint={
+                sessionMinutes !== null && !returnTouched
+                  ? `Rendez-vous + séance habituelle (${sessionMinutes} min) : modifiable.`
+                  : timeFieldHint("RETURN")
+              }
+            >
+              <Input
+                id="returnTime"
+                name="returnTime"
+                type="time"
+                required
+                value={returnTime}
+                onChange={(e) => {
+                  setReturnTime(e.target.value);
+                  setReturnTouched(true);
+                }}
+                className="tabular"
+                aria-invalid={invalid("returnTime")}
+              />
+            </Field>
+          ) : null}
         </div>
 
         <Field
@@ -311,57 +362,21 @@ function NewTripFields({
             ? "non (client privé)"
             : !prescription
               ? "selon la prescription"
-              : shareable
-                ? "possible sur ce trajet (proposition à tracer sur la course)"
-                : mode === "AMBULANCE"
-                  ? "non (ambulance\u00a0: un seul patient)"
-                  : "non autorisé par la prescription sur ce trajet"}
+              : mode === "AMBULANCE"
+                ? "non (ambulance : un seul patient)"
+                : shareableLegs.length === legs.length
+                  ? `possible sur ${legs.length > 1 ? "les deux trajets" : "ce trajet"} (proposition à tracer sur la course)`
+                  : shareableLegs.length > 0
+                    ? `possible sur ${shareableLegs[0] === "OUTBOUND" ? "l'aller" : "le retour"} seulement (prescription)`
+                    : `non autorisé par la prescription sur ${legs.length > 1 ? "ces trajets" : "ce trajet"}`}
         </p>
       </section>
 
-      <FormFooter cancelHref={`/courses?date=${serviceDate || today}`} submitLabel="Créer la course" />
+      <FormFooter
+        cancelHref={`/courses?date=${serviceDate || today}`}
+        submitLabel={direction === "BOTH" ? "Créer l'aller et le retour" : "Créer la course"}
+      />
       <ErrorFocus refusal={refusalKey(state)} />
     </form>
-  );
-}
-
-function RadioGroup({
-  legend,
-  name,
-  value,
-  onChange,
-  options,
-  error,
-}: {
-  legend: string;
-  name: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: { value: string; label: string }[];
-  error?: string;
-}) {
-  return (
-    <fieldset className="space-y-1.5">
-      <legend className="text-sm font-medium text-slate-700">{legend}</legend>
-      <div className="flex flex-wrap gap-2">
-        {options.map((option) => (
-          <label
-            key={option.value}
-            className="flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 has-checked:border-brand-500 has-checked:bg-brand-50 has-focus-visible:outline-2 has-focus-visible:outline-brand-600"
-          >
-            <input
-              type="radio"
-              name={name}
-              value={option.value}
-              checked={value === option.value}
-              onChange={() => onChange(option.value)}
-              className="size-4 accent-brand-700"
-            />
-            {option.label}
-          </label>
-        ))}
-      </div>
-      {error ? <p className="text-xs font-medium text-red-600">{error}</p> : null}
-    </fieldset>
   );
 }

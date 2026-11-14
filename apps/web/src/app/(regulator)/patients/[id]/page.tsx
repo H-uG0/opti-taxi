@@ -211,6 +211,12 @@ export default async function PatientPage({
           description={`${patient.city} · ${MOBILITY_LABELS[patient.mobility]}`}
           actions={
             <>
+              {patient.active ? (
+                <LinkButton href={`/courses/nouvelle?${new URLSearchParams({ patient: patient.id }).toString()}`} size="sm" variant="primary">
+                  <Plus aria-hidden className="size-4" />
+                  Nouvelle course
+                </LinkButton>
+              ) : null}
               <LinkButton href={`/patients/${patient.id}/modifier`} size="sm">
                 <Pencil aria-hidden className="size-4" />
                 Modifier
@@ -675,6 +681,9 @@ export default async function PatientPage({
                 <Th>Établissement</Th>
                 <Th>Statut</Th>
                 <Th>Partage</Th>
+                <Th className="text-right">
+                  <span className="sr-only">Actions</span>
+                </Th>
               </tr>
             </THead>
             <TBody>
@@ -704,7 +713,13 @@ export default async function PatientPage({
                         </span>
                       ) : null}
                     </Td>
-                    <Td>{t.facility?.name ?? <span className="text-slate-500">—</span>}</Td>
+                    <Td>
+                      {t.facility?.name ?? <span className="text-slate-500">Adresse libre</span>}
+                      {t.oneOffAddress ? (
+                        <span className="block text-xs font-medium text-amber-800">Adresse ponctuelle du patient</span>
+                      ) : null}
+                      {t.notes ? <span className="block max-w-xs truncate text-xs text-slate-500" title={t.notes}>{t.notes}</span> : null}
+                    </Td>
                     <Td>
                       <Badge tone={TRIP_STATUS_TONES[t.status]}>{TRIP_STATUS_LABELS[t.status]}</Badge>
                       {t.status === "CANCELLED" ? (
@@ -720,6 +735,18 @@ export default async function PatientPage({
                       <span className={t.sharingStatus === "REFUSED" ? "font-medium text-red-700" : "text-slate-700"}>
                         {SHARING_STATUS_LABELS[t.sharingStatus]}
                       </span>
+                    </Td>
+                    <Td className="text-right">
+                      {(t.status === "PLANNED" || t.status === "ASSIGNED") ? (
+                        <LinkButton
+                          href={`/courses/${encodeURIComponent(t.id)}/modifier`}
+                          size="sm"
+                          variant="ghost"
+                          aria-label={`Modifier la course du ${formatShortDate(date)} (${DIRECTION_LABELS[t.direction].toLowerCase()})`}
+                        >
+                          Modifier
+                        </LinkButton>
+                      ) : null}
                     </Td>
                   </tr>
                 );

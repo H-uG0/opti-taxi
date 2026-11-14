@@ -3,18 +3,17 @@
 import type { Prisma, RouteStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { LOW_GEOCODE_SCORE } from "@/components/address/address-utils";
 import { audit, auditRead, type AuditEntry } from "@/lib/audit";
-import { requireUser, type SessionUser } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { errorState, type ActionResult, type FormState } from "@/lib/forms";
+import { GENERATION_INCLUDE, prescriptionOn } from "@/lib/domain/trip-generation";
 import { CANCELLATION_REASON_LABELS, isLateCancellation, NO_CANCELLATION, userCancellation } from "@/lib/domain/cancellation";
 import { conflictLabel, restoreBlocker, tripConflicts } from "@/lib/domain/duplicates";
 import { isSameEpisode } from "@/lib/domain/no-show";
-import { formatAddress } from "@/lib/domain/rules";
+import { allowedVehicleTypesFor, formatAddress, sharingAllowedFor } from "@/lib/domain/rules";
 import { formatEuros } from "@/lib/labels";
 import { getSettings } from "@/lib/domain/settings";
-import { allowGeocodeSearch, bestMatch, GEOCODE_THROTTLED_MESSAGE, geocoderEnabled, searchAddress } from "@/lib/geocode";
 import { logError, safeErrorFields } from "@/lib/log";
 import { evaluate } from "@/lib/optimizer/client";
 import { isConcurrentWriteError, lockRoutesOfTrips, NOTHING_DETACHED, removeTripStops, type DetachResult } from "@/lib/planning/detach";
@@ -25,19 +24,21 @@ import {
   refreshRoutes,
   type RefreshOutcome,
 } from "@/lib/planning/refresh-routes";
-import { formatMinute, addDays, formatShortDate, isIsoDate, todayIso, tomorrowIso, toIsoDate } from "@/lib/time";
+import { formatMinute, addDays, formatShortDate, fromIsoDate, isIsoDate, todayIso, tomorrowIso, toIsoDate } from "@/lib/time";
 import { completeTrips, currentHorizon, inHorizon, type SkippedRecurrence } from "@/lib/trips/completion";
 import { writableRange } from "@/lib/trips/horizon";
 import {
-  buildNewTripData,
+  buildNewTrips,
   CANCEL_TRIP_FIELDS,
   cancelTripSchema,
+  EDIT_TRIP_FIELDS,
   cancelTripsSchema,
   firstErrorMessage,
   formValues,
   generateWeekSchema,
   NEW_TRIP_FIELDS,
   parseNewTrip,
+  parseTripEdit,
   prescriptionUsableOn,
   scheduleSchema,
   tollSchema,
@@ -48,6 +49,10 @@ import {
   type TripPrescription,
 } from "./trip-form";
 import { checkScheduleFit, type ScheduleFit } from "./schedule-fit";
+import { locatePlace, type LocatedPlace } from "./locate-place";
+import { planTripEdit, recurrenceMoveBlocker, type EditableTrip, type TripEdit } from "./trip-edit";
+import { createdTripsHref, updatedTripHref } from "./trip-notices";
+import { recurrenceSchedules } from "../patients/_lib/trip-sync";
 import { sharingDecisionData } from "./sharing-decision";
 import { bulkCancelMessage, generationMessage } from "./trip-list";
 import { canCancel, canEditTime, canRestore, keyMinuteLabel, sharingDecisionsFor, SHARING_DECISION_LABELS } from "./trip-rules";
@@ -136,47 +141,13 @@ export async function completeDayTrips(date: string): Promise<{ changed: boolean
 
 /** The app's form state (lib/forms): one message per field, the typed values echoed, a new submissionId each answer. */
 export type NewTripState = FormState;
-
-const OUTSIDE_FRANCE_MESSAGE = "Adresse localisée hors de France métropolitaine\u00a0: précisez-la ou saisissez les coordonnées.";
+export type EditTripState = FormState;
 
 /**
- * Destination of a private trip without facility: typed coordinates (already
- * checked in metropolitan France by parseNewTrip), or the geocoded address
- * (one search taken from the user's allowance).
+ * « Nouvelle course » : one leg, or « Aller et retour » (both trips at once,
+ * same day and place, two trip.create events). The list of the date opens
+ * on them, with « Où la placer ? » when the day already has routes.
  */
-async function freeDestination(
-  user: Pick<SessionUser, "id">,
-  address: string,
-  lat: number | undefined,
-  lng: number | undefined,
-): Promise<{ ok: true; destination: TripDestination } | { ok: false; field: string; message: string }> {
-  if (lat !== undefined && lng !== undefined) {
-    return { ok: true, destination: { facilityId: null, address, lat, lng } };
-  }
-  if (!geocoderEnabled()) {
-    return { ok: false, field: "destinationLat", message: "Géocodage indisponible\u00a0: saisissez la latitude et la longitude." };
-  }
-  if (!allowGeocodeSearch(user.id)) {
-    return { ok: false, field: "destinationAddress", message: GEOCODE_THROTTLED_MESSAGE };
-  }
-  try {
-    // The stored point goes to the optimizer: bestMatch checks it again against
-    // the metropolitan France ranges, whatever the parser kept.
-    const match = bestMatch(await searchAddress(address, 1), LOW_GEOCODE_SCORE);
-    if (match.status === "outside_france") {
-      return { ok: false, field: "destinationAddress", message: OUTSIDE_FRANCE_MESSAGE };
-    }
-    if (match.status === "not_found") {
-      return { ok: false, field: "destinationAddress", message: "Adresse introuvable ou imprécise\u00a0: précisez-la ou saisissez les coordonnées." };
-    }
-    const best = match.result;
-    return { ok: true, destination: { facilityId: null, address: best.label, lat: best.lat, lng: best.lng } };
-  } catch (error) {
-    logError("[courses] geocodeAddress failed", error);
-    return { ok: false, field: "destinationAddress", message: "Le géocodage n'a pas répondu\u00a0: saisissez la latitude et la longitude." };
-  }
-}
-
 export async function createTrip(_prev: NewTripState, formData: FormData): Promise<NewTripState> {
   const user = await requireUser("REGULATOR");
   const values = formValues(formData, NEW_TRIP_FIELDS);
@@ -221,28 +192,39 @@ export async function createTrip(_prev: NewTripState, formData: FormData): Promi
     if (!facility) return answer({ facilityId: ["Établissement introuvable ou archivé."] });
     destination = { facilityId: facility.id, address: formatAddress(facility), lat: facility.lat, lng: facility.lng };
   } else {
-    const free = await freeDestination(user, input.destinationAddress ?? "", input.destinationLat, input.destinationLng);
+    const free = await locatePlace(user, input.destinationAddress ?? "", input.destinationLat, input.destinationLng, {
+      address: "destinationAddress",
+      lat: "destinationLat",
+    });
     if (!free.ok) return answer({ [free.field]: [free.message] });
-    destination = free.destination;
+    destination = { facilityId: null, ...free.place };
   }
 
-  const data = buildNewTripData(input, patient, prescription, destination);
-  let createdId: string;
+  const trips = buildNewTrips(input, patient, prescription, destination);
+  let createdIds: string[];
   try {
-    createdId = await db.$transaction(async (tx) => {
-      const created = await tx.trip.create({ data, select: { id: true } });
-      await audit(tx, user, { action: "trip.create", entity: "Trip", entityId: created.id, serviceDate: input.serviceDate });
-      return created.id;
+    createdIds = await db.$transaction(async (tx) => {
+      const ids: string[] = [];
+      for (const data of trips) {
+        const created = await tx.trip.create({ data, select: { id: true } });
+        ids.push(created.id);
+      }
+      await audit(
+        tx,
+        user,
+        ids.map((id) => ({ action: "trip.create", entity: "Trip", entityId: id, serviceDate: input.serviceDate })),
+      );
+      return ids;
     }, TX_OPTIONS);
   } catch (error) {
     logError("[courses] createTrip failed", error, { patientId: patient.id });
-    return answer({}, "La course n'a pas pu être enregistrée. Réessayez.");
+    return answer({}, trips.length > 1 ? "Les courses n'ont pas pu être enregistrées. Réessayez." : "La course n'a pas pu être enregistrée. Réessayez.");
   }
 
   revalidateTripViews();
-  // The list names the new trip: a trip of the same patient that day (same leg, or during another session) is
+  // The list names the new trips: a trip of the same patient that day (same leg, or during another session) is
   // warned about there, without blocking (tripConflicts).
-  redirect(`/courses?date=${input.serviceDate}&notice=created&course=${encodeURIComponent(createdId)}`);
+  redirect(createdTripsHref(input.serviceDate, createdIds));
 }
 
 // ---------------------------------------------------------------------------
@@ -660,6 +642,311 @@ export async function rescheduleTrip(_prev: ActionResult, formData: FormData): P
       `${label} La tournée de ${vehicle} ne tenait plus (${fit.reason})\u00a0: la course en a été retirée.` +
       `${aloneMessage(detached.nowAlone)}${noticeOf(refresh)}${replace}`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// « Modifier la course »
+
+/** What « Modifier la course » reads of the trip: its state, places, route, recurrence and prescription. */
+const EDIT_SELECT = {
+  id: true,
+  status: true,
+  serviceDate: true,
+  occurrenceDate: true,
+  recurrenceId: true,
+  direction: true,
+  payer: true,
+  patientId: true,
+  prescriptionId: true,
+  facilityId: true,
+  allowedVehicleTypes: true,
+  sharingAllowed: true,
+  sharingStatus: true,
+  shared: true,
+  appointmentMinute: true,
+  readyMinute: true,
+  pickupAddress: true,
+  pickupLat: true,
+  pickupLng: true,
+  dropoffAddress: true,
+  dropoffLat: true,
+  dropoffLng: true,
+  oneOffAddress: true,
+  notes: true,
+  routeId: true,
+  lockedVehicleId: true,
+  route: { select: { status: true, vehicle: { select: { type: true, label: true } } } },
+  lockedVehicle: { select: { type: true } },
+  prescription: { select: { validFrom: true, validTo: true } },
+  patient: { select: { address: true, postalCode: true, city: true, lat: true, lng: true } },
+} satisfies Prisma.TripSelect;
+
+type EditedTrip = Prisma.TripGetPayload<{ select: typeof EDIT_SELECT }>;
+
+function editableTrip(trip: EditedTrip): EditableTrip {
+  return {
+    id: trip.id,
+    status: trip.status,
+    serviceDate: toIsoDate(trip.serviceDate),
+    occurrenceDate: trip.occurrenceDate ? toIsoDate(trip.occurrenceDate) : null,
+    recurrenceId: trip.recurrenceId,
+    direction: trip.direction,
+    prescriptionId: trip.prescriptionId,
+    facilityId: trip.facilityId,
+    allowedVehicleTypes: trip.allowedVehicleTypes,
+    sharingAllowed: trip.sharingAllowed,
+    sharingStatus: trip.sharingStatus,
+    shared: trip.shared,
+    appointmentMinute: trip.appointmentMinute,
+    readyMinute: trip.readyMinute,
+    pickupAddress: trip.pickupAddress,
+    pickupLat: trip.pickupLat,
+    pickupLng: trip.pickupLng,
+    dropoffAddress: trip.dropoffAddress,
+    dropoffLat: trip.dropoffLat,
+    dropoffLng: trip.dropoffLng,
+    oneOffAddress: trip.oneOffAddress,
+    notes: trip.notes,
+    routeId: trip.routeId,
+    routeVehicleType: trip.route?.vehicle.type ?? null,
+    lockedVehicleId: trip.lockedVehicleId,
+    lockedVehicleType: trip.lockedVehicle?.type ?? null,
+  };
+}
+
+/** The home side (pickup of an outbound trip, drop-off of a return) and the care side, as stored. */
+function tripSides(trip: EditedTrip): { home: LocatedPlace; care: LocatedPlace } {
+  const pickup = { address: trip.pickupAddress, lat: trip.pickupLat, lng: trip.pickupLng };
+  const dropoff = { address: trip.dropoffAddress, lat: trip.dropoffLat, lng: trip.dropoffLng };
+  return trip.direction === "OUTBOUND" ? { home: pickup, care: dropoff } : { home: dropoff, care: pickup };
+}
+
+/**
+ * The place typed is the one stored: same address, and coordinates left empty
+ * or as the form showed them (printed with 6 decimals): the stored point is
+ * kept, so an unchanged address never takes a trip out of its route.
+ */
+function isStoredPlace(stored: LocatedPlace, address: string, lat: number | undefined, lng: number | undefined): boolean {
+  if (address !== stored.address) return false;
+  if (lat === undefined && lng === undefined) return true;
+  return lat !== undefined && lng !== undefined && Math.abs(lat - stored.lat) < 1e-6 && Math.abs(lng - stored.lng) < 1e-6;
+}
+
+/**
+ * The prescription a CPAM trip uses on `date` when its own does not cover it:
+ * for a trip of a recurrence, the one the generation would give it that day
+ * (a renewal, or the PMT it renews: lib/domain/renewal.ts). Null when none
+ * does (or for a one-off trip: its own PMT is the only one it may use).
+ */
+async function prescriptionForMovedTrip(trip: EditedTrip, date: string): Promise<TripEdit["prescription"]> {
+  if (!trip.recurrenceId) return null;
+  const recurrence = await db.recurrence.findUnique({ where: { id: trip.recurrenceId }, include: GENERATION_INCLUDE });
+  const found = recurrence ? prescriptionOn(recurrence, date) : null;
+  if (!found) return null;
+  return {
+    id: found.id,
+    allowedVehicleTypes: allowedVehicleTypesFor(found.mode, "CPAM"),
+    sharingAllowed: sharingAllowedFor(found.sharing, trip.direction, found.mode, "CPAM"),
+  };
+}
+
+/**
+ * « Modifier la course » : date, address of the patient for this trip only
+ * (geocoded), care facility (or the free address of a private trip), time and
+ * notes. A trip of a recurrence keeps its link (it still serves the session of
+ * its recurrence: trip-edit.ts). A routed trip whose date or places change
+ * leaves its route, whose times and totals are then recomputed (stops kept);
+ * a time change alone keeps the route when its planned stop still fits.
+ * Traced trip.update (the fields changed, never their values).
+ */
+export async function updateTrip(tripId: string, _prev: EditTripState, formData: FormData): Promise<EditTripState> {
+  const user = await requireUser("REGULATOR");
+  const values = formValues(formData, EDIT_TRIP_FIELDS);
+  const echoedValues = Object.fromEntries(Object.entries(values).filter((entry): entry is [string, string] => entry[1] !== undefined));
+  const answer = (errors: FieldErrors, message: string | null = null): EditTripState =>
+    errorState(
+      Object.fromEntries(Object.entries(errors).flatMap(([field, messages]) => (messages?.[0] ? [[field, messages[0]]] : []))),
+      echoedValues,
+      message ?? "Vérifiez les champs signalés.",
+    );
+
+  const id = tripIdSchema.safeParse(tripId);
+  const trip = id.success ? await db.trip.findUnique({ where: { id: id.data }, select: EDIT_SELECT }) : null;
+  if (!trip) return answer({}, "Course introuvable\u00a0: elle a peut-être été supprimée. Rechargez la page.");
+  const today = todayIso();
+  const currentDate = toIsoDate(trip.serviceDate);
+  if (!canEditTime(trip.status)) return answer({}, "Cette course est commencée, terminée ou annulée\u00a0: elle ne peut plus être modifiée.");
+  if (currentDate < today) return answer({}, "Course d'un jour passé\u00a0: elle ne peut plus être modifiée.");
+
+  const parsed = parseTripEdit(values, today, trip.payer);
+  if (!parsed.ok) return answer(parsed.errors);
+  const input = parsed.data;
+  const newDate = input.serviceDate;
+  const sides = tripSides(trip);
+
+  // Care side: a facility (the current one even if deactivated since), or the free address of a private trip.
+  let care: TripEdit["care"];
+  if (input.facilityId) {
+    const facility = await db.facility.findUnique({
+      where: { id: input.facilityId },
+      select: { id: true, active: true, address: true, postalCode: true, city: true, lat: true, lng: true },
+    });
+    if (!facility || (!facility.active && facility.id !== trip.facilityId)) {
+      return answer({ facilityId: ["Établissement introuvable ou désactivé."] });
+    }
+    care = { facilityId: facility.id, place: { address: formatAddress(facility), lat: facility.lat, lng: facility.lng } };
+  } else {
+    const typed = input.careAddress ?? "";
+    if (trip.facilityId === null && isStoredPlace(sides.care, typed, input.careLat, input.careLng)) {
+      care = { facilityId: null, place: sides.care };
+    } else {
+      const located = await locatePlace(user, typed, input.careLat, input.careLng, { address: "careAddress", lat: "careLat" });
+      if (!located.ok) return answer({ [located.field]: [located.message] });
+      care = { facilityId: null, place: located.place };
+    }
+  }
+
+  // Home side: the patient's home (as stored on the trip, or the record's when it comes back from a one-off
+  // address), or an address for this trip only.
+  let home: TripEdit["home"];
+  if (input.homeMode === "home") {
+    home = trip.oneOffAddress
+      ? { place: { address: formatAddress(trip.patient), lat: trip.patient.lat, lng: trip.patient.lng }, oneOff: false }
+      : { place: sides.home, oneOff: false };
+  } else {
+    const typed = input.homeAddress ?? "";
+    if (trip.oneOffAddress && isStoredPlace(sides.home, typed, input.homeLat, input.homeLng)) {
+      home = { place: sides.home, oneOff: true };
+    } else {
+      const located = await locatePlace(user, typed, input.homeLat, input.homeLng, { address: "homeAddress", lat: "homeLat" });
+      if (!located.ok) return answer({ [located.field]: [located.message] });
+      home = { place: located.place, oneOff: true };
+    }
+  }
+
+  // Another day: a CPAM trip needs a prescription covering it; a trip of a recurrence never takes a day its
+  // recurrence already serves.
+  let prescription: TripEdit["prescription"] = null;
+  if (newDate !== currentDate) {
+    const own = trip.prescription;
+    const covered = own !== null && toIsoDate(own.validFrom) <= newDate && newDate <= toIsoDate(own.validTo);
+    if (trip.payer === "CPAM" && !covered) {
+      prescription = await prescriptionForMovedTrip(trip, newDate);
+      if (!prescription) {
+        return answer({
+          serviceDate: [
+            `Aucune prescription du patient ne couvre le ${formatShortDate(newDate)}\u00a0: saisissez d'abord sa nouvelle prescription.`,
+          ],
+        });
+      }
+    }
+    if (trip.recurrenceId) {
+      const [recurrence, sameSession] = await Promise.all([
+        db.recurrence.findUnique({
+          where: { id: trip.recurrenceId },
+          select: { active: true, weekdays: true, legs: true, startDate: true, endDate: true },
+        }),
+        db.trip.findFirst({
+          where: { recurrenceId: trip.recurrenceId, occurrenceDate: fromIsoDate(newDate), direction: trip.direction, id: { not: trip.id } },
+          select: { status: true, cancellationOrigin: true },
+        }),
+      ]);
+      const blocker = recurrenceMoveBlocker(
+        {
+          ownSession: newDate === toIsoDate(trip.occurrenceDate ?? trip.serviceDate),
+          schedulesThatDay:
+            recurrence !== null &&
+            recurrence.active &&
+            recurrenceSchedules(
+              {
+                weekdays: recurrence.weekdays,
+                legs: recurrence.legs,
+                startDate: toIsoDate(recurrence.startDate),
+                endDate: recurrence.endDate ? toIsoDate(recurrence.endDate) : null,
+              },
+              newDate,
+              trip.direction,
+            ),
+          sameSessionTrip: sameSession,
+        },
+        formatShortDate(newDate),
+      );
+      if (blocker) return answer({ serviceDate: [blocker] });
+    }
+  }
+
+  const plan = planTripEdit(editableTrip(trip), {
+    serviceDate: newDate,
+    keyMinute: input.time,
+    home,
+    care,
+    notes: input.notes ?? null,
+    prescription,
+  });
+  if (plan.changes.length === 0) return answer({}, "Aucune modification\u00a0: la course est déjà ainsi.");
+
+  // The time alone changed on a routed trip: the route keeps it if its planned stop still fits (as « Modifier l'horaire »).
+  let fit: ScheduleFit = { fits: true };
+  if (plan.checkFit) {
+    const [settings, patientTrips] = await Promise.all([
+      getSettings(db),
+      db.trip.findMany({
+        where: { patientId: trip.patientId, serviceDate: trip.serviceDate, status: { notIn: ["CANCELLED", "NO_SHOW"] } },
+        select: {
+          id: true,
+          direction: true,
+          facilityId: true,
+          appointmentMinute: true,
+          readyMinute: true,
+          routeId: true,
+          plannedPickupMinute: true,
+          plannedDropoffMinute: true,
+        },
+      }),
+    ]);
+    const planned = patientTrips.map(({ routeId, ...t }) => ({
+      ...t,
+      plannedPickupMinute: routeId ? t.plannedPickupMinute : null,
+      plannedDropoffMinute: routeId ? t.plannedDropoffMinute : null,
+    }));
+    fit = checkScheduleFit(trip.id, input.time, planned, settings);
+  }
+  const detach = plan.detach || !fit.fits;
+  const data: Prisma.TripUncheckedUpdateManyInput = plan.detach || fit.fits ? plan.data : { ...plan.data, ...DETACHED_PLANNING, status: "PLANNED" };
+
+  let detached: DetachResult | null;
+  try {
+    detached = await detachInTransaction(async (tx) => {
+      // Guarded on what was read: a trip started, cancelled, re-planned or moved meanwhile is left alone.
+      const updated = await tx.trip.updateMany({
+        where: { id: trip.id, status: trip.status, routeId: trip.routeId, serviceDate: trip.serviceDate },
+        data,
+      });
+      if (updated.count === 0) return null;
+      // The names of the fields changed and the dates, never an address or a note.
+      await audit(tx, user, {
+        action: "trip.update",
+        entity: "Trip",
+        entityId: trip.id,
+        serviceDate: newDate,
+        details: {
+          fields: plan.changes,
+          ...(newDate !== currentDate ? { serviceDate: { from: currentDate, to: newDate } } : {}),
+          ...(detach ? { detached: true } : {}),
+        },
+      });
+      return detach ? removeTripStops(tx, trip.id) : NOTHING_DETACHED;
+    });
+  } catch (error) {
+    logError("[courses] updateTrip failed", error, { tripId: trip.id });
+    return answer({}, "La course n'a pas pu être enregistrée. Réessayez.");
+  }
+  if (!detached) return answer({}, CONCURRENT_CHANGE);
+
+  const refresh = await refreshLeftRoutes(detached.routeIds);
+  revalidateTripViews();
+  revalidatePath("/(regulator)/patients", "layout");
+  redirect(updatedTripHref(newDate, trip.id, { changes: plan.changes, detached: detach && trip.routeId !== null, refresh }));
 }
 
 /**
