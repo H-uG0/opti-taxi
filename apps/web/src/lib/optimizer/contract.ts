@@ -97,6 +97,11 @@ export const settingsSchema = z.strictObject({
   traffic: trafficSettingsSchema.nullish(),
   /** Absent or null: the defaults (no empty-leg surcharge, multiplied, distinct co-passengers, no holiday). */
   pricing: pricingSettingsSchema.nullish(),
+  /**
+   * Euros per trip of the plan in place (`initialRoutes`) served by another vehicle in the plan returned
+   * (contract/README.md, « Pénalité de changement »); absent: 0.
+   */
+  changePenalty: z.number().min(0).max(100_000).optional(),
 });
 
 export const breakRuleSchema = z
@@ -240,6 +245,28 @@ export const routePlanSchema = z.strictObject({
   stops: z.array(stopRefSchema).max(2 * MAX_TRIPS),
 });
 
+/** A stop the crew has done, with its real times (contract/README.md, « Journée commencée »). */
+export const doneStopSchema = z
+  .strictObject({ tripId: z.string().min(1), kind: stopKindSchema, startMin: dayMinute, departureMin: dayMinute })
+  .refine((stop) => stop.departureMin >= stop.startMin, { message: "done stop departureMin must not be before startMin" });
+
+export const startedRouteSchema = z.strictObject({
+  vehicleId: z.string().min(1),
+  /** Its stops done, in route order: they head every route returned for the vehicle. */
+  done: z.array(doneStopSchema).max(2 * MAX_TRIPS),
+  /** The driver's break already taken (or under way): no other is placed. */
+  breakTaken: z
+    .strictObject({ startMin: dayMinute, endMin: dayMinute })
+    .refine((slot) => slot.endMin > slot.startMin, { message: "breakTaken endMin must be after startMin" })
+    .nullish(),
+});
+
+/** A day under way: nothing still to do is planned before nowMin, the stops done stay as they are. */
+export const progressSchema = z.strictObject({
+  nowMin: dayMinute,
+  routes: z.array(startedRouteSchema).max(MAX_VEHICLES).default([]),
+});
+
 /** What both operations need: the day's settings, fleet, trips and tariffs. */
 const dayRequestFields = {
   date: isoDate,
@@ -247,7 +274,42 @@ const dayRequestFields = {
   vehicles: z.array(vehicleSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} véhicules au plus par calcul`),
   trips: z.array(tripSchema).max(MAX_TRIPS, `${MAX_TRIPS} courses au plus par calcul`),
   tariffs: z.array(tariffSchema).max(MAX_TARIFFS, `${MAX_TARIFFS} grilles tarifaires au plus par calcul`),
+  /** The day has started (contract/README.md, « Journée commencée »); absent or null: planned from every shift start. */
+  progress: progressSchema.nullish(),
 };
+
+type ProgressReferences = {
+  vehicles: { id: string }[];
+  trips: { id: string }[];
+  progress?: { routes?: { vehicleId: string; done: { tripId: string; kind: string }[] }[] } | null;
+};
+
+/**
+ * The progress names vehicles and trips of the request, each vehicle once, each stop once, a dropoff
+ * after its pickup on the same route (same check in schemas.py).
+ */
+export function progressReferencesOk(request: ProgressReferences): boolean {
+  if (!request.progress) return true;
+  const vehicles = new Set(request.vehicles.map((v) => v.id));
+  const trips = new Set(request.trips.map((t) => t.id));
+  const seenVehicles = new Set<string>();
+  const seenStops = new Set<string>();
+  for (const route of request.progress.routes ?? []) {
+    if (!vehicles.has(route.vehicleId) || seenVehicles.has(route.vehicleId)) return false;
+    seenVehicles.add(route.vehicleId);
+    const picked = new Set<string>();
+    for (const stop of route.done) {
+      const key = `${stop.tripId}/${stop.kind}`;
+      if (!trips.has(stop.tripId) || seenStops.has(key)) return false;
+      seenStops.add(key);
+      if (stop.kind === "PICKUP") picked.add(stop.tripId);
+      else if (!picked.has(stop.tripId)) return false;
+    }
+  }
+  return true;
+}
+
+const PROGRESS_REFERENCES = { message: "progress must name vehicles and trips of the request, each stop once, a dropoff after its pickup" };
 
 type TariffReferences = {
   vehicles: { tariffId?: string | null }[];
@@ -264,7 +326,10 @@ function tariffReferencesOk(request: TariffReferences): boolean {
 
 const TARIFF_REFERENCES = { message: "tariff ids must be unique and every tariffId must name one of them" };
 
-export const dayRequestSchema = z.strictObject(dayRequestFields).refine(tariffReferencesOk, TARIFF_REFERENCES);
+export const dayRequestSchema = z
+  .strictObject(dayRequestFields)
+  .refine(tariffReferencesOk, TARIFF_REFERENCES)
+  .refine(progressReferencesOk, PROGRESS_REFERENCES);
 
 export const optimizeRequestSchema = z
   .strictObject({
@@ -277,14 +342,16 @@ export const optimizeRequestSchema = z
      */
     initialRoutes: z.array(routePlanSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} tournées au plus en place`).nullish(),
   })
-  .refine(tariffReferencesOk, TARIFF_REFERENCES);
+  .refine(tariffReferencesOk, TARIFF_REFERENCES)
+  .refine(progressReferencesOk, PROGRESS_REFERENCES);
 
 export const evaluateRequestSchema = z
   .strictObject({
     ...dayRequestFields,
     routes: z.array(routePlanSchema).max(MAX_VEHICLES, `${MAX_VEHICLES} tournées au plus par évaluation`),
   })
-  .refine(tariffReferencesOk, TARIFF_REFERENCES);
+  .refine(tariffReferencesOk, TARIFF_REFERENCES)
+  .refine(progressReferencesOk, PROGRESS_REFERENCES);
 
 /**
  * POST /insert (contract/README.md, « InsertRequest et InsertResponse »): where one trip fits in the
@@ -300,7 +367,11 @@ export const insertRequestSchema = z
     vehicleIds: z.array(z.string()).max(MAX_VEHICLES).nullish(),
   })
   .refine(tariffReferencesOk, TARIFF_REFERENCES)
-  .refine((request) => request.trips.some((trip) => trip.id === request.tripId), { message: "tripId must name a trip of the request" });
+  .refine(progressReferencesOk, PROGRESS_REFERENCES)
+  .refine((request) => request.trips.some((trip) => trip.id === request.tripId), { message: "tripId must name a trip of the request" })
+  .refine((request) => !request.progress?.routes.some((route) => route.done.some((stop) => stop.tripId === request.tripId)), {
+    message: "tripId names a trip already picked up (done or on board)",
+  });
 
 export const breakSlotSchema = z.strictObject({
   startMin: z.number().int(),
@@ -467,6 +538,8 @@ export type DayRequest = z.input<typeof dayRequestSchema>;
 export type OptimizeRequest = z.input<typeof optimizeRequestSchema>;
 export type EvaluateRequest = z.input<typeof evaluateRequestSchema>;
 export type RoutePlan = z.infer<typeof routePlanSchema>;
+export type Progress = z.input<typeof progressSchema>;
+export type DoneStop = z.infer<typeof doneStopSchema>;
 export type PlanResponse = z.infer<typeof planResponseSchema>;
 export type PlanRoute = z.infer<typeof routeSchema>;
 export type PlanStop = z.infer<typeof stopSchema>;

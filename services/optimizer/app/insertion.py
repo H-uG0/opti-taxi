@@ -18,6 +18,11 @@ its own (the other stops keep their order, their times follow). For each vehicle
 5. a vehicle without any place gets the reason the solver gives the trips it leaves out
    (_DayModel._obstacle: busy, break, no room between two stops…), within REASON_SEC.
 
+On a day under way (contract `progress`), the stops done stay at the head of their routes: the trip
+goes after them, never before the vehicle's start (its last stop done and the hour of the request),
+and the patients on board ride with it only within their own rules (the validator re-checks their
+time on board, detour and wait from their real pickup). A trip done or on board cannot be placed (422).
+
 No OR-Tools routing model is built (9 s at 120 vehicles and 300 trips): only the nodes of the
 candidate vehicles' routes and of the trip are laid out. The trip's own lock is lifted: the regulator
 is placing it. The figures of an option are differences with the routes in place: km, km driven
@@ -54,6 +59,7 @@ from app.schemas import (
 from app.solver import (
     CENTS_PER_EURO,
     METERS_PER_KM,
+    ON_BOARD_PENALTY,
     UNITS_PER_CENT,
     FleetVehicle,
     Node,
@@ -134,14 +140,19 @@ class _InsertionModel(_DayModel):
         allowance_m = round(min(settings.max_detour_km_per_extra_patient, settings.max_detour_km_total) * METERS_PER_KM)
         for trip, candidates in self.routable:
             penalty = (settings.unassigned_penalty + self.best_revenue(trip, candidates)) * CENTS_PER_EURO * UNITS_PER_CENT
-            self.drop_penalty[trip.id] = round(penalty)
+            self.drop_penalty[trip.id] = ON_BOARD_PENALTY if trip.id in self.on_board else round(penalty)
             if trip.shareable and any(self.fleet[v].vehicle.capacity > 1 for v in candidates):
                 p_node, d_node = self.trip_nodes[trip.id]
-                self.detour_limits_m[trip.id] = self._meter_rows[p_node][d_node] + allowance_m
+                self.detour_limits_m[trip.id] = self._detour_limit_m(trip, p_node, d_node, allowance_m)
 
     def sequence_of(self, refs: Sequence[StopRef]) -> list[int]:
-        """Routing indices of the stops (their trips have nodes: see _routable)."""
-        return [self.manager.NodeToIndex(self.trip_nodes[ref.trip_id][0 if ref.kind == "PICKUP" else 1]) for ref in refs]
+        """Routing indices of the stops (their trips have nodes: see _routable); the trips done have none
+        (they head the route whatever the sequence), a patient on board is picked up at the start."""
+        return [
+            self.manager.NodeToIndex(self.trip_nodes[ref.trip_id][0 if ref.kind == "PICKUP" else 1])
+            for ref in refs
+            if ref.trip_id in self.trip_nodes
+        ]
 
     def refs_of(self, sequence: Sequence[int]) -> list[StopRef]:
         """The stops of a route, break nodes left out (schedule.py places the break)."""
@@ -400,6 +411,7 @@ def insert(request: InsertRequest) -> InsertResponse:
     sequences, _, reference_warnings = check_plan_references(day, day.routes)
     warnings.extend(reference_warnings)
     trip = ctx.trips[day.trip_id]
+    sequences = ctx.progress.with_done(sequences)
     source = next((vid for vid, refs in sequences.items() if any(ref.trip_id == trip.id for ref in refs)), None)
     in_place: dict[str, list[StopRef]] = {vid: list(refs) for vid, refs in sequences.items()}
     without: dict[str, list[StopRef]] = {vid: [ref for ref in refs if ref.trip_id != trip.id] for vid, refs in in_place.items()}
@@ -430,7 +442,7 @@ def insert(request: InsertRequest) -> InsertResponse:
         if complete is None:
             rejected[vehicle_id] = InsertRejection(vehicle_id=vehicle_id, kind="RULES", reason=REASON_ROUTE_BROKEN)
             continue
-        routable.extend((ctx.trips[trip_id], [v]) for trip_id in complete)
+        routable.extend((ctx.trips[trip_id], [v]) for trip_id in complete if trip_id not in ctx.progress.done_trips)
         plans.append(RoutePlan(vehicle_id=vehicle_id, stops=refs))
         candidates.append(v)
 

@@ -110,6 +110,23 @@ and include the places where its routes rest (_plan_break_sites): repairing a pl
 made, under the same rules and data, keeps every trip, also when « Placer les non affectées » locks
 each of them on its vehicle (OPT-09).
 
+Day under way (contract `progress`, app/progress.py). Each vehicle starts at its own start node: the
+place of its last stop done (its depot when none) at its start minute (the shift start lifted to the
+request's minute), and still ends at its depot. The trips done are no node: the plan returned heads
+each started route with its stops done (DayProgress.with_done). A patient on board is a pickup node at
+the start, with no stop time and a window closed at the start minute (so first, beside the other
+patients on board), and their dropoff: both on that vehicle only, never left out (ON_BOARD_PENALTY,
+and the Python steps never take them out: a breach of their ride is blamed on the trips picked up
+while they are on board, _blame), their dropoff window left open after its close (a soft upper
+bound: a late patient is dropped late, not left on board), their time on board and detour counted
+from their real pickup. A trip whose other leg is done or on board weighs its patient's coherence
+penalty alone (a patient left at the facility).
+
+Change penalty (settings.changePenalty): every trip of the plan in place served by another vehicle
+costs it once more, in the Python insertion (its cost) and in plan_score (the final choice between
+the plan in place repaired and the search's), not in the routing model (a soft same-vehicle
+constraint per trip made the guided local search lose most trips at 120 vehicles).
+
 Determinism: nodes, candidates and every Python step iterate lists and insertion-ordered dicts
 (never sets), so the model and, under a solution limit, the plan do not depend on PYTHONHASHSEED.
 Only the wall-clock time limit (and the 100 ms LNS sub-search limit of OR-Tools) can make two runs
@@ -145,6 +162,7 @@ from app.model import (
     work_limit_min,
 )
 from app.plan import plan_margin
+from app.progress import VehicleStart
 from app.schedule import PlannedStop, RouteSchedule, schedule_route
 from app.schemas import LatLng, PlanStatus, RoutePlan, StopRef, Trip, Vehicle
 from app.traffic import stop_reference_minute
@@ -170,6 +188,11 @@ LOCKED_PENALTY_FACTOR = 2
 MAX_ROUTE_METERS = 10_000_000
 BREAK_PENALTY = 10**16
 """Cost (objective units, 10**11 EUR) of a vehicle without its break: more than any set of trips."""
+ON_BOARD_PENALTY = 10**15
+"""Cost (objective units) of leaving a patient on board without their dropoff: more than any set of trips."""
+LATE_ON_BOARD_MIN_PER_PENALTY = 30
+"""A patient on board dropped this many minutes after the close of their window costs one unassigned
+penalty (soft upper bound of their dropoff: they are dropped late rather than never)."""
 MIN_LOCAL_SEARCH_SEC = 0.2
 """Below this remaining budget, the repaired first solution is returned as is."""
 FIRST_SOLUTION_GRACE_SEC = 5
@@ -292,12 +315,39 @@ class Node:
 
 
 @dataclass(frozen=True)
+class OnBoard:
+    """A patient on board when the request was made (app/progress.py), as the model sees them."""
+
+    vehicle: int
+    """Fleet position of the vehicle carrying them."""
+    pickup_start: int
+    """Real start of their pickup (their wait at the facility after a session counts from it)."""
+    pickup_window: Window
+    """Their real pickup window (the node's is the vehicle's start minute)."""
+
+
+@dataclass(frozen=True)
 class FleetVehicle:
     vehicle: Vehicle
     breaks: BreakPlan
     shift: Window
     work_limit: int | None = None
     """Longest route (minutes) without a legal break inside it, None when unlimited (model.work_limit_min)."""
+    start: VehicleStart | None = None
+    """On a day under way, a vehicle with stops done: where it goes on from (`vehicle` then has its
+    shift start lifted to the start minute, and no break when one was taken)."""
+
+    @property
+    def origin(self) -> LatLng:
+        """Where its route goes on from: the place of its last stop done, else its depot."""
+        return self.start.location if self.start is not None else self.vehicle.depot
+
+    @property
+    def internal_start(self) -> VehicleStart | None:
+        """The start schedule.py times the solver's sequences from (patients on board are pickup nodes there)."""
+        if self.start is None:
+            return None
+        return VehicleStart(self.vehicle.id, (), self.start.location, self.start.min, (), None, self.start.day_start)
 
 
 @dataclass(frozen=True)
@@ -322,17 +372,45 @@ class SolveOutcome:
 # --------------------------------------------------------------------------- screening
 
 
+def _going_on(ctx: PlanContext, vehicle: Vehicle, start: VehicleStart) -> Vehicle:
+    """The vehicle as the solver plans the rest of its day: its shift from its start minute (to the
+    end of the drops of its patients on board at least), without a break once one was taken."""
+    end = vehicle.shift_end_min
+    if start.on_board:
+        settings, matrix = ctx.request.settings, ctx.matrix
+        clock, here = start.min, start.location
+        for trip_id in start.on_board:
+            trip = ctx.trips[trip_id]
+            clock += matrix.leg(here, trip.dropoff, None, None) + service_minutes(settings, trip, "DROPOFF")
+            here = trip.dropoff
+        end = max(end, clock + matrix.leg(here, vehicle.depot, None, None))
+    rule = None if start.break_taken else vehicle.break_
+    return vehicle.model_copy(update={"shift_start_min": start.min, "shift_end_min": end, "break_": rule})
+
+
 def usable_fleet(ctx: PlanContext) -> tuple[list[FleetVehicle], list[str]]:
-    """Vehicles the solver can use, and warnings for the others."""
+    """Vehicles the solver can use, and warnings for the others. On a day under way, each vehicle
+    from its start (app/progress.py); one whose day is over without a patient on board is left out
+    (its stops done head its route all the same)."""
     fleet: list[FleetVehicle] = []
     warnings: list[str] = []
     for vehicle in ctx.request.vehicles:
-        plan = break_plan(vehicle)
-        if plan.mode is BreakMode.IMPOSSIBLE:
-            warnings.append(f"{vehicle_name(vehicle)} non utilisé\u00a0: sa pause ne peut pas être placée dans son horaire")
+        start = ctx.progress.start_of(vehicle)
+        planned = vehicle if start is None else _going_on(ctx, vehicle, start)
+        if planned.shift_end_min <= planned.shift_start_min:
             continue
-        shift = effective_shift(vehicle, plan)
-        fleet.append(FleetVehicle(vehicle, plan, shift, work_limit_min(vehicle, plan, shift)))
+        plan = break_plan(planned)
+        if plan.mode is BreakMode.IMPOSSIBLE and start is not None and start.on_board:
+            # Its patients are dropped all the same: the break gives way.
+            planned = planned.model_copy(update={"break_": None})
+            plan = break_plan(planned)
+        if plan.mode is BreakMode.IMPOSSIBLE:
+            if start is None or not start.started:
+                warnings.append(f"{vehicle_name(vehicle)} non utilisé\u00a0: sa pause ne peut pas être placée dans son horaire")
+            continue
+        shift = effective_shift(planned, plan)
+        started = start if start is not None and start.started else None
+        fleet.append(FleetVehicle(planned, plan, shift, work_limit_min(planned, plan, shift), started))
     return fleet, warnings
 
 
@@ -342,7 +420,7 @@ def _reachable_alone(ctx: PlanContext, trip: Trip, member: FleetVehicle) -> bool
     windows = ctx.windows[trip.id]
     depot = member.vehicle.depot
     at_pickup, at_dropoff = stop_reference_minute(trip, "PICKUP", matrix), stop_reference_minute(trip, "DROPOFF", matrix)
-    to_pickup, ride = matrix.leg(depot, trip.pickup, None, at_pickup), matrix.leg(trip.pickup, trip.dropoff, at_pickup, at_dropoff)
+    to_pickup, ride = matrix.leg(member.origin, trip.pickup, None, at_pickup), matrix.leg(trip.pickup, trip.dropoff, at_pickup, at_dropoff)
     to_depot = matrix.leg(trip.dropoff, depot, at_dropoff, None)
     pickup_service, dropoff_service = service_minutes(settings, trip, "PICKUP"), service_minutes(settings, trip, "DROPOFF")
     # Alone, an outbound pickup (free window) or a return dropoff (free window) absorbs any wait.
@@ -455,6 +533,12 @@ class _DayModel:
         """Route of each vehicle in the plan in place (the first one given, as _from_plan reads it)."""
         for plan in initial_routes:
             self._plan_by_vehicle.setdefault(plan.vehicle_id, plan)
+        position = {member.vehicle.id: v for v, member in enumerate(fleet)}
+        self._homes: dict[str, int] = {}
+        for plan in self._plan_by_vehicle.values():
+            if plan.vehicle_id in position:
+                for ref in plan.stops:
+                    self._homes.setdefault(ref.trip_id, position[plan.vehicle_id])
         self._site_vehicles: dict[str, frozenset[int]] = self._break_site_vehicles()
         """Vehicles whose break sites may include each trip's places (_break_site_vehicles)."""
         self.cost_matrices = 0
@@ -482,8 +566,19 @@ class _DayModel:
         """Distance-dimension transit (meters) between nodes, rows[a][b] (computed on demand by app/insertion.py)."""
         self._limit_functions: list[Callable[[int, int], int]] = []
         """Pickup-to-delivery limit callbacks, kept alive while the C++ model uses them."""
+        self.start_nodes: list[int] = list(range(len(fleet)))
+        """Start node of each vehicle: its depot node, or the place of its last stop done (a day under way)."""
+        self.on_board: dict[str, OnBoard] = {}
+        """Patients on board (a day under way): never left out, never taken out by the Python steps."""
+        self.virtual_pickups: dict[str, LatLng] = {}
+        """Where the pickup node of each patient on board stands: their vehicle's start."""
+        self.fixed: set[str] = set(ctx.progress.done_trips)
+        """Trips done or on board: served whatever the plan (a partner of theirs is a half-served patient)."""
+        self.home: dict[str, int] = {}
+        """Vehicle of each trip in the plan in place (the change penalty, settings.changePenalty)."""
+        self.change_cents = round(ctx.request.settings.change_penalty * CENTS_PER_EURO)
         self._layout()
-        self.manager = pywrapcp.RoutingIndexManager(len(self.nodes), len(fleet), list(range(len(fleet))), list(range(len(fleet))))
+        self.manager = pywrapcp.RoutingIndexManager(len(self.nodes), len(fleet), self.start_nodes, list(range(len(fleet))))
         self._make_model()
 
     def _make_model(self) -> None:
@@ -500,7 +595,13 @@ class _DayModel:
         settings = self.ctx.request.settings
         for v, member in enumerate(self.fleet):
             self.nodes.append(Node(Role.DEPOT, self._point(member.vehicle.depot), vehicle=v))
-        for trip, _ in self.routable:
+        for v, member in enumerate(self.fleet):
+            if member.start is not None:
+                self.start_nodes[v] = len(self.nodes)
+                self.nodes.append(Node(Role.DEPOT, self._point(member.start.location), vehicle=v))
+        position = {member.vehicle.id: v for v, member in enumerate(self.fleet)}
+        progress = self.ctx.progress
+        for trip, candidates in self.routable:
             windows = self.ctx.windows[trip.id]
             weight = 1 if trip.shareable else EXCLUSIVE_WEIGHT
             pickup = Node(
@@ -523,9 +624,29 @@ class _DayModel:
                 trip,
                 reference_min=stop_reference_minute(trip, "DROPOFF", self.ctx.matrix),
             )
+            real_limit = self._leg(pickup, delivery) + settings.max_ride_extra_min
+            carrier = progress.on_board.get(trip.id)
+            v = position.get(carrier) if carrier is not None else None
+            if v is not None and self.fleet[v].start is not None:
+                start = self.fleet[v].start
+                assert start is not None
+                done = next(stop for stop in start.done if stop.trip_id == trip.id and stop.kind == "PICKUP")
+                self.on_board[trip.id] = OnBoard(v, done.start_min, windows.pickup)
+                self.virtual_pickups[trip.id] = start.location
+                pickup = Node(Role.PICKUP, self._point(start.location), 0, Window(start.min, start.min), 1, weight, trip, reference_min=pickup.reference_min)
+                delivery = Node(
+                    Role.DELIVERY, delivery.point, delivery.service_min, Window(delivery.window.open, HORIZON_MIN), -1, -weight, trip,
+                    reference_min=delivery.reference_min,
+                )
+                # On board since their real pickup: what is left of their ride, never less than the direct drive from here.
+                real_limit = max(real_limit - (start.min - done.departure_min), self._leg(pickup, delivery))
             self.trip_nodes[trip.id] = (len(self.nodes), len(self.nodes) + 1)
             self.nodes.extend((pickup, delivery))
-            self.ride_limits[trip.id] = self._leg(pickup, delivery) + settings.max_ride_extra_min
+            self.ride_limits[trip.id] = real_limit
+            home = self._homes.get(trip.id)
+            if home is not None and home in candidates:
+                self.home[trip.id] = home
+        self.fixed.update(self.on_board)
         for v, member in enumerate(self.fleet):
             rule = member.vehicle.break_
             if member.breaks.mode is not BreakMode.NODE or member.breaks.window is None or rule is None:
@@ -563,6 +684,7 @@ class _DayModel:
         a lunchtime return or a long outbound (_home_break_sites)."""
         matrix = self.ctx.matrix
         depot = self._point(member.vehicle.depot)
+        origin = self._point(member.origin)
         facilities: dict[int, None] = {}
         for trip, _ in self.routable:
             if v in self._site_vehicles[trip.id]:
@@ -572,7 +694,7 @@ class _DayModel:
         sites = [depot]
         at_break = _middle(window)
         for point in nearest:
-            begin = max(member.shift.open + matrix.leg_by_index(depot, point, None, at_break), window.open)
+            begin = max(member.shift.open + matrix.leg_by_index(origin, point, None, at_break), window.open)
             if begin <= window.close and begin + duration + matrix.leg_by_index(point, depot, at_break, None) <= member.shift.close:
                 sites.append(point)
         return [*sites, *self._home_break_sites(v, member, window, duration, sites)]
@@ -595,7 +717,7 @@ class _DayModel:
         stops: list[PlannedStop] = []
         for ref in plan.stops:
             trip = self.ctx.trips.get(ref.trip_id)
-            if trip is None or v not in self._candidates.get(trip.id, ()):
+            if trip is None or v not in self._candidates.get(trip.id, ()) or self.ctx.progress.is_done(ref.trip_id, ref.kind):
                 continue
             if ref.kind == "PICKUP":
                 if trip.id in picked:
@@ -610,7 +732,7 @@ class _DayModel:
             stops.append(PlannedStop(trip, ref.kind, location, service_minutes(settings, trip, ref.kind), window))
         if not stops:
             return []
-        schedule = schedule_route(member.vehicle, stops, matrix)
+        schedule = schedule_route(member.vehicle, stops, matrix, member.internal_start)
         slot = schedule.break_slot
         if slot is None:
             return []
@@ -679,6 +801,28 @@ class _DayModel:
 
     def node_at(self, index: int) -> Node:
         return self.nodes[self.manager.IndexToNode(index)]
+
+    def _origin(self, v: int) -> Node:
+        """Start node of vehicle v: its depot, or where it goes on from on a day under way."""
+        return self.nodes[self.start_nodes[v]]
+
+    def _blame(self, sequence: Sequence[int], trip_ids: set[str]) -> set[str]:
+        """The trips to take out of the route of vehicle v for these breaches: a patient on board is
+        never taken out, the trips picked up while they ride are instead (none: a breach nothing in the
+        plan causes, left as it is)."""
+        if not self.on_board or not trip_ids & self.on_board.keys():
+            return set(trip_ids)
+        blamed = {trip_id for trip_id in trip_ids if trip_id not in self.on_board}
+        riding: list[str] = []
+        for index in sequence:
+            node = self.node_at(index)
+            if node.trip is None:
+                continue
+            if node.role is Role.PICKUP and node.trip.id not in self.on_board:
+                riding.append(node.trip.id)
+            elif node.role is Role.DELIVERY and node.trip.id in trip_ids and node.trip.id in self.on_board:
+                blamed.update(riding)
+        return blamed
 
     def _leg(self, a: Node, b: Node) -> int:
         """Driving minutes between two nodes: the same for the routing model and the checks in Python.
@@ -844,12 +988,16 @@ class _DayModel:
             penalty = round((settings.unassigned_penalty + self.best_revenue(trip, candidates)) * CENTS_PER_EURO * UNITS_PER_CENT)
             if trip.locked_vehicle_id is not None:
                 penalty *= LOCKED_PENALTY_FACTOR
+            if trip.id in self.on_board:
+                penalty = ON_BOARD_PENALTY
+                # Dropped late rather than never: each minute after the close of their window costs.
+                late = round(settings.unassigned_penalty * CENTS_PER_EURO * UNITS_PER_CENT / LATE_ON_BOARD_MIN_PER_PENALTY)
+                time_dim.SetCumulVarSoftUpperBound(delivery, self.ctx.windows[trip.id].dropoff.close, late)
             self.drop_penalty[trip.id] = penalty
             routing.AddDisjunction([pickup], penalty)
             routing.AddDisjunction([delivery], 0)
             if trip.shareable and any(fleet[v].vehicle.capacity > 1 for v in candidates):
-                # Same rounding as the distance dimension.
-                self.detour_limits_m[trip.id] = self._meter_rows[p_node][d_node] + detour_allowance_m
+                self.detour_limits_m[trip.id] = self._detour_limit_m(trip, p_node, d_node, detour_allowance_m)
                 self._limit_ride(distance_dim, pair_index, self.detour_limits_m[trip.id])
             # Time on board (direct drive + maxRideExtraMin, self.ride_limits) is not a limit of the
             # routing model: on the time dimension, whose slack is the waiting, the routing filters
@@ -862,11 +1010,16 @@ class _DayModel:
         # `coherence` more, paid once per pair (a patient driven to the facility and not back home,
         # or the reverse). Dropping both costs it too: pairs come before lone trips at equal cost.
         coherence = self.coherence_penalty = round(settings.unassigned_penalty * CENTS_PER_EURO * UNITS_PER_CENT)
-        for outbound, ret in same_day_pairs([trip for trip, _ in self.routable]):
+        for outbound, ret in self._pairs():
             self.partner[outbound.id], self.partner[ret.id] = ret.id, outbound.id
-            if coherence:
-                pickups = [manager.NodeToIndex(self.trip_nodes[t.id][0]) for t in (outbound, ret)]
+            if not coherence:
+                continue
+            pickups = [manager.NodeToIndex(self.trip_nodes[t.id][0]) for t in (outbound, ret) if t.id in self.trip_nodes]
+            if len(pickups) == 2:
                 routing.AddDisjunction(pickups, coherence, 2, pywrapcp.RoutingModel.PENALIZE_ONCE)
+            elif pickups and not any(t.id in self.on_board for t in (outbound, ret)):
+                # The other leg is done: leaving this one costs a half-served patient.
+                routing.AddDisjunction(pickups, coherence)
 
         for v, break_nodes in self.break_nodes.items():
             indices = [manager.NodeToIndex(n) for n in break_nodes]
@@ -875,6 +1028,23 @@ class _DayModel:
                 seats_dim.CumulVar(index).SetRange(0, 0)
                 time_dim.CumulVar(index).SetRange(nodes[n].window.open, nodes[n].window.close)
             routing.AddDisjunction(indices, BREAK_PENALTY)
+
+    def _pairs(self) -> list[tuple[Trip, Trip]]:
+        """Same-day outbound and return of a patient, both routable or one of them done (or on board)."""
+        trips = [trip for trip, _ in self.routable]
+        trips.extend(self.ctx.trips[trip_id] for trip_id in sorted(self.ctx.progress.done_trips) if trip_id in self.ctx.trips)
+        routable = {trip.id for trip, _ in self.routable}
+        return [(o, r) for o, r in same_day_pairs(trips) if o.id in routable or r.id in routable]
+
+    def _detour_limit_m(self, trip: Trip, p_node: int, d_node: int, allowance_m: int) -> int:
+        """Longest ride (meters) of a shareable trip on the Distance dimension: its direct distance plus the
+        allowance; for a patient on board, what is left of it after the km ridden so far, never less than
+        the drive from their vehicle's start to their dropoff (same rounding as the dimension)."""
+        if trip.id not in self.on_board:
+            return self._meter_rows[p_node][d_node] + allowance_m
+        real = round(self.ctx.direct_km(trip) * METERS_PER_KM) + allowance_m
+        ridden = round(self.ctx.progress.ride_km_so_far.get(trip.id, 0.0) * METERS_PER_KM)
+        return max(real - ridden, self._meter_rows[p_node][d_node])
 
     def _limit_ride(self, dimension: pywrapcp.RoutingDimension, pair_index: int, bound: int) -> None:
         """Cumul of the delivery minus the pickup's <= bound on `dimension` (checked by the routing
@@ -1161,7 +1331,10 @@ class _DayModel:
             late = self._late_trip(v, kept)
             if late is None:
                 break
-            kept = self._without_trips(kept, {late}, v)
+            shorter = self._without_trips(kept, {late}, v)
+            if shorter == kept:
+                break
+            kept = shorter
         if v not in self.break_nodes:
             return kept
         _, _, starts = self._packed(v, kept)
@@ -1177,7 +1350,8 @@ class _DayModel:
             node = self.node_at(index)
             if node.trip is None or node.trip.id in over:
                 continue
-            if node.role is Role.PICKUP and (seats + node.seats > capacity or alone + node.exclusive > EXCLUSIVE_WEIGHT):
+            on_board = node.trip.id in self.on_board
+            if node.role is Role.PICKUP and not on_board and (seats + node.seats > capacity or alone + node.exclusive > EXCLUSIVE_WEIGHT):
                 over.add(node.trip.id)
                 continue
             seats += node.seats
@@ -1188,22 +1362,28 @@ class _DayModel:
         """Trip of the first stop of the route that cannot start inside its window (earliest
         starts, like _time_feasible), or its last trip when the route ends after the shift or
         lasts longer than the work limit; None when the route is on time."""
-        previous = self.nodes[v]
+        previous = self._origin(v)
         clock = self.fleet[v].shift.open
         nodes: list[Node] = []
         earliest: list[int] = []
-        for index in sequence:
+        for k, index in enumerate(sequence):
             node = self.node_at(index)
             clock = max(clock + previous.service_min + self._leg(previous, node), node.window.open)
             if clock > node.window.close and node.trip is not None:
-                return node.trip.id
+                if node.trip.id not in self.on_board:
+                    return node.trip.id
+                # A patient on board is never taken out: the last trip picked up before this stop is.
+                return next(
+                    (n.trip.id for n in (self.node_at(i) for i in reversed(sequence[:k])) if n.trip is not None and n.trip.id not in self.on_board),
+                    None,
+                )
             nodes.append(node)
             earliest.append(clock)
             previous = node
         clock += previous.service_min + self._leg(previous, self.nodes[v])
         if clock <= self.fleet[v].shift.close and self._span_fits(v, nodes, earliest, clock):
             return None
-        return next((node.trip.id for node in reversed(nodes) if node.trip is not None), None)
+        return next((node.trip.id for node in reversed(nodes) if node.trip is not None and node.trip.id not in self.on_board), None)
 
     def plan_score(self, routes: Sequence[Sequence[int]]) -> float:
         """What the objective weighs, in euros, on the times and revenue the response will report
@@ -1224,7 +1404,18 @@ class _DayModel:
             for trip_id, partner in self.partner.items()
             if self.ctx.trips[trip_id].direction == "OUTBOUND" and not (trip_id in served and partner in served)
         )
-        return dropped + broken_pairs * penalty - margin
+        return dropped + broken_pairs * penalty - margin + self.change_cents / CENTS_PER_EURO * self._moved(routes)
+
+    def _moved(self, routes: Sequence[Sequence[int]]) -> int:
+        """Trips of the plan in place served by another vehicle (the change penalty)."""
+        if not self.change_cents or not self.home:
+            return 0
+        return sum(
+            1
+            for v, route in enumerate(routes)
+            for trip_id in self._trip_ids(route)
+            if self.home.get(trip_id, v) != v
+        )
 
     def _routes(self, solution: pywrapcp.Assignment) -> list[list[int]]:
         """Visited indices (depots excluded) of every vehicle."""
@@ -1256,11 +1447,11 @@ class _DayModel:
         schedule.py: earliest starts, then each stop followed by a patient on board delayed as late
         as the next stop allows (never past its window). Break nodes count as stops, where
         schedule.py places the break itself: close, not exact (_guarded checks the exact times)."""
-        member, depot = self.fleet[v], self.nodes[v]
+        member, origin = self.fleet[v], self._origin(v)
         nodes = [self.node_at(index) for index in sequence]
         starts: list[int] = []
         loads: list[int] = []
-        clock, previous, load = member.shift.open, depot, 0
+        clock, previous, load = member.shift.open, origin, 0
         for node in nodes:
             clock = max(clock + previous.service_min + self._leg(previous, node), node.window.open)
             load += node.seats
@@ -1281,25 +1472,44 @@ class _DayModel:
         stop's window, beyond the window of their trip (the share of the 45 min given to that leg)."""
         breaches: set[str] = set()
         boarded: dict[str, int] = {}
+        picked: list[str] = []
+        """Trips picked up so far, patients on board aside (whom a breach of a patient on board is blamed on)."""
         for k, node in enumerate(nodes):
             trip = node.trip
             if trip is None:
                 continue
             if node.role is Role.PICKUP:
                 boarded[trip.id] = k
+                if trip.id not in self.on_board:
+                    picked.append(trip.id)
                 continue
             i = boarded.pop(trip.id, None)
             if i is None:
                 continue
             pickup = nodes[i]
+            aboard = self.on_board.get(trip.id)
+            breach = False
             if starts[k] - (starts[i] + pickup.service_min) > self.ride_limits[trip.id]:
-                breaches.add(trip.id)
+                breach = True
             elif trip.direction == "OUTBOUND":
-                if starts[k] - self._standing(nodes, arrivals, starts, range(k, i, -1), node.point) < node.window.open:
-                    breaches.add(trip.id)
-            elif starts[i] + self._standing(nodes, arrivals, starts, range(i + 1, k), pickup.point) > pickup.window.close:
+                breach = starts[k] - self._standing(nodes, arrivals, starts, range(k, i, -1), node.point) < node.window.open
+            elif aboard is not None:
+                breach = aboard.pickup_start + self._standing(nodes, arrivals, starts, range(i + 1, k), pickup.point) > aboard.pickup_window.close
+            else:
+                breach = starts[i] + self._standing(nodes, arrivals, starts, range(i + 1, k), pickup.point) > pickup.window.close
+            if not breach:
+                continue
+            if aboard is None:
                 breaches.add(trip.id)
+            else:
+                # Never a patient on board: the trips picked up while they ride (none: nothing to take out).
+                breaches.update(t for t in picked if t in boarded or self._picked_between(nodes, i, k, t))
         return breaches
+
+    @staticmethod
+    def _picked_between(nodes: Sequence[Node], first: int, last: int, trip_id: str) -> bool:
+        """Whether trip_id is picked up between positions first and last of the route."""
+        return any(n.trip is not None and n.trip.id == trip_id and n.role is Role.PICKUP for n in nodes[first + 1 : last])
 
     @staticmethod
     def _standing(nodes: Sequence[Node], arrivals: Sequence[int], starts: Sequence[int], positions: range, point: int) -> int:
@@ -1324,14 +1534,17 @@ class _DayModel:
             PlannedStop(
                 trip=node.trip,
                 kind="PICKUP" if node.role is Role.PICKUP else "DROPOFF",
-                location=node.trip.pickup if node.role is Role.PICKUP else node.trip.dropoff,
+                location=(
+                    self.virtual_pickups.get(node.trip.id, node.trip.pickup) if node.role is Role.PICKUP else node.trip.dropoff
+                ),
                 service_min=node.service_min,
                 window=node.window,
             )
             for node in nodes
             if node.trip is not None
         ]
-        return nodes, schedule_route(self.fleet[v].vehicle, stops, self.ctx.matrix)
+        member = self.fleet[v]
+        return nodes, schedule_route(member.vehicle, stops, self.ctx.matrix, member.internal_start)
 
     def _scheduled_breaches(self, v: int, sequence: Sequence[int]) -> set[str]:
         """Trips of the route breaking a rule the solver cannot see exactly (_scheduled_reasons)."""
@@ -1353,7 +1566,10 @@ class _DayModel:
             return dict.fromkeys(sorted(breaches), REASON_DROPPED_ON_BOARD)
         if _lawful_work_time(schedule):
             return {}
-        ends = [trip for trip in (nodes[0].trip, nodes[-1].trip) if trip is not None]
+        movable = [node.trip for node in nodes if node.trip is not None and node.trip.id not in self.on_board]
+        ends = [trip for trip in (movable[:1] + movable[-1:]) if trip is not None]
+        if not ends:
+            return {}
         return {min(ends, key=lambda trip: (self.drop_penalty[trip.id], trip.id)).id: REASON_DROPPED_WORK_TIME}
 
     def guarded(self, routes: list[list[int]], seconds: float = GUARD_SEC) -> dict[str, str]:
@@ -1412,7 +1628,7 @@ class _DayModel:
         same time, a move its operators do not make (on the busy day, the pair penalty alone left as
         many half-served patients)."""
         deadline = time.monotonic() + seconds
-        served = {trip_id for route in routes for trip_id in self._trip_ids(route)}
+        served = {trip_id for route in routes for trip_id in self._trip_ids(route)} | self.fixed
         missing = [
             trip_id
             for trip_id, partner in self.partner.items()
@@ -1452,7 +1668,7 @@ class _DayModel:
         leave a trip for which a single move would make room: on the 480-trip bench, one more
         ambulance trip served (journal, OPT-09)."""
         deadline = time.monotonic() + seconds
-        served = {trip_id for route in routes for trip_id in self._trip_ids(route)}
+        served = {trip_id for route in routes for trip_id in self._trip_ids(route)} | self.fixed
         left = [trip for trip, _ in self.routable if trip.id not in served]
         left.sort(key=lambda trip: -self._partner_rank(trip.id, served))  # stable: half-served patients first
         placed = 0
@@ -1488,7 +1704,7 @@ class _DayModel:
             boarded: dict[str, int] = {}
             in_the_way: list[str] = []
             for k, node in enumerate(nodes):
-                if node.trip is None:
+                if node.trip is None or node.trip.id in self.on_board:
                     continue
                 if node.role is Role.PICKUP:
                     boarded[node.trip.id] = starts[k]
@@ -1718,12 +1934,11 @@ class _DayModel:
         limit = self.fleet[v].work_limit
         if limit is None or not nodes:
             return True
-        depot = self.nodes[v]
-        latest, following = end, depot
+        latest, following = end, self.nodes[v]
         for node, first in zip(reversed(nodes), reversed(earliest), strict=True):
             latest = max(first, min(node.window.close, latest - self._leg(node, following) - node.service_min))
             following = node
-        return end - (latest - self._leg(depot, following)) <= limit
+        return end - (latest - self._leg(self._origin(v), following)) <= limit
 
     # -- break repair
     def _repaired(self, solution: pywrapcp.Assignment, insertion_deadline: float) -> tuple[pywrapcp.Assignment, int]:
@@ -1771,7 +1986,10 @@ class _DayModel:
             fitted = self._with_break(sequence, v)
             if fitted is not None:
                 return fitted
-            pickups = [index for index in sequence if self.node_at(index).role is Role.PICKUP]
+            pickups = [
+                index for index in sequence if self.node_at(index).role is Role.PICKUP and self.node_at(index).trip is not None
+                and self.node_at(index).trip.id not in self.on_board  # type: ignore[union-attr]
+            ]
             trips = [trip for trip in (self.node_at(index).trip for index in pickups) if trip is not None]
             if not trips:
                 return [self.manager.NodeToIndex(self.break_nodes[v][0])]
@@ -1796,8 +2014,8 @@ class _DayModel:
     def _break_insertions(self, sequence: Sequence[int], v: int) -> Iterator[list[int]]:
         """Sequences with one break site inserted where the vehicle is empty, least extra km first."""
         matrix = self.ctx.matrix
-        depot = self.nodes[v].point
-        empty_positions: list[int] = [0]
+        depot, origin = self.nodes[v].point, self._origin(v).point
+        empty_positions: list[int] = [0] if not any(self.on_board_of(v)) else []
         load = 0
         for position, index in enumerate(sequence, start=1):
             load += self.node_at(index).seats
@@ -1805,7 +2023,7 @@ class _DayModel:
                 empty_positions.append(position)
         options: list[tuple[float, int, int]] = []
         for position in empty_positions:
-            before = self.node_at(sequence[position - 1]).point if position > 0 else depot
+            before = self.node_at(sequence[position - 1]).point if position > 0 else origin
             after = self.node_at(sequence[position]).point if position < len(sequence) else depot
             for n in self.break_nodes[v]:
                 site = self.nodes[n].point
@@ -1818,7 +2036,7 @@ class _DayModel:
     def _time_feasible(self, v: int, sequence: Sequence[int]) -> bool:
         """Exact time-window, shift and work-limit check of one route (earliest service starts)."""
         shift = self.fleet[v].shift
-        previous = self.nodes[v]
+        previous = self._origin(v)
         clock = shift.open
         nodes: list[Node] = []
         earliest: list[int] = []
@@ -1841,11 +2059,11 @@ class _DayModel:
         inequality; a road matrix (OSRM) may not, and an earlier stop can leave a co-passenger
         waiting on board for the next window: hence the checks.
         """
-        removed = set(trip_ids)
+        removed = self._blame(sequence, set(trip_ids))
         while True:
             kept = [index for index in sequence if (trip := self.node_at(index).trip) is None or trip.id not in removed]
-            breaches = self._detour_breaches(kept) | self._rule_breaches(v, kept)
-            if not breaches:
+            breaches = self._blame(kept, self._detour_breaches(kept)) | self._rule_breaches(v, kept)
+            if not breaches - removed:
                 return kept
             removed |= breaches
 
@@ -1904,6 +2122,7 @@ class _DayModel:
         options in the changed route are recomputed.
         """
         placed = {self.node_at(index).trip.id for route in routes for index in route if self.node_at(index).trip is not None}
+        placed |= self.fixed
         options: dict[str, dict[int, tuple[float, list[int]]]] = {}
         for trip, candidates in self.routable:
             if time.monotonic() >= deadline:
@@ -2002,9 +2221,8 @@ class _DayModel:
 
     def _stop_cost(self, v: int, route: Sequence[int], k: int) -> float:
         """Cost (cents) of the detour through stop k of the route of vehicle v."""
-        depot = self.nodes[v]
-        before = self.node_at(route[k - 1]) if k else depot
-        after = self.node_at(route[k + 1]) if k + 1 < len(route) else depot
+        before = self.node_at(route[k - 1]) if k else self._origin(v)
+        after = self.node_at(route[k + 1]) if k + 1 < len(route) else self.nodes[v]
         return self._detour_cost(v, before, self.node_at(route[k]), after)
 
     def _detour_cost(self, v: int, a: Node, b: Node, c: Node) -> float:
@@ -2025,7 +2243,7 @@ class _DayModel:
         full check (_first_feasible).
         """
         member = self.fleet[v]
-        depot = self.nodes[v]
+        depot, origin = self.nodes[v], self._origin(v)
         p_node, d_node = self.trip_nodes[trip.id]
         pickup, delivery = self.nodes[p_node], self.nodes[d_node]
         stops = [self.node_at(index) for index in route]
@@ -2035,7 +2253,7 @@ class _DayModel:
         earliest: list[int] = []
         seats: list[int] = []
         exclusive: list[int] = []
-        clock, previous, load, alone = member.shift.open, depot, 0, 0
+        clock, previous, load, alone = member.shift.open, origin, 0, 0
         for node in stops:
             clock = max(clock + previous.service_min + self._leg(previous, node), node.window.open)
             load, alone = load + node.seats, alone + node.exclusive
@@ -2055,13 +2273,15 @@ class _DayModel:
         ride_limit = self.ride_limits[trip.id]
         weight = pickup.exclusive
         base = self._lost_cents[p_node].get(self._tariff_key(member.vehicle), 0)
+        if self.home.get(trip.id, v) != v:
+            base += self.change_cents
 
         def extra(a: Node, b: Node, c: Node) -> float:
             return self._detour_cost(v, a, b, c)
 
         positions: list[tuple[float, int, int]] = []
         for i in range(count + 1):
-            before = stops[i - 1] if i else depot
+            before = stops[i - 1] if i else origin
             departure = earliest[i - 1] + before.service_min if i else member.shift.open
             if departure > pickup.window.close:
                 break  # departures only get later along the route
@@ -2111,13 +2331,19 @@ class _DayModel:
             refs: list[StopRef] = []
             for index in route:
                 node = self.node_at(index)
+                if node.trip is not None and node.role is Role.PICKUP and node.trip.id in self.on_board:
+                    continue  # picked up among the stops done, which head the route (DayProgress.with_done)
                 if node.trip is not None and node.role is Role.PICKUP:
                     refs.append(StopRef(trip_id=node.trip.id, kind="PICKUP"))
                 elif node.trip is not None and node.role is Role.DELIVERY:
                     refs.append(StopRef(trip_id=node.trip.id, kind="DROPOFF"))
             if refs:
                 result[self.fleet[v].vehicle.id] = refs
-        return result
+        return self.ctx.progress.with_done(result)
+
+    def on_board_of(self, v: int) -> list[str]:
+        """Patients on board vehicle v when the request was made."""
+        return [trip_id for trip_id, aboard in self.on_board.items() if aboard.vehicle == v]
 
 
 def _seconds_left(deadline: float, most: float) -> float:
@@ -2154,7 +2380,15 @@ def solve(ctx: PlanContext, initial_routes: Sequence[RoutePlan] = ()) -> SolveOu
     fleet, warnings = usable_fleet(ctx)
     unassigned: dict[str, str] = {}
     routable: list[tuple[Trip, list[int]]] = []
+    progress = ctx.progress
+    position = {member.vehicle.id: v for v, member in enumerate(fleet)}
     for trip in ctx.request.trips:
+        if trip.id in progress.done_trips:
+            continue  # done: its stops head its vehicle's route
+        carrier = progress.on_board.get(trip.id)
+        if carrier is not None and carrier in position:
+            routable.append((trip, [position[carrier]]))
+            continue
         candidates, reason = screen_trip(ctx, trip, fleet)
         if reason is not None:
             unassigned[trip.id] = reason
@@ -2162,7 +2396,7 @@ def solve(ctx: PlanContext, initial_routes: Sequence[RoutePlan] = ()) -> SolveOu
             routable.append((trip, candidates))
 
     if not routable:
-        return SolveOutcome({}, unassigned, "OK", "NO_TRIP_TO_ROUTE", None, warnings)
+        return SolveOutcome(progress.with_done({}), unassigned, "OK", "NO_TRIP_TO_ROUTE", None, warnings)
 
     build_started = time.monotonic()
     model = _DayModel(ctx, fleet, routable, initial_routes)
@@ -2185,7 +2419,7 @@ def solve(ctx: PlanContext, initial_routes: Sequence[RoutePlan] = ()) -> SolveOu
     if solution is None:
         for trip, _ in routable:
             unassigned[trip.id] = REASON_NO_SOLUTION
-        return SolveOutcome({}, unassigned, "NO_SOLUTION", status_name, None, warnings)
+        return SolveOutcome(progress.with_done({}), unassigned, "NO_SOLUTION", status_name, None, warnings)
 
     routes = model.routes_of(solution)
     # One budget for every final pass, those on the plan in place included (FALLBACK_SEARCH_SEC:

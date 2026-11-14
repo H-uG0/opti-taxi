@@ -21,6 +21,33 @@ describe("optimizer contract fixtures", () => {
     expect(evaluateRequestSchema.safeParse({ ...evaluate, initialRoutes }).success).toBe(false);
   });
 
+  it("accepts optimize-request-started.json, a day under way, and the same progress on /evaluate and /insert", () => {
+    const raw = load("optimize-request-started.json") as Record<string, unknown>;
+    const parsed = optimizeRequestSchema.parse(raw);
+    expect(parsed.progress?.nowMin).toBe(500);
+    expect(parsed.progress?.routes[0]?.done.length).toBe(2);
+    expect(parsed.settings.changePenalty).toBe(15);
+    const { initialRoutes, ...day } = raw;
+    expect(evaluateRequestSchema.safeParse({ ...day, routes: initialRoutes }).success).toBe(true);
+    expect(insertRequestSchema.safeParse({ ...day, routes: initialRoutes, tripId: "trip_7" }).success).toBe(true);
+    // A trip already picked up is not placed again.
+    expect(insertRequestSchema.safeParse({ ...day, routes: initialRoutes, tripId: "trip_5" }).success).toBe(false);
+  });
+
+  it("refuses a progress that does not match the request (same rules as schemas.py)", () => {
+    const raw = load("optimize-request-started.json") as { progress: { nowMin: number; routes: Array<{ vehicleId: string; done: unknown[] }> } };
+    const withRoutes = (routes: unknown) => ({ ...raw, progress: { nowMin: 500, routes } });
+    const stop = (tripId: string, kind: string, startMin = 400, departureMin = 405) => ({ tripId, kind, startMin, departureMin });
+    expect(optimizeRequestSchema.safeParse(withRoutes([{ vehicleId: "veh_404", done: [] }])).success).toBe(false);
+    expect(optimizeRequestSchema.safeParse(withRoutes([{ vehicleId: "veh_taxi_1", done: [stop("trip_404", "PICKUP")] }])).success).toBe(false);
+    expect(optimizeRequestSchema.safeParse(withRoutes([{ vehicleId: "veh_taxi_1", done: [stop("trip_1", "DROPOFF")] }])).success).toBe(false);
+    expect(optimizeRequestSchema.safeParse(withRoutes([{ vehicleId: "veh_taxi_1", done: [stop("trip_1", "PICKUP", 405, 400)] }])).success).toBe(false);
+    expect(
+      optimizeRequestSchema.safeParse(withRoutes([{ vehicleId: "veh_taxi_1", done: [] }, { vehicleId: "veh_taxi_1", done: [] }])).success,
+    ).toBe(false);
+    expect(optimizeRequestSchema.safeParse({ ...raw, progress: null }).success).toBe(true);
+  });
+
   it("accepts evaluate-request.json", () => {
     const parsed = evaluateRequestSchema.parse(load("evaluate-request.json"));
     expect(parsed.routes.length).toBeGreaterThan(0);

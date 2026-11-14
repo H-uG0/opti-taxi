@@ -28,6 +28,12 @@ time on board against the direct drive (RIDE_TIME); the solver keeps both within
 
 Lateness (service after the window close, return after the shift end) is not hidden: it is kept in
 the times so that the validator reports it.
+
+On a day under way (contract `progress`, app/progress.py), a started route begins with its stops
+done, at their real times (never re-timed), from its depot; the rest of the route is timed as above
+from the place of the last stop done, leaving no earlier than the vehicle's start minute, with the
+patients on board loaded from there (no break before leaving while they are), and the break taken
+kept as the route's break (no other one is placed).
 """
 
 from __future__ import annotations
@@ -38,6 +44,7 @@ from enum import Enum
 
 from app.matrix import TravelMatrix
 from app.model import MAX_WORK_WITHOUT_BREAK_MIN, MIN_LEGAL_BREAK_MIN, Window
+from app.progress import VehicleStart
 from app.schemas import BreakRule, LatLng, StopKind, Trip, Vehicle
 from app.traffic import stop_reference_minute
 
@@ -130,11 +137,12 @@ def _break_start_on_leg(departure: int, travel: int, rule: BreakRule) -> int:
     return min(max(departure + travel, rule.window_start_min), rule.window_end_min - rule.duration_min)
 
 
-def _load_profile(stops: Sequence[PlannedStop]) -> tuple[list[int], list[frozenset[str]]]:
-    """Patients on board after each stop, and the on-board set of each leg."""
-    on_board: set[str] = set()
+def _load_profile(stops: Sequence[PlannedStop], aboard: Sequence[str] = ()) -> tuple[list[int], list[frozenset[str]]]:
+    """Patients on board after each stop, and the on-board set of each leg (`aboard`: on board before
+    the first stop)."""
+    on_board: set[str] = set(aboard)
     loads: list[int] = []
-    leg_sets: list[frozenset[str]] = [frozenset()]
+    leg_sets: list[frozenset[str]] = [frozenset(on_board)]
     for stop in stops:
         if stop.kind == "PICKUP":
             on_board.add(stop.trip.id)
@@ -152,17 +160,20 @@ class _Run:
     end_min: int
     break_slot: tuple[int, int] | None
     lateness_min: int
+    day_start: int | None = None
+    """Start of the whole route when this run is the rest of a route under way (its work time counts from there)."""
 
     @property
     def lawful(self) -> bool:
         """At most MAX_WORK_WITHOUT_BREAK_MIN of route, or a break of MIN_LEGAL_BREAK_MIN inside it."""
-        if self.end_min - self.start_min <= MAX_WORK_WITHOUT_BREAK_MIN:
+        start = self.start_min if self.day_start is None else min(self.day_start, self.start_min)
+        if self.end_min - start <= MAX_WORK_WITHOUT_BREAK_MIN:
             return True
         slot = self.break_slot
         return (
             slot is not None
             and slot[1] - slot[0] >= MIN_LEGAL_BREAK_MIN
-            and self.start_min <= slot[0]
+            and start <= slot[0]
             and slot[1] <= self.end_min
         )
 
@@ -175,10 +186,11 @@ class _Run:
 class _Timing:
     """Forward/backward passes of one sequence for one break placement."""
 
-    def __init__(self, vehicle: Vehicle, stops: Sequence[PlannedStop], travel: Sequence[int]) -> None:
+    def __init__(self, vehicle: Vehicle, stops: Sequence[PlannedStop], travel: Sequence[int], day_start: int | None = None) -> None:
         self.vehicle = vehicle
         self.stops = stops
         self.travel = travel
+        self.day_start = day_start
 
     def _rule(self) -> BreakRule:
         rule = self.vehicle.break_
@@ -275,7 +287,7 @@ class _Timing:
 
         lateness = sum(max(0, t.start_min - t.stop.window.close) for t in timed)
         lateness += max(0, end_min - self.vehicle.shift_end_min)
-        return _Run(tuple(timed), start_min, end_min, break_slot, lateness)
+        return _Run(tuple(timed), start_min, end_min, break_slot, lateness, self.day_start)
 
     def _drive(self, placement: _Placement, leg: int, departure: int) -> tuple[int, int, tuple[int, int] | None]:
         """(physical arrival, ready to serve, break slot) for a leg driven from `departure`."""
@@ -304,20 +316,76 @@ def _compact_if_lawful(timing: _Timing, chosen: _Run, candidates: Sequence[_Plac
     return min(lawful, key=lambda item: (item[0].lateness_min, item[0].break_slot is None, item[1]))[0]
 
 
-def schedule_route(vehicle: Vehicle, stops: Sequence[PlannedStop], matrix: TravelMatrix) -> RouteSchedule:
-    """Times, loads and legs of `stops` driven in this order by `vehicle` from and to its depot."""
-    points = [vehicle.depot, *(stop.location for stop in stops), vehicle.depot]
+def schedule_route(
+    vehicle: Vehicle, stops: Sequence[PlannedStop], matrix: TravelMatrix, start: VehicleStart | None = None
+) -> RouteSchedule:
+    """Times, loads and legs of `stops` driven in this order by `vehicle` from and to its depot; on a
+    day under way (`start`), its stops done first, at their real times, then the rest from its start."""
+    if start is None:
+        return _schedule(vehicle, stops, matrix, vehicle.depot, ())
+    done = len(start.done)
+    if [(stop.trip.id, stop.kind) for stop in stops[:done]] != [(stop.trip_id, stop.kind) for stop in start.done]:
+        raise ValueError(f"route of {vehicle.id} does not start with its stops done")
+    going_on = vehicle.model_copy(update={"shift_start_min": start.min, "break_": None if start.break_taken else vehicle.break_})
+    rest = _schedule(going_on, stops[done:], matrix, start.location, start.on_board, start.day_start)
+    if not done:
+        return RouteSchedule(
+            vehicle=vehicle,
+            stops=rest.stops,
+            legs=rest.legs,
+            # The rest of a route under way (the solver's checks): its work time counts from the route's start.
+            start_min=rest.start_min if start.day_start is None else min(start.day_start, rest.start_min),
+            end_min=rest.end_min,
+            break_slot=start.break_taken or rest.break_slot,
+            lateness_min=rest.lateness_min,
+        )
+    past = stops[:done]
+    points = [vehicle.depot, *(stop.location for stop in past)]
+    references = [None, *(stop_reference_minute(stop.trip, stop.kind, matrix) for stop in past)]
+    loads, leg_sets = _load_profile(past)
+    legs = [
+        Leg(matrix.km(points[k], points[k + 1]), matrix.leg(points[k], points[k + 1], references[k], references[k + 1]), leg_sets[k])
+        for k in range(done)
+    ]
+    timed = [
+        TimedStop(stop, real.start_min, real.start_min, real.departure_min, loads[k])
+        for k, (stop, real) in enumerate(zip(past, start.done, strict=True))
+    ]
+    return RouteSchedule(
+        vehicle=vehicle,
+        stops=(*timed, *rest.stops),
+        legs=(*legs, *rest.legs),
+        start_min=start.done[0].start_min - legs[0].minutes,
+        end_min=rest.end_min,
+        break_slot=start.break_taken or rest.break_slot,
+        lateness_min=rest.lateness_min,
+    )
+
+
+def _schedule(
+    vehicle: Vehicle,
+    stops: Sequence[PlannedStop],
+    matrix: TravelMatrix,
+    origin: LatLng,
+    aboard: Sequence[str],
+    day_start: int | None = None,
+) -> RouteSchedule:
+    """Times, loads and legs of `stops` driven from `origin` (patients `aboard`) back to the depot; `day_start`:
+    the start of the whole route of a vehicle under way (its 6-hour rule counts from there)."""
+    points = [origin, *(stop.location for stop in stops), vehicle.depot]
     references = [None, *(stop_reference_minute(stop.trip, stop.kind, matrix) for stop in stops), None]
     legs_km = [matrix.km(a, b) for a, b in zip(points, points[1:], strict=False)]
     travel = [matrix.leg(points[k], points[k + 1], references[k], references[k + 1]) for k in range(len(points) - 1)]
-    loads, leg_sets = _load_profile(stops)
+    loads, leg_sets = _load_profile(stops, aboard)
     legs = tuple(Leg(km, minutes, on_board) for km, minutes, on_board in zip(legs_km, travel, leg_sets, strict=True))
 
-    timing = _Timing(vehicle, stops, travel)
+    timing = _Timing(vehicle, stops, travel, day_start)
     rule = vehicle.break_
     candidates: list[_Placement] = []
     if rule is not None and rule.duration_min > 0:
-        candidates.append(_Placement(_Where.BEFORE))
+        if not aboard:
+            # Never a break before leaving with patients on board.
+            candidates.append(_Placement(_Where.BEFORE))
         candidates.extend(_Placement(_Where.LEG, k) for k, leg in enumerate(legs) if leg.empty)
         candidates.append(_Placement(_Where.AFTER))
 

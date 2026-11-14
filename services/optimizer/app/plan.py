@@ -151,13 +151,18 @@ def _revenue_cents(ctx: PlanContext, trip: Trip, schedules: Sequence[RouteSchedu
     return revenue_cents(ctx.tariffs, trip, schedule.vehicle, ride, ctx.request.settings.pricing, ctx.calendar)
 
 
-def _schedules(ctx: PlanContext, sequences: Mapping[str, Sequence[StopRef]]) -> list[RouteSchedule]:
-    """Timed routes of the vehicles with stops, in the request's vehicle order."""
+def _schedules(ctx: PlanContext, sequences: Mapping[str, Sequence[StopRef]], *, whole_day: bool = True) -> list[RouteSchedule]:
+    """Timed routes of the vehicles with stops, in the request's vehicle order. On a day under way,
+    each started route is headed by its stops done (app/progress.py), whatever the sequences give;
+    with `whole_day`, a started vehicle given no stop keeps its stops done."""
+    progress = ctx.progress
+    routes = progress.with_done(sequences, every_started=whole_day)
     schedules: list[RouteSchedule] = []
     for vehicle in ctx.request.vehicles:
-        refs = sequences.get(vehicle.id, ())
+        refs = routes.get(vehicle.id, ())
         if refs:
-            schedules.append(schedule_route(vehicle, [planned_stop(ctx, ref) for ref in refs], ctx.matrix))
+            stops = [planned_stop(ctx, ref) for ref in refs]
+            schedules.append(schedule_route(vehicle, stops, ctx.matrix, progress.start_of(vehicle)))
     return schedules
 
 
@@ -217,7 +222,7 @@ def route_results(ctx: PlanContext, sequences: Mapping[str, Sequence[StopRef]]) 
     """The routes of these sequences and the results of the trips they carry (request order), timed
     and priced exactly as build_response reports them, without the rest of the day: the routes an
     insertion changes (app/insertion.py)."""
-    schedules = _schedules(ctx, sequences)
+    schedules = _schedules(ctx, sequences, whole_day=False)
     placements = _locate_trips(schedules)
     route_revenue = [0] * len(schedules)
     results: list[TripResult] = []

@@ -25,6 +25,14 @@ billed distance, short-trip band, night and weekend surcharges at the planned ti
 sharing discount, supplements, rounded half up to the cent. A trip result off by more than one cent,
 or a route whose revenue is not the sum of its trips', is reported.
 
+Day under way (contract `progress`): the stops done of a started route are facts, at their real times.
+They are not checked against the rules (window, time between stops, shift start, seats, vehicle type),
+nor are the rides and waits that ended with them; a ride or a wait still going on is checked whole,
+from its real pickup (time on board, detour, seats and exclusive rides with the patients on board,
+wait at the facility). A break taken is the route's break: it is not checked against stops done, and
+a break window over before the vehicle goes on is not asked for any more. Read from the request
+alone, with this module's own code (not app/progress.py).
+
 Size of a breach (validate_measured, for /insert): how far a measured rule is exceeded, in its own
 unit: minutes beyond the window, the total wait, the time on board or the shift, km beyond the
 detour allowance, patients beyond the seats; None for a breach without a size (pairing, type, lock,
@@ -183,6 +191,30 @@ def validate_measured(request: DayRequest, routes: Sequence[Route], matrix: Trav
     return list(zip(out.items, out.excess, strict=True))
 
 
+@dataclass(frozen=True)
+class _Started:
+    """What the request says of a vehicle on a day under way."""
+
+    done: frozenset[tuple[str, StopKind]]
+    """Its stops done."""
+    going_on: int
+    """Earliest minute it goes on: now, the end of its last stop done, the end of a break taken."""
+
+
+def _started(request: DayRequest) -> dict[str, _Started]:
+    progress = request.progress
+    if progress is None:
+        return {}
+    started: dict[str, _Started] = {}
+    for route in progress.routes:
+        taken = route.break_taken.end_min if route.break_taken else 0
+        last = route.done[-1].departure_min if route.done else 0
+        started[route.vehicle_id] = _Started(
+            frozenset((stop.trip_id, stop.kind) for stop in route.done), max(progress.now_min, last, taken)
+        )
+    return started
+
+
 def _validate(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix) -> _Collector:
     trips = {trip.id: trip for trip in request.trips}
     vehicles = {vehicle.id: vehicle for vehicle in request.vehicles}
@@ -191,6 +223,9 @@ def _validate(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix
     occurrences: dict[str, list[_Occurrence]] = defaultdict(list)
     standing: dict[str, int] = {}
     """Minutes each patient waited on board at their facility (filled by _RouteCheck)."""
+    started = _started(request)
+    now = request.progress.now_min if request.progress else None
+    done_everywhere = frozenset(key for item in started.values() for key in item.done)
 
     for route_no, route in enumerate(routes):
         vehicle = vehicles.get(route.vehicle_id)
@@ -219,10 +254,16 @@ def _validate(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix
             seen.add((trip.id, stop.kind))
             occurrences[trip.id].append(_Occurrence(route_no, len(stops), stop.kind, stop, vehicle.id))
             stops.append((stop, trip))
-        _RouteCheck(out, request.settings, vehicle, route, stops, trips, matrix, standing).run()
+        mine = started.get(vehicle.id)
+        done = 0
+        if mine is not None:
+            while done < len(stops) and (stops[done][1].id, stops[done][0].kind) in mine.done:
+                done += 1
+        going_on = mine.going_on if mine is not None else now
+        _RouteCheck(out, request.settings, vehicle, route, stops, trips, matrix, standing, done=done, going_on=going_on).run()
 
     _check_pairing(out, occurrences)
-    _check_total_wait(out, request.settings, request.trips, occurrences, standing)
+    _check_total_wait(out, request.settings, request.trips, occurrences, standing, done_everywhere)
     return out
 
 
@@ -291,17 +332,27 @@ def _on_board_text(minutes: int) -> str:
     return f", dont {minutes}\u00a0min à bord du véhicule à l'arrêt" if minutes else ""
 
 
+def _wait_over(trip: Trip, done: frozenset[tuple[str, StopKind]]) -> bool:
+    """The trip's wait at the facility is over and done: the stop that ends it (the dropoff of an
+    outbound, after which the patient is at the appointment; the dropoff of a return, the patient
+    having left the facility) is done."""
+    return (trip.id, "DROPOFF") in done
+
+
 def _check_total_wait(
     out: _Collector,
     settings: Settings,
     trips: Sequence[Trip],
     occurrences: Mapping[str, list[_Occurrence]],
     standing: Mapping[str, int],
+    done: frozenset[tuple[str, StopKind]] = frozenset(),
 ) -> None:
     maximum = settings.max_total_wait_min + TIME_TOLERANCE_MIN
     paired: set[str] = set()
     for outbound, ret in _patient_pairs(trips):
         paired.update((outbound.id, ret.id))
+        if _wait_over(outbound, done) and _wait_over(ret, done):
+            continue  # both waits are past: facts, not the plan's
         before = _facility_wait(outbound, occurrences, standing)
         after = _facility_wait(ret, occurrences, standing)
         if before is None or after is None:
@@ -319,7 +370,7 @@ def _check_total_wait(
                 excess=total - settings.max_total_wait_min,
             )
     for trip in trips:
-        if trip.id in paired:
+        if trip.id in paired or _wait_over(trip, done):
             continue
         wait = _facility_wait(trip, occurrences, standing)
         if wait is not None and wait[0] > maximum:
@@ -347,6 +398,9 @@ class _RouteCheck:
         trips: Mapping[str, Trip],
         matrix: TravelMatrix,
         standing: dict[str, int],
+        *,
+        done: int = 0,
+        going_on: int | None = None,
     ) -> None:
         self.out = out
         self.settings = settings
@@ -356,6 +410,15 @@ class _RouteCheck:
         self.trips = trips
         self.matrix = matrix
         self.standing = standing
+        self.done = done
+        """Number of stops done heading the route (a day under way): facts, not checked."""
+        self.going_on = going_on
+        """Minute the vehicle goes on from its last stop done (or its depot), None on a day not started."""
+        positions: dict[str, dict[StopKind, int]] = defaultdict(dict)
+        for position, (stop, trip) in enumerate(stops):
+            positions[trip.id].setdefault(stop.kind, position)
+        self.finished = {trip_id for trip_id, kinds in positions.items() if kinds.get("DROPOFF", done) < done}
+        """Trips dropped off among the stops done: their ride is over (history)."""
         points: list[LatLng] = [vehicle.depot]
         points.extend(trip.pickup if stop.kind == "PICKUP" else trip.dropoff for stop, trip in stops)
         points.append(vehicle.depot)
@@ -392,6 +455,8 @@ class _RouteCheck:
     def _check_vehicle_rules(self) -> None:
         vid = self.vehicle.id
         for _, trip in self.stops:
+            if trip.id in self.finished:
+                continue
             if self.vehicle.type not in trip.allowed_vehicle_types:
                 self.out.add(
                     "VEHICLE_TYPE",
@@ -412,6 +477,8 @@ class _RouteCheck:
     def _check_loads(self) -> None:
         vid = self.vehicle.id
         for k, (stop, trip) in enumerate(self.stops):
+            if k < self.done:
+                continue
             on_board = self.leg_sets[k + 1]
             if len(on_board) > self.vehicle.capacity:
                 self.out.add(
@@ -445,6 +512,8 @@ class _RouteCheck:
         vid = self.vehicle.id
         settings = self.settings
         for k, (departure, next_start) in enumerate(zip(self.departures, self.next_starts, strict=True)):
+            if k < self.done:
+                continue  # a drive to a stop done: its real times
             needed = self.travel[k] + self._break_inside(departure, next_start)
             if next_start - departure >= needed - TIME_TOLERANCE_MIN:
                 continue
@@ -467,7 +536,7 @@ class _RouteCheck:
                     excess=departure + needed - next_start,
                 )
 
-        for stop, trip in self.stops:
+        for stop, trip in self.stops[self.done :]:
             service = _service(settings, trip, stop.kind)
             if stop.start_min < stop.arrival_min or stop.departure_min < stop.start_min + service:
                 self.out.add(
@@ -555,7 +624,7 @@ class _RouteCheck:
     # -- shift
     def _check_shift(self) -> None:
         vehicle, route = self.vehicle, self.route
-        if route.start_min < vehicle.shift_start_min - TIME_TOLERANCE_MIN:
+        if not self.done and route.start_min < vehicle.shift_start_min - TIME_TOLERANCE_MIN:
             self.out.add(
                 "SHIFT",
                 f"Départ du dépôt de {vehicle_name(vehicle)} à {hhmm(route.start_min)}, avant le début de service "
@@ -582,6 +651,18 @@ class _RouteCheck:
         vid = self.vehicle.id
         window = f"entre {hhmm(ws)} et {hhmm(we)}"
         slot = route.break_
+        if self.going_on is not None and self.done and slot is None and we - duration < self.going_on:
+            return  # a day under way: the window is over, what was done of it is not known
+        if self.going_on is not None and self.done and slot is not None and slot.end_min <= self.going_on:
+            # A break taken (or under way): only its length and window are checked, not the stops done around it.
+            if slot.end_min - slot.start_min < duration - TIME_TOLERANCE_MIN:
+                self.out.add(
+                    "BREAK",
+                    f"Pause {hhmm(slot.start_min)}–{hhmm(slot.end_min)} de {slot.end_min - slot.start_min}\u00a0min, "
+                    f"inférieure aux {duration}\u00a0min prévues",
+                    vehicle_id=vid,
+                )
+            return
         if slot is None:
             off_route_before = min(we, route.start_min) - ws >= duration
             off_route_after = we - max(ws, route.end_min) >= duration
@@ -655,6 +736,8 @@ class _RouteCheck:
                 self.standing[trip_id] = self._standing_at(range(dropoff, pickup, -1), self.places[dropoff])
             else:
                 self.standing[trip_id] = self._standing_at(range(pickup + 1, dropoff), self.places[pickup])
+            if trip_id in self.finished:
+                continue  # dropped off among the stops done: its time on board is a fact
             on_board = self.stops[dropoff][0].start_min - self.stops[pickup][0].departure_min
             direct = self.matrix.leg(trip.pickup, trip.dropoff, self.references[pickup + 1], self.references[dropoff + 1])
             limit = direct + self.settings.max_ride_extra_min
@@ -677,7 +760,7 @@ class _RouteCheck:
             positions[trip.id].setdefault(stop.kind, position)
         for trip_id, kinds in positions.items():
             pickup, dropoff = kinds.get("PICKUP"), kinds.get("DROPOFF")
-            if pickup is None or dropoff is None or dropoff < pickup:
+            if pickup is None or dropoff is None or dropoff < pickup or trip_id in self.finished:
                 continue
             trip = self.trips[trip_id]
             # Leg k + 1 goes from stop k to stop k + 1.

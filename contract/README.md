@@ -53,6 +53,8 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
     "pickupServiceMin": 5,              // temps d'arrêt à une prise en charge (course sans le sien)
     "dropoffServiceMin": 5,             // temps d'arrêt à une dépose (course sans le sien)
     "unassignedPenalty": 10000,         // € de pénalité par course non affectée
+    "changePenalty": 15,                // facultatif (0) : € par course du planning en place servie par un autre
+                                        //   véhicule (voir « Pénalité de changement »)
     "timeLimitSec": 10,                 // budget de calcul du solveur, entier 1..600 s (voir plus bas)
     "maxRideExtraMin": 30,              // facultatif (30 par défaut), 0..180 : temps à bord <= trajet direct + 30 min
     "traffic": {                        // facultatif, absent ou null = temps de trajet sans trafic (voir plus bas)
@@ -132,9 +134,59 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
   "initialRoutes": [{                   // facultatif, absent ou null = aucun : le planning en place (voir plus bas)
     "vehicleId": "veh_taxi_1",
     "stops": [{ "tripId": "trip_1", "kind": "PICKUP" }, { "tripId": "trip_1", "kind": "DROPOFF" }]
-  }]
+  }],
+  "progress": {                         // facultatif, absent ou null = journée pas commencée (voir « Journée commencée »)
+    "nowMin": 600,                      // heure de la demande : rien de ce qui reste à faire n'est prévu avant
+    "routes": [{                        // tournées commencées : leurs arrêts faits, dans l'ordre de la tournée
+      "vehicleId": "veh_taxi_1",
+      "done": [
+        { "tripId": "trip_1", "kind": "PICKUP", "startMin": 398, "departureMin": 403 },
+        { "tripId": "trip_1", "kind": "DROPOFF", "startMin": 440, "departureMin": 445 }
+      ],
+      "breakTaken": { "startMin": 700, "endMin": 745 }  // facultatif : pause déjà prise (ou en cours)
+    }]
+  }
 }
 ```
+
+### Journée commencée (`progress`)
+
+Facultatif dans `OptimizeRequest`, `EvaluateRequest` et `InsertRequest` (exemple complet :
+`fixtures/optimize-request-started.json`). Le web l'envoie pour la date du jour : `nowMin`, l'heure de la
+demande, et pour chaque tournée qui a des arrêts faits, ces arrêts dans l'ordre avec leurs heures réelles
+(`startMin`, `departureMin` : une prise en charge saisie « patient à bord » donne son départ, une dépose son
+début), et la pause du chauffeur si elle est déjà prise ou commencée. Refusé (422) : un véhicule ou une course
+inconnus, un véhicule deux fois, un arrêt donné deux fois, une dépose sans sa prise en charge avant elle,
+`departureMin` avant `startMin`. L'optimizer :
+
+1. **ne change jamais un arrêt fait** : chaque tournée commencée de la réponse commence par ses arrêts faits,
+   à leurs heures réelles, sur son véhicule (un arrêt fait donné ailleurs dans `routes` est retiré) ; une
+   course faite n'est jamais non affectée ;
+2. fait repartir chaque véhicule **de son dernier arrêt fait**, au plus tôt à `max(nowMin, départ de cet arrêt,
+   fin de la pause prise)` ; un véhicule sans arrêt fait part de son dépôt au plus tôt à
+   `max(shiftStartMin, nowMin)` : aucun arrêt à faire n'est prévu avant `nowMin` ;
+3. garde chaque **patient à bord** (prise en charge faite, dépose à faire) sur son véhicule : sa dépose est
+   toujours prévue, en retard s'il le faut (le retard est signalé, `TIME_WINDOW`), jamais laissée de côté ; un
+   autre patient ne monte avec lui que dans ses règles, comptées depuis sa prise en charge réelle (temps à
+   bord, détour, places, transport exclusif, attente au lieu de soins) ;
+4. ne place plus de pause pour un chauffeur qui l'a prise ; la fenêtre d'un chauffeur qui ne l'a pas prise
+   commence au plus tôt à son départ ;
+5. pour `/insert`, place la course après les arrêts faits et l'heure de départ du véhicule ; une course faite
+   ou à bord ne se place pas (422).
+
+Le validateur ne juge pas les arrêts faits (fenêtre, temps entre deux arrêts, début de service, places, type
+de véhicule) ni les trajets et attentes terminés avec eux : ce sont des faits. Il revérifie entier un trajet
+en cours (temps à bord et détour depuis la prise en charge réelle, places et transport exclusif avec les
+patients à bord) et l'attente cumulée d'un patient dont l'un des trajets reste à faire.
+
+### Pénalité de changement (`settings.changePenalty`)
+
+Facultative (0 par défaut). Avec `initialRoutes`, chaque course du planning en place servie par un autre
+véhicule dans le planning rendu coûte `changePenalty` euros de plus : dans l'insertion de l'optimizer (le coût
+de chaque place) et dans la comparaison finale avec le planning en place réparé (point 3 ci-dessous). Une
+réoptimisation ne déplace donc une course connue d'un chauffeur que pour un gain supérieur. Elle n'entre pas
+dans le modèle OR-Tools (une contrainte souple par course y faisait perdre la plupart des courses à
+120 véhicules) et n'apparaît dans aucun chiffre de la réponse (CA, coût, marge).
 
 ### Planning en place (`initialRoutes`)
 

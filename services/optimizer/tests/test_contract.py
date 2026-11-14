@@ -30,6 +30,21 @@ def test_initial_routes_are_optional_and_not_part_of_evaluate() -> None:
         EvaluateRequest.model_validate({**load("evaluate-request.json"), "initialRoutes": in_place})
 
 
+def test_started_day_fixture() -> None:
+    raw = load("optimize-request-started.json")
+    request = OptimizeRequest.model_validate(raw)
+    assert request.progress is not None and request.progress.routes[0].done
+    assert request.settings.change_penalty == 15
+    # The same progress is part of the day: /evaluate and /insert take it too.
+    day = {key: value for key, value in raw.items() if key != "initialRoutes"}
+    assert EvaluateRequest.model_validate({**day, "routes": raw["initialRoutes"]}).progress == request.progress
+    assert InsertRequest.model_validate({**day, "routes": raw["initialRoutes"], "tripId": "trip_7"}).progress == request.progress
+    # Absent or null: a day not started, no penalty.
+    plain = load("optimize-request.json")
+    assert OptimizeRequest.model_validate(plain).progress is None
+    assert OptimizeRequest.model_validate({**plain, "progress": None}).settings.change_penalty == 0
+
+
 def test_evaluate_request_fixture() -> None:
     request = EvaluateRequest.model_validate(load("evaluate-request.json"))
     assert request.routes

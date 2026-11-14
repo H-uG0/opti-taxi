@@ -136,6 +136,10 @@ class Settings(ContractModel):
     traffic: TrafficSettings | None = None
     pricing: PricingSettings = Field(default_factory=PricingSettings)
     """Absent or null: the defaults (no empty-leg surcharge, multiplied, distinct co-passengers, no holiday)."""
+    change_penalty: float = Field(default=0, ge=0, le=100_000)
+    """Euros per trip of the plan in place (`initialRoutes`) served by another vehicle in the plan returned:
+    a route the driver already knows is not reshuffled for a smaller gain (contract README, « Pénalité de
+    changement »). 0: no penalty."""
 
     @model_validator(mode="before")
     @classmethod
@@ -299,6 +303,49 @@ class RoutePlan(ContractModel):
     stops: list[StopRef] = Field(max_length=2 * MAX_TRIPS)
 
 
+class DoneStop(ContractModel):
+    """A stop the crew has done, with its real times (contract README, « Journée commencée »)."""
+
+    trip_id: str = Field(min_length=1)
+    kind: StopKind
+    start_min: DayMinute
+    departure_min: DayMinute
+
+    @model_validator(mode="after")
+    def _ordered(self) -> DoneStop:
+        if self.departure_min < self.start_min:
+            raise ValueError("done stop departureMin must not be before startMin")
+        return self
+
+
+class TakenBreak(ContractModel):
+    """The driver's break already taken (or under way) on a started route."""
+
+    start_min: DayMinute
+    end_min: DayMinute
+
+    @model_validator(mode="after")
+    def _ordered(self) -> TakenBreak:
+        if self.end_min <= self.start_min:
+            raise ValueError("breakTaken endMin must be after startMin")
+        return self
+
+
+class StartedRoute(ContractModel):
+    """The stops a vehicle's crew has done, in route order: they never change."""
+
+    vehicle_id: str = Field(min_length=1)
+    done: list[DoneStop] = Field(max_length=2 * MAX_TRIPS)
+    break_taken: TakenBreak | None = None
+
+
+class Progress(ContractModel):
+    """A day under way: nothing still to do is planned before nowMin, the stops done stay as they are."""
+
+    now_min: DayMinute
+    routes: list[StartedRoute] = Field(default_factory=list, max_length=MAX_VEHICLES)
+
+
 class DayRequest(ContractModel):
     """What both operations need: the day's settings, fleet, trips and tariffs."""
 
@@ -307,6 +354,37 @@ class DayRequest(ContractModel):
     vehicles: list[Vehicle] = Field(max_length=MAX_VEHICLES)
     trips: list[Trip] = Field(max_length=MAX_TRIPS)
     tariffs: list[Tariff] = Field(max_length=MAX_TARIFFS)
+    progress: Progress | None = None
+    """The day has started (contract README, « Journée commencée »): the time of the request and, per
+    vehicle, the stops done. None: a day not started, planned from the start of every shift."""
+
+    @model_validator(mode="after")
+    def _progress_references(self) -> DayRequest:
+        if self.progress is None:
+            return self
+        vehicles = {vehicle.id for vehicle in self.vehicles}
+        trips = {trip.id for trip in self.trips}
+        seen_vehicles: set[str] = set()
+        seen_stops: set[tuple[str, str]] = set()
+        for route in self.progress.routes:
+            if route.vehicle_id not in vehicles:
+                raise ValueError(f"progress names an unknown vehicle: {route.vehicle_id}")
+            if route.vehicle_id in seen_vehicles:
+                raise ValueError(f"progress names a vehicle twice: {route.vehicle_id}")
+            seen_vehicles.add(route.vehicle_id)
+            picked: set[str] = set()
+            for stop in route.done:
+                if stop.trip_id not in trips:
+                    raise ValueError(f"progress names an unknown trip: {stop.trip_id}")
+                key = (stop.trip_id, stop.kind)
+                if key in seen_stops:
+                    raise ValueError(f"progress gives a stop twice: {stop.trip_id} {stop.kind}")
+                seen_stops.add(key)
+                if stop.kind == "PICKUP":
+                    picked.add(stop.trip_id)
+                elif stop.trip_id not in picked:
+                    raise ValueError(f"progress gives the dropoff of {stop.trip_id} without its pickup before it")
+        return self
 
     @model_validator(mode="after")
     def _tariff_references(self) -> DayRequest:
@@ -348,6 +426,8 @@ class InsertRequest(DayRequest):
     def _known_trip(self) -> InsertRequest:
         if all(trip.id != self.trip_id for trip in self.trips):
             raise ValueError("tripId must name a trip of the request")
+        if self.progress is not None and any(stop.trip_id == self.trip_id for route in self.progress.routes for stop in route.done):
+            raise ValueError("tripId names a trip already picked up (done or on board)")
         return self
 
 

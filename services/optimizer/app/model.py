@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
@@ -124,8 +124,13 @@ def _bounded(window: Window, trip: Trip) -> Window:
     return Window(open_, close)
 
 
-def derive_windows(request: DayRequest) -> dict[str, TripWindows]:
-    """Service time windows of every trip, keyed by trip id."""
+def derive_windows(
+    request: DayRequest, now_min: int | None = None, fixed: Callable[[str], bool] = lambda _trip_id: False
+) -> dict[str, TripWindows]:
+    """Service time windows of every trip, keyed by trip id. On a day under way (`now_min`), a trip not picked
+    up yet (`fixed` false) is picked up from now on; a return whose patient has waited past the end of their
+    window since the end of the session is picked up as soon as possible (a window from now, its lateness
+    reported by the validator against the session's end)."""
     settings = request.settings
     total = settings.max_total_wait_min
     # A leg without its pair waits at most the total as well (the validator checks it on its own).
@@ -151,6 +156,13 @@ def derive_windows(request: DayRequest) -> dict[str, TripWindows]:
             if facility_hours_apply(trip):
                 pickup = _bounded(pickup, trip)
             windows[trip.id] = TripWindows(pickup=pickup, dropoff=FREE_WINDOW)
+        if now_min is not None and not fixed(trip.id):
+            pickup = windows[trip.id].pickup
+            if trip.direction == "RETURN" and pickup.close < now_min:
+                pickup = Window(now_min, min(HORIZON_MIN, now_min + after_budget[trip.id]))
+            else:
+                pickup = Window(max(pickup.open, now_min), pickup.close)
+            windows[trip.id] = TripWindows(pickup=pickup, dropoff=windows[trip.id].dropoff)
     return windows
 
 
