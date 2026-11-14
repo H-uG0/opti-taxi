@@ -193,6 +193,9 @@ class Trip(ContractModel):
     ready_min: DayMinute | None = None
     allowed_vehicle_types: list[VehicleType] = Field(min_length=1)
     shareable: bool
+    sharing_eligible: bool | None = None
+    """Eligible to sharing as the Assurance maladie counts it: the prescription allows it and the caisse
+    pays, a refusal included. Only the plan's shared_trip_ratio reads it; None: shareable."""
     locked_vehicle_id: str | None = None
     pickup_service_min: ServiceMinutes | None = None
     """Stop duration at this trip's pickup; None: settings.pickupServiceMin."""
@@ -408,9 +411,11 @@ class Kpis(ContractModel):
     empty_km_ratio: float
     shared_trips: int
     shareable_trips: int
-    """Served trips that may be shared (trips[].shareable) in a taxi or a VSL: the denominator of shared_trip_ratio."""
+    """Served eligible trips (trips[].sharing_eligible, else shareable) in a taxi or a VSL: the denominator of
+    shared_trip_ratio."""
     shared_trip_ratio: float
-    """Shared trips among shareable_trips (the scope of the Assurance maladie), 0 when there is none."""
+    """Shared trips among shareable_trips (the dashboard's formula, the scope of the Assurance maladie), 0 when
+    there is none."""
     revenue: float
     cost: float
     margin: float

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeDayKpis, computeKpisForDates, type KpiData, type KpiRoute, type KpiTrip } from "./kpis";
-import { planViewOf, plannedComparison, realizedComparison } from "./kpis-compare";
+import { periodPlan, planViewOf, plannedComparison, realizedComparison } from "./kpis-compare";
 import {
   addPlanFigures,
   comparisonDates,
@@ -9,6 +9,7 @@ import {
   encodePlanFigures,
   planFiguresOf,
   planRates,
+  reopeningDropsFrozenPlan,
   replacesFrozenPlan,
   vehicleFiguresOf,
 } from "./kpis-plan";
@@ -110,6 +111,11 @@ describe("planned, served, done (KPI-07)", () => {
     expect(replacesFrozenPlan({ validatedAt: new Date("2026-11-03T06:00:00Z") }, DAY, new Date("2026-11-03T07:00:00Z"))).toBe(true);
   });
 
+  it("drops the frozen plan when the day is reopened before it, keeps it when reopened on the day", () => {
+    expect(reopeningDropsFrozenPlan(DAY, "2026-11-02")).toBe(true);
+    expect(reopeningDropsFrozenPlan(DAY, DAY)).toBe(false);
+  });
+
   it("freezes the plan in the validation's client, unless a plan of the day before must stay", async () => {
     const writes: unknown[] = [];
     const client = (existing: { validatedAt: Date } | null) =>
@@ -202,5 +208,13 @@ describe("fair comparisons", () => {
     const comparison = plannedComparison(DAY, lookup, TODAY);
     expect(comparison.previous?.frozen).toBe(true);
     expect(comparison.fourWeeks).toMatchObject({ count: 3, frozen: 1, figures: { served: 7 } });
+  });
+
+  it("totals the « Prévu » of a period as its days read it: frozen when started, routes otherwise", () => {
+    // 13th and 20th: 2 trips each on their routes; 27th: the frozen 3; the 3rd: 1 served (a patient absent).
+    const total = periodPlan(days, TODAY);
+    expect(total).toMatchObject({ count: 4, frozen: 1, figures: { served: 2 + 2 + 3 + 1, vehicles: 4 } });
+    expect(planRates(total!.figures).tripsPerVehicle).toBe(2);
+    expect(periodPlan([], TODAY)).toBeNull();
   });
 });

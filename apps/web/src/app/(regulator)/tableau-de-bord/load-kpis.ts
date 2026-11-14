@@ -11,7 +11,6 @@ import { DEFAULT_KPI_OPTIONS, listDates, type KpiData, type KpiOptions } from "@
 import { loadKpiFleet } from "@/lib/kpis-fleet-load";
 import { loadKpiRows, type KpiDates } from "@/lib/kpis-load";
 import { yearToDateMonths, type SharingMonth } from "@/lib/kpis-sharing";
-import { fromIsoDate } from "@/lib/time";
 import { patientInitials } from "./format";
 
 export async function loadKpiData(dates: KpiDates): Promise<KpiData> {
@@ -41,7 +40,9 @@ type MonthRow = { month: string; type: string; tap: number; tapShared: number; e
 /**
  * Shared transport of the year of `to`, from 1 January to `to`, by month and
  * vehicle type (served CPAM trips in a taxi or a VSL, the plan's sharing):
- * one aggregate query, so the year does not load trip by trip.
+ * one aggregate query, so the year does not load trip by trip. The bounds are
+ * cast from their ISO strings (a Date would bind as timestamptz and shift with
+ * the session's time zone).
  */
 export async function loadSharingYear(to: string): Promise<{ months: SharingMonth[]; total: SharingMonth }> {
   const from = `${to.slice(0, 4)}-01-01`;
@@ -55,7 +56,7 @@ export async function loadSharingYear(to: string): Promise<{ months: SharingMont
     FROM "Trip" t
     JOIN "Route" r ON r.id = t."routeId"
     JOIN "Vehicle" v ON v.id = r."vehicleId"
-    WHERE t."serviceDate" BETWEEN ${fromIsoDate(from)} AND ${fromIsoDate(to)}
+    WHERE t."serviceDate" BETWEEN ${from}::date AND ${to}::date
       AND t.status IN ('ASSIGNED', 'PICKED_UP', 'DROPPED_OFF')
       AND t.payer = 'CPAM'
       AND NOT ('AMBULANCE' = ALL (t."allowedVehicleTypes"))

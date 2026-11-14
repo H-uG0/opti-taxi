@@ -46,6 +46,21 @@ export function planViewOf(day: DayKpis, today: string): PlanView | null {
   return { date: day.date, figures: planFiguresOf(day), frozen: false, validatedAt: day.validatedAt };
 }
 
+/**
+ * The plans of a period summed, each day read as planViewOf reads it (frozen
+ * for a day started, its routes otherwise): the total of the detail table's
+ * « Prévu » column. Null when no day has a plan.
+ */
+export function periodPlan(days: readonly DayKpis[], today: string): { figures: PlanFigures; count: number; frozen: number } | null {
+  const views = days.flatMap((day) => planViewOf(day, today) ?? []);
+  if (views.length === 0) return null;
+  return {
+    figures: views.reduce((sum, view) => addPlanFigures(sum, view.figures), emptyPlanFigures()),
+    count: views.length,
+    frozen: views.filter((view) => view.frozen).length,
+  };
+}
+
 export type PlannedComparison = {
   previous: PlanView | null;
   fourWeeks: { figures: PlanFigures; count: number; frozen: number } | null;

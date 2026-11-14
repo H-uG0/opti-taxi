@@ -4,6 +4,7 @@ import { cn } from "@/components/ui/cn";
 import { Table, TBody, THead } from "@/components/ui/table";
 import { hasPlanning, type DayKpis, type PeriodKpis } from "@/lib/kpis";
 import { lostTrips, placedTrips, tripsToCarry } from "@/lib/kpis-demand";
+import { periodPlan, planViewOf } from "@/lib/kpis-compare";
 import { planRates } from "@/lib/kpis-plan";
 import { tapTotal } from "@/lib/kpis-sharing";
 import { formatKm, formatPercent, MATRIX_SOURCE_LABELS } from "@/lib/labels";
@@ -16,6 +17,7 @@ import {
   formatEurosRounded,
   formatInstant,
   formatPlanningTime,
+  lateThreshold,
   plural,
 } from "./format";
 import { dashboardHref } from "./range-form";
@@ -105,17 +107,19 @@ function realizedCell(day: DayKpis): { tone: Tone; text: string; title: string }
   return { tone: "default", text: realized.value, title: capitalize(realized.note) };
 }
 
-/** « Prévu » trips per vehicle: the plan as validated (frozen) for a day started, else the routes as they stand. */
+/** « Prévu » trips per vehicle: the plan as validated (frozen) for a day started, else the routes as they stand (planViewOf). */
 function plannedCell(day: DayKpis, today: string): { text: string; title: string } {
-  if (day.date <= today && day.frozen) {
+  const view = planViewOf(day, today);
+  if (view?.frozen && view.validatedAt) {
+    const reopened = day.planningStatus === "VALIDATED" ? "" : ", avant la réouverture du planning";
     return {
-      text: formatDecimal(planRates(day.frozen.figures).tripsPerVehicle),
-      title: `Plan validé le ${formatInstant(day.frozen.validatedAt)} : ${plural(day.frozen.figures.served, "course")}, ${plural(day.frozen.figures.vehicles, "véhicule")}. Servi aujourd'hui : ${formatDecimal(day.tripsPerVehiclePlanned)}`,
+      text: formatDecimal(planRates(view.figures).tripsPerVehicle),
+      title: `Plan validé le ${formatInstant(view.validatedAt)}${reopened}\u00a0: ${plural(view.figures.served, "course")}, ${plural(view.figures.vehicles, "véhicule")}. Servi (après les absences et les annulations)\u00a0: ${formatDecimal(day.tripsPerVehiclePlanned)}`,
     };
   }
   return {
     text: formatDecimal(day.tripsPerVehiclePlanned),
-    title: day.date <= today ? "Pas de plan validé figé ce jour : les tournées telles qu'elles sont" : "Tournées prévues",
+    title: day.date <= today ? "Pas de plan validé figé ce jour\u00a0: les tournées telles qu'elles sont" : "Tournées prévues",
   };
 }
 
@@ -157,6 +161,7 @@ export function KpiTable({
   const periodLate = lateCell(period.lateArrivals, period.measuredOutbound);
   const periodTight = tightCell(period.tightOutbound, period.plannedOutbound);
   const periodLost = lostTrips(period.demand);
+  const plan = periodPlan(days, today);
 
   return (
     <Table>
@@ -181,7 +186,7 @@ export function KpiTable({
           <HeadCell rowSpan={2} divider className="align-bottom" title="Part des km roulés sans patient à bord (km totaux au survol)">
             Km à vide
           </HeadCell>
-          <HeadCell rowSpan={2} divider className="align-bottom" title="Partage prévu des courses éligibles en taxi ou VSL (Assurance maladie)">
+          <HeadCell rowSpan={2} divider className="align-bottom" title="Partage servi (les tournées après les absences et les annulations) des courses éligibles en taxi ou VSL (Assurance maladie)">
             Partagé
           </HeadCell>
           <HeadCell colSpan={2} scope="colgroup" align="center" divider>
@@ -205,7 +210,7 @@ export function KpiTable({
             Prévu
           </HeadCell>
           <HeadCell>Réalisé</HeadCell>
-          <HeadCell divider title={`Allers déposés plus de ${tolerance} min après le RDV / allers déposés avec heure saisie`}>
+          <HeadCell divider title={`Allers déposés ${lateThreshold(tolerance)} / allers déposés avec heure saisie`}>
             Retards
           </HeadCell>
           <HeadCell title={"Allers dont la dépose est prévue moins de 5\u00a0min avant le RDV"}>Serrés</HeadCell>
@@ -366,8 +371,16 @@ export function KpiTable({
             {period.fleet ? `${period.vehicles} / ${period.fleet.available}` : period.vehicles}
             <span className="block text-[11px] font-normal text-slate-600">journées-véhicules</span>
           </Num>
-          <Num divider tone="strong" title="Courses servies ÷ journées-véhicules utilisées">
-            {formatDecimal(period.tripsPerVehiclePlanned)}
+          <Num
+            divider
+            tone="strong"
+            title={
+              plan
+                ? `${plural(plan.figures.served, "course")} ÷ ${plural(plan.figures.vehicles, "journée-véhicule", "journées-véhicules")} des plans, comme la colonne (${plural(plan.frozen, "plan validé figé", "plans validés figés")}, ${plural(plan.count - plan.frozen, "jour lu", "jours lus")} sur ses tournées)`
+                : undefined
+            }
+          >
+            {formatDecimal(plan ? planRates(plan.figures).tripsPerVehicle : null)}
           </Num>
           <Num
             tone="strong"

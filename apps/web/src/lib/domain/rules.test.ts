@@ -7,6 +7,7 @@ import {
   formatAddress,
   initialSharingStatus,
   isShareable,
+  isSharingEligible,
   REQUIRED_QUALIFICATIONS,
   sharingAllowedFor,
 } from "./rules";
@@ -73,6 +74,16 @@ describe("initialSharingStatus", () => {
   it("starts eligible trips as not proposed and the others as not eligible", () => {
     expect(initialSharingStatus(true)).toBe("NOT_PROPOSED");
     expect(initialSharingStatus(false)).toBe("NOT_ELIGIBLE");
+  });
+});
+
+describe("isSharingEligible", () => {
+  it("counts the CPAM trips whose prescription allows sharing, a refusal included", () => {
+    expect(isSharingEligible({ sharingAllowed: true })).toBe(true);
+    expect(isSharingEligible({ sharingAllowed: true, payer: "CPAM" })).toBe(true);
+    expect(isSharingEligible({ sharingAllowed: true, payer: "PRIVATE" })).toBe(false);
+    expect(isSharingEligible({ sharingAllowed: false, payer: "CPAM" })).toBe(false);
+    expect(isSharingEligible({})).toBe(false);
   });
 });
 

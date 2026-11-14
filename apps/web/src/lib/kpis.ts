@@ -474,9 +474,9 @@ export function hasPlanning(day: Pick<DayKpis, "vehicles" | "optimizationRuns">)
  * Period summary: rates are recomputed from summed counters, not averaged day
  * by day. The realized trips-per-vehicle rate only sums finished days: the
  * day in progress would add all its vehicles but only part of its drop-offs.
- * Demand and fleet only sum the days with planning: a day not optimized yet
- * would read « every trip unassigned », a Sunday without transport « every
- * vehicle idle ».
+ * Demand, fleet and sharing only sum the days with planning: a day not
+ * optimized yet would read « every trip unassigned » and « every eligible trip
+ * never proposed », a Sunday without transport « every vehicle idle ».
  */
 export function summarizePeriod(days: readonly DayKpis[]): PeriodKpis {
   const totals = days.reduce<KpiTotals>((sum, day) => addTotals(sum, day), emptyTotals());
@@ -487,7 +487,7 @@ export function summarizePeriod(days: readonly DayKpis[]): PeriodKpis {
   const parts: KpiParts = {
     demand: planned.reduce((sum, d) => addDemand(sum, d.demand), emptyDemand()),
     fleet: planned.reduce<FleetTotals | null>((sum, d) => addFleet(sum, d.fleet), null),
-    sharing: days.reduce((sum, d) => addSharing(sum, d.sharing), emptySharing()),
+    sharing: planned.reduce((sum, d) => addSharing(sum, d.sharing), emptySharing()),
     waits: days.reduce((sum, d) => addWaits(sum, d.waits), emptyWaits()),
   };
   const measured = days.filter((d) => d.planningMinutes !== null);

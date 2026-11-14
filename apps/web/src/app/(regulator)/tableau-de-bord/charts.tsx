@@ -4,7 +4,7 @@ import { tapTotal } from "@/lib/kpis-sharing";
 import { formatKm, formatPercent } from "@/lib/labels";
 import { formatDuration } from "@/lib/time";
 import { BarChart } from "./bar-chart";
-import { formatDayShort, formatDecimal, formatEurosRounded, plural } from "./format";
+import { formatDayShort, formatDecimal, formatEurosRounded, lateThreshold, plural } from "./format";
 
 type ChartSpec = {
   id: string;
@@ -71,18 +71,18 @@ export function chartSpecs(toleranceMin: number): readonly ChartSpec[] {
       id: "shared",
       title: "Transport partagé (périmètre CPAM)",
       method:
-        "Courses partagées ÷ courses éligibles\u00a0: servies en taxi ou en VSL, Assurance maladie, prescription autorisant le partage. Barres\u00a0: partage prévu par les tournées\u202f; points\u00a0: partage mesuré aux horodatages (deux patients à bord en même temps).",
+        "Courses partagées ÷ courses éligibles\u00a0: servies en taxi ou en VSL, Assurance maladie, prescription autorisant le partage. Barres\u00a0: partage servi, celui des tournées après les absences et les annulations\u202f; points\u00a0: partage mesuré aux horodatages (deux patients à bord en même temps).",
       value: (d) => d.eligibleSharedRate,
       format: percent,
-      primaryLabel: "Prévu",
+      primaryLabel: "Servi",
       secondary: { label: "Mesuré", value: (d) => d.measuredSharedRate },
       period: (p) =>
-        `Sur la période\u00a0: ${formatPercent(p.eligibleSharedRate, 1)} prévu, ${formatPercent(p.measuredSharedRate, 1)} mesuré (${tapTotal(p.sharing.eligibleShared)} sur ${tapTotal(p.sharing.eligible)} éligibles)`,
+        `Sur la période\u00a0: ${formatPercent(p.eligibleSharedRate, 1)} servi, ${formatPercent(p.measuredSharedRate, 1)} mesuré (${tapTotal(p.sharing.eligibleShared)} sur ${tapTotal(p.sharing.eligible)} éligibles)`,
     },
     {
       id: "late",
-      title: `Retards au RDV (au-delà de ${toleranceMin}\u00a0min)`,
-      method: `Allers déposés dont l'heure de dépose saisie par le chauffeur (heure de Paris, à la minute près) dépasse l'heure du RDV de plus de ${toleranceMin}\u00a0min, parmi les allers déposés avec une heure saisie. Le chauffeur tape «\u202fDéposé\u202f» après avoir accompagné le patient à l'accueil\u00a0: d'où la tolérance, réglable en haut de page.`,
+      title: toleranceMin > 0 ? `Retards au RDV (au-delà de ${toleranceMin}\u00a0min)` : "Retards au RDV (sans tolérance)",
+      method: `Allers dont l'heure de dépose saisie par le chauffeur (heure de Paris, à la minute près) est ${lateThreshold(toleranceMin)}, parmi les allers déposés avec une heure saisie. Le chauffeur tape «\u202fDéposé\u202f» après avoir accompagné le patient à l'accueil\u00a0: d'où la tolérance, réglable en haut de page.`,
       value: (d) => (d.measuredOutbound > 0 ? d.lateRate : null),
       format: percent,
       period: (p) =>

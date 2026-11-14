@@ -46,6 +46,7 @@ import { checkRouteCrewChange, remainingPart } from "@/lib/staff/route-crew";
 import { loadPlanVersion, STALE_PLAN_ERROR } from "@/lib/planning/version";
 import { VEHICLE_TYPE_SHORT } from "@/lib/labels";
 import { formatLongDate, fromIsoDate, isIsoDate, todayIso, toIsoDate } from "@/lib/time";
+import { reopeningDropsFrozenPlan } from "@/lib/kpis-plan";
 import { freezeValidatedPlan } from "@/lib/kpis-plan-store";
 
 export type PlanningActionResult =
@@ -916,7 +917,18 @@ export async function reopenDay(date: string): Promise<PlanningActionResult> {
         where: { serviceDate: fromIsoDate(isoDate), status: "VALIDATED" },
         data: { status: "PROPOSED", validatedAt: null },
       });
-      if (reopened.count > 0) await audit(tx, user, { action: "plan.reopen", entity: "Route", entityId: null, serviceDate: isoDate });
+      if (reopened.count === 0) return 0;
+      // Before the service day, the validated plan frozen for the dashboard is no longer the plan (kpis-plan.ts).
+      const dropped = reopeningDropsFrozenPlan(isoDate, todayIso())
+        ? (await tx.validatedPlan.deleteMany({ where: { serviceDate: fromIsoDate(isoDate) } })).count
+        : 0;
+      await audit(tx, user, {
+        action: "plan.reopen",
+        entity: "Route",
+        entityId: null,
+        serviceDate: isoDate,
+        ...(dropped > 0 ? { details: { frozenPlanDropped: true } } : {}),
+      });
       return reopened.count;
     }, PLANNING_TX_OPTIONS);
     if (count === 0) return { ok: false, error: "Aucune tournée validée à rouvrir ce jour." };

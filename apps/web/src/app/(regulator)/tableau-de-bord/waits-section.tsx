@@ -3,7 +3,7 @@ import { Stat } from "@/components/ui/layout";
 import type { KpiOptions, PeriodKpis } from "@/lib/kpis";
 import { quantile } from "@/lib/kpis-rows";
 import { formatDuration } from "@/lib/time";
-import { formatCountOf, formatDayShort, formatMinutes, formatRate, plural } from "./format";
+import { formatCountOf, formatDayShort, formatMinutes, formatRate, lateLabel, plural } from "./format";
 
 /** A shared care session over the wait limit, as listed: initials only, and links to its trips on the planning. */
 export type WaitCaseRow = {
@@ -65,7 +65,7 @@ export function WaitsSection({ period, options, cases }: { period: PeriodKpis; o
           hint={`Médiane, p90 ${formatMinutes(quantile(w.rideExcess, 0.9))} · ${w.rideOverMax} au-delà de +${formatDuration(options.maxRideExtraMin)} (trajet direct estimé sur le plan)`}
         />
         <Stat
-          label={`Retards (> ${options.lateToleranceMin}\u00a0min)`}
+          label={lateLabel(options.lateToleranceMin)}
           tone={period.measuredOutbound === 0 ? "default" : period.lateArrivals > 0 ? "bad" : "good"}
           value={period.measuredOutbound > 0 ? formatRate(period.lateRate) : "—"}
           hint={`${period.lateArrivals} sur ${plural(period.measuredOutbound, "aller mesuré", "allers mesurés")} · tolérance réglable en haut de page (le chauffeur tape «\u202fDéposé\u202f» après avoir accompagné le patient)`}
@@ -123,34 +123,42 @@ export function WaitsSection({ period, options, cases }: { period: PeriodKpis; o
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {shown.map((row) => (
-                  <tr key={`${row.serviceDate}-${row.outboundTripId ?? ""}-${row.returnTripId ?? ""}`}>
-                    <td className="tabular px-3 py-1.5 whitespace-nowrap text-slate-800">{formatDayShort(row.serviceDate)}</td>
-                    <td className="px-3 py-1.5 text-slate-800">{row.initials}</td>
-                    <td className="tabular px-3 py-1.5 text-right text-slate-800">{formatMinutes(row.beforeMin)}</td>
-                    <td className="tabular px-3 py-1.5 text-right text-slate-800">{formatMinutes(row.afterMin)}</td>
-                    <td className="tabular px-3 py-1.5 text-right font-semibold text-red-700">{formatMinutes(row.totalMin)}</td>
-                    <td className="px-3 py-1.5 whitespace-nowrap">
-                      {row.outboundTripId ? (
-                        <Link
-                          href={`/planning?date=${row.serviceDate}&trip=${row.outboundTripId}`}
-                          className="font-medium text-brand-700 underline underline-offset-2"
-                        >
-                          Aller
-                        </Link>
-                      ) : null}
-                      {row.outboundTripId && row.returnTripId ? <span className="text-slate-400"> · </span> : null}
-                      {row.returnTripId ? (
-                        <Link
-                          href={`/planning?date=${row.serviceDate}&trip=${row.returnTripId}`}
-                          className="font-medium text-brand-700 underline underline-offset-2"
-                        >
-                          Retour
-                        </Link>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
+                {shown.map((row) => {
+                  // The links say which session they open: a list of links read alone is not « Aller, Retour, Aller… ».
+                  const session = `du ${formatDayShort(row.serviceDate)}, ${row.initials}`;
+                  return (
+                    <tr key={`${row.serviceDate}-${row.outboundTripId ?? ""}-${row.returnTripId ?? ""}`}>
+                      <th scope="row" className="tabular px-3 py-1.5 text-left font-normal whitespace-nowrap text-slate-800">
+                        {formatDayShort(row.serviceDate)}
+                      </th>
+                      <td className="px-3 py-1.5 text-slate-800">{row.initials}</td>
+                      <td className="tabular px-3 py-1.5 text-right text-slate-800">{formatMinutes(row.beforeMin)}</td>
+                      <td className="tabular px-3 py-1.5 text-right text-slate-800">{formatMinutes(row.afterMin)}</td>
+                      <td className="tabular px-3 py-1.5 text-right font-semibold text-red-700">{formatMinutes(row.totalMin)}</td>
+                      <td className="px-3 py-1.5 whitespace-nowrap">
+                        {row.outboundTripId ? (
+                          <Link
+                            href={`/planning?date=${row.serviceDate}&trip=${row.outboundTripId}`}
+                            aria-label={`Aller ${session}`}
+                            className="font-medium text-brand-700 underline underline-offset-2"
+                          >
+                            Aller
+                          </Link>
+                        ) : null}
+                        {row.outboundTripId && row.returnTripId ? <span className="text-slate-400"> · </span> : null}
+                        {row.returnTripId ? (
+                          <Link
+                            href={`/planning?date=${row.serviceDate}&trip=${row.returnTripId}`}
+                            aria-label={`Retour ${session}`}
+                            className="font-medium text-brand-700 underline underline-offset-2"
+                          >
+                            Retour
+                          </Link>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </>
           ) : null}

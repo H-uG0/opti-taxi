@@ -21,6 +21,7 @@ import type {
   EmptyLegRule,
   FacilityType,
   Mobility,
+  Payer,
   Prisma,
   PrismaClient,
   SharedPatientCount,
@@ -32,7 +33,7 @@ import type {
   VehicleType,
 } from "@prisma/client";
 import { contractFacilityHours, facilityHoursOn, outsideHoursText, type DayHours } from "@/lib/domain/facility-hours";
-import { isShareable } from "@/lib/domain/rules";
+import { isShareable, isSharingEligible } from "@/lib/domain/rules";
 import { getSettings } from "@/lib/domain/settings";
 import { loadTrafficZones, toContractTraffic, type TrafficInput } from "@/lib/domain/traffic";
 import { areasInForce, communeOfAddress, tripAreaFlags, type AreaInput, type Commune } from "@/lib/domain/tariff-areas";
@@ -148,6 +149,8 @@ export type TripInput = {
   allowedVehicleTypes: VehicleType[];
   sharingAllowed: boolean;
   sharingStatus: SharingStatus;
+  /** Who pays: a private client is not eligible to sharing as the caisse counts it (sharingEligible); absent: CPAM. */
+  payer?: Payer;
   lockedVehicleId: string | null;
   /** Patient's mobility (stop surcharge, tripServiceMinutes); absent: seated. */
   mobility?: Mobility;
@@ -697,6 +700,7 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
       readyMin: trip.direction === "RETURN" ? trip.readyMinute : null,
       allowedVehicleTypes: [...new Set(trip.allowedVehicleTypes)],
       shareable: isShareable(trip),
+      sharingEligible: isSharingEligible(trip),
       lockedVehicleId,
       ...(service.pickupServiceMin !== null ? { pickupServiceMin: service.pickupServiceMin } : {}),
       ...(service.dropoffServiceMin !== null ? { dropoffServiceMin: service.dropoffServiceMin } : {}),
@@ -792,6 +796,7 @@ export const tripInputSelect = {
   allowedVehicleTypes: true,
   sharingAllowed: true,
   sharingStatus: true,
+  payer: true,
   lockedVehicleId: true,
   pickupAddress: true,
   dropoffAddress: true,

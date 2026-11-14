@@ -52,7 +52,7 @@ export function periodSummaryLines(period: PeriodKpis): string[] {
     ["Part des km à vide", `${orDash(period.emptyKmShare, pct)} (${whole.format(period.emptyKm)} km sur ${whole.format(period.distanceKm)})`],
     [
       "Transport partagé (périmètre CPAM)",
-      `${orDash(period.eligibleSharedRate, pct)} prévu sur ${tapTotal(sharing.eligible)} courses éligibles, ` +
+      `${orDash(period.eligibleSharedRate, pct)} servi sur ${tapTotal(sharing.eligible)} courses éligibles, ` +
         `${orDash(measuredSharedRate(sharing), pct)} mesuré ; ${sharing.funnel.refused} refus (${plural(sharing.refusingPatientIds.length, "patient")})`,
     ],
     [

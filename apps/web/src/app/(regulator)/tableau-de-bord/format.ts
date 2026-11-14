@@ -150,3 +150,13 @@ export function formatDeltaEuros(delta: number): string {
 export function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
   return `${count} ${count > 1 ? pluralForm : singular}`;
 }
+
+/** When a drop-off is late, in a sentence: « après l'heure du RDV » without tolerance, « plus de 5 min après le RDV » with one. */
+export function lateThreshold(toleranceMin: number): string {
+  return toleranceMin > 0 ? `plus de ${formatDuration(toleranceMin)} après le RDV` : "après l'heure du RDV";
+}
+
+/** Label of the lateness indicator: « Retards (après l'heure du RDV) », « Retards (> 5 min) ». */
+export function lateLabel(toleranceMin: number): string {
+  return toleranceMin > 0 ? `Retards (> ${formatDuration(toleranceMin)})` : "Retards (après l'heure du RDV)";
+}

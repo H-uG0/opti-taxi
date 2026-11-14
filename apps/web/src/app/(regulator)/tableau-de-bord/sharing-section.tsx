@@ -95,7 +95,7 @@ export function SharingSection({
       <div className="mb-4 overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-xs">
         <table className="min-w-full text-sm">
           <caption className="px-3 pt-2 text-left text-xs text-slate-600">
-            Cumul de l&apos;année {year.month}, mois par mois, partage prévu par les tournées (courses servies)&nbsp;; le partage mesuré
+            Cumul de l&apos;année {year.month}, mois par mois, partage servi d&apos;après les tournées&nbsp;; le partage mesuré
             aux horodatages porte sur la période affichée, plus bas.
             {emptyBefore ? ` Aucune course servie avant ${monthLabel(emptyBefore.month).toLowerCase()}.` : ""}
           </caption>
@@ -152,8 +152,8 @@ export function SharingSection({
                 VSL {formatRate(measuredSharedRate(s, "VSL"))} · taxi {formatRate(measuredSharedRate(s, "TAXI"))}
               </span>
               <span className="block">
-                Prévu {formatRate(eligibleSharedRate(s))} · mesuré sur {plural(tapTotal(s.measured), "course déposée", "courses déposées")} dont
-                les deux heures sont saisies
+                Servi (tournées) {formatRate(eligibleSharedRate(s))} · mesuré sur{" "}
+                {plural(tapTotal(s.measured), "course déposée", "courses déposées")} dont les deux heures sont saisies
               </span>
             </>
           }

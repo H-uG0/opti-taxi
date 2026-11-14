@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from app.kpis import compute_kpis
 from app.schemas import EvaluateRequest, TripResult
 from tests.builders import load_fixture
@@ -24,7 +26,8 @@ def _result(trip_id: str, vehicle_id: str | None, shared: bool = False) -> TripR
 
 
 def test_shared_rate_counts_shareable_trips_in_a_taxi_or_a_vsl_only() -> None:
-    # The fixture: trips 1 to 4 shareable and seated, 5 and 6 lying (ambulance), 7 seated but not shareable.
+    # The fixture: trips 1 to 4 shareable and seated, 5 and 6 lying (ambulance),
+    # 7 seated but kept alone by its prescription.
     request = EvaluateRequest.model_validate(load_fixture("evaluate-request.json"))
     trips = [
         _result("trip_1", "veh_taxi_1", shared=True),
@@ -47,3 +50,37 @@ def test_shared_rate_is_zero_without_shareable_trips() -> None:
     request = EvaluateRequest.model_validate(load_fixture("evaluate-request.json"))
     kpis = compute_kpis(request, [], [_result("trip_5", "veh_amb_1")])
     assert kpis.shareable_trips == 0 and kpis.shared_trip_ratio == 0.0
+
+
+def _request_with(eligibility: dict[str, dict[str, Any]]) -> EvaluateRequest:
+    raw = load_fixture("evaluate-request.json")
+    raw["trips"] = [{**trip, **eligibility.get(trip["id"], {})} for trip in raw["trips"]]
+    return EvaluateRequest.model_validate(raw)
+
+
+def test_shared_rate_keeps_refusals_and_leaves_private_clients_out_like_the_dashboard() -> None:
+    request = _request_with(
+        {
+            # Refused by the patient: not shareable for the solver, still eligible (it lowers the rate).
+            "trip_7": {"shareable": False, "sharingEligible": True},
+            # A private client: shareable, but not in the scope of the Assurance maladie.
+            "trip_2": {"shareable": True, "sharingEligible": False},
+        }
+    )
+    trips = [
+        _result("trip_1", "veh_taxi_1", shared=True),
+        _result("trip_3", "veh_taxi_1", shared=True),
+        _result("trip_2", "veh_vsl_1"),
+        _result("trip_7", "veh_vsl_1"),
+    ]
+    kpis = compute_kpis(request, [], trips)
+    # Trips 1, 3 and 7: not trip 2 (private).
+    assert kpis.shareable_trips == 3
+    assert kpis.shared_trip_ratio == round(2 / 3, 4)
+
+
+def test_shared_rate_falls_back_on_shareable_without_the_eligibility_flag() -> None:
+    request = _request_with({"trip_1": {"sharingEligible": None}, "trip_7": {"sharingEligible": None}})
+    trips = [_result("trip_1", "veh_taxi_1", shared=True), _result("trip_7", "veh_vsl_1")]
+    kpis = compute_kpis(request, [], trips)
+    assert kpis.shareable_trips == 1 and kpis.shared_trip_ratio == 1.0

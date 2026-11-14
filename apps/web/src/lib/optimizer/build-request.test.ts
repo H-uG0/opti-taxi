@@ -447,6 +447,25 @@ describe("trips", () => {
     });
   });
 
+  it("sends sharingEligible = the dashboard's eligible trips: CPAM, sharing allowed, refusals included", () => {
+    const { request } = buildOptimizeRequest(
+      input({
+        trips: [
+          trip("ok"),
+          trip("refused", { sharingStatus: "REFUSED" }),
+          trip("private", { payer: "PRIVATE" }),
+          trip("notAllowed", { sharingAllowed: false, sharingStatus: "NOT_ELIGIBLE" }),
+        ],
+      }),
+    );
+    expect(Object.fromEntries(request.trips.map((t) => [t.id, t.sharingEligible]))).toEqual({
+      ok: true,
+      refused: true,
+      private: false,
+      notAllowed: false,
+    });
+  });
+
   it("leaves out cancelled and no-show trips, excludes incomplete ones with a reason", () => {
     const result = buildOptimizeRequest(
       input({

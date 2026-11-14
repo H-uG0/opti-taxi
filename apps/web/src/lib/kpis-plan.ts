@@ -9,7 +9,9 @@
  * line per vehicle for the breakdowns. A validation made before the service
  * day replaces the frozen plan; a validation on the day itself (after a
  * reopening) keeps the one of the day before, so the absences and the
- * cancellations of the day stay visible against it.
+ * cancellations of the day stay visible against it. A reopening before the
+ * service day drops the frozen plan: the routes re-optimized after it are no
+ * longer what was validated, and the next validation freezes them.
  *
  * Comparisons are fair: the same weekday of the week before (the series of
  * dialysis follow Mon-Wed-Fri or Tue-Thu-Sat), or the four same weekdays before
@@ -272,6 +274,16 @@ export function decodeFrozenPlan(row: { serviceDate: string; validatedAt: Date; 
 export function replacesFrozenPlan(existing: { validatedAt: Date } | null, serviceDate: string, now: Date): boolean {
   if (!existing) return true;
   return !(isoDateOf(existing.validatedAt) < serviceDate && isoDateOf(now) >= serviceDate);
+}
+
+/**
+ * Whether reopening the planning of `serviceDate` on `today` drops its frozen
+ * plan: before the service day, yes (it will be validated again, or it was
+ * not the plan of the day); on the day itself, no (the plan of the day before
+ * stays the reference against the absences and cancellations of the day).
+ */
+export function reopeningDropsFrozenPlan(serviceDate: string, today: string): boolean {
+  return today < serviceDate;
 }
 
 // ---------------------------------------------------------------------------

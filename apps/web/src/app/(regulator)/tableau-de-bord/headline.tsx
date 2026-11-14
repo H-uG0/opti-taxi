@@ -11,6 +11,7 @@ import { lostTrips, placedTrips, tripsToCarry } from "@/lib/kpis-demand";
 import { lostVehicleDays } from "@/lib/kpis-fleet";
 import { planRates } from "@/lib/kpis-plan";
 import { eligibleSharedRate, measuredSharedRate, SHARING_OBJECTIVE, tapTotal } from "@/lib/kpis-sharing";
+import type { TapType } from "@/lib/kpis-rows";
 import { formatKm } from "@/lib/labels";
 import { addDays, formatDuration, formatLongDate } from "@/lib/time";
 import {
@@ -24,6 +25,7 @@ import {
   formatEurosRounded,
   formatInstant,
   formatRate,
+  lateLabel,
   plural,
 } from "./format";
 
@@ -92,9 +94,9 @@ function Compare({
 function BlockTitle({ id, title, date, badges, children }: { id: string; title: string; date: string; badges: ReactNode; children?: ReactNode }) {
   return (
     <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-      <h3 id={id} className="text-base font-semibold text-slate-900">
+      <h2 id={id} className="text-base font-semibold text-slate-900">
         {title} <span className="font-normal text-slate-600">— {capitalize(formatLongDate(date))}</span>
-      </h3>
+      </h2>
       {badges}
       {children}
     </div>
@@ -124,10 +126,15 @@ function comparedText(date: string, count: number): string {
   }.`;
 }
 
-/** Shared rate measured from the timestamps when the crews recorded both times, else the plan's. */
-function sharedFigure(day: Pick<KpiSummary, "sharing" | "eligibleSharedRate">): { value: number | null; measured: boolean } {
-  const measured = measuredSharedRate(day.sharing);
-  return measured !== null ? { value: measured, measured: true } : { value: day.eligibleSharedRate, measured: false };
+/**
+ * Shared rate of the « Partage » tile, on one basis chosen from the day shown:
+ * measured from the timestamps when its crews recorded both times, else the
+ * routes' (served). The days compared are read on the same basis, never a
+ * measured rate against a served one.
+ */
+function sharedRateOf(measured: boolean, day: Pick<KpiSummary, "sharing" | "eligibleSharedRate">, type?: TapType): number | null {
+  if (measured) return measuredSharedRate(day.sharing, type);
+  return type ? eligibleSharedRate(day.sharing, type) : day.eligibleSharedRate;
 }
 
 /** « Hier (réalisé) »: what was done on a day, against the same weekday of the weeks before. */
@@ -149,7 +156,16 @@ export function RealizedBlock({
   const four = (value: (d: KpiSummary) => number | null) => (fourWeeks ? { count: fourWeeks.count, value: value(fourWeeks) } : null);
   const realized = describeRealizedRate(day);
   const frozen = day.frozen ? planRates(day.frozen.figures) : null;
-  const shared = sharedFigure(day);
+  const measuredBasis = measuredSharedRate(day.sharing) !== null;
+  const sharedDetail = [
+    measuredBasis
+      ? `Sur ${plural(tapTotal(day.sharing.measured), "course déposée", "courses déposées")} · servi ${formatRate(day.eligibleSharedRate)}`
+      : `Sur ${plural(tapTotal(day.sharing.eligible), "éligible")}`,
+    frozen ? `prévu ${formatRate(frozen.sharedRate)}` : null,
+    `objectif ${formatRate(SHARING_OBJECTIVE)}`,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
   const lost = lostTrips(day.demand);
   const fleet = day.fleet;
   const servedMargin = day.servedRevenue - day.cost;
@@ -245,28 +261,19 @@ export function RealizedBlock({
           }
         />
         <Stat
-          label={shared.measured ? "Partage mesuré (CPAM)" : "Partage prévu (CPAM)"}
-          value={formatRate(shared.value)}
+          label={measuredBasis ? "Partage mesuré (CPAM)" : "Partage servi (CPAM)"}
+          value={formatRate(sharedRateOf(measuredBasis, day))}
           hint={
             <>
               <Line>
-                VSL{" "}
-                <span className="tabular">
-                  {formatRate(shared.measured ? measuredSharedRate(day.sharing, "VSL") : eligibleSharedRate(day.sharing, "VSL"))}
-                </span>{" "}
-                · taxi{" "}
-                <span className="tabular">
-                  {formatRate(shared.measured ? measuredSharedRate(day.sharing, "TAXI") : eligibleSharedRate(day.sharing, "TAXI"))}
-                </span>
+                VSL <span className="tabular">{formatRate(sharedRateOf(measuredBasis, day, "VSL"))}</span> · taxi{" "}
+                <span className="tabular">{formatRate(sharedRateOf(measuredBasis, day, "TAXI"))}</span>
               </Line>
-              <Line>
-                Prévu {formatRate(day.eligibleSharedRate)} sur {plural(tapTotal(day.sharing.eligible), "éligible")} · objectif{" "}
-                {formatRate(SHARING_OBJECTIVE)}
-              </Line>
+              <Line>{sharedDetail}</Line>
               <Compare
-                current={shared.value}
-                previous={prev((d) => sharedFigure(d).value)}
-                fourWeeks={four((d) => sharedFigure(d).value)}
+                current={sharedRateOf(measuredBasis, day)}
+                previous={prev((d) => sharedRateOf(measuredBasis, d))}
+                fourWeeks={four((d) => sharedRateOf(measuredBasis, d))}
                 higherIsBetter
                 formatDelta={formatDeltaPoints}
                 formatValue={formatRate}
@@ -275,7 +282,7 @@ export function RealizedBlock({
           }
         />
         <Stat
-          label={`Retards (> ${toleranceMin} min)`}
+          label={lateLabel(toleranceMin)}
           tone={day.measuredOutbound === 0 ? "default" : day.lateArrivals > 0 ? "bad" : "good"}
           value={day.measuredOutbound > 0 ? formatRate(day.lateRate) : "—"}
           hint={
@@ -371,7 +378,10 @@ function PlannedServedDone({ day }: { day: DayKpis }) {
       <table className="min-w-full text-sm">
         <caption className="px-3 pt-2 text-left text-xs text-slate-600">
           {day.frozen ? (
-            <>Prévu&nbsp;: le plan tel que validé le {formatInstant(day.frozen.validatedAt)}. </>
+            <>
+              Prévu&nbsp;: le plan tel que validé le {formatInstant(day.frozen.validatedAt)}
+              {day.planningStatus === "VALIDATED" ? ". " : ", avant la réouverture du planning. "}
+            </>
           ) : day.planningStatus === "VALIDATED" ? (
             <>Plan validé avant l&apos;enregistrement des plans validés&nbsp;: pas de prévu figé. </>
           ) : (

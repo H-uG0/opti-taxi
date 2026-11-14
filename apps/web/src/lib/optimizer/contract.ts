@@ -143,6 +143,11 @@ export const tripSchema = z
     readyMin: dayMinute.nullable().default(null),
     allowedVehicleTypes: z.array(vehicleTypeSchema).min(1),
     shareable: z.boolean(),
+    /**
+     * Eligible to sharing as the Assurance maladie counts it: the prescription allows it and the caisse pays,
+     * a refusal included (lib/kpis-sharing.ts). Only the plan's sharedTripRatio reads it; absent or null: shareable.
+     */
+    sharingEligible: z.boolean().nullish(),
     lockedVehicleId: z.string().nullable().default(null),
     /** Stop durations of this trip (vehicle type, mobility, facility); absent or null: the settings'. */
     pickupServiceMin: tripServiceMinutes.nullish(),
@@ -356,7 +361,7 @@ export const kpisSchema = z.strictObject({
   emptyKm: z.number(),
   emptyKmRatio: z.number(),
   sharedTrips: z.number().int(),
-  /** Served trips that may be shared, in a taxi or a VSL: the denominator of sharedTripRatio (Assurance maladie scope). */
+  /** Served eligible trips (trips[].sharingEligible, else shareable) in a taxi or a VSL: the denominator of sharedTripRatio. */
   shareableTrips: z.number().int(),
   sharedTripRatio: z.number(),
   revenue: z.number(),

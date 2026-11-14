@@ -4,18 +4,22 @@
  * The regulatory shared transport is the transport assis professionnalisé
  * (taxi conventionné, VSL), for patients of the Assurance maladie: neither
  * the ambulance (one lying patient) nor the private clients count. The rate
- * is taken over the trips whose prescription allows sharing (« éligibles »),
- * taxis and VSL apart, against the objective of the protocol of 24 September
- * 2025 (strictly more than 30 % at the end of 2027, art. 4.2) and the markers
- * the Cour des comptes cites (36 % in VSL, 25 % in taxi). The all-TAP rate
- * (every seated CPAM trip in a taxi or a VSL) is kept beside it: the caisse
- * has not published its own formula yet.
+ * is taken over the trips whose prescription allows sharing (« éligibles »,
+ * lib/domain/rules.ts isSharingEligible: a patient's refusal stays in the
+ * denominator), taxis and VSL apart, against the objective of the protocol of
+ * 24 September 2025 (strictly more than 30 % at the end of 2027, art. 4.2) and
+ * the markers the Cour des comptes cites (36 % in VSL, 25 % in taxi). The
+ * optimizer's sharedTripRatio takes the same trips (trips[].sharingEligible).
+ * The all-TAP rate (every seated CPAM trip in a taxi or a VSL) is kept beside
+ * it: the caisse has not published its own formula yet.
  *
- * - « Prévu » sharing is the plan's (Trip.shared: a co-passenger on board in
- *   the routes). « Mesuré » sharing reads the crews' timestamps: a dropped-off
- *   trip was shared when another patient of the same route was on board at the
- *   same time (their « Pris en charge » → « Déposé » intervals overlap). A
- *   co-passenger declared absent never was.
+ * - « Servi » sharing is the routes' as they stand (Trip.shared: a co-passenger
+ *   on board in the routes, after the absences and cancellations of the day);
+ *   « prévu » is kept for the plan as validated (lib/kpis-plan.ts). « Mesuré »
+ *   sharing reads the crews' timestamps: a dropped-off trip was shared when
+ *   another patient of the same route was on board at the same time (their
+ *   « Pris en charge » → « Déposé » intervals overlap). A co-passenger declared
+ *   absent never was.
  * - The funnel of the decree 2025-202: eligible trips, proposed (the plan
  *   shared them, or the patient's answer was recorded), accepted, refused; the
  *   patients who refuse (they lose the third-party payment) and the time
@@ -26,6 +30,7 @@
  *   co-passenger in the plan (times, detour, capacity).
  */
 import type { VehicleType } from "@prisma/client";
+import { isSharingEligible } from "@/lib/domain/rules";
 import { cancelledBeforeDay } from "./kpis-demand";
 import { isLyingTrip, isRealizedTrip, isServedTrip, isTapType, ratio, TAP_TYPES, type KpiTrip, type TapType } from "./kpis-rows";
 
@@ -120,7 +125,7 @@ export function addSharing(a: SharingTotals, b: SharingTotals): SharingTotals {
   };
 }
 
-/** Planned shared rate over the eligible trips, one type or both (null: none eligible). */
+/** Shared rate of the routes (served) over the eligible trips, one type or both (null: none eligible). */
 export function eligibleSharedRate(s: Pick<SharingTotals, "eligible" | "eligibleShared">, type?: TapType): number | null {
   return type ? ratio(s.eligibleShared[type], s.eligible[type]) : ratio(tapTotal(s.eligibleShared), tapTotal(s.eligible));
 }
@@ -130,7 +135,7 @@ export function measuredSharedRate(s: Pick<SharingTotals, "measured" | "measured
   return type ? ratio(s.measuredShared[type], s.measured[type]) : ratio(tapTotal(s.measuredShared), tapTotal(s.measured));
 }
 
-/** Planned shared rate over every served CPAM trip in a taxi or a VSL. */
+/** Shared rate of the routes (served) over every served CPAM trip in a taxi or a VSL. */
 export function tapSharedRate(s: Pick<SharingTotals, "tap" | "tapShared">, type?: TapType): number | null {
   return type ? ratio(s.tapShared[type], s.tap[type]) : ratio(tapTotal(s.tapShared), tapTotal(s.tap));
 }
@@ -185,7 +190,7 @@ export function sharingOfDay(
     const cpam = isCpam(trip);
 
     // Funnel: every eligible trip of the day not cancelled the day before.
-    if (seated && cpam && trip.sharingAllowed) {
+    if (seated && isSharingEligible(trip)) {
       const cancelledBefore = trip.status === "CANCELLED" && trip.cancellationReason !== "PARTNER" && cancelledBeforeDay(trip, trip.serviceDate);
       if (!cancelledBefore) {
         totals.funnel.eligible += 1;
@@ -221,7 +226,7 @@ export function sharingOfDay(
     if (!cpam) continue;
     totals.tap[type] += 1;
     if (trip.shared) totals.tapShared[type] += 1;
-    if (!trip.sharingAllowed) continue;
+    if (!isSharingEligible(trip)) continue;
     totals.eligible[type] += 1;
     if (trip.shared) totals.eligibleShared[type] += 1;
     if (isRealizedTrip(trip) && trip.pickupCompletedAt && trip.dropoffCompletedAt) {
@@ -233,7 +238,7 @@ export function sharingOfDay(
   return totals;
 }
 
-/** Month of the year-to-date table: planned sharing of the served eligible trips, by type (loaded by month in SQL). */
+/** Month of the year-to-date table: sharing of the served eligible trips in the routes, by type (loaded by month in SQL). */
 export type SharingMonth = { month: string; tap: ByTap; tapShared: ByTap; eligible: ByTap; eligibleShared: ByTap };
 
 /** Months of the year from January to the month of `to`, filled with zeros where the query returned nothing. */

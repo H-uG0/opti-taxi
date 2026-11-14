@@ -47,6 +47,15 @@ export function isShareable(trip: { sharingAllowed: boolean; sharingStatus: Shar
   return trip.sharingAllowed && trip.sharingStatus !== "REFUSED" && trip.sharingStatus !== "NOT_ELIGIBLE";
 }
 
+/**
+ * Eligible to sharing as the Assurance maladie counts it (KPI-04): the prescription allows it and the caisse pays,
+ * a patient's refusal included (it lowers the rate). The denominator of the shared rate on the dashboard, the
+ * planning strip (lib/kpis-sharing.ts) and the optimizer's sharedTripRatio (trips[].sharingEligible).
+ */
+export function isSharingEligible(trip: { sharingAllowed?: boolean; payer?: Payer | null }): boolean {
+  return (trip.sharingAllowed ?? false) && (trip.payer ?? "CPAM") === "CPAM";
+}
+
 /** Default seats per vehicle type: V shares at most 2 patients; an ambulance carries 1. */
 export const DEFAULT_CAPACITY: Record<VehicleType, number> = {
   TAXI: 2,

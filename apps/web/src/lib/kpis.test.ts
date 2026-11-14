@@ -603,6 +603,28 @@ describe("summarizePeriod", () => {
     expect(period.lateRate).toBeCloseTo(2 / 3);
   });
 
+  it("leaves a day not optimized yet out of the demand and the sharing funnel", () => {
+    const eligible = (serviceDate: string, overrides: Partial<KpiTrip> = {}) =>
+      trip({ serviceDate, sharingAllowed: true, sharingStatus: "PROPOSED", ...overrides });
+    const data: KpiData = {
+      routes: [route({ serviceDate: "2026-11-03" })],
+      trips: [
+        eligible("2026-11-03", { shared: true }),
+        eligible("2026-11-03", { shared: true }),
+        // Tomorrow, not optimized yet: its trips are neither unassigned nor « never proposed ».
+        eligible("2026-11-04", { status: "PLANNED", routeId: null, sharingStatus: "NOT_PROPOSED" }),
+        eligible("2026-11-04", { status: "PLANNED", routeId: null, sharingStatus: "REFUSED", patientId: "p9" }),
+      ],
+      runs: [],
+    };
+    const days = computeKpisByDay("2026-11-03", "2026-11-04", data, "2026-11-03");
+    expect(days[1]?.sharing.funnel.eligible).toBe(2);
+    const period = summarizePeriod(days);
+    expect(period.demand.requested).toBe(2);
+    expect(period.sharing.funnel).toEqual({ eligible: 2, proposed: 2, accepted: 0, refused: 0 });
+    expect(period.sharing.refusingPatientIds).toEqual([]);
+  });
+
   it("summarizes an empty period without dividing by zero", () => {
     const period = summarizePeriod(computeKpisByDay("2026-11-01", "2026-11-02", { routes: [], trips: [], runs: [] }, TODAY));
     expect(period).toMatchObject({

@@ -94,6 +94,9 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
     "readyMin": null,                   // obligatoire si RETURN (fin de séance), null sinon
     "allowedVehicleTypes": ["TAXI", "VSL"],
     "shareable": true,                  // prescription compatible ET patient non opposé
+    "sharingEligible": true,            // facultatif : prescription compatible ET payée par l'Assurance maladie, refus
+                                        //   du patient compris (éligible au partage, kpis.sharedTripRatio) ;
+                                        //   absent ou null : shareable. N'agit pas sur le calcul des tournées
     "lockedVehicleId": null,            // course figée sur ce véhicule par le régulateur
     "pickupServiceMin": 10,             // facultatifs, 0..120 : temps d'arrêt propres à la course
     "dropoffServiceMin": 10,            //   (absents ou null : ceux de settings)
@@ -364,9 +367,11 @@ Le web enregistre une option telle quelle (« Appliquer ») après l'avoir redem
     "vehiclesUsed": 9, "tripsPerVehicle": 6.44,
     "totalKm": 1520.4, "emptyKm": 498.1, "emptyKmRatio": 0.3276,
     "sharedTrips": 14,                  // courses servies avec un co-passager
-    "shareableTrips": 50,               // courses servies partageables (trips[].shareable) en taxi ou VSL
-    "sharedTripRatio": 0.28,            // partagées parmi les shareableTrips (périmètre de l'Assurance maladie :
-                                        // ni ambulance ni course que la prescription ou le patient garde seule)
+    "shareableTrips": 50,               // courses servies éligibles (trips[].sharingEligible, à défaut shareable)
+                                        // en taxi ou VSL
+    "sharedTripRatio": 0.28,            // partagées parmi les shareableTrips : la formule du tableau de bord
+                                        // (lib/kpis-sharing.ts), refus compris, ni ambulance, ni client privé, ni
+                                        // course que la prescription garde seule
     "revenue": 3120.5, "cost": 1610.2, "margin": 1510.3
   },
   "validation": {

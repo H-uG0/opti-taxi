@@ -16,10 +16,10 @@ import {
 } from "@/lib/kpis";
 import { planViewOf, plannedComparison, realizedComparison } from "@/lib/kpis-compare";
 import { comparisonDates } from "@/lib/kpis-plan";
-import { formatDuration, formatShortDate, todayIso, tomorrowIso } from "@/lib/time";
+import { formatShortDate, todayIso, tomorrowIso } from "@/lib/time";
 import { KpiCharts } from "./charts";
 import { DemandSection, FleetSection } from "./demand-fleet";
-import { plural } from "./format";
+import { lateThreshold, plural } from "./format";
 import { PlannedBlock, RealizedBlock } from "./headline";
 import { KpiTable } from "./kpi-table";
 import { loadKpiData, loadKpiOptions, loadPatientInitials, loadSharingYear } from "./load-kpis";
@@ -102,7 +102,7 @@ export default async function DashboardPage({
             des mesures&nbsp;: les retards (incidents de circulation tirés au hasard), le temps de planification (validation 15 à
             60&nbsp;min après le premier calcul), les annulations, les absences de patients, les dépassements de fin de séance (donc
             les attentes au retour), les refus de partage, les absences du personnel et les véhicules au garage, et la part
-            d&apos;équipages qui saisissent leurs statuts (environ 85&nbsp;%). Les kilomètres, le partage prévu, le taux de service et la
+            d&apos;équipages qui saisissent leurs statuts (environ 85&nbsp;%). Les kilomètres, le partage des tournées, le taux de service et la
             marge viennent du calcul des tournées sur ces données fictives.
           </p>
         </div>
@@ -223,8 +223,8 @@ export default async function DashboardPage({
           <p>
             Km et coût sont ceux calculés par l&apos;optimiseur pour chaque tournée&nbsp;: les distances sont les distances routières, ou
             une estimation à vol d&apos;oiseau quand le calcul routier n&apos;est pas disponible. Les heures réelles (prise en charge, dépose,
-            validation) sont converties à l&apos;heure de Paris. Un patient est en retard quand la dépose est saisie plus de{" "}
-            {formatDuration(options.lateToleranceMin)} après le RDV (tolérance réglable).
+            validation) sont converties à l&apos;heure de Paris. Un patient est en retard quand la dépose est saisie{" "}
+            {lateThreshold(options.lateToleranceMin)} (tolérance réglable).
           </p>
           <p>
             La flotte de chaque jour est lue sur les équipages du jour (fixés par le régulateur, sinon proposés), avec la flotte et le
