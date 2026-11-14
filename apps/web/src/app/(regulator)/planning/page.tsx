@@ -19,6 +19,7 @@ import { loadPlanningDay } from "@/lib/planning/load";
 import { PLACE_NO_ROUTES } from "@/lib/planning/place-view";
 import type { PlanningDayView } from "@/lib/planning/types";
 import { loadDayVersion } from "@/lib/planning/version";
+import { loadLiveSnapshot, loadRoadmapStates, type LiveSnapshot } from "@/lib/planning/live-load";
 import { formatDateTime, formatDayDate, formatLongDate, isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
 import { currentHorizon, inHorizon } from "@/lib/trips/completion";
 import { loadRecurrencesWithoutTrip } from "@/lib/trips/missing-load";
@@ -36,6 +37,7 @@ import { PendingPlanBanner, RestorePlanButton } from "./pending-plan";
 import { PlanningActivityBanner, PlanningActivityProvider } from "./planning-activity";
 import { PlanningBoard } from "./planning-board";
 import { PlanningToolbar } from "./planning-toolbar";
+import { LiveDayBar, LiveDayProvider } from "./live-day";
 import { ReplacePanel } from "./replace-panel";
 import { PlanningVersionWatcher } from "./version-watcher";
 
@@ -106,6 +108,16 @@ function emptyDayText(past: boolean, missing: readonly MissingRecurrence[]): str
   return "Aucune récurrence (dialyse, chimiothérapie…) ne prévoit de séance ce jour. Saisissez une course ponctuelle si besoin.";
 }
 
+/** Today's planning with routes is followed live (« Suivi du jour », DAY-01); any other day is drawn as read. */
+function LiveWrap({ live, view, children }: { live: LiveSnapshot | null; view: PlanningDayView; children: React.ReactNode }) {
+  if (!live) return <>{children}</>;
+  return (
+    <LiveDayProvider initial={live} vehicles={view.vehicles} trips={view.trips} maxTotalWaitMin={view.maxTotalWaitMin}>
+      {children}
+    </LiveDayProvider>
+  );
+}
+
 export default async function PlanningPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requireUser("REGULATOR");
   const params = await searchParams;
@@ -117,14 +129,17 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
 
   // Read before the plan: a change made between the two reads makes the version older than the plan shown,
   // so an action on this page is refused (never the other way round).
-  const shownVersion = await loadDayVersion(db, date);
-  const [view, horizon, missing, closed] = await Promise.all([
+  // Today: the live state is read before the plan too (its key is the plan shown; « Recharger » when it moves).
+  const [shownVersion, liveRead] = await Promise.all([loadDayVersion(db, date), date === today ? loadLiveSnapshot(db, date) : null]);
+  const [view, horizon, missing, closed, roadmaps] = await Promise.all([
     loadPlanningDay(date),
     // Read only: the trips of a date of the horizon are completed by <TripCompletion> once the page is shown.
     currentHorizon(db, today),
     date >= today ? loadRecurrencesWithoutTrip(date) : Promise.resolve([]),
     // Holiday or dated closure: the open trips to a facility closed that day (from today on).
     date >= today ? loadClosedFacilityTrips(db, date) : Promise.resolve(null),
+    // Tomorrow: whether each crew saw its roadmap and its changes (today, the live poll says it).
+    date === tomorrow ? loadRoadmapStates(db, date) : Promise.resolve(null),
     // The day's patients, stop addresses, phones, access and trip notes are on screen (timeline, map, trip panel).
     auditRead(user, { action: "plan.view", entity: "Route", entityId: null, serviceDate: date }),
   ]);
@@ -133,6 +148,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   const past = date < today;
   const showMissing = !past && view.dayStatus !== "VALIDATED";
   const hasRoutes = view.vehicles.some((v) => v.route !== null);
+  const live = liveRead && hasRoutes ? liveRead : null;
   const availableVehicles = view.vehicles.filter((v) => v.available).length;
   const replanBlocked = replanBlockedReason(view, past);
   // A validated or started day keeps its routes: their crew changes on the route itself.
@@ -165,175 +181,180 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   return (
     // Keyed by date: an action's progress or result never shows on another date.
     <PlanningActivityProvider key={date} timeLimitSec={view.timeLimitSec}>
-      {/* From xl (1 280 px) the page is as tall as the screen: the board below takes what the header and banners
-          leave, and scrolls inside (timeline, panel), never the page (3rem: the main area's vertical padding).
-          Narrower, the board's parts stack and the page scrolls. */}
-      <div className="flex flex-col gap-2 xl:h-[calc(100dvh-var(--demo-banner-h)-3rem)]">
-        <PageHeader
-          className="mb-0"
-          title={
-            <span className="flex flex-wrap items-center gap-2">
-              <span>Planning du {formatLongDate(date)}</span>
-              {relativeDay ? <Badge tone="brand">{relativeDay}</Badge> : null}
-              {view.dayStatus === "VALIDATED" ? <Badge tone="success">Validé</Badge> : null}
-              {view.dayStatus === "PROPOSED" ? <Badge tone="info">Proposé</Badge> : null}
-              {view.dayStatus === "MIXED" ? <Badge tone="warning">Partiellement validé</Badge> : null}
-              {isSimulatedId(view.planRun?.id ?? view.lastRun?.id) ? <SimulatedDayBadge /> : null}
-            </span>
-          }
-          description={headerDescription(view, availableVehicles)}
-          titleAside={<DayTabs current="/planning" date={date} />}
-          actions={
-            <>
-              {/* The title's badge already says « J+1 »: no second marker next to the date. */}
-              <DayNav
-                basePath="/planning"
-                date={date}
-                tomorrow={tomorrow}
-                keepParams={FILTER_PARAMS}
-                shortcuts
-                fieldLabel="Date du planning"
-                tomorrowMarker={false}
-              />
-              <PlanningToolbar
-                date={date}
-                version={shownVersion.version}
-                optimizeLabel={optimizeLabel}
-                optimizeHint={
-                  underWay
-                    ? "Replanifie ce qui reste à faire à partir de maintenant\u202f; les arrêts faits et les patients à bord ne changent pas, seules les tournées modifiées sont enregistrées"
-                    : undefined
-                }
-                optimizeBlocked={optimizeBlocked}
-                runningReason={runningReason}
-                canValidate={!past && (view.dayStatus === "PROPOSED" || view.dayStatus === "MIXED")}
-                canReopen={!past && (view.dayStatus === "VALIDATED" || view.dayStatus === "MIXED")}
-                unassignedCount={hasRoutes && !past ? placeable : 0}
-              />
-              {view.dayStatus === "VALIDATED" && !past ? (
-                // The next step once the day is validated: the sheets for the reception desks.
-                <LinkButton href={`/arrivees-partagees?date=${date}`} variant="secondary">
-                  <Share2 aria-hidden className="size-4" />
-                  Prévenir les accueils
-                </LinkButton>
-              ) : null}
-            </>
-          }
-        />
-
-        <PlanningActivityBanner />
-        <PlanningVersionWatcher key={`${shownVersion.version}/${shownVersion.run ?? ""}`} date={date} shown={shownVersion} />
-        {/* One line of context: the optimizer service, then the plan in place (when, how, what to keep in mind). */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <Suspense fallback={<OptimizerStatusPending />}>
-            <OptimizerStatus />
-          </Suspense>
-          {view.dayStatus !== "EMPTY" ? <AvailabilityNotes skipped={view.skippedVehicles} notes={view.notes} inline /> : null}
-          <PlanRunLine
-            planRun={view.planRun}
-            restore={
-              view.planRun?.previous && hasRoutes && !past && view.dayStatus === "PROPOSED" && !view.dayStarted ? (
-                <RestorePlanButton
+      <LiveWrap live={live} view={view}>
+        {/* From xl (1 280 px) the page is as tall as the screen: the board below takes what the header and banners
+            leave, and scrolls inside (timeline, panel), never the page (3rem: the main area's vertical padding).
+            Narrower, the board's parts stack and the page scrolls. */}
+        <div className="flex flex-col gap-2 xl:h-[calc(100dvh-var(--demo-banner-h)-3rem)]">
+          <PageHeader
+            className="mb-0"
+            title={
+              <span className="flex flex-wrap items-center gap-2">
+                <span>Planning du {formatLongDate(date)}</span>
+                {relativeDay ? <Badge tone="brand">{relativeDay}</Badge> : null}
+                {view.dayStatus === "VALIDATED" ? <Badge tone="success">Validé</Badge> : null}
+                {view.dayStatus === "PROPOSED" ? <Badge tone="info">Proposé</Badge> : null}
+                {view.dayStatus === "MIXED" ? <Badge tone="warning">Partiellement validé</Badge> : null}
+                {isSimulatedId(view.planRun?.id ?? view.lastRun?.id) ? <SimulatedDayBadge /> : null}
+              </span>
+            }
+            description={headerDescription(view, availableVehicles)}
+            titleAside={<DayTabs current="/planning" date={date} />}
+            actions={
+              <>
+                {/* The title's badge already says « J+1 »: no second marker next to the date. */}
+                <DayNav
+                  basePath="/planning"
+                  date={date}
+                  tomorrow={tomorrow}
+                  keepParams={FILTER_PARAMS}
+                  shortcuts
+                  fieldLabel="Date du planning"
+                  tomorrowMarker={false}
+                />
+                <PlanningToolbar
                   date={date}
                   version={shownVersion.version}
-                  previous={view.planRun.previous}
-                  blocked={runningReason}
+                  optimizeLabel={optimizeLabel}
+                  optimizeHint={
+                    underWay
+                      ? "Replanifie ce qui reste à faire à partir de maintenant\u202f; les arrêts faits et les patients à bord ne changent pas, seules les tournées modifiées sont enregistrées"
+                      : undefined
+                  }
+                  optimizeBlocked={optimizeBlocked}
+                  runningReason={runningReason}
+                  canValidate={!past && (view.dayStatus === "PROPOSED" || view.dayStatus === "MIXED")}
+                  canReopen={!past && (view.dayStatus === "VALIDATED" || view.dayStatus === "MIXED")}
+                  unassignedCount={hasRoutes && !past ? placeable : 0}
                 />
-              ) : null
+                {view.dayStatus === "VALIDATED" && !past ? (
+                  // The next step once the day is validated: the sheets for the reception desks.
+                  <LinkButton href={`/arrivees-partagees?date=${date}`} variant="secondary">
+                    <Share2 aria-hidden className="size-4" />
+                    Prévenir les accueils
+                  </LinkButton>
+                ) : null}
+              </>
             }
           />
-        </div>
-        {view.lastRun?.pending && !past ? (
-          // Keyed by run: a new plan waiting for confirmation takes the focus again.
-          <PendingPlanBanner key={view.lastRun.id} run={{ ...view.lastRun, pending: view.lastRun.pending }} />
-        ) : null}
-        <RunBanner lastRun={view.lastRun} planRun={view.planRun} />
-        {view.dayStatus !== "EMPTY" && !past ? <TariffGapBanner gaps={view.tariffGaps} date={date} /> : null}
-        {completing ? (
-          <TripCompletion key={date} date={date} missing={showMissing ? missing : []} />
-        ) : showMissing ? (
-          <MissingRecurrencesNote missing={missing} state={generationStateOf(date, today, false)} />
-        ) : null}
-        {closed ? <ClosedFacilitiesNote key={`closed-${date}`} date={date} {...closedFacilitiesNoteProps(closed)} /> : null}
 
-        {replacing.length > 0 && !past ? (
-          // Trips an interruption left (DAY-03): one by one with « Où placer », or all at once.
-          <ReplacePanel
-            key={`replace-${date}`}
-            date={date}
-            tripIds={replacing}
-            trips={Object.fromEntries(view.trips.filter((t) => replacing.includes(t.id)).map((t) => [t.id, t]))}
-            blocked={placeBlocked}
-          />
-        ) : null}
-        {view.dayStatus === "EMPTY" ? (
-          <>
-            <AvailabilityNotes skipped={view.skippedVehicles} notes={view.notes} />
-            <EmptyState
-              title={`Aucune course le ${formatLongDate(date)}`}
-              action={
-                <LinkButton href={`/courses?date=${date}`} variant="primary">
-                  <CalendarPlus aria-hidden className="size-4" />
-                  {past
-                    ? "Voir les courses"
-                    : completing
-                      ? "Voir ou saisir les courses"
-                      : date === today
-                        ? "Saisir les courses"
-                        : "Générer ou saisir les courses"}
-                </LinkButton>
+          <PlanningActivityBanner />
+          {live ? <LiveDayBar /> : null}
+          <PlanningVersionWatcher key={`${shownVersion.version}/${shownVersion.run ?? ""}`} date={date} shown={shownVersion} />
+          {/* One line of context: the optimizer service, then the plan in place (when, how, what to keep in mind). */}
+          <div data-wall-hide className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <Suspense fallback={<OptimizerStatusPending />}>
+              <OptimizerStatus />
+            </Suspense>
+            {view.dayStatus !== "EMPTY" ? <AvailabilityNotes skipped={view.skippedVehicles} notes={view.notes} inline /> : null}
+            <PlanRunLine
+              planRun={view.planRun}
+              restore={
+                view.planRun?.previous && hasRoutes && !past && view.dayStatus === "PROPOSED" && !view.dayStarted ? (
+                  <RestorePlanButton
+                    date={date}
+                    version={shownVersion.version}
+                    previous={view.planRun.previous}
+                    blocked={runningReason}
+                  />
+                ) : null
               }
-            >
-              {emptyDayText(past, missing)}
-            </EmptyState>
-          </>
-        ) : (
-          <>
-            <PlanningBoard
-              key={date}
-              className="xl:min-h-[26rem] xl:flex-1"
-              date={date}
-              vehicles={view.vehicles}
-              trips={view.trips}
-              unassigned={view.unassigned}
-              violations={view.violations}
-              violationsKnown={view.violationsKnown}
-              staleTrips={view.staleTrips}
-              vehicleIssues={view.vehicleIssues}
-              droppedLocks={view.droppedLocks}
-              timeRange={view.timeRange}
-              waitWindows={view.waitWindows}
-              planned={hasRoutes}
-              kpis={view.kpis}
-              unplannedNote={
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                  <p>
-                    <span className="font-semibold">{pluralize(view.kpis.tripsTotal, "course")} à planifier</span> avec{" "}
-                    {pluralize(availableVehicles, "véhicule disponible", "véhicules disponibles")}.{" "}
-                    {optimizeBlocked ?? runningReason ?? <OptimizeHint label={optimizeLabel} />}
-                  </p>
-                  <LinkButton href={`/courses?date=${date}`} size="sm">
-                    <ListChecks aria-hidden className="size-4" />
-                    Voir les courses
-                  </LinkButton>
-                </div>
-              }
-              replanBlocked={replanBlocked ?? runningReason}
-              lockBlocked={past ? "Date passée\u00a0: figer une course ne sert plus." : null}
-              placeBlocked={placeBlocked}
-              initialTripId={initialTripId}
-              initialPlace={firstParam(params.placer) === "1"}
-              geocoder={geocoderEnabled()}
-              crewChoices={view.crewChoices}
-              crewRules={view.crewRules}
-              crewChangeMode={past ? "none" : dayLocked ? "route" : "equipages"}
-              crewChangeBlocked={runningReason}
-              today={date === today}
-              version={shownVersion.version}
             />
-          </>
-        )}
-      </div>
+          </div>
+          {view.lastRun?.pending && !past ? (
+            // Keyed by run: a new plan waiting for confirmation takes the focus again.
+            <PendingPlanBanner key={view.lastRun.id} run={{ ...view.lastRun, pending: view.lastRun.pending }} />
+          ) : null}
+          <RunBanner lastRun={view.lastRun} planRun={view.planRun} />
+          {view.dayStatus !== "EMPTY" && !past ? <TariffGapBanner gaps={view.tariffGaps} date={date} /> : null}
+          {completing ? (
+            <TripCompletion key={date} date={date} missing={showMissing ? missing : []} />
+          ) : showMissing ? (
+            <MissingRecurrencesNote missing={missing} state={generationStateOf(date, today, false)} />
+          ) : null}
+          {closed ? <ClosedFacilitiesNote key={`closed-${date}`} date={date} {...closedFacilitiesNoteProps(closed)} /> : null}
+
+          {replacing.length > 0 && !past ? (
+            // Trips an interruption left (DAY-03): one by one with « Où placer », or all at once.
+            <ReplacePanel
+              key={`replace-${date}`}
+              date={date}
+              tripIds={replacing}
+              trips={Object.fromEntries(view.trips.filter((t) => replacing.includes(t.id)).map((t) => [t.id, t]))}
+              blocked={placeBlocked}
+            />
+          ) : null}
+          {view.dayStatus === "EMPTY" ? (
+            <>
+              <AvailabilityNotes skipped={view.skippedVehicles} notes={view.notes} />
+              <EmptyState
+                title={`Aucune course le ${formatLongDate(date)}`}
+                action={
+                  <LinkButton href={`/courses?date=${date}`} variant="primary">
+                    <CalendarPlus aria-hidden className="size-4" />
+                    {past
+                      ? "Voir les courses"
+                      : completing
+                        ? "Voir ou saisir les courses"
+                        : date === today
+                          ? "Saisir les courses"
+                          : "Générer ou saisir les courses"}
+                  </LinkButton>
+                }
+              >
+                {emptyDayText(past, missing)}
+              </EmptyState>
+            </>
+          ) : (
+            <>
+              <PlanningBoard
+                key={date}
+                className="xl:min-h-[26rem] xl:flex-1"
+                date={date}
+                vehicles={view.vehicles}
+                trips={view.trips}
+                unassigned={view.unassigned}
+                violations={view.violations}
+                violationsKnown={view.violationsKnown}
+                staleTrips={view.staleTrips}
+                vehicleIssues={view.vehicleIssues}
+                droppedLocks={view.droppedLocks}
+                timeRange={view.timeRange}
+                waitWindows={view.waitWindows}
+                planned={hasRoutes}
+                kpis={view.kpis}
+                unplannedNote={
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                    <p>
+                      <span className="font-semibold">{pluralize(view.kpis.tripsTotal, "course")} à planifier</span> avec{" "}
+                      {pluralize(availableVehicles, "véhicule disponible", "véhicules disponibles")}.{" "}
+                      {optimizeBlocked ?? runningReason ?? <OptimizeHint label={optimizeLabel} />}
+                    </p>
+                    <LinkButton href={`/courses?date=${date}`} size="sm">
+                      <ListChecks aria-hidden className="size-4" />
+                      Voir les courses
+                    </LinkButton>
+                  </div>
+                }
+                replanBlocked={replanBlocked ?? runningReason}
+                lockBlocked={past ? "Date passée\u00a0: figer une course ne sert plus." : null}
+                placeBlocked={placeBlocked}
+                initialTripId={initialTripId}
+                initialPlace={firstParam(params.placer) === "1"}
+                geocoder={geocoderEnabled()}
+                crewChoices={view.crewChoices}
+                crewRules={view.crewRules}
+                crewChangeMode={past ? "none" : dayLocked ? "route" : "equipages"}
+                crewChangeBlocked={runningReason}
+                today={date === today}
+                version={shownVersion.version}
+                roadmaps={roadmaps}
+                maxTotalWaitMin={view.maxTotalWaitMin}
+              />
+            </>
+          )}
+        </div>
+      </LiveWrap>
     </PlanningActivityProvider>
   );
 }

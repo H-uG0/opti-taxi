@@ -29,7 +29,7 @@ export default async function RegulatorLayout({ children }: { children: React.Re
         Aller au contenu
       </a>
       {/* The column (white, bordered) runs the page's whole height; its content stays pinned to the screen. */}
-      <aside className="hidden w-60 shrink-0 border-r border-slate-200 bg-white lg:block print:hidden">
+      <aside data-wall-hide className="hidden w-60 shrink-0 border-r border-slate-200 bg-white lg:block print:hidden">
         <div className="sticky top-below-banner flex h-below-banner flex-col">
           <div className="border-b border-slate-200 px-5 py-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand-700">Taxi & Ambulance V</p>
@@ -51,7 +51,7 @@ export default async function RegulatorLayout({ children }: { children: React.Re
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 lg:hidden print:hidden">
+        <header data-wall-hide className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 lg:hidden print:hidden">
           <p className="font-semibold text-slate-900">Opti-Taxi</p>
           <form action={logout}>
             <button
@@ -63,7 +63,7 @@ export default async function RegulatorLayout({ children }: { children: React.Re
             </button>
           </form>
         </header>
-        <div className="border-b border-slate-200 bg-white lg:hidden print:hidden">
+        <div data-wall-hide className="border-b border-slate-200 bg-white lg:hidden print:hidden">
           <RegulatorNav horizontal counts={counts} />
         </div>
         <main id="contenu" tabIndex={-1} className="min-w-0 flex-1 px-4 py-6 outline-none sm:px-6 lg:px-8 print:p-0">

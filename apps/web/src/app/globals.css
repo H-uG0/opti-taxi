@@ -67,3 +67,11 @@ body {
 .tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/*
+ * « Plein écran » of the day's follow-up (planning of today, DAY-01): the menu and the narrow-screen header give
+ * their room to the planning (html carries data-wall while the browser is in full screen).
+ */
+html[data-wall] [data-wall-hide] {
+  display: none;
+}

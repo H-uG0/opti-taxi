@@ -26,7 +26,8 @@ import {
   type VehicleInput,
 } from "@/lib/optimizer/build-request";
 import type { RunDetails } from "@/lib/optimizer/run-details";
-import { returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
+import { isSameEpisode, returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
+import { minuteOn } from "./day-progress";
 import { halfServedPairs } from "./half-served";
 import { isStopDone } from "./stop-done";
 import { computeDayKpis as computeDashboardDayKpis, type KpiRoute, type KpiTrip } from "@/lib/kpis";
@@ -234,8 +235,8 @@ export function fieldRecordsByTrip(
   return byTrip;
 }
 
-/** The stop as the timeline draws it (recorded instants and names stay out). */
-function toStopView(stop: RawStop): StopView {
+/** The stop as the timeline draws it (recorded instants and names stay out; the minute of a status is kept). */
+function toStopView(stop: RawStop, isoDate: string): StopView {
   return {
     id: stop.id,
     sequence: stop.sequence,
@@ -249,7 +250,22 @@ function toStopView(stop: RawStop): StopView {
     departureMinute: stop.departureMinute,
     loadAfter: stop.loadAfter,
     completed: stop.completedAt !== null,
+    completedMinute: stop.completedAt ? minuteOn(stop.completedAt, isoDate) : null,
   };
+}
+
+/** Each trip's other leg the same day (same care: isSameEpisode), outbound and return paired both ways. */
+export function otherLegs(trips: readonly Pick<RawTrip, "id" | "direction" | "status" | "patientId" | "recurrenceId" | "facilityId">[]): Map<string, string> {
+  const pairs = new Map<string, string>();
+  const live = trips.filter((t) => t.status !== "CANCELLED");
+  for (const outbound of live) {
+    if (outbound.direction !== "OUTBOUND") continue;
+    const back = live.find((t) => t.direction === "RETURN" && !pairs.has(t.id) && isSameEpisode(outbound, t));
+    if (!back) continue;
+    pairs.set(outbound.id, back.id);
+    pairs.set(back.id, outbound.id);
+  }
+  return pairs;
 }
 
 /** How a run's messages and lists name the day's trips and vehicles. */
@@ -498,7 +514,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
       breakEndMinute: route.breakEndMinute,
       validatedAt: route.validatedAt?.toISOString() ?? null,
       tripCount: new Set(stops.map((s) => s.tripId)).size,
-      stops: stops.map(toStopView),
+      stops: stops.map((stop) => toStopView(stop, input.date)),
       driverId: route.driverId ?? null,
       crewMateId: route.crewMateId ?? null,
       remaining: remainingPart(
@@ -550,6 +566,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
 
   const vehicleOfTrip = (trip: RawTrip): string | null => (trip.routeId ? (routeById.get(trip.routeId)?.vehicleId ?? null) : null);
   const returnsToCheck = returnsToCheckAfterNoShow(input.trips);
+  const legs = otherLegs(input.trips);
   const fieldRecords = fieldRecordsByTrip(input.routes);
 
   const planDetails = input.planRun ? (input.details.get(input.planRun.id) ?? null) : null;
@@ -599,6 +616,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
         leftByOptimizer: vehicleId === null && optimizerReasons.has(t.id),
         continuation: t.continuesTripId ? { interruptedAtMinute: t.interruptedAtMinute ?? null } : null,
         interrupted: t.status === "CANCELLED" && t.cancellationReason === "INTERRUPTED",
+        otherLegTripId: legs.get(t.id) ?? null,
       };
     })
     .sort((a, b) => tripTime(a) - tripTime(b));
@@ -685,6 +703,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
       }),
     ),
     waitWindows,
+    maxTotalWaitMin: input.settings.maxTotalWaitMin,
     dayStarted:
       input.trips.some((t) => FIELD_STATUSES.includes(t.status)) ||
       input.routes.some((r) => r.stops.some((s) => s.completedAt !== null)),

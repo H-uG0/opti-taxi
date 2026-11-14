@@ -658,3 +658,26 @@ describe("Timeline: drag and drop into the draft (INS-03)", () => {
     expect(document.querySelector("[data-trip-block='trip-a']")?.className).toContain("ring-amber-400");
   });
 });
+
+describe("Timeline: « Suivi du jour »", () => {
+  it("draws the « maintenant » line on the axis and the tracks, and each route's progress next to its name", () => {
+    renderTimeline({
+      nowMinute: 430,
+      liveRows: new Map([["taxi-1", { label: "1/4 · +12\u00a0min", tone: "late" as const, title: "1 arrêt fait sur 4\u00a0; retard estimé 12\u00a0min" }]]),
+    });
+    const axis = screen.getAllByRole("columnheader").find((cell) => cell.textContent?.includes("07:10"));
+    expect(axis).toBeTruthy();
+    const taxi = rowOf("taxi-1");
+    expect(taxi.textContent).toContain("1/4 · +12\u00a0min");
+    // Its meaning in words: the tooltip and, for screen readers, a hidden text.
+    const chip = Array.from(taxi.querySelectorAll("[title]")).find((el) => el.getAttribute("title")?.startsWith("1 arrêt fait sur 4"));
+    expect(chip?.querySelector(".sr-only")?.textContent).toBe(chip?.getAttribute("title"));
+    // One line per drawn row (4 vehicles) and one on the axis.
+    expect(document.querySelectorAll(".bg-red-600\\/80")).toHaveLength(5);
+  });
+
+  it("draws no line outside the time range, nor without the follow-up", () => {
+    renderTimeline({ nowMinute: 1200 });
+    expect(document.querySelectorAll(".bg-red-600\\/80")).toHaveLength(0);
+  });
+});

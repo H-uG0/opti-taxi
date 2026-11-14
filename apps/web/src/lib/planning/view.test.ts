@@ -469,7 +469,7 @@ describe("buildPlanningView", () => {
       { stopId: "s3", kind: "DROPOFF", at: droppedOff.toISOString(), byName: null },
     ]);
     expect(b).toMatchObject({ sharingAnswer: null, fieldRecords: [] });
-    // The timeline stops carry the done flag only: no recorded instant, no account.
+    // The timeline stops carry the done flag and the minute of the status (« Suivi du jour »): no instant, no account.
     const stops = view.vehicles[0]?.route?.stops ?? [];
     expect(stops.map((s) => s.completed)).toEqual([true, false, true, false]);
     for (const s of stops) {
@@ -477,6 +477,7 @@ describe("buildPlanningView", () => {
         "address",
         "arrivalMinute",
         "completed",
+        "completedMinute",
         "departureMinute",
         "id",
         "kind",

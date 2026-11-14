@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { DayVersion } from "@/lib/planning/version";
+import { useLiveDay } from "./live-day";
 import { usePlanningActivity, useStaleFeedback } from "./planning-activity";
 
 /** Poll period while a computation of the date runs. */
@@ -18,9 +19,15 @@ const POLL_MS = 5_000;
  * and when the tab or the window comes back, never while an action of this
  * page is in flight (its own result reloads the page). Re-mounted (key) with
  * every new render of the page.
+ *
+ * Today, with « Suivi du jour » (live-day.tsx): its 30 s poll says it instead, by the plan's key, which the crews'
+ * statuses and ends of session do not move (the page shows them live): only a change of the plan itself asks for
+ * « Recharger ». This watcher then polls only while a computation runs.
  */
 export function PlanningVersionWatcher({ date, shown }: { date: string; shown: DayVersion }) {
   const router = useRouter();
+  const live = useLiveDay();
+  const followed = live !== null;
   const { busy, setRemoteRunning } = usePlanningActivity();
   const staleFeedback = useStaleFeedback();
   const [remote, setRemote] = useState<DayVersion | null>(null);
@@ -48,7 +55,7 @@ export function PlanningVersionWatcher({ date, shown }: { date: string; shown: D
     }
   }, [date, router]);
 
-  const running = remote ? remote.running : shown.running;
+  const running = remote ? remote.running : live ? live.snapshot.running : shown.running;
   useEffect(() => {
     if (!running) return;
     const id = window.setInterval(() => void check(), POLL_MS);
@@ -56,6 +63,8 @@ export function PlanningVersionWatcher({ date, shown }: { date: string; shown: D
   }, [running, check]);
 
   useEffect(() => {
+    // Today the live poll checks when the page comes back.
+    if (followed) return;
     const onVisible = () => {
       if (document.visibilityState === "visible") void check();
     };
@@ -65,15 +74,18 @@ export function PlanningVersionWatcher({ date, shown }: { date: string; shown: D
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [check]);
+  }, [check, followed]);
 
   // « Optimiser » and « Valider » follow the last poll: off while a computation runs (toolbar).
+  const liveRunning = live ? live.snapshot.running : null;
   useEffect(() => {
-    setRemoteRunning(remote ? remote.running : null);
+    setRemoteRunning(remote ? remote.running : liveRunning);
     return () => setRemoteRunning(null);
-  }, [remote, setRemoteRunning]);
+  }, [remote, liveRunning, setRemoteRunning]);
 
-  const changed = remote !== null && (remote.version !== shown.version || remote.run !== shown.run);
+  const changed = live
+    ? live.planChanged || (remote !== null && remote.run !== shown.run)
+    : remote !== null && (remote.version !== shown.version || remote.run !== shown.run);
   if (!changed || busy || staleFeedback) return null;
   return (
     <div
@@ -82,7 +94,7 @@ export function PlanningVersionWatcher({ date, shown }: { date: string; shown: D
     >
       <p className="min-w-0">
         <span className="font-semibold">Planning modifié</span> depuis l&apos;affichage (autre poste, autre onglet ou
-        calcul terminé){remote?.running ? "\u202f; une optimisation de cette date est en cours" : ""}.
+        calcul terminé){(remote?.running ?? liveRunning) ? "\u202f; une optimisation de cette date est en cours" : ""}.
       </p>
       <Button size="sm" variant="secondary" onClick={() => router.refresh()}>
         <RefreshCw aria-hidden className="size-3.5" />

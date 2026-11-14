@@ -2,16 +2,21 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MousePointerClick, PencilLine } from "lucide-react";
+import { ActionButton } from "@/components/ui/action-button";
+import { LinkButton } from "@/components/ui/button";
 import { Card } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
 import { PlanningMapLazy } from "@/components/map/planning-map-lazy";
 import type { MapTrip, MapVehicle } from "@/components/map/planning-geojson";
-import { IssuesPanel } from "@/components/planning/issues-panel";
+import { IssuesPanel, type LiveIssues } from "@/components/planning/issues-panel";
 import { KpiStrip } from "@/components/planning/kpi-strip";
 import { Timeline } from "@/components/planning/timeline";
 import type { TripDragApi } from "@/components/planning/use-trip-drag";
 import { VehiclePanel } from "@/components/planning/vehicle-panel";
 import type { DroppedLock } from "@/lib/optimizer/build-request";
+import { FIELD_CANCEL_REASON_LABELS, type FieldRequestView } from "@/lib/domain/field-requests";
+import type { RoadmapStateView } from "@/lib/planning/live-load";
+import { liveRowView, vehicleLiveView, type LiveRowView } from "@/lib/planning/live-view";
 import { scopeLockCounts, scopeTripOf } from "@/lib/planning/bulk-lock";
 import { displayColors, IDLE_VEHICLE_COLOR } from "@/lib/planning/colors";
 import { dragIssue, dropIssue, rowsWithDraft, tripsWithDraft } from "@/lib/planning/draft";
@@ -29,6 +34,8 @@ import type { CrewChoice } from "@/lib/staff/route-crew";
 import { STOP_KIND_LABELS } from "@/lib/labels";
 import { formatMinute } from "@/lib/time";
 import { DraftBar } from "./draft-bar";
+import { resolveFieldRequest } from "./field-request-actions";
+import { useLiveDay } from "./live-day";
 import { LockScopeButtons } from "./lock-scope-buttons";
 import { usePlanningActivity, useTripLink } from "./planning-activity";
 import { PlanningSearch } from "./planning-search";
@@ -77,8 +84,58 @@ export type PlanningBoardProps = {
   today?: boolean;
   /** Plan version shown (actions on a stale page are refused). */
   version: string;
+  /** Where each crew stands with its roadmap (tomorrow; today the live poll gives it). */
+  roadmaps?: Record<string, RoadmapStateView> | null;
+  /** Longest wait at the care place (setting maxTotalWaitMin), for « Suivi du jour ». */
+  maxTotalWaitMin?: number;
   className?: string;
 };
+
+/** The regulator's answers to a crew's request, in « À traiter » (DAY-05). */
+function RequestActions({ request, trip }: { request: FieldRequestView; trip: TripView | undefined }) {
+  const fields = (decision: string) => ({ requestId: request.id, decision });
+  if (request.kind === "READY_TIME" || request.kind === "NEXT_SESSION") {
+    return (
+      <div className="flex flex-wrap items-start gap-1.5">
+        <ActionButton action={resolveFieldRequest} fields={fields("note")} align="start">
+          Pris en compte
+        </ActionButton>
+        {request.kind === "NEXT_SESSION" && trip ? (
+          <LinkButton href={`/patients/${trip.patientId}`} size="sm" variant="ghost">
+            Fiche du patient
+          </LinkButton>
+        ) : null}
+      </div>
+    );
+  }
+  const reason = request.cancellationReason && request.cancellationReason in FIELD_CANCEL_REASON_LABELS ? FIELD_CANCEL_REASON_LABELS[request.cancellationReason as keyof typeof FIELD_CANCEL_REASON_LABELS] : null;
+  return (
+    <div className="flex flex-wrap items-start gap-1.5">
+      {request.kind === "CANCEL" ? (
+        <ActionButton
+          action={resolveFieldRequest}
+          fields={fields("accept")}
+          align="start"
+          variant="primary"
+          confirm={{
+            question: `Annuler la course de ${trip?.patientName ?? "ce patient"}${reason ? ` (${reason.toLowerCase()})` : ""}\u202f? Elle sort de sa tournée.`,
+            confirmLabel: "Oui, annuler la course",
+            keepLabel: "Garder la course",
+          }}
+        >
+          Annuler la course
+        </ActionButton>
+      ) : (
+        <ActionButton action={resolveFieldRequest} fields={fields("accept")} align="start" variant="primary" pendingLabel="Création…">
+          Créer le retour
+        </ActionButton>
+      )}
+      <ActionButton action={resolveFieldRequest} fields={fields("refuse")} align="start">
+        Refuser
+      </ActionButton>
+    </div>
+  );
+}
 
 const ACTIVE = (t: TripView) => t.status !== "CANCELLED" && t.status !== "NO_SHOW";
 
@@ -115,8 +172,8 @@ const SKIP_LINK =
  */
 export function PlanningBoard({
   date,
-  vehicles,
-  trips,
+  vehicles: pageVehicles,
+  trips: pageTrips,
   unassigned,
   violations,
   violationsKnown,
@@ -140,8 +197,15 @@ export function PlanningBoard({
   crewChangeBlocked,
   today = false,
   version,
+  roadmaps: pageRoadmaps = null,
+  maxTotalWaitMin = 45,
   className,
 }: PlanningBoardProps) {
+  // Today: the rows and trips as the crews' latest statuses left them (« Suivi du jour », live-day.tsx).
+  const live = useLiveDay();
+  const vehicles = live?.vehicles ?? pageVehicles;
+  const trips = live?.trips ?? pageTrips;
+  const roadmaps = live?.snapshot.roadmaps ?? pageRoadmaps;
   const tripsById = useMemo(() => Object.fromEntries(trips.map((t) => [t.id, t])), [trips]);
   const vehicleLabels = useMemo(() => Object.fromEntries(vehicles.map((v) => [v.id, v.label])), [vehicles]);
   const violationIndex = useMemo(() => indexViolations(violations, tripsById), [violations, tripsById]);
@@ -154,6 +218,27 @@ export function PlanningBoard({
   const depotIds = useMemo(() => new Set(depots.map((d) => d.id)), [depots]);
   const { filter, setFilter, setTrip } = usePlanningFilter(depotIds);
   const { busy } = usePlanningActivity();
+  const liveRows = useMemo(() => {
+    if (!live) return undefined;
+    const map = new Map<string, LiveRowView>();
+    for (const [vehicleId, route] of live.projection.routes) map.set(vehicleId, liveRowView(route));
+    return map;
+  }, [live]);
+  const liveIssues = useMemo<LiveIssues | null>(() => {
+    if (!live) return null;
+    const unseen = Object.entries(live.snapshot.roadmaps).flatMap(([vehicleId, state]) => (state.tone === "pending" && state.pendingSince ? [{ vehicleId, text: state.text }] : []));
+    return {
+      nowMinute: live.nowMinute,
+      maxTotalWaitMin,
+      requests: live.snapshot.requests,
+      requestActions: (request) => <RequestActions request={request} trip={live.trips.find((t) => t.id === request.tripId)} />,
+      threatened: live.projection.threatened,
+      silent: live.projection.silent,
+      overdue: live.projection.overdue,
+      longWaits: live.projection.longWaits,
+      unseenRoadmaps: unseen,
+    };
+  }, [live, maxTotalWaitMin]);
 
   // The drag-and-drop draft (INS-03): the timeline shows it, the rest of the board the plan in place.
   const nameOf = useCallback((tripId: string) => {
@@ -575,6 +660,8 @@ export function PlanningBoard({
             drag={dragApi}
             draftVehicleIds={draftVehicleIds}
             flashTripIds={flash}
+            nowMinute={live?.nowMinute ?? null}
+            liveRows={liveRows}
             groupActions={
               planned
                 ? (group) => {
@@ -639,12 +726,27 @@ export function PlanningBoard({
                 onAutoPlaceStarted={autoPlaceStarted}
                 onSelectTrip={selectTrip}
                 onClose={clear}
+                live={(() => {
+                  const route = selectedTrip.vehicleId ? live?.projection.routes.get(selectedTrip.vehicleId) : undefined;
+                  if (!route) return null;
+                  const texts = vehicleLiveView(route).stops;
+                  const textOf = (kind: "PICKUP" | "DROPOFF") => {
+                    const stop = route.stops.find((s) => s.tripId === selectedTrip.id && s.kind === kind);
+                    return stop ? (texts[stop.stopId]?.text ?? null) : null;
+                  };
+                  return { pickup: textOf("PICKUP"), dropoff: textOf("DROPOFF") };
+                })()}
               />
             ) : selectedVehicle ? (
               <VehiclePanel
                 vehicle={{ ...selectedVehicle, color: colorOf(selectedVehicle) }}
                 trips={tripsById}
                 issues={vehicleIssues.find((issue) => issue.vehicleId === selectedVehicle.id)?.changes ?? []}
+                live={(() => {
+                  const route = live?.projection.routes.get(selectedVehicle.id);
+                  return route ? vehicleLiveView(route) : null;
+                })()}
+                roadmap={roadmaps?.[selectedVehicle.id] ?? null}
                 lockAction={
                   lockedLabel ? (
                     <LockScopeButtons
@@ -711,6 +813,7 @@ export function PlanningBoard({
               selectedTripId={selectedTrip?.id ?? null}
               onSelectTrip={selectTrip}
               onSelectVehicle={showVehicle}
+              live={liveIssues}
             />
           </div>
           {/* With a trip or a vehicle selected, the map gives height to its panel: the actions stay in view on a

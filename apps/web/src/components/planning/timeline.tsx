@@ -39,6 +39,7 @@ import {
   type WaitWindows,
   type ZoomLevel,
 } from "@/lib/planning/timeline-layout";
+import type { LiveRowView } from "@/lib/planning/live-view";
 import type { TripView, VehicleRowView, ViolationView } from "@/lib/planning/types";
 import { NO_VIOLATIONS, violationLabels, type ViolationIndex } from "@/lib/planning/violation-index";
 import { formatPercent, ROUTE_STATUS_LABELS, VEHICLE_TYPE_SHORT } from "@/lib/labels";
@@ -85,8 +86,38 @@ export type TimelineProps = {
   draftVehicleIds?: ReadonlySet<string>;
   /** Trips highlighted a moment (a link of « Changements », a drop of the draft). */
   flashTripIds?: ReadonlySet<string>;
+  /** Today, minute of now (« Suivi du jour »): a red line across the tracks. */
+  nowMinute?: number | null;
+  /** Today, where each route stands (« Suivi du jour »): a chip next to the vehicle's name. */
+  liveRows?: ReadonlyMap<string, LiveRowView>;
   className?: string;
 };
+
+const LIVE_TONES: Record<LiveRowView["tone"], string> = {
+  ok: "bg-emerald-50 text-emerald-800 ring-emerald-200",
+  late: "bg-amber-50 text-amber-900 ring-amber-300",
+  alert: "bg-red-50 text-red-800 ring-red-300",
+};
+
+/** The vertical « maintenant » line of a track (or of the axis). */
+function NowLine({ minute, range, label = false }: { minute: number; range: TimeRange; label?: boolean }) {
+  if (minute < range.start || minute > range.end) return null;
+  const left = `${percentOf(minute, range)}%`;
+  return (
+    <>
+      <span aria-hidden className="pointer-events-none absolute inset-y-0 z-[7] w-0.5 -translate-x-1/2 bg-red-600/80" style={{ left }} />
+      {label ? (
+        <span
+          aria-hidden
+          className="tabular pointer-events-none absolute top-1/2 z-[8] -translate-x-1/2 -translate-y-1/2 rounded bg-red-600 px-1 text-[11px] font-bold leading-4 text-white"
+          style={{ left }}
+        >
+          {formatMinute(minute)}
+        </span>
+      ) : null}
+    </>
+  );
+}
 
 type DropHint = "ok" | "no" | null;
 
@@ -191,6 +222,8 @@ type RowProps = {
   flashIds: ReadonlySet<string>;
   canDrag?: (tripId: string) => boolean;
   draggingTripId: string | null;
+  nowMinute: number | null;
+  live: LiveRowView | undefined;
 };
 
 /** Row badge: the vehicle's violations (its own and its trips'), by an icon and a count, named for screen readers. */
@@ -229,6 +262,8 @@ const TimelineRow = memo(function TimelineRow({
   flashIds,
   canDrag,
   draggingTripId,
+  nowMinute,
+  live,
 }: RowProps) {
   const { range, compact, zoomed } = geometry;
   const route = row.route;
@@ -324,6 +359,15 @@ const TimelineRow = memo(function TimelineRow({
             {labelSaysType ? null : <VehicleTypeBadge type={row.type} dot={false} />}
             {violationMark}
             {draftMark}
+            {live ? (
+              <span
+                className={cn("tabular inline-flex shrink-0 items-center rounded px-1 py-px text-[11px] leading-none font-semibold ring-1 ring-inset", LIVE_TONES[live.tone])}
+                title={live.title}
+              >
+                <span aria-hidden>{live.label}</span>
+                <span className="sr-only">{live.title}</span>
+              </span>
+            ) : null}
             {compact && route ? (
               <span className="tabular shrink-0 text-[11px] text-slate-500">
                 {route.tripCount} course{route.tripCount > 1 ? "s" : ""}
@@ -458,6 +502,8 @@ const TimelineRow = memo(function TimelineRow({
             draggingTripId={draggingTripId}
           />
         ) : null}
+
+        {nowMinute !== null ? <NowLine minute={nowMinute} range={range} /> : null}
 
         {!route && row.available && !compact ? (
           <span className="absolute inset-0 flex items-center justify-center">
@@ -742,6 +788,8 @@ export function Timeline({
   drag: dragApi,
   draftVehicleIds,
   flashTripIds = NO_FLASH,
+  nowMinute = null,
+  liveRows,
   className,
 }: TimelineProps) {
   const scroller = useRef<HTMLDivElement>(null);
@@ -986,6 +1034,7 @@ export function Timeline({
                 </span>
               );
             })}
+            {nowMinute !== null ? <NowLine minute={nowMinute} range={range} label /> : null}
           </div>
           {STAT_HEADERS.map((label) => (
             <div key={label} role="columnheader" className={cn(zoomed ? "hidden" : STAT_CELL, "uppercase tracking-wide")}>
@@ -1090,6 +1139,8 @@ export function Timeline({
                       flashIds={flashTripIds}
                       canDrag={canDrag}
                       draggingTripId={drag?.tripId ?? null}
+                      nowMinute={nowMinute}
+                      live={liveRows?.get(row.id)}
                     />
                   ))}
                 </div>

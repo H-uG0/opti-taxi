@@ -34,6 +34,8 @@ export type StopView = {
   departureMinute: number;
   loadAfter: number;
   completed: boolean;
+  /** Real minute of the crew's status (Europe/Paris, minutes since midnight of the date), null when none. Absent: unknown. */
+  completedMinute?: number | null;
 };
 
 export type RouteView = {
@@ -161,6 +163,8 @@ export type TripView = {
   continuation?: { interruptedAtMinute: number | null } | null;
   /** Cancelled because its transport was interrupted (a continuation picks the patient up again). Absent: false. */
   interrupted?: boolean;
+  /** The patient's other leg the same day (same care: lib/domain/no-show.ts isSameEpisode). Absent or null: none. */
+  otherLegTripId?: string | null;
 };
 
 export type UnassignedView = {
@@ -309,6 +313,8 @@ export type PlanningDayView = {
    * trip without a vehicle on that window.
    */
   waitWindows: { beforeAppointmentMin: number; afterSessionMin: number };
+  /** Longest wait at the care place (before the appointment plus after the session), setting maxTotalWaitMin. */
+  maxTotalWaitMin: number;
   /** True once a trip was picked up: « Réoptimiser la suite » plans after the stops done (DAY-02). */
   dayStarted: boolean;
   /** Every route of the day is done by its crew: nothing is left to re-plan. */

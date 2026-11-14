@@ -2,15 +2,51 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { CarFront, House, OctagonAlert, CircleSlash, LockKeyholeOpen, RotateCcw, UserX } from "lucide-react";
+import {
+  CalendarClock,
+  CarFront,
+  CircleSlash,
+  Clock4,
+  FileWarning,
+  Hourglass,
+  House,
+  LockKeyholeOpen,
+  MessageSquareWarning,
+  OctagonAlert,
+  PhoneOff,
+  RotateCcw,
+  UserX,
+} from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
 import { OUTBOUND_NO_SHOW_ADVICE, OUTBOUND_NO_SHOW_SHORT_LABEL } from "@/lib/domain/no-show";
 import type { DroppedLock } from "@/lib/optimizer/build-request";
+import { fieldRequestText, type FieldRequestView } from "@/lib/domain/field-requests";
+import type { LongWait, OverdueStop, SilentRoute, ThreatenedAppointment } from "@/lib/planning/live-day";
 import type { VehicleIssue } from "@/lib/planning/route-issues";
 import type { TripView, UnassignedView, ViolationView } from "@/lib/planning/types";
 import { DIRECTION_LABELS } from "@/lib/labels";
-import { formatMinute } from "@/lib/time";
+import { formatDuration, formatMinute } from "@/lib/time";
+
+/** What the day's follow-up adds to « À traiter » (DAY-01, DAY-05), today only. */
+export type LiveIssues = {
+  nowMinute: number;
+  maxTotalWaitMin: number;
+  /** The crews' requests still to handle, with the regulator's buttons for each. */
+  requests: FieldRequestView[];
+  requestActions: (request: FieldRequestView) => ReactNode;
+  threatened: ThreatenedAppointment[];
+  silent: SilentRoute[];
+  overdue: OverdueStop[];
+  longWaits: LongWait[];
+  /** Crews that have not seen a change of their roadmap. */
+  unseenRoadmaps: { vehicleId: string; text: string }[];
+};
+
+/** « 10:05 » of an ISO instant (Europe/Paris). */
+function clockOf(iso: string): string {
+  return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+}
 
 export type IssuesPanelProps = {
   date: string;
@@ -33,6 +69,8 @@ export type IssuesPanelProps = {
   selectedTripId: string | null;
   onSelectTrip: (tripId: string) => void;
   onSelectVehicle: (vehicleId: string) => void;
+  /** Today: the day's follow-up (threatened appointments, silent routes, requests of the crews…). */
+  live?: LiveIssues | null;
 };
 
 function tripTimeLabel(trip: TripView | undefined): string {
@@ -71,6 +109,19 @@ function TripButton({
         <span className="tabular shrink-0 text-xs text-slate-500">{tripTimeLabel(trip)}</span>
       </span>
       {children ? <span className="mt-0.5 block text-xs text-slate-600">{children}</span> : null}
+    </button>
+  );
+}
+
+function VehicleButton({ label, onSelect, children }: { label: string; onSelect: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="block w-full rounded-md px-2 py-1.5 text-left hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-brand-600"
+    >
+      <span className="block truncate text-sm font-medium text-slate-900">{label}</span>
+      <span className="mt-0.5 block text-xs text-slate-600">{children}</span>
     </button>
   );
 }
@@ -155,6 +206,7 @@ export function IssuesPanel({
   selectedTripId,
   onSelectTrip,
   onSelectVehicle,
+  live = null,
 }: IssuesPanelProps) {
   // A patient driven to the facility and not back home (or the reverse) comes first.
   const halfServed = planned ? unassigned.filter((u) => u.servedPartner) : [];
@@ -166,7 +218,11 @@ export function IssuesPanel({
     violations.length +
     staleTrips.length +
     droppedLocks.length +
-    (violationsKnown ? 0 : 1);
+    (violationsKnown ? 0 : 1) +
+    (live
+      ? live.requests.length + live.threatened.length + live.silent.length + live.overdue.length + live.longWaits.length + live.unseenRoadmaps.length
+      : 0);
+  const vehicleOf = (vehicleId: string | null) => (vehicleId ? (vehicleLabels[vehicleId] ?? "Véhicule") : "sans véhicule");
 
   return (
     <Card>
@@ -180,6 +236,125 @@ export function IssuesPanel({
               Le dernier calcul signalait des violations, mais leur détail n&apos;a pas été enregistré (calcul plus
               ancien)&nbsp;: relancez l&apos;optimisation pour les revoir.
             </p>
+          ) : null}
+
+          {live && live.requests.length > 0 ? (
+            <Section
+              icon={<MessageSquareWarning aria-hidden className="size-3.5" />}
+              title={`Demandes des équipages (${live.requests.length})`}
+              tone="red"
+              intro="Une fin de séance signalée est déjà enregistrée sur le retour&nbsp;: replacez-le si besoin («&#x202F;Où placer&#x202F;»). Une annulation ou un retour attend votre réponse."
+            >
+              {live.requests.map((request) => (
+                <li key={request.id} className="space-y-1">
+                  <TripButton tripId={request.tripId} trips={trips} selected={request.tripId === selectedTripId} onSelect={onSelectTrip}>
+                    <span className="font-medium text-red-800">{fieldRequestText(request)}</span>
+                    <span className="block">
+                      {request.createdBy ?? "Équipage"}, à {clockOf(request.createdAt)}
+                      {trips[request.tripId]?.vehicleId ? ` · ${vehicleOf(trips[request.tripId]?.vehicleId ?? null)}` : ""}
+                    </span>
+                  </TripButton>
+                  <div className="px-2 pb-1">{live.requestActions(request)}</div>
+                </li>
+              ))}
+            </Section>
+          ) : null}
+
+          {live && live.threatened.length > 0 ? (
+            <Section
+              icon={<CalendarClock aria-hidden className="size-3.5" />}
+              title={`RDV menacés (${live.threatened.length})`}
+              tone="red"
+              intro="Arrivée estimée à partir des derniers statuts saisis et des temps du planning (aucune position GPS)&nbsp;: prévenez l'établissement ou replacez la course."
+            >
+              {live.threatened.map((t) => (
+                <li key={t.tripId}>
+                  <TripButton tripId={t.tripId} trips={trips} selected={t.tripId === selectedTripId} onSelect={onSelectTrip}>
+                    <span className="font-medium text-red-800">
+                      Arrivée vers {formatMinute(t.projectedMinute)}, {formatDuration(t.lateMinutes)} après le RDV
+                    </span>
+                    <span className="block">{vehicleOf(t.vehicleId)}</span>
+                  </TripButton>
+                </li>
+              ))}
+            </Section>
+          ) : null}
+
+          {live && live.silent.length > 0 ? (
+            <Section
+              icon={<PhoneOff aria-hidden className="size-3.5" />}
+              title={`Tournées silencieuses (${live.silent.length})`}
+              tone="red"
+              intro="Aucun statut saisi 15&nbsp;min après la première prise en charge prévue&nbsp;: appelez l'équipage."
+            >
+              {live.silent.map((s) => (
+                <li key={s.vehicleId}>
+                  <VehicleButton label={vehicleOf(s.vehicleId)} onSelect={() => onSelectVehicle(s.vehicleId)}>
+                    <span className="font-medium text-red-800">
+                      Aucun statut depuis {formatMinute(s.sinceMinute)} ({formatDuration(s.minutes)})
+                    </span>
+                  </VehicleButton>
+                </li>
+              ))}
+            </Section>
+          ) : null}
+
+          {live && live.overdue.length > 0 ? (
+            <Section
+              icon={<Clock4 aria-hidden className="size-3.5" />}
+              title={`Arrêts sans statut (${live.overdue.length})`}
+              tone="amber"
+              intro="Heure dépassée de plus de 10&nbsp;min sans statut, ou statut oublié avant un arrêt déjà fait."
+            >
+              {live.overdue.map((o) => (
+                <li key={o.stopId}>
+                  <TripButton tripId={o.tripId} trips={trips} selected={o.tripId === selectedTripId} onSelect={onSelectTrip}>
+                    <span className="font-medium text-amber-900">
+                      {o.kind === "PICKUP" ? "Prise en charge" : "Dépose"}{" "}
+                      {o.missing ? "sans statut, l'arrêt suivant est fait" : `attendue vers ${formatMinute(live.nowMinute - o.minutes)}, sans statut depuis ${formatDuration(o.minutes)}`}
+                    </span>
+                    <span className="block">{vehicleOf(o.vehicleId)}</span>
+                  </TripButton>
+                </li>
+              ))}
+            </Section>
+          ) : null}
+
+          {live && live.longWaits.length > 0 ? (
+            <Section
+              icon={<Hourglass aria-hidden className="size-3.5" />}
+              title={`Attentes de plus de ${live.maxTotalWaitMin}\u00a0min (${live.longWaits.length})`}
+              tone="amber"
+              intro="Attente du patient au lieu de soins (avant le RDV et après la séance), retour estimé comme les RDV&nbsp;: replacez le retour («&#x202F;Où placer&#x202F;»)."
+            >
+              {live.longWaits.map((w) => (
+                <li key={w.tripId}>
+                  <TripButton tripId={w.tripId} trips={trips} selected={w.tripId === selectedTripId} onSelect={onSelectTrip}>
+                    <span className="font-medium text-amber-900">
+                      Attente estimée {formatDuration(w.waitMinutes)}, dont {formatDuration(w.afterMinutes)} après la séance
+                    </span>
+                    <span className="block">{vehicleOf(w.vehicleId)}</span>
+                  </TripButton>
+                </li>
+              ))}
+            </Section>
+          ) : null}
+
+          {live && live.unseenRoadmaps.length > 0 ? (
+            <Section
+              icon={<FileWarning aria-hidden className="size-3.5" />}
+              title={`Changements pas encore vus (${live.unseenRoadmaps.length})`}
+              tone="amber"
+              intro="L'équipage n'a pas encore appuyé sur «&#x202F;J'ai vu&#x202F;»&nbsp;: appelez-le si le changement est proche."
+            >
+              {live.unseenRoadmaps.map((r) => (
+                <li key={r.vehicleId}>
+                  <VehicleButton label={vehicleOf(r.vehicleId)} onSelect={() => onSelectVehicle(r.vehicleId)}>
+                    {r.text}
+                  </VehicleButton>
+                </li>
+              ))}
+            </Section>
           ) : null}
 
           {halfServed.length > 0 ? (

@@ -1,11 +1,13 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Lock, TriangleAlert, X } from "lucide-react";
+import { FileCheck2, FileWarning, Lock, Radio, TriangleAlert, X } from "lucide-react";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/layout";
 import { cn } from "@/components/ui/cn";
 import { formatEurosRounded, formatKmRounded } from "@/lib/planning/format";
+import type { RoadmapStateView } from "@/lib/planning/live-load";
+import type { VehicleLiveView } from "@/lib/planning/live-view";
 import type { TripView, VehicleRowView } from "@/lib/planning/types";
 import { formatPercent, ROUTE_STATUS_LABELS, STOP_KIND_LABELS } from "@/lib/labels";
 import { formatMinute } from "@/lib/time";
@@ -18,10 +20,16 @@ export function VehiclePanel({
   crewAction,
   outageAction,
   lockAction,
+  live = null,
+  roadmap = null,
   onSelectTrip,
   onClose,
 }: {
   vehicle: VehicleRowView;
+  /** Today: where the route stands (« Suivi du jour »). */
+  live?: VehicleLiveView | null;
+  /** Where the crew stands with its roadmap (version published, « J'ai vu »). */
+  roadmap?: RoadmapStateView | null;
   trips: Record<string, TripView>;
   /** What to fix on this vehicle (route-issues.ts): an absent driver, a crew changed since the computation… */
   issues?: string[];
@@ -83,6 +91,28 @@ export function VehiclePanel({
         ) : (
           <p className="text-slate-500">Aucune course ce jour.</p>
         )}
+        {live ? (
+          <div className="mt-1 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700">
+            <p className="flex items-start gap-1.5">
+              <Radio aria-hidden className="mt-0.5 size-3.5 shrink-0 text-red-600" />
+              <span className="tabular">{live.summary}</span>
+            </p>
+            {live.alert ? <p className="mt-0.5 font-medium text-red-800">{live.alert}</p> : null}
+          </div>
+        ) : null}
+        {roadmap ? (
+          <p className={cn("flex items-start gap-1.5 text-xs", roadmap.tone === "pending" ? "font-medium text-amber-900" : "text-slate-600")}>
+            {roadmap.tone === "pending" ? (
+              <FileWarning aria-hidden className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+            ) : (
+              <FileCheck2 aria-hidden className="mt-0.5 size-3.5 shrink-0 text-slate-500" />
+            )}
+            <span>
+              <span className="sr-only">Feuille de route&nbsp;: </span>
+              {roadmap.text}
+            </span>
+          </p>
+        ) : null}
         {route && lockAction ? <div className="pt-1.5">{lockAction}</div> : null}
         {issues.length > 0 ? (
           <ul className="space-y-0.5 pt-1 text-xs text-amber-900">
@@ -102,6 +132,7 @@ export function VehiclePanel({
         <ol className="border-t border-slate-100 px-2 py-2">
           {route.stops.map((stop) => {
             const trip = trips[stop.tripId];
+            const now = live?.stops[stop.id];
             return (
               <li key={stop.id}>
                 <button
@@ -125,6 +156,19 @@ export function VehiclePanel({
                       ) : null}
                     </span>
                     <span className="block truncate text-xs text-slate-500">{stop.address}</span>
+                    {now ? (
+                      <span
+                        className={cn(
+                          "tabular block text-xs",
+                          now.tone === "done" && "text-emerald-700",
+                          now.tone === "late" && "font-medium text-amber-800",
+                          now.tone === "alert" && "font-medium text-red-700",
+                          now.tone === "ok" && "text-slate-500",
+                        )}
+                      >
+                        {now.text}
+                      </span>
+                    ) : null}
                   </span>
                 </button>
               </li>
