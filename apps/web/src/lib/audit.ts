@@ -83,7 +83,13 @@
  * - field, on the Trip (stops are deleted by re-optimizations): stop.pickup,
  *   stop.dropoff, stop.no_show, stop.undo_pickup, stop.undo_dropoff
  *   (details.observedAt: the time of the gesture, when the status was sent
- *   from the phone's offline queue more than 1 min after it);
+ *   from the phone's offline queue more than 1 min after it); the crews'
+ *   signals and requests (DAY-05): field_request.create (details.kind and
+ *   details.requestId, never the reason: health data), trip.ready_time (an
+ *   end of session signalled from the field, details.from and to in minutes,
+ *   details.source "field"), and the regulator's answer field_request.note,
+ *   .accept or .refuse; roadmap.seen (« J'ai vu » of a changed roadmap, on
+ *   the Route, details.version);
  * - staff and crews: day_crew.save (one per vehicle fixed, details: vehicle
  *   and people ids), day_crew.unfix (one vehicle back to the proposal),
  *   day_crew.reset (the whole date), route.crew_change (« Changer l'équipage »

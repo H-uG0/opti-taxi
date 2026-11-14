@@ -235,6 +235,30 @@ enum UserRole {
   DRIVER
 }
 
+/// Demande ou signalement du terrain (DAY-05), saisi par l'équipage depuis la feuille de route.
+enum FieldRequestKind {
+  /// Fin de séance signalée (« Patient prêt à HH:MM ») : l'heure de fin du retour est mise à jour tout de suite.
+  READY_TIME
+  /// Demande d'annulation d'une course, soumise à la régulation.
+  CANCEL
+  /// Demande d'un retour qui n'était pas prévu, soumise à la régulation.
+  RETURN
+  /// Prochaine séance de la série, saisie à la dépose et transmise à la régulation.
+  NEXT_SESSION
+}
+
+/// Suite donnée par la régulation à une demande du terrain.
+enum FieldRequestStatus {
+  /// À traiter.
+  PENDING
+  /// Acceptée (annulation faite, retour créé).
+  ACCEPTED
+  /// Refusée.
+  REFUSED
+  /// Signalement pris en compte (fin de séance, prochaine séance).
+  NOTED
+}
+
 model Patient {
   id          String   @id @default(cuid())
   firstName   String
@@ -484,6 +508,7 @@ model Trip {
   cancelledBy        User?         @relation("TripCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
   exceptionalAmbulanceBy User?     @relation("TripExceptionalAmbulanceBy", fields: [exceptionalAmbulanceById], references: [id], onDelete: SetNull)
   stops              RouteStop[]
+  fieldRequests      FieldRequest[]
 
   @@unique([recurrenceId, occurrenceDate, direction])
   @@index([serviceDate])
@@ -542,6 +567,7 @@ model Vehicle {
   maintenance     MaintenanceDeadline[]
   fuelLogs        FuelLog[]
   lockedTrips     Trip[]  @relation("TripLockedVehicle")
+  routeVersions   RouteVersion[]
 
   @@index([depotId])
 }
@@ -756,6 +782,68 @@ model RouteStop {
   completedBy User? @relation("RouteStopCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
 
   @@unique([routeId, sequence])
+  @@index([tripId])
+}
+
+/// Version publiée de la feuille de route d'un véhicule pour une date (DAY-04) : ce que l'équipage voit (arrêts dans
+/// l'ordre, heure prévue de chacun, courses annulées restées sur la tournée). Une ligne par changement constaté quand
+/// le téléphone de l'équipage vérifie sa feuille de route ; la tournée elle-même peut être recréée par une
+/// réoptimisation, d'où la clé (date, véhicule).
+model RouteVersion {
+  id          String   @id @default(cuid())
+  serviceDate DateTime @db.Date
+  vehicleId   String
+  /// 1, 2, 3… dans l'ordre des changements.
+  version     Int
+  /// Empreinte des arrêts (lib/planning/roadmap-version.ts).
+  fingerprint String
+  /// Arrêts de la version : identifiants de course, sens de l'arrêt, heure prévue, annulation. Aucune donnée patient.
+  stops       Json
+  /// Moment du changement par la régulation, estimé par les dernières modifications des courses touchées, au plus
+  /// tard le moment où il a été constaté.
+  publishedAt DateTime
+  /// « J'ai vu » d'un membre de l'équipage (ou première ouverture de la feuille de route pour la version 1).
+  seenAt      DateTime?
+  seenById    String?
+  createdAt   DateTime @default(now())
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  seenBy  User?   @relation("RouteVersionSeenBy", fields: [seenById], references: [id], onDelete: SetNull)
+
+  @@unique([serviceDate, vehicleId, version])
+}
+
+/// Demande ou signalement de l'équipage depuis la feuille de route (DAY-05) : fin de séance, demande d'annulation ou de
+/// retour, prochaine séance de la série. Jamais de texte libre (données de santé) : un motif dans une liste.
+model FieldRequest {
+  id          String             @id @default(cuid())
+  serviceDate DateTime           @db.Date
+  kind        FieldRequestKind
+  status      FieldRequestStatus @default(PENDING)
+  /// Course concernée : le retour (fin de séance, annulation du retour), la course à annuler, ou l'aller déposé
+  /// (demande de retour, prochaine séance).
+  tripId      String
+  /// Fin de séance ou retour demandé : heure à laquelle le patient est prêt (minutes depuis minuit).
+  readyMinute Int?
+  /// Fin de séance : heure de fin enregistrée avant le signalement.
+  previousReadyMinute Int?
+  /// Demande d'annulation : motif proposé par l'équipage.
+  cancellationReason CancellationReason?
+  /// Prochaine séance de la série, saisie à la dépose.
+  nextSessionDate DateTime? @db.Date
+  createdAt   DateTime           @default(now())
+  createdById String?
+  /// Suite donnée par la régulation.
+  resolvedAt   DateTime?
+  resolvedById String?
+  /// Course créée en acceptant une demande de retour.
+  createdTripId String?
+
+  trip       Trip  @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  createdBy  User? @relation("FieldRequestCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  resolvedBy User? @relation("FieldRequestResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([serviceDate, status])
   @@index([tripId])
 }
 
@@ -1016,6 +1104,9 @@ model User {
   dayCrews         DayCrew[]         @relation("DayCrewUpdatedBy")
   validatedPlans   ValidatedPlan[]   @relation("ValidatedPlanBy")
   kpiTargets       KpiTarget[]       @relation("KpiTargetUpdatedBy")
+  routeVersionsSeen RouteVersion[]   @relation("RouteVersionSeenBy")
+  fieldRequests    FieldRequest[]    @relation("FieldRequestCreatedBy")
+  fieldRequestsResolved FieldRequest[] @relation("FieldRequestResolvedBy")
   auditEvents      AuditEvent[]
 }
 

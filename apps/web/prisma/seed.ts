@@ -155,6 +155,8 @@ async function wipe(): Promise<void> {
     prisma.patientAbsence.deleteMany(),
     prisma.facilityClosure.deleteMany(),
     prisma.crewIncompatibility.deleteMany(),
+    prisma.fieldRequest.deleteMany(),
+    prisma.routeVersion.deleteMany(),
     prisma.routeStop.deleteMany(),
     prisma.trip.deleteMany(),
     prisma.route.deleteMany(),
