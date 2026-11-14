@@ -505,6 +505,8 @@ Ajoutées après l'appel du 6 novembre (entre parenthèses, l'hypothèse retenue
 - [ ] Tableau de bord, retards : à partir de combien de minutes après le RDV V considère-t-il un patient en retard ? Le chauffeur tape « Déposé » après avoir accompagné le patient à l'accueil (5 min de dépose prévues). (5 min, réglable en haut du tableau de bord : 0, 5, 10 ou 15 min ; les tranches au-delà de 5 et de 15 min sont toujours affichées)
 - [ ] Tableau de bord, valeur de référence de « courses par véhicule » : par véhicule utilisé (ce que montrait le MVP) ou par véhicule disponible (flotte active moins indisponibles et véhicules sans équipage) ? (les deux affichés, avec le taux d'utilisation et les journées-véhicules perdues)
 - [ ] Taux de partage : la caisse le rapportera-t-elle aux courses éligibles (prescription autorisant le partage) ou à toutes les courses en taxi et VSL ? (les deux affichés, VSL et taxi séparés ; l'éligible en premier, face aux 30 % du protocole)
+- [ ] Tableau de bord, objectifs : quelles valeurs de référence (mesurées sur l'historique, avant l'outil) et quels objectifs pour les huit indicateurs, et faut-il des objectifs propres à certains dépôts ? (à saisir dans Paramètres ; le jeu de démonstration montre des valeurs d'exemple fictives)
+- [ ] Temps de planification : faut-il compter les appels aux patients (réponses au partage, annulations) et la composition des équipages dans le temps passé à construire le planning ? (oui, comme toute action sur la journée dans le journal d'audit ; les consultations seules ne comptent pas)
 
 **Tarifs et facturation (lot tarifaire, 9 novembre 2026)**
 
