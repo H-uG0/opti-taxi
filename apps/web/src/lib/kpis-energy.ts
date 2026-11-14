@@ -12,8 +12,9 @@
  * at the end of the day), up to the last reading on or before the last day
  * that has routes at all (the days after it are not planned yet); not
  * compared when the interval starts before the first planned day. Then its
- * days off the road in the period
- * (unavailabilities) and its deadlines overdue today. A group sums its
+ * days off the road in the period (unavailabilities) and its deadlines
+ * overdue today, at its latest odometer reading (whatever the period, like
+ * the vehicle's record). A group sums its
  * vehicles: litres and kWh never mix, the consumption of a group is given per
  * unit.
  */
@@ -72,6 +73,8 @@ export function vehicleEnergy(
     plannedUntil?: string | null;
     offRoadDays: number;
     deadlines: readonly EnergyDeadline[];
+    /** Its latest odometer reading, all fills (null: none); absent: the highest of `fills`. */
+    latestOdometerKm?: number | null;
   },
 ): VehicleEnergy {
   const before = input.fills.filter((f) => f.date < input.from && f.fullTank).sort((a, b) => a.date.localeCompare(b.date) || a.odometerKm - b.odometerKm);
@@ -90,7 +93,7 @@ export function vehicleEnergy(
     for (const [date, km] of input.plannedKm) if (date > start.date && date <= end.date) plannedKm += km;
     comparedKm = end.odometerKm - start.odometerKm;
   }
-  const lastOdometer = consumptionStats(input.fills).odometerKm;
+  const lastOdometer = input.latestOdometerKm !== undefined ? input.latestOdometerKm : consumptionStats(input.fills).odometerKm;
   return {
     vehicleId: vehicle.id,
     energy: vehicle.energy,

@@ -53,6 +53,12 @@ describe("vehicleEnergy", () => {
     expect(vehicleEnergy(diesel, { ...input, plannedSince: null }).plannedKm).toBeNull();
   });
 
+  it("counts the deadlines overdue today at the latest odometer, not the last reading of a past period", () => {
+    // The SERVICE at 60 000 km: passed since the period, read on the latest fill-up.
+    expect(vehicleEnergy(diesel, { ...input, latestOdometerKm: 60_400 }).overdueDeadlines).toBe(2);
+    expect(vehicleEnergy(diesel, { ...input, latestOdometerKm: null }).overdueDeadlines).toBe(1);
+  });
+
   it("measures nothing without two full tanks", () => {
     expect(vehicleEnergy(diesel, { ...input, fills: [fill("2026-11-12", 50_600, 22, 39)] })).toMatchObject({ measuredKm: 0, plannedKm: null });
   });

@@ -65,11 +65,15 @@ export type TrendPoint = {
 
 /**
  * The steps of `days` (consecutive, oldest first). `before`: the days just
- * before the range (for the moving average of the first days), any order.
+ * before the range (for the moving average of the first days), any order;
+ * only the MOVING_AVERAGE_LEAD_IN_DAYS calendar days before the range are
+ * read, so that the average never jumps over a gap to a day weeks earlier.
  */
 export function trendPoints(days: readonly DayKpis[], granularity: Granularity, before: readonly DayKpis[] = []): TrendPoint[] {
   if (granularity === "day") {
-    const history = [...before, ...days].filter((d) => d.date < (days[0]?.date ?? "")).sort((a, b) => a.date.localeCompare(b.date));
+    const first = days[0]?.date ?? "";
+    const earliest = first ? addDays(first, -MOVING_AVERAGE_LEAD_IN_DAYS) : "";
+    const history = before.filter((d) => d.date < first && d.date >= earliest).sort((a, b) => a.date.localeCompare(b.date));
     const all = [...history, ...days];
     return days.map((day, index) => ({
       key: day.date,
@@ -132,7 +136,9 @@ export type RangePreset = { id: string; label: string; from: string; to: string;
 /**
  * Shortcuts: the last 7, 14, 30 and 90 days through J+1, last week (Monday to
  * Sunday), the current month (from the 1st through J+1, at most its last
- * day) and the 12 months (the current one and the 11 before, by month).
+ * day) and the 12 months (the current one and the 11 before, by month, at
+ * most through the current month's last day: J+1 on the 1st of the next
+ * month would add a 13th month of one day).
  */
 export function rangePresets(today: string, tomorrow: string): RangePreset[] {
   const lastDays = [7, 14, 30, 90].map(
@@ -141,10 +147,11 @@ export function rangePresets(today: string, tomorrow: string): RangePreset[] {
   const thisMonday = startOfIsoWeek(today);
   const monthStart = bucketStart(today, "month");
   const monthEnd = bucketEnd(monthStart, "month");
+  const thisMonthTo = tomorrow < monthEnd ? tomorrow : monthEnd;
   return [
     ...lastDays,
     { id: "semaine", label: "Semaine dernière", from: addDays(thisMonday, -7), to: addDays(thisMonday, -1), granularity: "day" },
-    { id: "mois", label: "Mois en cours", from: monthStart, to: tomorrow < monthEnd ? tomorrow : monthEnd, granularity: "day" },
-    { id: "12mois", label: "12 mois", from: addMonths(today, -11), to: tomorrow, granularity: "month" },
+    { id: "mois", label: "Mois en cours", from: monthStart, to: thisMonthTo, granularity: "day" },
+    { id: "12mois", label: "12 mois", from: addMonths(today, -11), to: thisMonthTo, granularity: "month" },
   ];
 }

@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { encodePlanFigures, emptyPlanFigures } from "./kpis-plan";
-import { loadKpiRows, routeTimings, serviceDateFilter, toKpiData, type KpiClient, type KpiQueryRows, type TimedStop } from "./kpis-load";
+import {
+  loadKpiRows,
+  loadPlanningActivity,
+  loadRouteKpiRows,
+  routeTimings,
+  serviceDateFilter,
+  toKpiData,
+  type KpiClient,
+  type KpiQueryRows,
+  type TimedStop,
+} from "./kpis-load";
+import { PLANNING_ACTIONS } from "./kpis-planning-time";
 
 const day = new Date("2026-10-12T00:00:00.000Z");
 const validatedAt = new Date("2026-10-11T15:40:00.000Z");
@@ -187,6 +198,69 @@ describe("loadKpiRows", () => {
   });
 });
 
+describe("loadRouteKpiRows", () => {
+  const range = { gte: new Date("2026-10-05T00:00:00.000Z"), lte: new Date("2026-10-31T00:00:00.000Z") };
+  function recordingClient() {
+    const calls: Record<string, unknown> = {};
+    const recordCall = (name: string, result: unknown) => async (args: unknown) => {
+      calls[name] = args;
+      return result;
+    };
+    const client = {
+      route: { findMany: recordCall("routes", rows.routes) },
+      routeStop: { findMany: recordCall("stops", rows.stops) },
+      trip: { findMany: recordCall("trips", rows.trips) },
+    } as unknown as Parameters<typeof loadRouteKpiRows>[0];
+    return { client, calls };
+  }
+
+  it("reads a vehicle's routes, their stops and the trips placed on them, nothing else", async () => {
+    const { client, calls } = recordingClient();
+    const data = await loadRouteKpiRows(client, { from: "2026-10-05", to: "2026-10-31" }, { vehicleId: "v1" });
+    const routeWhere = { serviceDate: range, vehicleId: "v1" };
+    expect(calls.routes).toMatchObject({ where: routeWhere });
+    expect(calls.stops).toMatchObject({ where: { route: routeWhere } });
+    // The trips on those routes only: not the demand left aside.
+    expect(calls.trips).toMatchObject({ where: { serviceDate: range, route: routeWhere } });
+    expect(data.runs).toEqual([]);
+    expect(data.routes.map((r) => r.id)).toEqual(["r1", "amb"]);
+  });
+
+  it("reads a person's routes, driven or crewed", async () => {
+    const { client, calls } = recordingClient();
+    await loadRouteKpiRows(client, { from: "2026-10-05", to: "2026-10-31" }, { personId: "d1" });
+    const routeWhere = { serviceDate: range, OR: [{ driverId: "d1" }, { crewMateId: "d1" }] };
+    expect(calls.routes).toMatchObject({ where: routeWhere });
+    expect(calls.stops).toMatchObject({ where: { route: routeWhere } });
+    expect(calls.trips).toMatchObject({ where: { serviceDate: range, route: routeWhere } });
+  });
+});
+
+describe("loadPlanningActivity", () => {
+  it("reads the regulators' planning actions of the dates, instants only, and drops a row without a date", async () => {
+    let args: unknown;
+    const at = new Date("2026-10-11T15:02:00.000Z");
+    const client = {
+      auditEvent: {
+        findMany: async (query: unknown) => {
+          args = query;
+          return [
+            { serviceDate: day, at, action: "plan.optimize", userId: "u1" },
+            { serviceDate: null, at, action: "plan.validate", userId: "u1" },
+          ];
+        },
+      },
+    } as unknown as Parameters<typeof loadPlanningActivity>[0];
+    const activity = await loadPlanningActivity(client, { dates: ["2026-10-12"] });
+    expect(args).toEqual({
+      where: { serviceDate: { in: [day] }, role: "REGULATOR", action: { in: [...PLANNING_ACTIONS] } },
+      // Never the details: the action, its instant, its author.
+      select: { serviceDate: true, at: true, action: true, userId: true },
+    });
+    expect(activity).toEqual([{ serviceDate: "2026-10-12", at, action: "plan.optimize", userId: "u1" }]);
+  });
+});
+
 describe("routeTimings", () => {
   const stop = (sequence: number, tripId: string, kind: "PICKUP" | "DROPOFF", arrival: number, start: number, departure: number, loadAfter: number): TimedStop => ({
     sequence,
@@ -210,6 +284,7 @@ describe("routeTimings", () => {
     ];
     expect(routeTimings({ startMinute: 400, endMinute: 700, breakStartMinute: 480, breakEndMinute: 510 }, stops.reverse(), direction)).toEqual({
       activeMinutes: 270,
+      paidMinutes: 300,
       onboardMinutes: 35 + 30,
       facilityWaitMinutes: 10 + 20,
     });

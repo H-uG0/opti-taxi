@@ -4,7 +4,7 @@
  * typed in percent). Pure module, unit-tested.
  */
 import { z } from "zod";
-import { optionalNumberField, formatDecimalInput, type FormValues } from "@/lib/forms";
+import { formatDecimalInput, optionalNumberField, type FormValues } from "@/lib/forms";
 import {
   fromInputValue,
   INDICATOR_KEYS,
@@ -12,6 +12,7 @@ import {
   KPI_INDICATORS,
   targetField,
   toInputValue,
+  type IndicatorUnit,
   type KpiIndicator,
   type TargetRow,
 } from "@/lib/kpis-targets";
@@ -52,15 +53,24 @@ export function toTargetRows(parsed: Record<string, unknown>, depotId: string | 
   });
 }
 
-/** Audit details of a change: « indicator.field » from → to, in the typed unit ("" for none). */
+/**
+ * A stored value as typed, without losing a digit: a rate (stored to the
+ * tenth of a percent, fromInputValue) in percent, any other number as is.
+ */
+function asTyped(unit: IndicatorUnit, value: number | null): string {
+  return unit === "rate" ? toInputValue(unit, value) : formatDecimalInput(value);
+}
+
+/** Audit details of a change: « indicator.field » from → to, as typed in the form (a rate in percent, "" for none). */
 export function targetChanges(previous: readonly TargetRow[], next: readonly TargetRow[]): Record<string, { from: string; to: string }> {
   const changes: Record<string, { from: string; to: string }> = {};
   for (const indicator of INDICATOR_KEYS) {
+    const unit = KPI_INDICATORS[indicator].unit;
     const before = previous.find((r) => r.indicator === indicator);
     const after = next.find((r) => r.indicator === indicator);
     for (const field of ["reference", "objective"] as const) {
-      const from = formatDecimalInput(before?.[field] ?? null);
-      const to = formatDecimalInput(after?.[field] ?? null);
+      const from = asTyped(unit, before?.[field] ?? null);
+      const to = asTyped(unit, after?.[field] ?? null);
       if (from !== to) changes[`${indicator}.${field}`] = { from, to };
     }
   }

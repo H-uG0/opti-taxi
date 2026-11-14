@@ -39,7 +39,11 @@ function Row({ label, g, strong = false }: { label: string; g: EnergyGroup; stro
       <td className={cell}>{consumption(g)}</td>
       <td className={`${cell} border-l border-slate-100`}>{r.energyCostPerKm === null ? "—" : `${formatEuros(r.energyCostPerKm)}/km`}</td>
       <td className={cell}>{r.configuredCostPerKm === null ? "—" : `${formatEuros(r.configuredCostPerKm)}/km`}</td>
-      <td className={`${cell} border-l border-slate-100${gapTone}`} title={`${formatKm(g.measuredKm, 0)} au compteur pour ${formatKm(g.plannedKm, 0)} planifiés`}>
+      <td
+        className={`${cell} border-l border-slate-100${gapTone}`}
+        // The km the gap compares (stopped at the last planned day), not the whole measured interval.
+        title={r.kmGap === null ? undefined : `${formatKm(g.comparedKm, 0)} au compteur pour ${formatKm(g.plannedKm, 0)} planifiés`}
+      >
         {signedPercent(r.kmGap)}
       </td>
       <td className={`${cell} border-l border-slate-100`}>{g.offRoadDays}</td>
@@ -75,7 +79,11 @@ function GroupTable({ caption, first, rows, total }: { caption: string; first: s
           <th scope="col" className={`${HEAD} border-l border-slate-200`} title="(km au compteur − km planifiés) ÷ km planifiés, sur les mêmes jours">
             Compteur / planifié
           </th>
-          <th scope="col" className={`${HEAD} border-l border-slate-200`} title="Journées d'indisponibilité dans la période (entretien, réparation, garde…)">
+          <th
+            scope="col"
+            className={`${HEAD} border-l border-slate-200`}
+            title="Journées d'indisponibilité (entretien, réparation, garde…) parmi les jours planifiés de la période, comme l'onglet Ventilation"
+          >
             Jours immobilisés
           </th>
           <th scope="col" className={HEAD} title="Échéances dépassées aujourd'hui (date ou kilométrage)">
@@ -94,7 +102,7 @@ function GroupTable({ caption, first, rows, total }: { caption: string; first: s
 }
 
 /**
- * The fleet by energy and by depot (KPI-10, prepares lot 5): measured
+ * The fleet by energy and by depot (KPI-10): measured
  * consumption and energy cost per km against the configured cost per km, the
  * odometer against the planned km, the days off the road and the deadlines
  * overdue.
@@ -120,8 +128,8 @@ export function EnergySection({
         D&apos;après les pleins et recharges saisis sur les fiches des véhicules&nbsp;: consommation et coût de l&apos;énergie entre le
         dernier plein complet avant la période et le dernier de la période, face au coût au km configuré (qui couvre aussi
         l&apos;entretien et l&apos;usure). L&apos;écart entre le compteur et les km planifiés révèle les distances sous-estimées et les
-        trajets hors tournée. Litres et kWh ne s&apos;additionnent pas&nbsp;: la consommation est donnée par unité. Prépare le choix
-        diesel ou électrique (lot 5).
+        trajets hors tournée. Litres et kWh ne s&apos;additionnent pas&nbsp;: la consommation est donnée par unité. De quoi comparer
+        le coût réel d&apos;un véhicule diesel et d&apos;un électrique.
       </p>
       <div className="space-y-4">
         <GroupTable

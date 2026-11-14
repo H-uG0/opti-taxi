@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import { getSettings } from "@/lib/domain/settings";
 import { FACTOR_FIELDS, loadTrafficZones, TRAFFIC_BANDS } from "@/lib/domain/traffic";
 import { loadObservedFactors } from "@/lib/domain/traffic-observed";
-import { invalidState, messageState, readForm, successState, type FormState } from "@/lib/forms";
+import { invalidState, isUniqueViolation, messageState, readForm, successState, type FormState } from "@/lib/forms";
 import { settingsSavedMessage, settingsSchema } from "./schema";
 import { targetChanges, targetsSchema, toTargetRows } from "./targets-schema";
 import { toTrafficUpdate, trafficChanged, trafficSchema, type TrafficUpdate } from "./traffic-schema";
@@ -106,10 +106,18 @@ function prefixed(prefix: string, details: AuditDetails): AuditDetails {
   return Object.fromEntries(Object.entries(details).map(([key, value]) => [`${prefix}.${key}`, value]));
 }
 
+/** First key of the lock of the objectives of a scope: "KPIT" (the planning locks use "OPTX", lib/planning/day-lock.ts). */
+const KPI_TARGET_LOCK_NAMESPACE = 0x4b504954;
+
 /**
  * Saves the reference values and objectives of the dashboard for one scope
  * (`depotId`, null for the whole company, KPI-09): the scope's rows are
  * replaced in one transaction, traced kpi_target.update with the changes.
+ * Two saves of a scope are serialized by an advisory lock taken before the
+ * rows are read: the unique index (indicator, depotId) does not cover the
+ * company's rows (NULLs are distinct), and the trail's « from » is then the
+ * value replaced. A unique violation left over (a depot created meanwhile…)
+ * asks to reload rather than failing the page.
  */
 export async function saveKpiTargets(depotId: string | null, _state: FormState, formData: FormData): Promise<FormState> {
   const user = await requireUser("REGULATOR");
@@ -121,19 +129,30 @@ export async function saveKpiTargets(depotId: string | null, _state: FormState, 
   if (!parsed.success) return invalidState(parsed.error, values);
 
   const next = toTargetRows(parsed.data, depotId);
-  const previous = await db.kpiTarget.findMany({ where: { depotId }, select: { indicator: true, depotId: true, reference: true, objective: true } });
-  const changes = targetChanges(previous, next);
-  if (Object.keys(changes).length === 0) return successState("Objectifs inchangés.");
-  await db.$transaction(async (tx) => {
-    await tx.kpiTarget.deleteMany({ where: { depotId } });
-    if (next.length > 0) await tx.kpiTarget.createMany({ data: next.map((row) => ({ ...row, updatedById: user.id })) });
-    await audit(tx, user, {
-      action: "kpi_target.update",
-      entity: "KpiTarget",
-      entityId: depotId,
-      details: { ...(depotId ? { depotId } : {}), ...changes },
+  let changed: boolean;
+  try {
+    changed = await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${KPI_TARGET_LOCK_NAMESPACE}::int, hashtext(${depotId ?? "company"}))`;
+      const previous = await tx.kpiTarget.findMany({ where: { depotId }, select: { indicator: true, depotId: true, reference: true, objective: true } });
+      const changes = targetChanges(previous, next);
+      if (Object.keys(changes).length === 0) return false;
+      await tx.kpiTarget.deleteMany({ where: { depotId } });
+      if (next.length > 0) await tx.kpiTarget.createMany({ data: next.map((row) => ({ ...row, updatedById: user.id })) });
+      await audit(tx, user, {
+        action: "kpi_target.update",
+        entity: "KpiTarget",
+        entityId: depotId,
+        details: { ...(depotId ? { depotId } : {}), ...changes },
+      });
+      return true;
     });
-  });
+  } catch (error) {
+    if (isUniqueViolation(error, "indicator")) {
+      return messageState("Les objectifs ont été modifiés entre-temps\u00a0: rechargez la page puis recommencez.");
+    }
+    throw error;
+  }
+  if (!changed) return successState("Objectifs inchangés.");
   revalidatePath("/parametres");
   revalidatePath("/tableau-de-bord");
   return successState("Objectifs enregistrés\u00a0: ils sont tracés en pointillés sur les graphiques du tableau de bord.");

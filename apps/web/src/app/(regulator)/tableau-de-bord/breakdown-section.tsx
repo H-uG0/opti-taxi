@@ -54,7 +54,7 @@ const COLUMNS: Record<string, Column> = {
   name: { key: "nom", label: "", value: (r) => r.label, render: () => null },
   vehicleDays: {
     key: "jours",
-    label: "Véhicules",
+    label: "Véh.-jours",
     title: "Journées-véhicules utilisées / disponibles (ni indisponibles ni sans équipage)",
     value: (r) => r.totals.vehicleDays,
     render: (r) => (r.fleet ? `${r.totals.vehicleDays} / ${r.fleet.available}` : r.totals.vehicleDays),
@@ -320,7 +320,8 @@ export function BreakdownSection({
           </h2>
           <p className="mt-1 max-w-3xl text-sm text-slate-600">
             Les indicateurs de la période par groupe, calculés sur ses tournées comme pour toute l&apos;entreprise. Les filtres
-            «&#x202F;Dépôt&#x202F;» et «&#x202F;Véhicules&#x202F;» en haut de page restreignent les listes. Cliquez sur un en-tête pour trier.
+            «&#x202F;Dépôt&#x202F;» et «&#x202F;Véhicules&#x202F;» en haut de page restreignent les listes. «&#x202F;Véh.-jours&#x202F;»&nbsp;:
+            journées-véhicules utilisées / disponibles. Cliquez sur un en-tête pour trier.
           </p>
         </div>
         <nav aria-label="Ventiler par" className="flex flex-wrap gap-1">

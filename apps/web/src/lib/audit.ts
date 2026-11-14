@@ -102,7 +102,8 @@
  *   holiday.create, holiday.create_legal (details.added), holiday.delete,
  *   kpi_target.update (the dashboard's references and objectives of a scope,
  *   on the KpiTarget scope: entityId the depot, null for the company;
- *   details: « indicator.field » { from, to } as typed, and depotId);
+ *   details: « indicator.field » { from, to } as typed, a rate in percent,
+ *   and depotId);
  * - accounts: driver.*, account.* (create, update, password_reset,
  *   password_change, password_change_failed: a wrong current password,
  *   deactivate, reactivate), session.login, session.logout,

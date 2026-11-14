@@ -26,8 +26,12 @@ describe("targets form", () => {
     ];
     expect(targetsFormValues(stored, null)).toMatchObject({ "sharedRate-reference": "20", "sharedRate-objective": "30", "lateRate-objective": "" });
     expect(targetsFormValues(stored, "gap")).toMatchObject({ "sharedRate-reference": "", "sharedRate-objective": "40" });
+    // As typed: a rate in percent, like the settings' trail.
     expect(targetChanges([stored[0]!], [{ indicator: "sharedRate", depotId: null, reference: 0.2, objective: 0.35 }])).toEqual({
-      "sharedRate.objective": { from: "0,3", to: "0,35" },
+      "sharedRate.objective": { from: "30", to: "35" },
+    });
+    expect(targetChanges([], [{ indicator: "marginPerTrip", depotId: null, reference: null, objective: 12.5 }])).toEqual({
+      "marginPerTrip.objective": { from: "", to: "12,5" },
     });
     expect(targetChanges([stored[0]!], [stored[0]!])).toEqual({});
   });

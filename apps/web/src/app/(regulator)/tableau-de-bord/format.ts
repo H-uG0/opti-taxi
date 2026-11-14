@@ -195,6 +195,22 @@ export function formatIndicator(unit: IndicatorUnit, value: number | null | unde
   }
 }
 
+/** Rounds half away from zero to `step`, as Intl and formatDuration do. */
+function roundTo(value: number, step: number): number {
+  return Math.sign(value) * Math.round(Math.abs(value) / step) * step;
+}
+
+/**
+ * How a gap to an objective reads, from the gap as formatIndicatorGap shows
+ * it (a tenth of a point, a tenth, the minute, the euro): a gap shown as
+ * « 0 € » is « even », never coloured as missed.
+ */
+export function gapVerdict(unit: IndicatorUnit, higherIsBetter: boolean, gap: number): "better" | "worse" | "even" {
+  const shown = unit === "rate" ? roundTo(gap, 0.001) : unit === "decimal" ? roundTo(gap, 0.1) : roundTo(gap, 1);
+  if (shown === 0) return "even";
+  return shown > 0 === higherIsBetter ? "better" : "worse";
+}
+
 /** A gap in the unit of its indicator, signed: « +2,1 pts », « −0,3 », « +5 min », « −3 € ». */
 export function formatIndicatorGap(unit: IndicatorUnit, gap: number): string {
   switch (unit) {

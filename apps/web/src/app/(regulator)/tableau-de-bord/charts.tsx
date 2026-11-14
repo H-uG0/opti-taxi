@@ -14,6 +14,7 @@ import {
   formatIndicatorGap,
   formatStep,
   formatStepEdge,
+  gapVerdict,
   lateThreshold,
   plural,
   STEP_LABELS,
@@ -134,17 +135,26 @@ function TargetLine({ indicator, value, targets }: { indicator: KpiIndicator; va
   const unit = KPI_INDICATORS[indicator].unit;
   if (target.objective === null) return null;
   const gap = targetGap(value, target.objective);
-  const better = gap === null ? null : KPI_INDICATORS[indicator].higherIsBetter ? gap >= 0 : gap <= 0;
+  // From the gap as shown: « 0 € » is met, not coloured as missed.
+  const verdict = gap === null ? null : gapVerdict(unit, KPI_INDICATORS[indicator].higherIsBetter, gap);
   return (
     <span className="block text-[11px] text-slate-600" title={`Objectif ${target.objectiveSource ? SOURCE_NOTES[target.objectiveSource] : ""}`}>
       obj. <span className="tabular">{formatIndicator(unit, target.objective)}</span>
       {gap !== null ? (
         <>
           {" · "}
-          <span className={better ? "tabular font-medium text-emerald-700" : "tabular font-medium text-red-700"}>
+          <span
+            className={
+              verdict === "better"
+                ? "tabular font-medium text-emerald-700"
+                : verdict === "worse"
+                  ? "tabular font-medium text-red-700"
+                  : "tabular font-medium text-slate-700"
+            }
+          >
             {formatIndicatorGap(unit, gap)}
           </span>
-          <span className="sr-only">{better ? " (objectif atteint)" : " (en deçà de l'objectif)"}</span>
+          <span className="sr-only">{verdict === "worse" ? " (en deçà de l'objectif)" : " (objectif atteint)"}</span>
         </>
       ) : null}
     </span>

@@ -10,7 +10,7 @@ import type { PlannedComparison, PlanView, RealizedComparison } from "@/lib/kpis
 import { lostTrips, placedTrips, tripsToCarry } from "@/lib/kpis-demand";
 import { lostVehicleDays } from "@/lib/kpis-fleet";
 import { planRates } from "@/lib/kpis-plan";
-import { eligibleSharedRate, measuredSharedRate, SHARING_OBJECTIVE, tapTotal } from "@/lib/kpis-sharing";
+import { eligibleSharedRate, measuredSharedRate, tapTotal } from "@/lib/kpis-sharing";
 import type { TapType } from "@/lib/kpis-rows";
 import { KPI_INDICATORS, targetGap, type EffectiveTargets, type KpiIndicator } from "@/lib/kpis-targets";
 import { formatKm } from "@/lib/labels";
@@ -28,6 +28,7 @@ import {
   formatIndicatorGap,
   formatInstant,
   formatRate,
+  gapVerdict,
   lateLabel,
   plural,
 } from "./format";
@@ -97,33 +98,43 @@ function Compare({
 /**
  * The value against the objective and the reference of its indicator (KPI-09):
  * « Objectif 4,5 · −0,3 · réf. 3,8 ». The gap to the objective reads better or
- * worse in words for screen readers, never by its colour alone.
+ * worse in words for screen readers, never by its colour alone, and from its
+ * rounded value (a gap shown as « 0 € » is met). `per`: the unit of a value
+ * that is not the tile's own (the margin per trip under the day's margin).
  */
-function TargetHint({ indicator, value, targets }: { indicator: KpiIndicator; value: number | null; targets: EffectiveTargets }) {
+function TargetHint({ indicator, value, targets, per }: { indicator: KpiIndicator; value: number | null; targets: EffectiveTargets; per?: string }) {
   const target = targets[indicator];
   if (target.objective === null && target.reference === null) return null;
   const { unit, higherIsBetter } = KPI_INDICATORS[indicator];
+  const suffix = per ? `\u00a0/ ${per}` : "";
   const gap = targetGap(value, target.objective);
-  const better = gap === null ? null : higherIsBetter ? gap >= 0 : gap <= 0;
+  const verdict = gap === null ? null : gapVerdict(unit, higherIsBetter, gap);
   const referenceGap = targetGap(value, target.reference);
   return (
     <span className="mt-1 flex flex-wrap items-center gap-x-1">
       {target.objective !== null ? (
         <span>
-          Objectif <span className="tabular">{formatIndicator(unit, target.objective)}</span>
+          Objectif <span className="tabular">{`${formatIndicator(unit, target.objective)}${suffix}`}</span>
           {target.objectiveSource === "protocol" ? " (protocole)" : ""}
           {gap !== null ? (
             <>
               {" · "}
-              <span className={cn("tabular font-medium", better ? "text-emerald-700" : "text-red-700")}>{formatIndicatorGap(unit, gap)}</span>
-              <span className="sr-only">{better ? " (atteint)" : " (non atteint)"}</span>
+              <span
+                className={cn(
+                  "tabular font-medium",
+                  verdict === "better" ? "text-emerald-700" : verdict === "worse" ? "text-red-700" : "text-slate-700",
+                )}
+              >
+                {`${formatIndicatorGap(unit, gap)}${suffix}`}
+              </span>
+              <span className="sr-only">{verdict === "worse" ? " (non atteint)" : " (atteint)"}</span>
             </>
           ) : null}
         </span>
       ) : null}
       {target.reference !== null ? (
         <span title="Valeur de référence, mesurée avant l'outil">
-          {target.objective !== null ? "· " : ""}réf. <span className="tabular">{formatIndicator(unit, target.reference)}</span>
+          {target.objective !== null ? "· " : ""}réf. <span className="tabular">{`${formatIndicator(unit, target.reference)}${suffix}`}</span>
           {referenceGap !== null ? <span className="tabular"> ({formatIndicatorGap(unit, referenceGap)})</span> : null}
         </span>
       ) : null}
@@ -207,7 +218,6 @@ export function RealizedBlock({
       ? `Sur ${plural(tapTotal(day.sharing.measured), "course déposée", "courses déposées")} · servi ${formatRate(day.eligibleSharedRate)}`
       : `Sur ${plural(tapTotal(day.sharing.eligible), "éligible")}`,
     frozen ? `prévu ${formatRate(frozen.sharedRate)}` : null,
-    `objectif ${formatRate(SHARING_OBJECTIVE)}`,
   ]
     .filter((part): part is string => part !== null)
     .join(" · ");
@@ -386,7 +396,7 @@ export function RealizedBlock({
                 formatDelta={(delta) => `${formatDeltaEuros(delta)} / course`}
                 formatValue={(v) => `${formatEurosRounded(v)} / course`}
               />
-              <TargetHint indicator="marginPerTrip" value={day.marginPerTrip} targets={targets} />
+              <TargetHint indicator="marginPerTrip" value={day.marginPerTrip} targets={targets} per="course" />
             </>
           }
         />
@@ -613,8 +623,7 @@ export function PlannedBlock({
                   <span className="tabular">{formatRate(eligibleSharedRate(figures, "TAXI"))}</span>
                 </Line>
                 <Line>
-                  {tapTotal(figures.eligibleShared)} sur {plural(tapTotal(figures.eligible), "éligible")} · objectif{" "}
-                  {formatRate(SHARING_OBJECTIVE)}
+                  {tapTotal(figures.eligibleShared)} sur {plural(tapTotal(figures.eligible), "éligible")}
                 </Line>
                 <Compare
                   current={rates.sharedRate}
@@ -667,7 +676,7 @@ export function PlannedBlock({
                   formatDelta={(delta) => `${formatDeltaEuros(delta)} / course`}
                   formatValue={(v) => `${formatEurosRounded(v)} / course`}
                 />
-                <TargetHint indicator="marginPerTrip" value={rates.marginPerTrip} targets={targets} />
+                <TargetHint indicator="marginPerTrip" value={rates.marginPerTrip} targets={targets} per="course" />
               </>
             }
           />

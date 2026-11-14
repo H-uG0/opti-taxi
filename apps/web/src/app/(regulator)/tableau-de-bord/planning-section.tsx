@@ -120,7 +120,8 @@ export function PlanningSection({ days, period, scoped }: { days: readonly DayKp
                     )}
                   </td>
                   <td className={NUM}>{p.sessions}</td>
-                  <td className={NUM}>{p.touchUpMinutes > 0 ? formatDuration(p.touchUpMinutes) : "—"}</td>
+                  {/* Measured, even when none (« 0 min »); « — » only before the first validation, when there is nothing to touch up. */}
+                  <td className={NUM}>{p.initialMinutes !== null ? formatDuration(p.touchUpMinutes) : "—"}</td>
                   <td className={`${NUM} border-l border-slate-100`}>{p.interventions.moves}</td>
                   <td className={NUM}>{p.interventions.locks}</td>
                   <td className={NUM}>{p.interventions.reoptimizations}</td>

@@ -91,6 +91,21 @@ describe("trendPoints", () => {
     expect(points[0]?.average?.days).toBe(7);
     expect(movingAverage(all, 0)).toBeNull();
   });
+
+  it("never reaches past the lead-in days for a day weeks earlier (a comparison day of the headline)", () => {
+    // The range starts on Monday 9: its lead-in has 6 working days (2 to 7), a comparison day of 12 October is passed too.
+    const data = twoWeeks();
+    data.routes.push(route("2026-10-12"));
+    data.trips.push(...trips("2026-10-12", 50));
+    const all = computeKpisByDay("2026-11-02", "2026-11-15", data, "2026-11-20");
+    const [october] = computeKpisByDay("2026-10-12", "2026-10-12", data, "2026-11-20");
+    const leadIn = all.slice(0, 7).filter((d) => d.date !== "2026-11-02");
+    const points = trendPoints(all.slice(7), "day", [...leadIn, october!]);
+    // Monday 9 has 6 working days with it (3 to 7, 9): no average rather than one built with 12 October.
+    expect(points[0]?.key).toBe("2026-11-09");
+    expect(points[0]?.average).toBeNull();
+    expect(points[1]?.average?.summary.tripsPerVehiclePlanned).toBe((3 + 4 + 5 + 6 + 7 + 9 + 10) / 7);
+  });
 });
 
 describe("rangePresets", () => {
@@ -102,5 +117,7 @@ describe("rangePresets", () => {
     expect(presets.find((p) => p.id === "12mois")).toMatchObject({ from: "2025-12-01", to: "2026-11-15", granularity: "month" });
     // The last day of a month: J+1 is in the next one, the current month stops at its end.
     expect(rangePresets("2026-11-30", "2026-12-01").find((p) => p.id === "mois")).toMatchObject({ from: "2026-11-01", to: "2026-11-30" });
+    // Nor do the 12 months: December 2025 to November 2026, not a 13th month of one day.
+    expect(rangePresets("2026-11-30", "2026-12-01").find((p) => p.id === "12mois")).toMatchObject({ from: "2025-12-01", to: "2026-11-30" });
   });
 });

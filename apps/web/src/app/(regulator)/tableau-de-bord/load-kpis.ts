@@ -72,7 +72,8 @@ export async function loadPeople(ids: readonly string[]): Promise<{ id: string; 
 const FUEL_LOOKBACK_DAYS = 120;
 
 /**
- * Fill-ups (from FUEL_LOOKBACK_DAYS before the period to its end) and open
+ * Fill-ups (from FUEL_LOOKBACK_DAYS before the period to its end), latest
+ * odometer reading (any date: the deadlines are overdue today) and open
  * deadlines of the vehicles, the km of their routes from the earliest fill-up
  * read (the planned km of each measured interval) and the first and last
  * dates that have routes at all.
@@ -82,17 +83,19 @@ export async function loadFleetEnergyInputs(
   vehicleIds: readonly string[],
 ): Promise<{
   fills: Map<string, FuelEntry[]>;
+  latestOdometer: Map<string, number>;
   deadlines: Map<string, EnergyDeadline[]>;
   routeKm: Map<string, Map<string, number>>;
   plannedSince: string | null;
   plannedUntil: string | null;
 }> {
   const ids = [...vehicleIds];
-  const [fills, deadlines, first] = await Promise.all([
+  const [fills, odometers, deadlines, first] = await Promise.all([
     db.fuelLog.findMany({
       where: { vehicleId: { in: ids }, date: { gte: fromIsoDate(addDays(range.from, -FUEL_LOOKBACK_DAYS)), lte: fromIsoDate(range.to) } },
       select: { vehicleId: true, date: true, odometerKm: true, quantity: true, cost: true, fullTank: true },
     }),
+    db.fuelLog.groupBy({ by: ["vehicleId"], where: { vehicleId: { in: ids } }, _max: { odometerKm: true } }),
     db.maintenanceDeadline.findMany({
       where: { vehicleId: { in: ids }, doneDate: null },
       select: { vehicleId: true, kind: true, label: true, dueDate: true, dueKm: true, doneDate: true },
@@ -125,6 +128,7 @@ export async function loadFleetEnergyInputs(
   }
   return {
     fills: byVehicle(fills.map((f) => ({ ...f, date: toIsoDate(f.date) }))),
+    latestOdometer: new Map(odometers.flatMap((o) => (o._max.odometerKm !== null ? [[o.vehicleId, o._max.odometerKm] as const] : []))),
     deadlines: byVehicle(
       deadlines.map((d) => ({ ...d, dueDate: d.dueDate ? toIsoDate(d.dueDate) : null, doneDate: d.doneDate ? toIsoDate(d.doneDate) : null })),
     ),

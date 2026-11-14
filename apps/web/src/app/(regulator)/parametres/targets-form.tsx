@@ -6,7 +6,8 @@ import { Table, TBody, Td, Th, THead } from "@/components/ui/table";
 import { ErrorFocus } from "@/components/ui/error-focus";
 import { FormFooter } from "@/components/ui/form-footer";
 import { IDLE_STATE, refusalKey, valueOf, type FormState, type FormValues } from "@/lib/forms";
-import { INDICATOR_KEYS, inputBounds, KPI_INDICATORS, targetField, type KpiIndicator } from "@/lib/kpis-targets";
+import { SHARING_OBJECTIVE } from "@/lib/kpis-sharing";
+import { INDICATOR_KEYS, inputBounds, KPI_INDICATORS, targetField, toInputValue, type KpiIndicator } from "@/lib/kpis-targets";
 
 type Action = (state: FormState, formData: FormData) => Promise<FormState>;
 
@@ -23,7 +24,7 @@ export function TargetsForm({
 }: {
   action: Action;
   initial: FormValues;
-  /** The company's values, shown as placeholders when a depot is edited. */
+  /** The company's values, shown under each field when a depot is edited (what a blank field reads). */
   companyValues: FormValues | null;
   depotName: string | null;
 }) {
@@ -31,9 +32,18 @@ export function TargetsForm({
   const values = state.values ?? initial;
   const field = (indicator: KpiIndicator, kind: "reference" | "objective") => {
     const name = targetField(indicator, kind);
-    const { suffix } = inputBounds(KPI_INDICATORS[indicator].unit);
+    const unit = KPI_INDICATORS[indicator].unit;
+    const { suffix } = inputBounds(unit);
     const error = state.fieldErrors[name];
     const company = companyValues ? valueOf(companyValues, name) : "";
+    // The value a blank field falls back to, said in words under it (a placeholder reads like an entry).
+    const protocol = indicator === "sharedRate" && kind === "objective" ? `${toInputValue(unit, SHARING_OBJECTIVE)}\u00a0${suffix} (protocole)` : null;
+    const fallback = depotName
+      ? company
+        ? `Entreprise\u00a0: ${company}\u00a0${suffix}`
+        : protocol && `Entreprise\u00a0: ${protocol}`
+      : protocol && `Par défaut\u00a0: ${protocol}`;
+    const describedBy = [error ? `${name}-error` : null, fallback ? `${name}-fallback` : null].filter(Boolean).join(" ") || undefined;
     return (
       <div className="space-y-1">
         <UnitInput
@@ -42,13 +52,17 @@ export function TargetsForm({
           unit={suffix}
           inputMode="decimal"
           defaultValue={valueOf(values, name)}
-          placeholder={company || (indicator === "sharedRate" && kind === "objective" && !depotName ? "30" : undefined)}
           aria-label={`${kind === "reference" ? "Référence" : "Objectif"}, ${KPI_INDICATORS[indicator].label}`}
           aria-invalid={error ? true : undefined}
-          aria-describedby={error ? `${name}-error` : undefined}
+          aria-describedby={describedBy}
           // A long unit (« courses ») takes the room of the digits in a narrow field.
           className={suffix.length > 4 ? "w-44" : "w-32"}
         />
+        {fallback ? (
+          <p id={`${name}-fallback`} className="text-xs text-slate-500">
+            {fallback}
+          </p>
+        ) : null}
         {error ? (
           <p id={`${name}-error`} className="text-xs text-red-700">
             {error}

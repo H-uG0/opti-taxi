@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { computeKpisByDay, type KpiData } from "./kpis";
 import { routeLines } from "./kpis-breakdown";
-import { breakdownCsv, breakdownCsvRows, csvDate, csvField, csvNumber, toCsv, trendCsv } from "./kpis-csv";
+import { breakdownCsv, breakdownCsvRows, csvDate, csvField, csvFileName, csvNumber, csvPerimeter, toCsv, trendCsv } from "./kpis-csv";
+import { scopeKpiData } from "./kpis-scope";
 import { trendPoints } from "./kpis-trend";
 
 /** The cells of a CSV line (no field of these tests is quoted). */
@@ -12,8 +13,9 @@ function cells(line: string | undefined): string[] {
 describe("CSV for a French Excel", () => {
   it("writes a BOM, « ; » between fields, CRLF line ends and a decimal comma", () => {
     const csv = toCsv(["Date", "Km"], [[csvDate("2026-11-03"), csvNumber(1234.56, 1)]]);
-    expect(csv.startsWith("﻿")).toBe(true);
-    expect(csv).toBe("﻿Date;Km\r\n03/11/2026;1234,6\r\n");
+    // An escape, not the invisible character: an editor could strip it unnoticed.
+    expect(csv.charCodeAt(0)).toBe(0xfeff);
+    expect(csv).toBe("\uFEFFDate;Km\r\n03/11/2026;1234,6\r\n");
   });
 
   it("formats numbers without separators, unknown values empty", () => {
@@ -48,7 +50,7 @@ const data: KpiData = {
 describe("trendCsv", () => {
   it("writes one line per day with the aggregates only", () => {
     const days = computeKpisByDay("2026-11-03", "2026-11-04", data, "2026-11-10");
-    const lines = trendCsv(trendPoints(days, "day"), "day", 5).replace("﻿", "").split("\r\n");
+    const lines = trendCsv(trendPoints(days, "day"), "day", 5).replace("\uFEFF", "").split("\r\n");
     const header = cells(lines[0]);
     expect(header[0]).toBe("Date");
     expect(header).toContain("Taux de service (%)");
@@ -58,10 +60,85 @@ describe("trendCsv", () => {
     expect(lines).toHaveLength(4); // header, 2 days, the final CRLF
   });
 
+  /** The lines of a file as header -> value records. */
+  function records(csv: string): Record<string, string>[] {
+    const [head, ...body] = csv.replace("\uFEFF", "").split("\r\n").filter((line) => line !== "");
+    const header = cells(head);
+    return body.map((line) => Object.fromEntries(header.map((h, i) => [h, cells(line)[i] ?? ""])));
+  }
+
+  it("keeps only the demand of a day without any route, not « every trip unassigned »", () => {
+    // 05/11: two trips asked, nothing planned yet (tomorrow, say).
+    const withDemand: KpiData = {
+      ...data,
+      trips: [
+        ...data.trips,
+        { serviceDate: "2026-11-05", status: "PLANNED", routeId: null, direction: "OUTBOUND", shared: false, appointmentMinute: null, plannedDropoffMinute: null, dropoffCompletedAt: null },
+        { serviceDate: "2026-11-05", status: "PLANNED", routeId: null, direction: "RETURN", shared: false, appointmentMinute: null, plannedDropoffMinute: null, dropoffCompletedAt: null },
+      ],
+    };
+    const days = computeKpisByDay("2026-11-03", "2026-11-05", withDemand, "2026-11-04");
+    const [planned, , unplanned] = records(trendCsv(trendPoints(days, "day"), "day", 5));
+    expect(planned).toMatchObject({ Périmètre: "Toute l'entreprise", "Jour planifié": "oui", Servies: "1", "Non affectées": "0" });
+    expect(unplanned).toMatchObject({
+      Date: "05/11/2026",
+      "Jour planifié": "non",
+      "Courses demandées": "2",
+      Annulées: "0",
+      "À transporter": "",
+      Servies: "",
+      "Non affectées": "",
+      "Confiées à un confrère": "",
+      "Taux de service (%)": "",
+      Km: "",
+    });
+  });
+
+  it("leaves the demand empty for a depot: a trip without a vehicle belongs to none", () => {
+    const withUnassigned: KpiData = {
+      ...data,
+      trips: [
+        ...data.trips,
+        { serviceDate: "2026-11-03", status: "PLANNED", routeId: null, direction: "OUTBOUND", shared: false, appointmentMinute: null, plannedDropoffMinute: null, dropoffCompletedAt: null },
+      ],
+    };
+    const vehicles = new Map([
+      ["v1", { depotId: "gap", type: "TAXI" as const }],
+      ["v2", { depotId: "sis", type: "VSL" as const }],
+    ]);
+    const scoped = scopeKpiData(withUnassigned, { depotId: "gap", vehicleType: null }, vehicles);
+    const days = computeKpisByDay("2026-11-03", "2026-11-03", scoped, "2026-11-10");
+    const csv = trendCsv(trendPoints(days, "day"), "day", 5, csvPerimeter("Gap", null));
+    const [gap] = records(csv);
+    expect(gap).toMatchObject({
+      Périmètre: "Dépôt Gap",
+      "Courses demandées": "",
+      Annulées: "",
+      "À transporter": "",
+      "Patients absents": "",
+      "Non affectées": "",
+      "Confiées à un confrère": "",
+      "Taux de service (%)": "",
+      Servies: "1",
+    });
+    // The planning is the whole company's, whatever the filter.
+    expect(cells(csv.split("\r\n")[0])).toContain("Temps de planification actif (min, toute l'entreprise)");
+  });
+
+  it("names a filtered file after its depot and type", () => {
+    const range = { from: "2026-11-02", to: "2026-11-15" };
+    expect(csvFileName(range, { depotName: null, vehicleType: null }, "jour")).toBe("tableau-de-bord_2026-11-02_2026-11-15.csv");
+    expect(csvFileName(range, { depotName: "Gap – Tallard", vehicleType: "TAXI" }, "vehicule")).toBe(
+      "tableau-de-bord_2026-11-02_2026-11-15_depot-gap-tallard_taxis_par-vehicule.csv",
+    );
+    expect(csvFileName(range, { depotName: "Sisteron", vehicleType: null }, "depot")).toBe("tableau-de-bord_2026-11-02_2026-11-15_depot-sisteron_par-depot.csv");
+    expect(csvPerimeter("Gap", "AMBULANCE")).toBe("Dépôt Gap, ambulances");
+  });
+
   it("writes a week with its first and last days", () => {
     const days = computeKpisByDay("2026-11-03", "2026-11-04", data, "2026-11-10");
     const lines = trendCsv(trendPoints(days, "week"), "week", 0).split("\r\n");
-    expect(cells(lines[0]).slice(0, 2)).toEqual(["﻿Du", "Au"]);
+    expect(cells(lines[0]).slice(0, 2)).toEqual(["\uFEFFDu", "Au"]);
     expect(cells(lines[1]).slice(0, 2)).toEqual(["03/11/2026", "04/11/2026"]);
   });
 });
@@ -76,9 +153,18 @@ describe("breakdownCsv", () => {
       ["2026-11-04", "Sisteron", 1],
     ]);
     const csv = breakdownCsv(byDepot, "day", "depot", 5).split("\r\n");
-    expect(cells(csv[0]).slice(0, 3)).toEqual(["﻿Date", "Dépôt", "Véhicules utilisés"]);
+    expect(cells(csv[0]).slice(0, 4)).toEqual(["\uFEFFDate", "Périmètre", "Dépôt", "Véhicules utilisés"]);
+    expect(cells(breakdownCsv(byDepot, "week", "depot", 5).split("\r\n")[0])).toContain("Journées-véhicules utilisées");
     const byMonth = breakdownCsvRows(lines, { from: "2026-11-02", to: "2026-11-20" }, "month", "vehicle", names);
     expect(byMonth[0]).toMatchObject({ key: "2026-11-01", from: "2026-11-02", to: "2026-11-20", vehicle: { label: "Taxi v1" } });
-    expect(cells(breakdownCsv(byMonth, "month", "vehicle", 5).split("\r\n")[0]).slice(0, 5)).toEqual(["﻿Du", "Au", "Dépôt", "Véhicule", "Type"]);
+    expect(cells(breakdownCsv(byMonth, "month", "vehicle", 5, "Dépôt Gap").split("\r\n")[0]).slice(0, 6)).toEqual([
+      "\uFEFFDu",
+      "Au",
+      "Périmètre",
+      "Dépôt",
+      "Véhicule",
+      "Type",
+    ]);
+    expect(cells(breakdownCsv(byMonth, "month", "vehicle", 5, "Dépôt Gap").split("\r\n")[1])[2]).toBe("Dépôt Gap");
   });
 });

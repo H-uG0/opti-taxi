@@ -60,6 +60,8 @@ export type RouteLine = {
   kmCost: number | null;
   /** Planned minutes (break out), with a patient on board, waiting at a place of care (0 when unknown). */
   activeMinutes: number;
+  /** Minutes charged at the hourly cost by the optimizer (break included, 0 when unknown). */
+  paidMinutes: number;
   onboardMinutes: number;
   facilityWaitMinutes: number;
   /** The route's planned times are known. */
@@ -108,6 +110,7 @@ export function routeLines(
       cost: route.cost,
       kmCost: perKm === undefined ? null : route.distanceKm * perKm,
       activeMinutes: route.activeMinutes ?? 0,
+      paidMinutes: route.paidMinutes ?? route.activeMinutes ?? 0,
       onboardMinutes: route.onboardMinutes ?? 0,
       facilityWaitMinutes: route.facilityWaitMinutes ?? 0,
       timed: route.activeMinutes !== undefined,
@@ -176,6 +179,7 @@ export type LineTotals = {
   kmCostKm: number;
   /** Over the timed routes only. */
   activeMinutes: number;
+  paidMinutes: number;
   onboardMinutes: number;
   facilityWaitMinutes: number;
   timedRoutes: number;
@@ -208,6 +212,7 @@ export function sumLines(lines: readonly RouteLine[]): LineTotals {
     kmCost: 0,
     kmCostKm: 0,
     activeMinutes: 0,
+    paidMinutes: 0,
     onboardMinutes: 0,
     facilityWaitMinutes: 0,
     timedRoutes: 0,
@@ -238,6 +243,7 @@ export function sumLines(lines: readonly RouteLine[]): LineTotals {
     if (line.timed) {
       t.timedRoutes += 1;
       t.activeMinutes += line.activeMinutes;
+      t.paidMinutes += line.paidMinutes;
       t.onboardMinutes += line.onboardMinutes;
       t.facilityWaitMinutes += line.facilityWaitMinutes;
       t.timedCost += line.cost;
@@ -285,21 +291,28 @@ export type LineRates = {
   revenuePerKm: number | null;
   /** Total cost of the routes per km driven. */
   costPerKm: number | null;
-  /** Hourly part of the cost (cost - km part) per planned hour, over the timed routes whose km cost is known. */
+  /**
+   * Hourly part of the cost (cost - km part) per hour charged, over the timed
+   * routes whose km cost is known: the optimizer charges the whole route, its
+   * break included, so this reads the configured hourly cost when nothing changed.
+   */
   hourlyCost: number | null;
-  /** Total cost per planned hour. */
+  /** Total cost per hour charged (break included). */
   costPerHour: number | null;
   /** Minutes with a patient on board ÷ planned minutes. */
   occupancy: number | null;
   /** Trips whose outcome the crew recorded ÷ trips placed, finished days. */
   recordingRate: number | null;
+  /** Planned hours, breaks out; and the hours charged, breaks in. */
   plannedHours: number;
+  paidHours: number;
   /** Minutes waited at places of care per vehicle-day. */
   facilityWaitPerVehicleDay: number | null;
 };
 
 export function lineRates(t: LineTotals): LineRates {
   const hours = t.activeMinutes / 60;
+  const paidHours = t.paidMinutes / 60;
   const kmPartKnown = t.timedRoutes > 0 && t.kmCostKm > 0;
   return {
     tripsPerVehicleDay: ratio(t.trips, t.vehicleDays),
@@ -311,11 +324,12 @@ export function lineRates(t: LineTotals): LineRates {
     revenuePerVehicleDay: ratio(t.revenue, t.vehicleDays),
     revenuePerKm: ratio(t.revenue, t.distanceKm),
     costPerKm: ratio(t.cost, t.distanceKm),
-    hourlyCost: kmPartKnown ? ratio(Math.max(0, t.timedCost - t.timedKmCost), hours) : null,
-    costPerHour: ratio(t.timedCost, hours),
+    hourlyCost: kmPartKnown ? ratio(Math.max(0, t.timedCost - t.timedKmCost), paidHours) : null,
+    costPerHour: ratio(t.timedCost, paidHours),
     occupancy: ratio(t.onboardMinutes, t.activeMinutes),
     recordingRate: ratio(t.recorded, t.placedFinished),
     plannedHours: hours,
+    paidHours,
     facilityWaitPerVehicleDay: ratio(t.facilityWaitMinutes, t.timedRoutes),
   };
 }

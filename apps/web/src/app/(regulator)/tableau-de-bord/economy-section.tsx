@@ -84,9 +84,10 @@ export function EconomySection({ lines, period }: { lines: readonly RouteLine[];
         <Stat
           label="Coût horaire"
           value={perHour(rates.hourlyCost)}
-          hint={`Part horaire du coût par heure planifiée (${formatDecimal(rates.plannedHours, 0)} h) · coût total ${perHour(rates.costPerHour)}${
-            kmShare !== null ? ` · part km ${formatRate(kmShare)}` : ""
-          }`}
+          hint={`Part horaire du coût par heure de tournée, pause comprise comme l'optimiseur la compte (${formatDecimal(
+            rates.paidHours,
+            0,
+          )} h) · coût total ${perHour(rates.costPerHour)}${kmShare !== null ? ` · part km ${formatRate(kmShare)}` : ""}`}
         />
         <Stat
           label="Marge par course"
@@ -109,8 +110,7 @@ export function EconomySection({ lines, period }: { lines: readonly RouteLine[];
       </div>
       <Table>
         <caption className="px-3 pt-2 text-left text-xs text-slate-600">
-          Par type de véhicule&nbsp;: le transport couché finance souvent l&apos;assis. «&#x202F;Véh.-jours&#x202F;»&nbsp;: journées-véhicules
-          utilisées.
+          Par type de véhicule. «&#x202F;Véh.-jours&#x202F;»&nbsp;: journées-véhicules utilisées.
         </caption>
         <THead>
           <tr>
@@ -135,7 +135,7 @@ export function EconomySection({ lines, period }: { lines: readonly RouteLine[];
             <th scope="col" className={HEAD}>
               Coût / km
             </th>
-            <th scope="col" className={HEAD} title="Part horaire du coût par heure planifiée">
+            <th scope="col" className={HEAD} title="Part horaire du coût par heure de tournée, pause comprise">
               Coût horaire
             </th>
             <th scope="col" className={`${HEAD} border-l border-slate-200`}>

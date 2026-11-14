@@ -65,7 +65,16 @@ const tripSelect = {
 export type KpiQueryRows = {
   routes: (Omit<
     KpiRoute,
-    "id" | "serviceDate" | "stopCount" | "hasRecordedStatus" | "vehicleType" | "depotId" | "activeMinutes" | "onboardMinutes" | "facilityWaitMinutes"
+    | "id"
+    | "serviceDate"
+    | "stopCount"
+    | "hasRecordedStatus"
+    | "vehicleType"
+    | "depotId"
+    | "activeMinutes"
+    | "paidMinutes"
+    | "onboardMinutes"
+    | "facilityWaitMinutes"
   > & {
     id: string;
     serviceDate: Date;
@@ -173,7 +182,8 @@ export type TimedStop = Pick<KpiStopRow, "tripId" | "kind" | "startMinute" | "de
 
 /**
  * Planned time of a route (KPI-10): its minutes (end - start, the break taken
- * out), the minutes with a patient on board (from leaving a stop with a load
+ * out), those the optimizer charges at the hourly cost (end - start, the
+ * break included: services/optimizer plan.py), the minutes with a patient on board (from leaving a stop with a load
  * to the start of the next stop, waits with a patient included) and the
  * minutes the vehicle waits at a place of care before a stop there starts
  * (drop-off of an outbound trip, pickup of a return: the end of a session).
@@ -183,7 +193,7 @@ export function routeTimings(
   route: { startMinute?: number; endMinute?: number; breakStartMinute?: number | null; breakEndMinute?: number | null },
   stops: readonly TimedStop[],
   directionOf: (tripId: string) => TripDirection | undefined,
-): { activeMinutes?: number; onboardMinutes: number; facilityWaitMinutes: number } {
+): { activeMinutes?: number; paidMinutes?: number; onboardMinutes: number; facilityWaitMinutes: number } {
   const sorted = [...stops].sort((a, b) => a.sequence - b.sequence);
   let onboardMinutes = 0;
   let facilityWaitMinutes = 0;
@@ -199,7 +209,8 @@ export function routeTimings(
     route.breakStartMinute !== null && route.breakStartMinute !== undefined && route.breakEndMinute !== null && route.breakEndMinute !== undefined
       ? Math.max(0, route.breakEndMinute - route.breakStartMinute)
       : 0;
-  return { activeMinutes: Math.max(0, route.endMinute - route.startMinute - pause), onboardMinutes, facilityWaitMinutes };
+  const paidMinutes = Math.max(0, route.endMinute - route.startMinute);
+  return { activeMinutes: Math.max(0, paidMinutes - pause), paidMinutes, onboardMinutes, facilityWaitMinutes };
 }
 
 type TripTimes = {

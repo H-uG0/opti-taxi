@@ -28,13 +28,15 @@ function Figure({ label, value, hint }: { label: string; value: string; hint?: s
  * The figures of a vehicle or a person over the last RECORD_STATS_DAYS days
  * (KPI-02): its routes, the trips placed on them, km, money, lateness and the
  * statuses its crews recorded, with the dashboard's formulas
- * (lib/kpis-breakdown.ts). The link opens the dashboard's breakdown.
+ * (lib/kpis-breakdown.ts); a vehicle's days off the road are counted like the
+ * dashboard's (days with routes, the vehicle unavailable and unused). The
+ * link opens the dashboard's breakdown.
  */
 export async function RecordStats({ owner }: { owner: { vehicleId: string; costPerKm: number } | { personId: string } }) {
   const today = todayIso();
   const from = addDays(today, -(RECORD_STATS_DAYS - 1));
   const vehicle = "vehicleId" in owner;
-  const [data, outages] = await Promise.all([
+  const [data, outages, plannedRows] = await Promise.all([
     loadRouteKpiRows(db, { from, to: today }, vehicle ? { vehicleId: owner.vehicleId } : { personId: owner.personId }),
     vehicle
       ? db.vehicleUnavailability.findMany({
@@ -42,13 +44,23 @@ export async function RecordStats({ owner }: { owner: { vehicleId: string; costP
           select: { startDate: true, endDate: true },
         })
       : Promise.resolve([]),
+    // The days with routes (any vehicle): a day off the road counts on those only, like the dashboard.
+    vehicle
+      ? db.route.findMany({
+          where: { serviceDate: { gte: fromIsoDate(from), lte: fromIsoDate(today) }, stops: { some: {} } },
+          distinct: ["serviceDate"],
+          select: { serviceDate: true },
+        })
+      : Promise.resolve([]),
   ]);
+  const plannedDays = new Set(plannedRows.map((r) => toIsoDate(r.serviceDate)));
+  const usedDays = new Set(data.routes.filter((r) => r.stopCount > 0).map((r) => r.serviceDate));
   const totals = sumLines(routeLines(data, today, DEFAULT_KPI_OPTIONS, () => (vehicle ? owner.costPerKm : undefined)));
   const rates = lineRates(totals);
   const offRoad = new Set<string>();
   for (const outage of outages) {
     for (let day = toIsoDate(outage.startDate); day <= toIsoDate(outage.endDate); day = addDays(day, 1)) {
-      if (day >= from && day <= today) offRoad.add(day);
+      if (day >= from && day <= today && plannedDays.has(day) && !usedDays.has(day)) offRoad.add(day);
     }
   }
   const href = dashboardHref({ tab: "ventilation", from, to: today, axis: vehicle ? "vehicule" : "chauffeur" });

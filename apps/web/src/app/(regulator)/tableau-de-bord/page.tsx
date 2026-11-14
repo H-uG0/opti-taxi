@@ -9,6 +9,7 @@ import { hasPlanning, mixedDistanceSources, pickHeadlineDays, resolveLateToleran
 import { planViewOf, plannedComparison, realizedComparison } from "@/lib/kpis-compare";
 import { groupEnergy, sumEnergy, vehicleEnergy } from "@/lib/kpis-energy";
 import { comparisonDates } from "@/lib/kpis-plan";
+import { VEHICLE_TYPE_PLURAL } from "@/lib/kpis-csv";
 import { inScope } from "@/lib/kpis-scope";
 import { trendPoints } from "@/lib/kpis-trend";
 import { formatShortDate } from "@/lib/time";
@@ -30,6 +31,9 @@ import { TrendTable } from "./trend-table";
 import { WAIT_CASES_SHOWN, WaitsSection, type WaitCaseRow } from "./waits-section";
 
 export const metadata: Metadata = { title: "Tableau de bord" };
+
+/** A step of the period, in a sentence (« une ligne par semaine »). */
+const STEP_NAMES = { day: "jour", week: "semaine", month: "mois" } as const;
 
 type User = Awaited<ReturnType<typeof requireUser>>;
 
@@ -63,12 +67,15 @@ export default async function DashboardPage({
     vehicleType: scope.vehicleType,
     axis: query.axis,
     sort: query.sort,
+    // The day shown at the top: kept from one tab to the other (the tabs that do not read it ignore it).
+    day: query.day,
   };
   const anyPlanning = days.some(hasPlanning);
   const depotLabel = scope.depotId ? dashboard.refs.depots.find((d) => d.id === scope.depotId)?.name : null;
-  const scopeLabel = [depotLabel ? `dépôt ${depotLabel}` : null, scope.vehicleType ? { TAXI: "taxis", VSL: "VSL", AMBULANCE: "ambulances" }[scope.vehicleType] : null]
+  const scopeLabel = [depotLabel ? `dépôt ${depotLabel}` : null, scope.vehicleType ? VEHICLE_TYPE_PLURAL[scope.vehicleType] : null]
     .filter(Boolean)
     .join(", ");
+  const step = STEP_NAMES[range.granularity];
 
   return (
     <div>
@@ -80,11 +87,29 @@ export default async function DashboardPage({
         actions={
           <>
             {/* Plain links: a file to download, not a page for the client router. */}
-            <a href={exportHref(base, "jour")} download className={buttonClasses("secondary", "sm")}>
-              Exporter (CSV)
+            <a
+              href={exportHref(base, "jour")}
+              download
+              title={`Une ligne par ${step}, au format CSV pour Excel`}
+              className={buttonClasses("secondary", "sm")}
+            >
+              CSV par {step}
             </a>
-            <a href={exportHref(base, scope.depotId ? "vehicule" : "depot")} download className={buttonClasses("ghost", "sm")}>
-              {scope.depotId ? "CSV par véhicule" : "CSV par dépôt"}
+            <a
+              href={exportHref(base, "depot")}
+              download
+              title={`Une ligne par ${step} et par dépôt`}
+              className={buttonClasses("ghost", "sm")}
+            >
+              CSV par dépôt
+            </a>
+            <a
+              href={exportHref(base, "vehicule")}
+              download
+              title={`Une ligne par ${step} et par véhicule`}
+              className={buttonClasses("ghost", "sm")}
+            >
+              CSV par véhicule
             </a>
           </>
         }
@@ -189,16 +214,16 @@ async function TabContent({ dashboard, query, base, user }: { dashboard: Dashboa
 
 /** « Synthèse »: the headline days, the trends against their objectives, the detail. */
 async function SynthesisTab({ dashboard, query, base }: { dashboard: Dashboard; query: DashboardQuery; base: HrefState }) {
-  const { days, period, range, today, tomorrow, options, targets, scoped } = dashboard;
+  const { days, period, range, today, tomorrow, options, targets, scoped, scope } = dashboard;
   const { realized, planned } = pickHeadlineDays(days, { ...range, today, tomorrow, requested: query.day });
   // The headline compares with the same weekday of the 4 weeks before, the moving average reads the days before the range.
-  const extraDates = [
-    ...[realized, planned].flatMap((day) => (day ? comparisonDates(day.date) : [])),
-    ...(range.granularity === "day" ? leadInDates(range) : []),
-  ];
+  const leadIn = range.granularity === "day" ? leadInDates(range) : [];
+  const extraDates = [...[realized, planned].flatMap((day) => (day ? comparisonDates(day.date) : [])), ...leadIn];
   const extraDays = await loadExtraDays(dashboard, extraDates);
   const lookup = new Map<string, DayKpis>([...days, ...extraDays].map((day) => [day.date, day]));
-  const points = trendPoints(days, range.granularity, extraDays);
+  // Only the days just before the range: a comparison day weeks earlier would break the run of consecutive days.
+  const leadInSet = new Set(leadIn);
+  const points = trendPoints(days, range.granularity, extraDays.filter((day) => leadInSet.has(day.date)));
 
   return (
     <>
@@ -236,8 +261,11 @@ async function SynthesisTab({ dashboard, query, base }: { dashboard: Dashboard; 
           </h2>
           <p className="text-xs text-slate-600">
             Objectifs et valeurs de référence&nbsp;:{" "}
-            <Link href="/parametres#objectifs" className="font-medium text-brand-700 underline underline-offset-2">
-              Paramètres
+            <Link
+              href={scope.depotId ? `/parametres?objectifs=${encodeURIComponent(scope.depotId)}#objectifs` : "/parametres#objectifs"}
+              className="font-medium text-brand-700 underline underline-offset-2"
+            >
+              Paramètres{scope.depotId ? " du dépôt" : ""}
             </Link>
           </p>
         </div>
@@ -294,7 +322,9 @@ async function FleetTab({ dashboard }: { dashboard: Dashboard }) {
   const offRoad = new Map<string, number>();
   const usedOn = new Map<string, Set<string>>();
   for (const route of data.routes) if (route.stopCount > 0) usedOn.set(route.serviceDate, (usedOn.get(route.serviceDate) ?? new Set()).add(route.vehicleId));
-  for (const day of data.fleet ?? []) {
+  // The days with planning only, like the « indisponibles » above and the breakdown: a Sunday in the garage costs no trip.
+  const plannedDates = new Set(dashboard.days.filter(hasPlanning).map((d) => d.date));
+  for (const day of (data.fleet ?? []).filter((d) => plannedDates.has(d.serviceDate))) {
     for (const id of day.unavailable) if (!usedOn.get(day.serviceDate)?.has(id)) offRoad.set(id, (offRoad.get(id) ?? 0) + 1);
   }
   const figures = vehicles.map((vehicle) =>
@@ -308,6 +338,7 @@ async function FleetTab({ dashboard }: { dashboard: Dashboard }) {
       plannedUntil: inputs.plannedUntil,
       offRoadDays: offRoad.get(vehicle.id) ?? 0,
       deadlines: inputs.deadlines.get(vehicle.id) ?? [],
+      latestOdometerKm: inputs.latestOdometer.get(vehicle.id) ?? null,
     }),
   );
   const depotOf = new Map(vehicles.map((v) => [v.id, v.depotId]));

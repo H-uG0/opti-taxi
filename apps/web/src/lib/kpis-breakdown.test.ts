@@ -142,6 +142,16 @@ describe("groups and rates", () => {
     expect(rates.lateRate).toBe(0.5);
   });
 
+  it("reads the hourly cost on the hours the optimizer charges, the break included", () => {
+    // 8 h route with a 45 min break at 30 €/h and 100 km at 0,30 €/km: 240 + 30 = 270 €.
+    const timed = routeLines({ routes: [route({ cost: 270, activeMinutes: 435, paidMinutes: 480 })], trips: [] }, TODAY, DEFAULT_KPI_OPTIONS, () => 0.3);
+    const rates = lineRates(sumLines(timed));
+    expect(rates.hourlyCost).toBeCloseTo(30);
+    expect(rates.costPerHour).toBeCloseTo(270 / 8);
+    expect(rates.plannedHours).toBeCloseTo(435 / 60);
+    expect(rates.occupancy).toBeCloseTo(120 / 435);
+  });
+
   it("returns unknown rates for an empty group", () => {
     const rates = lineRates(sumLines([]));
     expect(rates).toMatchObject({ tripsPerVehicleDay: null, marginPerTrip: null, hourlyCost: null, occupancy: null, recordingRate: null });

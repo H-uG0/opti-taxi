@@ -38,6 +38,8 @@ export type KpiRoute = {
    * and planned hours (KPI-02, KPI-10). Absent: unknown.
    */
   activeMinutes?: number;
+  /** Minutes the optimizer charges at the hourly cost: end - start, the break included. Absent: activeMinutes. */
+  paidMinutes?: number;
   onboardMinutes?: number;
   facilityWaitMinutes?: number;
   distanceKm: number;
