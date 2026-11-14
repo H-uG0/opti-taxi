@@ -12,7 +12,10 @@ import pytest
 from pydantic import ValidationError
 
 from app import service
-from app.schemas import EvaluateRequest, InsertRequest, OptimizeRequest, PlanResponse
+from app.context import request_points
+from app.matrix import build_matrix
+from app.schemas import EvaluateRequest, InsertRequest, OptimizeRequest, PlanResponse, Route
+from app.validator import validate
 from tests.builders import AIX, MARSEILLE, load_fixture, offset, request, trip, vehicle
 
 Json = dict[str, Any]
@@ -264,3 +267,136 @@ def test_the_rest_of_a_long_route_takes_its_break_inside_the_route() -> None:
     assert [v for v in replanned.validation.violations if v.code == "BREAK"] == []
     if taxi.end_min - taxi.start_min > 360:
         assert taxi.break_ is not None and taxi.start_min <= taxi.break_.start_min and taxi.break_.end_min <= taxi.end_min
+
+
+def afternoon_after_the_break() -> tuple[Json, list[Json]]:
+    """A taxi out since 07:00 (two morning trips done), its 12:00–12:45 break taken, three afternoon trips."""
+    clinic = offset(MARSEILLE, -3, 2)
+    trips = [
+        trip("m1", "p1", "OUTBOUND", offset(MARSEILLE, 2, 1), clinic, appointment=480),
+        trip("m2", "p2", "OUTBOUND", offset(MARSEILLE, 3, 1), clinic, appointment=600),
+        trip("a1", "p3", "OUTBOUND", offset(MARSEILLE, 4, 1), clinic, appointment=840),
+        trip("a2", "p4", "OUTBOUND", offset(MARSEILLE, 2, 3), clinic, appointment=900),
+        trip("a3", "p5", "OUTBOUND", offset(MARSEILLE, 3, 3), clinic, appointment=960),
+    ]
+    rule = {"windowStartMin": 690, "windowEndMin": 840, "durationMin": 45}
+    raw = request([vehicle("taxi_1", MARSEILLE, shift=(420, 1080), break_=rule)], trips, timeLimitSec=2)
+    done = [
+        {"tripId": "m1", "kind": "PICKUP", "startMin": 440, "departureMin": 442},
+        {"tripId": "m1", "kind": "DROPOFF", "startMin": 460, "departureMin": 462},
+        {"tripId": "m2", "kind": "PICKUP", "startMin": 560, "departureMin": 562},
+        {"tripId": "m2", "kind": "DROPOFF", "startMin": 580, "departureMin": 582},
+    ]
+    return raw, done
+
+
+def test_the_afternoon_of_a_driver_back_from_their_break_is_planned() -> None:
+    """A route under way since 07:00 whose driver took their break at noon: at 13:00 its afternoon trips are planned,
+    its 6-hour rule met by the break taken (not « sans dépasser 6 h de travail sans pause »)."""
+    raw, done = afternoon_after_the_break()
+    progress_route: Json = {"vehicleId": "taxi_1", "done": done, "breakTaken": {"startMin": 720, "endMin": 765}}
+    body = {**raw, "progress": {"nowMin": 780, "routes": [progress_route]}}
+    plan = service.optimize(OptimizeRequest.model_validate(body))
+    assert plan.unassigned == [], plan.unassigned
+    taxi = route(plan, "taxi_1")
+    assert taxi.end_min - taxi.start_min > 360
+    assert [v for v in plan.validation.violations if v.code == "BREAK"] == []
+    # « Où placer » accepts the vehicle the same afternoon.
+    served = {"vehicleId": "taxi_1", "stops": [{"tripId": s.trip_id, "kind": s.kind} for s in taxi.stops if s.trip_id != "a3"]}
+    answer = service.insert(InsertRequest.model_validate({**body, "routes": [served], "tripId": "a3"}))
+    assert any(o.vehicle_id == "taxi_1" for o in answer.options), answer.rejected
+
+
+def progress_codes(raw: Json, routes: list[Route]) -> list[tuple[str | None, str | None]]:
+    """(trip, vehicle) of each PROGRESS violation the validator finds in these routes of the whole day."""
+    parsed = OptimizeRequest.model_validate(raw)
+    matrix, _ = build_matrix(request_points(parsed))
+    return [(v.trip_id, v.vehicle_id) for v in validate(parsed, routes, matrix) if v.code == "PROGRESS"]
+
+
+def with_stop(route_: Route, index: int, **times: int) -> Route:
+    stops = list(route_.stops)
+    stops[index] = stops[index].model_copy(update=times)
+    return route_.model_copy(update={"stops": stops})
+
+
+def test_the_validator_rechecks_the_rules_of_a_day_under_way(planned: tuple[Json, PlanResponse]) -> None:
+    """The validator itself (not only the solver) checks that the stops done head their route at their real times,
+    are nowhere else, and that nothing still to do starts before the vehicle goes on."""
+    raw, plan = planned
+    vid = "taxi_1" if route(plan, "taxi_1").stops else "taxi_2"
+    done = done_stops(plan, vid, 2, late=3)
+    now = done[-1]["departureMin"] + 20
+    body = started(raw, plan, now, {vid: done})
+    replanned = service.optimize(OptimizeRequest.model_validate(body))
+    routes = list(replanned.routes)
+    assert progress_codes(body, routes) == []
+    mine = next(k for k, r in enumerate(routes) if r.vehicle_id == vid)
+    assert len(routes[mine].stops) > 2
+
+    # A stop still to do moved before now.
+    early = [*routes]
+    early[mine] = with_stop(routes[mine], 2, start_min=now - 30, arrival_min=now - 30)
+    assert (routes[mine].stops[2].trip_id, vid) in progress_codes(body, early)
+    # A stop done at another time than its real one.
+    moved = [*routes]
+    moved[mine] = with_stop(routes[mine], 0, start_min=done[0]["startMin"] - 5)
+    assert (None, vid) in progress_codes(body, moved)
+    # The started route left out of a whole plan.
+    assert (None, vid) in progress_codes(body, [r for r in routes if r.vehicle_id != vid])
+    # A stop done planned again on another vehicle.
+    other = next(k for k, r in enumerate(routes) if r.vehicle_id != vid)
+    stolen = [*routes]
+    first = routes[mine].stops[0]
+    stolen[mine] = routes[mine].model_copy(update={"stops": list(routes[mine].stops[1:])})
+    stolen[other] = routes[other].model_copy(update={"stops": [*routes[other].stops, first]})
+    assert (first.trip_id, routes[other].vehicle_id) in progress_codes(body, stolen)
+
+
+def test_the_dropoff_of_a_patient_on_board_may_come_before_now_never_before_their_pickup(planned: tuple[Json, PlanResponse]) -> None:
+    """README « Journée commencée », point 2: a vehicle with a patient on board drove on with them since its last stop
+    done; their dropoff may be planned before now, not before the end of that stop."""
+    raw, plan = planned
+    vid = "taxi_1" if route(plan, "taxi_1").stops else "taxi_2"
+    stops = route(plan, vid).stops
+    first_pickup = next(k for k, s in enumerate(stops) if s.kind == "PICKUP")
+    done = done_stops(plan, vid, first_pickup + 1)
+    on_board = done[-1]["tripId"]
+    now = done[-1]["departureMin"] + 60
+    body = started(raw, plan, now, {vid: done})
+    replanned = service.optimize(OptimizeRequest.model_validate(body))
+    routes = list(replanned.routes)
+    mine = next(k for k, r in enumerate(routes) if r.vehicle_id == vid)
+    drop = next(k for k, s in enumerate(routes[mine].stops) if s.trip_id == on_board and s.kind == "DROPOFF")
+    assert progress_codes(body, routes) == []
+    before_now = [*routes]
+    before_now[mine] = with_stop(routes[mine], drop, start_min=now - 10, arrival_min=now - 10)
+    assert progress_codes(body, before_now) == []
+    before_pickup = [*routes]
+    before_pickup[mine] = with_stop(routes[mine], drop, start_min=done[-1]["departureMin"] - 1, arrival_min=done[-1]["departureMin"] - 1)
+    assert (on_board, vid) in progress_codes(body, before_pickup)
+
+
+def test_a_return_continuation_waits_by_the_vehicle_not_at_the_facility() -> None:
+    """A patient picked up again where their transport was interrupted (contract « Course de reprise »): at 11:00 the
+    only vehicle is 40 minutes away, beyond the 15 minutes after the session a return allows, and the continuation is
+    served all the same, with no wait at the facility reported; a plain return there is not."""
+    clinic, home, roadside = offset(MARSEILLE, -3, 2), offset(MARSEILLE, 4, 3), offset(AIX, 8, 6)
+    outbound = trip("o1", "p1", "OUTBOUND", home, clinic, appointment=480)
+    resumed = {**trip("c1", "p1", "RETURN", roadside, home, ready=660), "continuation": True}
+    taxi = vehicle("taxi_1", MARSEILLE, shift=(420, 1080))
+    under_way = {"progress": {"nowMin": 660, "routes": []}}
+
+    def plan_of(trips: list[Json]) -> PlanResponse:
+        return service.optimize(OptimizeRequest.model_validate({**request([taxi], trips, timeLimitSec=2), **under_way}))
+
+    plan = plan_of([resumed])
+    assert plan.kpis.trips_served == 1, plan.unassigned
+    pickup = next(s for s in plan.routes[0].stops if s.kind == "PICKUP")
+    assert pickup.start_min > 660 + 15
+    assert plan.validation.violations == []
+    assert next(t for t in plan.trips if t.trip_id == "c1").wait_at_facility_min is None
+    # Not paired with the patient's outbound (done in the morning): no wait at the facility added up.
+    with_outbound = plan_of([outbound, resumed])
+    assert [v for v in with_outbound.validation.violations if v.code == "TOTAL_WAIT"] == []
+    assert plan_of([{**resumed, "continuation": False}]).kpis.trips_served == 0

@@ -9,7 +9,7 @@ import { ConfirmPanel } from "@/components/ui/confirm-action";
 import { tripLineText } from "@/lib/planning/naming";
 import type { TripView } from "@/lib/planning/types";
 import { replaceTrips } from "./actions";
-import { usePlanningActivity } from "./planning-activity";
+import { usePlanningActivity, useTripLink } from "./planning-activity";
 
 /** The URL of the planning with `params` set (null: removed), the others kept. */
 function planningHref(date: string, current: URLSearchParams, params: Record<string, string | null>): string {
@@ -23,10 +23,11 @@ function planningHref(date: string, current: URLSearchParams, params: Record<str
 }
 
 /**
- * The trips an interruption left to place again (DAY-03, ?replacer=): each one with « Où placer » (the
- * assistant, one at a time), and « Replacer les N courses », which gives each trip, the most urgent first,
- * its best place now. What is still listed afterwards found no place: the answer of « Replacer » says
- * why for each (it stays on screen, in amber).
+ * The trips an interruption left to place again (DAY-03, ?replacer=): the patients waiting by the vehicle
+ * first (continuations, with where they are picked up), each one with « Où placer » (the assistant, one at a
+ * time: the board selects the trip and searches its places), and « Replacer les N courses », which gives each
+ * trip, the most urgent first, its best place now. What is still listed afterwards found no place: the answer
+ * of « Replacer » says why for each (it stays on screen, in amber).
  */
 export function ReplacePanel({
   date,
@@ -42,9 +43,14 @@ export function ReplacePanel({
   blocked: string | null;
 }) {
   const { busy, run } = usePlanningActivity();
+  const { showTrip } = useTripLink();
   const [asking, setAsking] = useState(false);
   const current = new URLSearchParams(useSearchParams()?.toString() ?? "");
-  const left = tripIds.map((id) => trips[id]).filter((trip): trip is TripView => trip !== undefined && trip.vehicleId === null && trip.status !== "CANCELLED");
+  // The patients waiting by the vehicle come first, whatever the order of the address.
+  const left = tripIds
+    .map((id) => trips[id])
+    .filter((trip): trip is TripView => trip !== undefined && trip.vehicleId === null && trip.status !== "CANCELLED")
+    .sort((a, b) => Number(!a.continuation) - Number(!b.continuation));
   const placed = tripIds.length - left.length;
   const close = planningHref(date, current, { replacer: null });
 
@@ -88,14 +94,23 @@ export function ReplacePanel({
         <ul className="mt-2 divide-y divide-amber-200/70">
           {left.map((trip) => (
             <li key={trip.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
-              <span className="min-w-0 flex-1 font-medium">{tripLineText(trip)}</span>
-              <Link
-                href={planningHref(date, current, { trip: trip.id, placer: "1" })}
-                className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white px-2 py-1 text-xs font-medium text-amber-950 hover:bg-amber-100"
+              <span className="min-w-0 flex-1">
+                {trip.continuation ? (
+                  <span className="mr-1.5 inline-block rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-900">Patient à bord</span>
+                ) : null}
+                <span className="font-medium">{tripLineText(trip)}</span>
+                {trip.continuation ? <span className="block text-xs text-amber-900">Prise en charge&nbsp;: {trip.pickupAddress}</span> : null}
+              </span>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => showTrip(trip.id, { place: true })}
+                disabled={busy || blocked !== null}
+                title={blocked ?? "Sélectionne la course et cherche où la placer"}
               >
                 <MapPinned aria-hidden className="size-3.5" />
                 Où placer
-              </Link>
+              </Button>
             </li>
           ))}
         </ul>

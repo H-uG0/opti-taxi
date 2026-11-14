@@ -162,6 +162,8 @@ class _Run:
     lateness_min: int
     day_start: int | None = None
     """Start of the whole route when this run is the rest of a route under way (its work time counts from there)."""
+    break_taken: tuple[int, int] | None = None
+    """The break already taken on that route (the run then places none): it counts as the route's break."""
 
     @property
     def lawful(self) -> bool:
@@ -169,7 +171,7 @@ class _Run:
         start = self.start_min if self.day_start is None else min(self.day_start, self.start_min)
         if self.end_min - start <= MAX_WORK_WITHOUT_BREAK_MIN:
             return True
-        slot = self.break_slot
+        slot = self.break_slot or self.break_taken
         return (
             slot is not None
             and slot[1] - slot[0] >= MIN_LEGAL_BREAK_MIN
@@ -186,11 +188,19 @@ class _Run:
 class _Timing:
     """Forward/backward passes of one sequence for one break placement."""
 
-    def __init__(self, vehicle: Vehicle, stops: Sequence[PlannedStop], travel: Sequence[int], day_start: int | None = None) -> None:
+    def __init__(
+        self,
+        vehicle: Vehicle,
+        stops: Sequence[PlannedStop],
+        travel: Sequence[int],
+        day_start: int | None = None,
+        break_taken: tuple[int, int] | None = None,
+    ) -> None:
         self.vehicle = vehicle
         self.stops = stops
         self.travel = travel
         self.day_start = day_start
+        self.break_taken = break_taken
 
     def _rule(self) -> BreakRule:
         rule = self.vehicle.break_
@@ -287,7 +297,7 @@ class _Timing:
 
         lateness = sum(max(0, t.start_min - t.stop.window.close) for t in timed)
         lateness += max(0, end_min - self.vehicle.shift_end_min)
-        return _Run(tuple(timed), start_min, end_min, break_slot, lateness, self.day_start)
+        return _Run(tuple(timed), start_min, end_min, break_slot, lateness, self.day_start, self.break_taken)
 
     def _drive(self, placement: _Placement, leg: int, departure: int) -> tuple[int, int, tuple[int, int] | None]:
         """(physical arrival, ready to serve, break slot) for a leg driven from `departure`."""
@@ -327,7 +337,7 @@ def schedule_route(
     if [(stop.trip.id, stop.kind) for stop in stops[:done]] != [(stop.trip_id, stop.kind) for stop in start.done]:
         raise ValueError(f"route of {vehicle.id} does not start with its stops done")
     going_on = vehicle.model_copy(update={"shift_start_min": start.min, "break_": None if start.break_taken else vehicle.break_})
-    rest = _schedule(going_on, stops[done:], matrix, start.location, start.on_board, start.day_start)
+    rest = _schedule(going_on, stops[done:], matrix, start.location, start.on_board, start.day_start, start.break_taken)
     if not done:
         return RouteSchedule(
             vehicle=vehicle,
@@ -369,9 +379,11 @@ def _schedule(
     origin: LatLng,
     aboard: Sequence[str],
     day_start: int | None = None,
+    break_taken: tuple[int, int] | None = None,
 ) -> RouteSchedule:
     """Times, loads and legs of `stops` driven from `origin` (patients `aboard`) back to the depot; `day_start`:
-    the start of the whole route of a vehicle under way (its 6-hour rule counts from there)."""
+    the start of the whole route of a vehicle under way (its 6-hour rule counts from there), `break_taken` the
+    break its driver already took (the route's break)."""
     points = [origin, *(stop.location for stop in stops), vehicle.depot]
     references = [None, *(stop_reference_minute(stop.trip, stop.kind, matrix) for stop in stops), None]
     legs_km = [matrix.km(a, b) for a, b in zip(points, points[1:], strict=False)]
@@ -379,7 +391,7 @@ def _schedule(
     loads, leg_sets = _load_profile(stops, aboard)
     legs = tuple(Leg(km, minutes, on_board) for km, minutes, on_board in zip(legs_km, travel, leg_sets, strict=True))
 
-    timing = _Timing(vehicle, stops, travel, day_start)
+    timing = _Timing(vehicle, stops, travel, day_start, break_taken)
     rule = vehicle.break_
     candidates: list[_Placement] = []
     if rule is not None and rule.duration_min > 0:

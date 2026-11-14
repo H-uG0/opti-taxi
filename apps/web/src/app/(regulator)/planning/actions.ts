@@ -20,8 +20,10 @@ import { lockMessage, tripsToLock, tripsToUnlock, unlockMessage, type LockScope,
 import { lockPlanningDay } from "@/lib/planning/day-lock";
 import { loadPlanningDay } from "@/lib/planning/load";
 import { applyTripPlace, findTripPlaces, type FindPlacesOutcome } from "@/lib/planning/place-trip";
+import { LAT_RANGE, LNG_RANGE } from "@/components/address/address-utils";
+import { locatePlace } from "../courses/locate-place";
 import { interruptRoute as interruptRouteAt } from "@/lib/planning/interrupt-route";
-import { replaceSummary, type ReplaceOutcome } from "@/lib/planning/replace-trips";
+import { chosenPlace, noPlaceReason, replaceSummary, type ReplaceOutcome, type ReplaceRefusal } from "@/lib/planning/replace-trips";
 import { DRAFT_MAX_MOVES } from "@/lib/planning/draft";
 import { checkDraftPlan, saveDraftPlan, type CheckDraftOutcome } from "@/lib/planning/draft-plan";
 import { LOCKED, lockAction, notLockedOn } from "@/lib/planning/lock";
@@ -65,6 +67,11 @@ export type PlanningActionResult =
       ok: false;
       error: string;
       needsConfirmation?: boolean;
+      /**
+       * The question comes before the computation (a validated day under way): the caller asks it and runs again
+       * with the answer. Without it, a computation's plan waits in « Changements » (the banner of the plan held).
+       */
+      askedFirst?: boolean;
       /** The page shows a plan that changed since: offer to reload it. */
       stale?: boolean;
       /**
@@ -114,7 +121,7 @@ async function guarded(action: string, body: () => Promise<PlanningActionResult>
 /** The action's answer to a computation's outcome. */
 function toResult(outcome: RunOutcome): PlanningActionResult {
   if (outcome.ok) return { ok: true, message: outcome.message, ...(outcome.warning ? { warning: true } : {}) };
-  if (outcome.needsConfirmation) return { ok: false, error: outcome.error, needsConfirmation: true };
+  if (outcome.needsConfirmation) return { ok: false, error: outcome.error, needsConfirmation: true, ...(outcome.askedFirst ? { askedFirst: true } : {}) };
   return outcome.stale ? { ok: false, error: outcome.error, stale: true } : { ok: false, error: outcome.error };
 }
 
@@ -124,13 +131,14 @@ function pastDateError(isoDate: string): PlanningActionResult | null {
 }
 
 /** « Optimiser demain » / « Réoptimiser » : recompute every route of the date, keeping locked trips on their vehicle. */
-export async function optimizeDay(date: string): Promise<PlanningActionResult> {
+export async function optimizeDay(date: string, confirmed: string | null = null): Promise<PlanningActionResult> {
   const user = await requireUser("REGULATOR");
   return guarded("optimizeDay", async () => {
     const parsed = dateSchema.safeParse(date);
     if (!parsed.success) return INVALID_DATE;
 
-    const outcome = await runOptimization(parsed.data, user);
+    // `confirmed`: the question of a validated day under way, answered (runOptimization asks it first).
+    const outcome = await runOptimization(parsed.data, user, { confirmed: typeof confirmed === "string" ? confirmed : null });
     refreshPages();
     return toResult(outcome);
   });
@@ -143,13 +151,13 @@ export async function optimizeDay(date: string): Promise<PlanningActionResult> {
  * and no other trip changes vehicle. Saved like any computation (comparison
  * with the routes in place, audit event plan.optimize with details.mode).
  */
-export async function placeUnassigned(date: string): Promise<PlanningActionResult> {
+export async function placeUnassigned(date: string, confirmed: string | null = null): Promise<PlanningActionResult> {
   const user = await requireUser("REGULATOR");
   return guarded("placeUnassigned", async () => {
     const parsed = dateSchema.safeParse(date);
     if (!parsed.success) return INVALID_DATE;
 
-    const outcome = await runOptimization(parsed.data, user, { placeOnly: true });
+    const outcome = await runOptimization(parsed.data, user, { placeOnly: true, confirmed: typeof confirmed === "string" ? confirmed : null });
     refreshPages();
     return toResult(outcome);
   });
@@ -312,36 +320,76 @@ const interruptSchema = z.object({
   note: z
     .string()
     .trim()
-    .max(500)
+    .max(500, "Précision trop longue (500 caractères au plus).")
     .transform((value) => (value === "" ? null : value)),
+  place: z
+    .object({
+      address: z.string().trim().min(1, "Saisissez le lieu de l'interruption.").max(200, "Lieu de l'interruption trop long (200 caractères au plus)."),
+      lat: z.string().trim().max(32),
+      lng: z.string().trim().max(32),
+    })
+    .nullable(),
+  confirmed: z.string().max(2000).nullable(),
 });
+
+/** Coordinates typed in the form (« 43,2965 » or « 43.2965 »), in metropolitan France; undefined: empty or invalid. */
+function typedCoordinate(value: string, range: { min: number; max: number }): number | undefined {
+  if (value === "") return undefined;
+  const n = Number(value.replace(",", "."));
+  return Number.isFinite(n) && n >= range.min && n <= range.max ? n : undefined;
+}
 
 /**
  * « Hors service ou indisponible à partir de HH:MM » (DAY-03): the vehicle out of service, or its driver
  * or crew mate unavailable, from that time. The partial unavailability is recorded, the route closed
  * there (what was done stays), the trips not picked up go back « à replacer », a patient on board gets a
- * continuation trip from the last stop done; traced (lib/planning/interrupt-route.ts). The answer lists
- * the trips to place again (`toPlace`).
+ * continuation trip from the place given (located like a trip's one-off address) or the last stop done;
+ * traced (lib/planning/interrupt-route.ts). On a validated plan the question is asked first (`confirmed`).
+ * The answer lists the trips to place again (`toPlace`), the patients on board first.
  */
-export async function interruptRoute(input: { routeId: string; who: string; from: string; kind: string; note: string }): Promise<PlanningActionResult> {
+export async function interruptRoute(input: {
+  routeId: string;
+  who: string;
+  from: string;
+  kind: string;
+  note: string;
+  place: { address: string; lat: string; lng: string } | null;
+  confirmed: string | null;
+}): Promise<PlanningActionResult> {
   const user = await requireUser("REGULATOR");
   return guarded("interruptRoute", async () => {
     const parsed = interruptSchema.safeParse(input);
-    if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Demande invalide." };
-    const { routeId, who, from, kind, note } = parsed.data;
+    if (!parsed.success) {
+      // Only the messages written for the regulator; zod's own (English) never reach the screen.
+      const issue = parsed.error.issues.find((i) => ["from", "note", "place"].includes(String(i.path[0])) && i.code !== "invalid_type");
+      return { ok: false, error: issue?.message ?? "Demande invalide : rechargez la page." };
+    }
+    const { routeId, who, from, kind, note, place, confirmed } = parsed.data;
     // A vehicle stops for a repair, a maintenance or another reason; a person is unavailable (sick or other reason).
     const allowed: readonly string[] = who === "VEHICLE" ? ["REPAIR", "MAINTENANCE", "OTHER"] : ["SICK", "OTHER"];
     if (!allowed.includes(kind)) return { ok: false, error: "Motif invalide pour ce choix." };
+    let located: { address: string; lat: number; lng: number } | null = null;
+    if (place) {
+      const lat = typedCoordinate(place.lat, LAT_RANGE);
+      const lng = typedCoordinate(place.lng, LNG_RANGE);
+      const found = await locatePlace(user, place.address, lat !== undefined && lng !== undefined ? lat : undefined, lng, {
+        address: "placeAddress",
+        lat: "placeLat",
+      });
+      if (!found.ok) return { ok: false, error: found.message };
+      located = found.place;
+    }
     const [hours, minutes] = from.split(":").map(Number);
-    const outcome = await interruptRouteAt({ routeId, who, fromMinute: hours! * 60 + minutes!, kind, note }, user);
+    const outcome = await interruptRouteAt({ routeId, who, fromMinute: hours! * 60 + minutes!, kind, note, place: located, confirmed }, user);
     if (outcome.ok) refreshPages();
     return outcome;
   });
 }
 
 /**
- * « Replacer les courses » after an interruption (DAY-03): each trip, the most urgent first, goes to the
- * best place « Où placer cette course ? » finds for it now, saved as « Appliquer » does (only the target
+ * « Replacer les courses » after an interruption (DAY-03): each trip, the patients waiting by the vehicle first
+ * (at the earliest pickup found), then the most urgent, goes to the best place « Où placer cette course ? » finds
+ * for it now, saved as « Appliquer » does (only the target
  * route changes, the trip locked there, trip.move traced); the regulator confirmed the drivers' roadmaps
  * change. The answer lists the trips placed and those left without a place, with why.
  */
@@ -352,13 +400,23 @@ export async function replaceTrips(date: string, tripIds: string[]): Promise<Pla
     if (!args.success) return { ok: false, error: "Demande invalide." };
     const trips = await db.trip.findMany({
       where: { id: { in: args.data.tripIds }, serviceDate: fromIsoDate(args.data.date) },
-      select: { id: true, routeId: true, direction: true, appointmentMinute: true, readyMinute: true, patient: { select: { firstName: true, lastName: true } } },
+      select: {
+        id: true,
+        routeId: true,
+        direction: true,
+        appointmentMinute: true,
+        readyMinute: true,
+        continuesTripId: true,
+        patient: { select: { firstName: true, lastName: true } },
+      },
     });
-    // The most urgent first: the earliest appointment or end of session.
+    // The patients waiting by the vehicle first, then the earliest appointment or end of session.
+    const urgency = (trip: (typeof trips)[number]) => (trip.direction === "OUTBOUND" ? trip.appointmentMinute : trip.readyMinute) ?? 0;
     const ordered = trips
       .filter((trip) => trip.routeId === null)
-      .sort((a, b) => ((a.direction === "OUTBOUND" ? a.appointmentMinute : a.readyMinute) ?? 0) - ((b.direction === "OUTBOUND" ? b.appointmentMinute : b.readyMinute) ?? 0));
+      .sort((a, b) => Number(a.continuesTripId === null) - Number(b.continuesTripId === null) || urgency(a) - urgency(b));
     const outcomes: ReplaceOutcome[] = [];
+    const refusals = new Map<number, ReplaceRefusal[]>();
     for (const trip of ordered) {
       const patient = formatPersonName(trip.patient);
       const places = await findTripPlaces(trip.id);
@@ -366,10 +424,11 @@ export async function replaceTrips(date: string, tripIds: string[]): Promise<Pla
         outcomes.push({ patient, placed: false, reason: places.error });
         continue;
       }
-      const best = places.view.options[0];
+      // A patient waiting by a vehicle: the earliest pickup; any other trip: the best margin.
+      const best = chosenPlace(places.view.options, trip.continuesTripId !== null);
       if (!best) {
-        const reason = places.view.rejected[0]?.reason ?? "aucun véhicule n'a de place";
-        outcomes.push({ patient, placed: false, reason: `aucune place (${places.view.rejected.length > 1 ? "ex. " : ""}${reason})` });
+        refusals.set(outcomes.length, places.view.rejected);
+        outcomes.push({ patient, placed: false, reason: "" });
         continue;
       }
       let applied = await applyTripPlace(trip.id, best.vehicleId, places.view.version, null, user);
@@ -378,8 +437,17 @@ export async function replaceTrips(date: string, tripIds: string[]): Promise<Pla
       outcomes.push(applied.ok ? { patient, placed: true, vehicleId: best.vehicleId, pickupMinute: best.pickupMinute } : { patient, placed: false, reason: applied.error });
     }
     refreshPages();
-    const vehicles = await db.vehicle.findMany({ where: { id: { in: outcomes.flatMap((o) => (o.placed ? [o.vehicleId] : [])) } }, select: { id: true, label: true } });
-    const summary = replaceSummary(outcomes, new Map(vehicles.map((v) => [v.id, v.label])));
+    const named = new Set([
+      ...outcomes.flatMap((o) => (o.placed ? [o.vehicleId] : [])),
+      ...[...refusals.values()].flatMap((list) => list.map((refusal) => refusal.vehicleId)),
+    ]);
+    const vehicles = await db.vehicle.findMany({ where: { id: { in: [...named] } }, select: { id: true, label: true } });
+    const labels = new Map(vehicles.map((v) => [v.id, v.label]));
+    const explained = outcomes.map((outcome, index) => {
+      const rejected = refusals.get(index);
+      return rejected && !outcome.placed ? { ...outcome, reason: noPlaceReason(rejected, labels) } : outcome;
+    });
+    const summary = replaceSummary(explained, labels);
     return { ok: true, message: summary.text, ...(summary.left > 0 ? { warning: true } : {}) };
   });
 }
@@ -1131,9 +1199,10 @@ export async function changeRouteCrew(
             shiftEndMinute: true,
           },
         }),
+        // With their hours: a person unavailable from 15:00 is not absent for the whole day.
         tx.staffAbsence.findMany({
           where: { startDate: { lte: serviceDate }, endDate: { gte: serviceDate } },
-          select: { driverId: true, kind: true, startDate: true, endDate: true },
+          select: { driverId: true, kind: true, startDate: true, endDate: true, startMinute: true, endMinute: true },
         }),
         tx.crewIncompatibility.findMany({ select: { driverAId: true, driverBId: true } }),
         tx.route.findMany({

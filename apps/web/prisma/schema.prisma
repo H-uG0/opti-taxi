@@ -466,6 +466,14 @@ model Trip {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Course de reprise (DAY-03) : la course interrompue dont elle reprend le patient à bord d'un véhicule
+  /// tombé en panne ou dont l'équipage est devenu indisponible ; null pour toute autre course.
+  continuesTripId     String?       @unique
+  /// Course de reprise : heure de l'interruption (minutes depuis minuit), le patient attend depuis.
+  interruptedAtMinute Int?
+
+  continues          Trip?         @relation("TripContinuation", fields: [continuesTripId], references: [id], onDelete: SetNull)
+  continuation       Trip?         @relation("TripContinuation")
   patient            Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
   prescription       Prescription? @relation(fields: [prescriptionId], references: [id], onDelete: SetNull)
   recurrence         Recurrence?   @relation(fields: [recurrenceId], references: [id], onDelete: SetNull)

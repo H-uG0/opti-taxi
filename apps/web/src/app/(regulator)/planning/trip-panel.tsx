@@ -438,7 +438,7 @@ export function TripPanel({
           ) : null}
         </div>
         <div className="py-1">
-          <Row label={outbound ? "Rendez-vous" : "Fin de séance"}>
+          <Row label={outbound ? "Rendez-vous" : trip.continuation ? "Reprise dès" : "Fin de séance"}>
             <span className="tabular font-medium">{formatMinute(outbound ? trip.appointmentMinute : trip.readyMinute)}</span>
             {mark?.kind === "appointment" && mark.marginMin !== null ? (
               mark.tight ? (

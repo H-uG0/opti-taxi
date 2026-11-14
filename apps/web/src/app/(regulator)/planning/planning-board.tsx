@@ -65,6 +65,8 @@ export type PlanningBoardProps = {
   initialTripId: string | null;
   /** The trip of the address (?trip=) gets its places searched at once (?placer=1: a trip just created). */
   initialPlace?: boolean;
+  /** An address can be located on this server (« Lieu de l'interruption » of « Hors service… »). */
+  geocoder?: boolean;
   /** « Changer l'équipage » of a route: people offered, where the change happens, what blocks it now. */
   crewChoices: CrewChoice[];
   /** Settings of the crews of the day (shared working time of an ambulance pair). */
@@ -131,6 +133,7 @@ export function PlanningBoard({
   placeBlocked,
   initialTripId,
   initialPlace = false,
+  geocoder = false,
   crewChoices,
   crewRules,
   crewChangeMode,
@@ -260,12 +263,15 @@ export function PlanningBoard({
     });
     return () => cancelAnimationFrame(frame);
   }, [flash]);
-  // A link of « Changements » (the plan waiting for confirmation, above the board): the trip is shown here.
+  // A link of « Changements » (the plan waiting for confirmation, above the board), or « Où placer » of the trips to
+  // place again after an interruption: the trip is shown here, its places searched for the latter.
   const { subscribe } = useTripLink();
   useEffect(
     () =>
-      subscribe((tripId) => {
-        if (tripsById[tripId]) showTripHere(tripId);
+      subscribe((tripId, options) => {
+        if (!tripsById[tripId]) return;
+        showTripHere(tripId);
+        if (options.place) setAutoPlaceTripId(tripId);
       }),
     [subscribe, tripsById, showTripHere],
   );
@@ -673,6 +679,7 @@ export function PlanningBoard({
                       today={today}
                       vehicle={selectedVehicle}
                       blocked={crewChangeBlocked}
+                      geocoder={geocoder}
                     />
                   )
                 }

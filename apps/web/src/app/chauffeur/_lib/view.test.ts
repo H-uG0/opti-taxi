@@ -24,6 +24,9 @@ function makeStop(
     earliestArrivalMinute?: number | null;
     notes?: string | null;
     oneOffAddress?: boolean;
+    cancellationReason?: "INTERRUPTED" | null;
+    continuesTripId?: string | null;
+    continuation?: { status: TripStatus; routeId: string | null; plannedPickupMinute: number | null } | null;
   },
   completedAt: string | null = null,
   /** Driver id of the account that recorded completedAt (null: a regulator, or not recorded). */
@@ -56,6 +59,9 @@ function makeStop(
       notes: trip.notes ?? null,
       oneOffAddress: trip.oneOffAddress ?? false,
       payer: trip.payer ?? "CPAM",
+      cancellationReason: trip.cancellationReason ?? null,
+      continuesTripId: trip.continuesTripId ?? null,
+      continuation: trip.continuation ?? null,
       patientId: `patient_${tripId}`,
       recurrenceId: null,
       facilityId: "facility_1",
@@ -422,5 +428,30 @@ describe("buildRouteView", () => {
     expect(buildRouteView(withNotes, DRIVER, true).vehicle.depot.notes).toBe("Badge portail\u00a0: 0425");
     const blank = makeRoute([], { vehicle: { ...makeRoute([]).vehicle, depot: { ...depot, notes: "   " } } });
     expect(buildRouteView(blank, DRIVER, true).vehicle.depot.notes).toBeNull();
+  });
+
+  it("tells the crew left with a patient whose transport was interrupted that another vehicle picks them up (DAY-03)", () => {
+    const stuck = { direction: "RETURN" as const, patient: "Gabriel ISNARD", readyMinute: 600, status: "CANCELLED" as const, cancellationReason: "INTERRUPTED" as const };
+    const done = "2026-11-03T09:40:00+01:00";
+    const waiting = buildRouteView(makeRoute([makeStop(0, "trip_i", "PICKUP", stuck, done)]), DRIVER, true);
+    expect(waiting.stops[0]?.interrupted).toEqual({ pickupMinute: null });
+    expect(waiting.waitingPatients).toEqual([{ patient: waiting.stops[0]!.patient, pickupMinute: null }]);
+    const placed = { ...stuck, continuation: { status: "ASSIGNED" as const, routeId: "route_9", plannedPickupMinute: 700 } };
+    const coming = buildRouteView(makeRoute([makeStop(0, "trip_i", "PICKUP", placed, done)]), DRIVER, true);
+    expect(coming.waitingPatients).toEqual([{ patient: coming.stops[0]!.patient, pickupMinute: 700 }]);
+    const gone = { ...stuck, continuation: { status: "PICKED_UP" as const, routeId: "route_9", plannedPickupMinute: 700 } };
+    expect(buildRouteView(makeRoute([makeStop(0, "trip_i", "PICKUP", gone, done)]), DRIVER, true).waitingPatients).toEqual([]);
+  });
+
+  it("shows a continuation's pickup as the place of the interruption, never the care place", () => {
+    const resumed = { direction: "RETURN" as const, patient: "Gabriel ISNARD", readyMinute: 680, continuesTripId: "trip_i", oneOffAddress: false };
+    const view = buildRouteView(makeRoute([makeStop(0, "trip_c", "PICKUP", resumed), makeStop(1, "trip_c", "DROPOFF", resumed)]), DRIVER, true);
+    expect(view.stops[0]).toMatchObject({ resumesInterrupted: true, facility: null, keyTime: null, oneOffAddress: false });
+    expect(view.stops[1]).toMatchObject({ resumesInterrupted: false, interrupted: null });
+    const outbound = { ...resumed, direction: "OUTBOUND" as const, appointmentMinute: 840, oneOffAddress: true };
+    const there = buildRouteView(makeRoute([makeStop(0, "trip_c", "PICKUP", outbound), makeStop(1, "trip_c", "DROPOFF", outbound)]), DRIVER, true);
+    // Not « Adresse inhabituelle »: the place where the vehicle stopped.
+    expect(there.stops[0]).toMatchObject({ resumesInterrupted: true, oneOffAddress: false });
+    expect(there.stops[1]?.keyTime).toEqual({ label: "RDV", minute: 840 });
   });
 });

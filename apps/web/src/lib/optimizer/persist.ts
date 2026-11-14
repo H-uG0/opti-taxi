@@ -17,6 +17,7 @@ import {
 } from "@/lib/planning/plan-compare";
 import { placementsOf, planChanges, type PlanChanges } from "@/lib/planning/plan-changes";
 import { isStopDone } from "@/lib/planning/stop-done";
+import { doneOnRoutes, type DoneByRoute } from "@/lib/planning/day-progress";
 import { planStartedWrite, writePlacedRoutes } from "@/lib/planning/route-writes";
 import { loadPlanVersion, routesKey } from "@/lib/planning/version";
 import { formatLongDate, fromIsoDate } from "@/lib/time";
@@ -64,12 +65,13 @@ export type ReplanState = {
 };
 
 /**
- * Why the routes of isoDate cannot be replaced, or null: a validated planning (reopen it first), or a
- * day whose every route is finished (nothing left to plan). A day under way is re-planned after its
- * stops done (DAY-02): savePlan never deletes nor rewrites them.
+ * Why the routes of isoDate cannot be replaced, or null: a validated planning (reopen it first; on a day
+ * under way, « Réoptimiser la suite » once the regulator confirmed: `validatedUnderWay`), or a day whose
+ * every route is finished (nothing left to plan). A day under way is re-planned after its stops done
+ * (DAY-02): savePlan never deletes nor rewrites them, and keeps a validated plan validated.
  */
-export function replanBlockReason(isoDate: string, state: ReplanState): string | null {
-  if (state.validatedRoutes > 0) {
+export function replanBlockReason(isoDate: string, state: ReplanState, options: { validatedUnderWay?: boolean } = {}): string | null {
+  if (state.validatedRoutes > 0 && !(options.validatedUnderWay && isStarted(state))) {
     return `Le planning du ${formatLongDate(isoDate)} est validé\u00a0: rouvrez-le avant de le modifier.`;
   }
   const routes = state.routes ?? 0;
@@ -316,6 +318,11 @@ export type SavePlanCheck = {
   routesKey?: string;
   /** The day is under way: only the routes the plan touches are written, the stops done never. */
   started?: boolean;
+  /**
+   * On a day under way, the stops done now, read under the row locks (day-progress.ts doneOnRoutes): a held plan
+   * is checked against them, not against the progress its request was built with.
+   */
+  doneNow?: DoneByRoute;
 };
 
 /**
@@ -448,6 +455,8 @@ export async function savePlan(
      * over (AppSettings.trafficChangedAt): the caller records it in the audit trail.
      */
     onTrafficReset?: (tx: Prisma.TransactionClient) => Promise<void>;
+    /** The regulator confirmed re-planning a validated day under way (replanBlockReason). */
+    validatedUnderWay?: boolean;
     now?: Date;
   },
 ): Promise<SavePlanResult> {
@@ -461,7 +470,7 @@ export async function savePlan(
       // Serialized with the creation of runs and the validation of the date (day-lock.ts).
       await lockPlanningDay(tx, isoDate);
       const state = await lockReplanState(tx, isoDate, serviceDate);
-      const blocker = replanBlockReason(isoDate, state);
+      const blocker = replanBlockReason(isoDate, state, { validatedUnderWay: args.validatedUnderWay });
       if (blocker) throw new PlanBlockedError(blocker);
       const started = isStarted(state);
 
@@ -505,28 +514,33 @@ export async function savePlan(
           )
         : null;
       const key = inPlace ? routesKey(inPlace.routes) : routesKey([]);
-      await args.check?.({ tx, comparison, version: await loadPlanVersion(tx, isoDate), changes, routesKey: key, started });
+      // A day under way: the routes and their stops done as they are now, under the locks.
+      const stored = started
+        ? await tx.route.findMany({
+            where: { serviceDate },
+            select: {
+              id: true,
+              vehicleId: true,
+              startMinute: true,
+              stops: { select: { id: true, tripId: true, kind: true, sequence: true, completedAt: true, trip: { select: { status: true } } } },
+            },
+          })
+        : [];
+      const statuses = new Map(stored.flatMap((route) => route.stops.flatMap((stop) => (stop.trip ? [[stop.tripId, stop.trip.status] as const] : []))));
+      for (const trip of currentTrips) statuses.set(trip.id, trip.status);
+      const doneNow = started ? doneOnRoutes({ routes: stored, statusOf: (id) => statuses.get(id), request }) : undefined;
+      await args.check?.({ tx, comparison, version: await loadPlanVersion(tx, isoDate), changes, routesKey: key, started, doneNow });
 
       if (started) {
         // A day under way: the routes the plan touches, in place; the stops done and the untouched routes stay.
-        const stored = await tx.route.findMany({
-          where: { serviceDate },
-          select: {
-            id: true,
-            vehicleId: true,
-            startMinute: true,
-            stops: { select: { id: true, tripId: true, kind: true, sequence: true, completedAt: true, trip: { select: { status: true } } } },
-          },
-        });
-        const statuses = new Map(stored.flatMap((route) => route.stops.flatMap((stop) => (stop.trip ? [[stop.tripId, stop.trip.status] as const] : []))));
-        for (const trip of currentTrips) statuses.set(trip.id, trip.status);
         const write = planStartedWrite({ rows: routes, updates, stored, statusOf: (id) => statuses.get(id) });
         await writePlacedRoutes(tx, {
           serviceDate,
           write,
           storedByVehicle: new Map(stored.map((route) => [route.vehicleId, route])),
           matrixSource: response.meta.matrixSource,
-          status: "PROPOSED",
+          // A validated plan stays validated: its routes touched keep their status, a new one is validated too.
+          status: state.validatedRoutes > 0 ? "VALIDATED" : "PROPOSED",
           validatedAt: now,
           planRunId: runId,
           locks: new Map(),

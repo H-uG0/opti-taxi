@@ -117,6 +117,8 @@ export function demandOfDay(trips: readonly KpiTrip[]): DemandTotals {
   const revenue = { lying: { sum: 0, count: 0 }, seated: { sum: 0, count: 0 } };
   const lost: KpiTrip[] = [];
   for (const trip of trips) {
+    // A transport interrupted on the way (DAY-03) is one demand with its continuation: only the continuation counts.
+    if (trip.status === "CANCELLED" && trip.cancellationReason === "INTERRUPTED") continue;
     totals.requested += 1;
     const bucket = demandBucket(trip);
     if (bucket === "cancelledBefore") totals.cancelledBefore += 1;

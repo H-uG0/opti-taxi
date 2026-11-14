@@ -327,7 +327,8 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
           enregistré d&apos;office que s&apos;il ne comporte pas plus de violations de contraintes que le planning en
           place, et dans les limites ci-dessous&#x202F;; sinon le planning affiche le comparatif et vous choisissez de remplacer
           ou de garder les tournées actuelles. Un déplacement qui laisserait d&apos;autres courses sans véhicule
-          demande toujours confirmation, en nommant ces courses.
+          demande toujours confirmation, en nommant ces courses. Sur une journée commencée, «&#x202F;Réoptimiser la suite&#x202F;» ne
+          réécrit que les tournées qui changent&nbsp;: les arrêts faits et les patients à bord restent où ils sont.
         </Explanation>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field

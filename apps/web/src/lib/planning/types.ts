@@ -154,6 +154,13 @@ export type TripView = {
    * exceptional ambulance. Absent: false.
    */
   leftByOptimizer?: boolean;
+  /**
+   * A continuation (DAY-03): the patient was on board a vehicle that broke down (or lost its crew) and waits by it
+   * since `interruptedAtMinute` (null: not recorded); its pickup is that place. Absent or null: an ordinary trip.
+   */
+  continuation?: { interruptedAtMinute: number | null } | null;
+  /** Cancelled because its transport was interrupted (a continuation picks the patient up again). Absent: false. */
+  interrupted?: boolean;
 };
 
 export type UnassignedView = {

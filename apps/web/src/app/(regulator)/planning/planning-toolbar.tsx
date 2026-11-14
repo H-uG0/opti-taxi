@@ -42,7 +42,10 @@ export function PlanningToolbar({
 }: ToolbarProps) {
   const { busy, run, remoteRunning, optimizerOffline } = usePlanningActivity();
   const [confirmation, setConfirmation] = useState<string | null>(null);
+  /** The question of a validated day under way, before « Réoptimiser la suite » or « Placer les non affectées ». */
+  const [replanQuestion, setReplanQuestion] = useState<{ question: string; placeOnly: boolean } | null>(null);
   const validateRef = useRef<HTMLButtonElement>(null);
+  const optimizeRef = useRef<HTMLButtonElement>(null);
 
   /** « Revoir le planning » or Escape: the question closes and the focus goes back to « Valider le planning » (not to the page's top). */
   const dismiss = () => {
@@ -55,6 +58,19 @@ export function PlanningToolbar({
   const computing = remoteRunning === null ? runningReason : remoteRunning ? (runningReason ?? RUNNING_ELSEWHERE) : null;
   const optimizeOff = optimizeBlocked ?? computing ?? optimizerOffline;
   const validateOff = computing;
+
+  /** `confirmed`: the question of a validated day under way, answered (asked by the server first). */
+  const replan = (placeOnly: boolean, confirmed: string | null) => {
+    setReplanQuestion(null);
+    const task = placeOnly ? () => placeUnassigned(date, confirmed) : () => optimizeDay(date, confirmed);
+    run(placeOnly ? "Placement des courses non affectées…" : "Optimisation en cours…", task, {
+      long: true,
+      onResult: (result) => {
+        // Only the question asked before computing; a plan held after it waits in its own banner.
+        if (!result.ok && result.askedFirst) setReplanQuestion({ question: result.error, placeOnly });
+      },
+    });
+  };
 
   /** `confirmed`: the question answered « Valider quand même » (asked again if the issues changed since). */
   const validate = (confirmed: string | null) => {
@@ -69,7 +85,8 @@ export function PlanningToolbar({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button
-        onClick={() => run("Optimisation en cours…", () => optimizeDay(date), { long: true })}
+        ref={optimizeRef}
+        onClick={() => replan(false, null)}
         disabled={busy || optimizeOff !== null}
         title={optimizeOff ?? optimizeHint ?? "Calcule les tournées\u202f; les courses figées restent sur leur véhicule"}
         aria-describedby={optimizeOff ? "optimize-blocked" : undefined}
@@ -86,7 +103,7 @@ export function PlanningToolbar({
       {unassignedCount > 0 ? (
         <Button
           variant="secondary"
-          onClick={() => run("Placement des courses non affectées…", () => placeUnassigned(date), { long: true })}
+          onClick={() => replan(true, null)}
           disabled={busy || optimizeOff !== null}
           title={
             optimizeOff ??
@@ -98,6 +115,23 @@ export function PlanningToolbar({
           Placer les non affectées
           <span className="tabular rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-900">{unassignedCount}</span>
         </Button>
+      ) : null}
+
+      {replanQuestion ? (
+        // A validated day under way: its routes stay validated, the roadmaps of those that change move at once.
+        <ConfirmPanel
+          question={replanQuestion.question}
+          confirmLabel={replanQuestion.placeOnly ? "Oui, placer" : "Oui, réoptimiser la suite"}
+          keepLabel="Non"
+          tone="primary"
+          onKeep={() => {
+            setReplanQuestion(null);
+            optimizeRef.current?.focus();
+          }}
+          onConfirm={() => replan(replanQuestion.placeOnly, replanQuestion.question)}
+          pending={busy}
+          className="basis-full border-amber-200 bg-amber-50 [&>div:first-child]:text-amber-950"
+        />
       ) : null}
 
       {canValidate ? (

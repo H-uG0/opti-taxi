@@ -6,7 +6,7 @@
 import type { Mobility, RouteStatus, StopKind, VehicleType } from "@prisma/client";
 import { dayHoursText, facilityHoursOn } from "@/lib/domain/facility-hours";
 import { minuteOfDay, toIsoDate } from "@/lib/time";
-import type { DriverRoute } from "./load";
+import type { DriverRoute, DriverRouteStop } from "./load";
 import { phoneContact, telHref, type PhoneContact } from "./links";
 import { plannedTapMinute, recordedLateness, type RecordedLateness } from "./punctuality";
 import {
@@ -89,6 +89,13 @@ export type StopView = {
    * "patient absent": the patient is probably not at the facility.
    */
   outboundNoShow: boolean;
+  /**
+   * The transport of this patient was interrupted (breakdown, crew unavailable: DAY-03) while they were on board:
+   * another vehicle picks them up again, at `pickupMinute` once placed (null: not yet). Null otherwise.
+   */
+  interrupted: { pickupMinute: number | null } | null;
+  /** Pickup of a continuation: the patient waits where their transport was interrupted (never the care place). */
+  resumesInterrupted: boolean;
   controls: StopControls;
 };
 
@@ -117,11 +124,29 @@ export type RouteView = {
   partnerPhone: PhoneContact | null;
   progress: { closed: number; total: number };
   stops: StopView[];
+  /**
+   * Patients of the route whose transport was interrupted and who still wait for the vehicle that picks them up
+   * again: the crew stays with them (the roadmap does not say « retour au dépôt » yet).
+   */
+  waitingPatients: { patient: string; pickupMinute: number | null }[];
   nextStop: StopView | null;
   timeline: TimelineItem<StopView>[];
 };
 
 const NOT_RIDING = new Set(["NO_SHOW", "CANCELLED"]);
+
+/** The continuation of an interrupted transport, as the crew left with the patient is told of it. */
+function interruptionOf(trip: DriverRouteStop["trip"]): StopView["interrupted"] {
+  if (trip.status !== "CANCELLED" || trip.cancellationReason !== "INTERRUPTED") return null;
+  const placed = trip.continuation?.routeId ? trip.continuation.plannedPickupMinute : null;
+  return { pickupMinute: placed ?? null };
+}
+
+/** The continuation of the trip of this stop is picked up (or done, or closed): the patient no longer waits. */
+function continuationPickedUp(route: DriverRoute, stopId: string): boolean {
+  const status = route.stops.find((stop) => stop.id === stopId)?.trip.continuation?.status;
+  return status !== undefined && status !== "PLANNED" && status !== "ASSIGNED";
+}
 
 /** « Accueil de 07:00 à 19:00 » on the route's day, null when the facility has no hours (or when not loaded). */
 function facilityHoursText(
@@ -189,8 +214,10 @@ export function buildRouteView(
     .sort((a, b) => a.sequence - b.sequence)
     .map((stop, index) => {
       const { trip } = stop;
+      // A continuation's pickup is where the transport was interrupted: a free address, never the care place.
+      const resumesInterrupted = stop.kind === "PICKUP" && trip.continuesTripId !== null;
       // Outbound dropoff or return pickup: the care place (or a private client's free address), never the home.
-      const careStop = isFacilityStop(stop.kind, trip.direction);
+      const careStop = isFacilityStop(stop.kind, trip.direction) && !resumesInterrupted;
       const facilityStop = careStop && trip.facility !== null;
       const state = stopState({ kind: stop.kind, completedAt: stop.completedAt, tripStatus: trip.status });
       // The appointment an outbound dropoff is judged against.
@@ -230,7 +257,7 @@ export function buildRouteView(
         phoneHref: telHref(trip.patient.phone),
         mobility: trip.patient.mobility,
         accessNotes: careStop || trip.oneOffAddress ? null : trip.patient.accessNotes?.trim() || null,
-        oneOffAddress: !careStop && trip.oneOffAddress,
+        oneOffAddress: !careStop && !resumesInterrupted && trip.oneOffAddress,
         tripNotes: trip.notes?.trim() || null,
         facility:
           facilityStop && trip.facility
@@ -243,12 +270,14 @@ export function buildRouteView(
               }
             : null,
         payOnBoard: trip.payer === "PRIVATE",
-        keyTime: stopKeyTime({
-          kind: stop.kind,
-          direction: trip.direction,
-          appointmentMinute: trip.appointmentMinute,
-          readyMinute: trip.readyMinute,
-        }),
+        keyTime: resumesInterrupted
+          ? null
+          : stopKeyTime({
+              kind: stop.kind,
+              direction: trip.direction,
+              appointmentMinute: trip.appointmentMinute,
+              readyMinute: trip.readyMinute,
+            }),
         sharedWith: (shared.get(stop.tripId) ?? []).map((tripId) => nameOfTrip.get(tripId) ?? "Autre patient"),
         onBoardAfter: onBoard.get(stop.id) ?? 0,
         outboundNoShow:
@@ -256,6 +285,8 @@ export function buildRouteView(
           trip.direction === "RETURN" &&
           state === "pending" &&
           returnTripsAfterOutboundNoShow.has(stop.tripId),
+        interrupted: interruptionOf(trip),
+        resumesInterrupted,
         controls: stopControls(
           { kind: stop.kind, completedAt: stop.completedAt, tripStatus: trip.status, isLatestCompleted: stop.id === latestId },
           editable,
@@ -291,6 +322,11 @@ export function buildRouteView(
     partnerPhone: partner ? phoneContact(partner.phone) : null,
     progress: routeProgress(like),
     stops,
+    waitingPatients: stops.flatMap((stop) =>
+      stop.kind === "PICKUP" && stop.interrupted && !continuationPickedUp(route, stop.id)
+        ? [{ patient: stop.patient, pickupMinute: stop.interrupted.pickupMinute }]
+        : [],
+    ),
     nextStop: stops.find((stop) => stop.isNext) ?? null,
     timeline: buildTimeline(
       stops.map((stop) => ({ ...stop, sequence: stop.position, startMinute: stop.plannedMinute })),

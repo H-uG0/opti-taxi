@@ -85,6 +85,11 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
               oneOffAddress: true,
               // A private client pays on board (no CPAM billing).
               payer: true,
+              // A transport interrupted (DAY-03): the patient left on board is picked up again by a continuation,
+              // whose time the crew is told once placed; a continuation's pickup is where the vehicle stopped.
+              cancellationReason: true,
+              continuesTripId: true,
+              continuation: { select: { status: true, routeId: true, plannedPickupMinute: true } },
               // Server-side only: pair the return leg with its outbound leg (never sent to the client).
               patientId: true,
               recurrenceId: true,

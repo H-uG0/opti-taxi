@@ -32,13 +32,20 @@ export async function loadKpiFleet(prisma: FleetClient, dates: readonly string[]
       select: { id: true, label: true, type: true, active: true, depotId: true, defaultDriverId: true, defaultCrewMateId: true },
     }),
     prisma.driver.findMany({ select: { ...driverInputSelect, qualifications: true, depotId: true } }),
-    prisma.staffAbsence.findMany({ where: covering, select: { driverId: true, kind: true, startDate: true, endDate: true } }),
+    // With their hours: a partial day (out of service from 14:00) is a day worked, not a day off the road.
+    prisma.staffAbsence.findMany({
+      where: covering,
+      select: { driverId: true, kind: true, startDate: true, endDate: true, startMinute: true, endMinute: true },
+    }),
     prisma.crewIncompatibility.findMany({ select: { driverAId: true, driverBId: true } }),
     prisma.dayCrew.findMany({
       where: { serviceDate: { in: sorted.map(fromIsoDate) } },
       select: { serviceDate: true, vehicleId: true, driverId: true, crewMateId: true },
     }),
-    prisma.vehicleUnavailability.findMany({ where: covering, select: { vehicleId: true, kind: true, startDate: true, endDate: true } }),
+    prisma.vehicleUnavailability.findMany({
+      where: covering,
+      select: { vehicleId: true, kind: true, startDate: true, endDate: true, startMinute: true, endMinute: true },
+    }),
     prisma.depot.findMany({ select: { id: true, name: true, lat: true, lng: true } }),
     loadCrewRules(prisma),
   ]);

@@ -29,29 +29,51 @@ export type StopWrites = {
 };
 
 export function planStopWrites(
-  stored: readonly Pick<StoredStopRef, "id" | "tripId" | "kind">[],
+  stored: readonly Pick<StoredStopRef, "id" | "tripId" | "kind" | "sequence">[],
   rows: readonly StopRow[],
   frozen: ReadonlySet<string> = new Set(),
 ): StopWrites {
   const byKey = new Map(stored.map((stop) => [`${stop.tripId}:${stop.kind}`, stop.id]));
+  const storedOf = new Map<number, string>();
   const kept = new Set<string>();
-  const updates: StopWrites["updates"] = [];
-  const creates: StopRow[] = [];
-  for (const row of rows) {
+  rows.forEach((row, index) => {
     const id = byKey.get(`${row.tripId}:${row.kind}`);
     if (id !== undefined && !kept.has(id)) {
       kept.add(id);
-      updates.push({ id, data: frozen.has(id) ? { sequence: row.sequence } : row });
-    } else {
-      creates.push(row);
+      storedOf.set(index, id);
     }
-  }
-  // A frozen stop never leaves its route. One the plan no longer carries (its trip closed since, an interrupted
-  // transport) keeps its row, after the plan's stops, in its former order: never a position another stop holds.
-  let next = rows.length;
-  for (const stop of stored) {
-    if (frozen.has(stop.id) && !kept.has(stop.id)) updates.push({ id: stop.id, data: { sequence: next++ } });
-  }
+  });
+  // A frozen stop never leaves its route. One the plan no longer carries (its trip closed since: a patient absent,
+  // an interrupted transport) is history: it keeps its place among the stops done, right after the stops kept that
+  // came before it (its route is then the same for the next computation); at the end when positions are unknown.
+  const sequenceOf = new Map(stored.map((stop) => [stop.id, stop.sequence]));
+  const history = stored
+    .filter((stop) => frozen.has(stop.id) && !kept.has(stop.id))
+    .sort((a, b) => (a.sequence ?? Infinity) - (b.sequence ?? Infinity));
+  const slotOf = (stop: (typeof history)[number]): number => {
+    if (stop.sequence === undefined) return rows.length;
+    let slot = 0;
+    rows.forEach((_, index) => {
+      const before = sequenceOf.get(storedOf.get(index) ?? "");
+      if (before !== undefined && before < stop.sequence!) slot = index + 1;
+    });
+    return slot;
+  };
+  const slots = history.map((stop) => ({ stop, slot: slotOf(stop) }));
+  const updates: StopWrites["updates"] = [];
+  const creates: StopRow[] = [];
+  let position = 0;
+  const historyAt = (slot: number) => {
+    for (const { stop } of slots.filter((entry) => entry.slot === slot)) updates.push({ id: stop.id, data: { sequence: position++ } });
+  };
+  rows.forEach((row, index) => {
+    historyAt(index);
+    const sequence = position++;
+    const id = storedOf.get(index);
+    if (id !== undefined) updates.push({ id, data: frozen.has(id) ? { sequence } : { ...row, sequence } });
+    else creates.push({ ...row, sequence });
+  });
+  historyAt(rows.length);
   return { deleteIds: stored.filter((stop) => !kept.has(stop.id) && !frozen.has(stop.id)).map((stop) => stop.id), updates, creates };
 }
 
@@ -64,6 +86,11 @@ export type PlaceWrite = {
   routes: { routeId: string | null; row: RouteRow }[];
   /** Routes in place left without any stop: deleted (their trips have gone elsewhere). */
   deletedRouteIds: string[];
+  /**
+   * Stops still to do of a route in place the plan no longer carries but which keeps its stops done (a vehicle the
+   * request left out, a route whose only stops done are history): deleted, their trips planned elsewhere.
+   */
+  deletedStopIds?: string[];
   /** Results of the trips of these routes (persist.ts planTripUpdates). */
   trips: TripWrite[];
 };
@@ -98,11 +125,14 @@ export type StartedStoredRoute = {
 /**
  * What a plan of a day under way writes (DAY-02, « Réoptimiser la suite »): only the routes it
  * touches. A route whose stops come in the same order is left as it is (its times too: the driver's
- * roadmap does not move for nothing); a touched route keeps its id, crew and start (its stops done
- * are behind it) and its stops done (writePlacedRoutes); a stored route the plan no longer has is deleted, unless a stop of
- * it is done (never: the optimizer heads each started route with its stops done). The trips written are
- * those of the touched, created and deleted routes and those that change vehicle; a planned minute of a
- * stop done is not rewritten. `frozenStopIds`: the stops done, for planStopWrites.
+ * roadmap does not move for nothing), the stops done of trips the plan does not carry aside (history: a
+ * patient absent, an interrupted transport); a touched route keeps its id, crew and start (its stops done
+ * are behind it) and its stops done (writePlacedRoutes). A stored route the plan no longer has is deleted,
+ * unless a stop of it is done: then it keeps its stops done (a vehicle the request left out, or whose only
+ * stops done are history) and loses its stops still to do of trips the plan places (deletedStopIds), never
+ * twice on two routes. The trips written are those of the touched, created and deleted routes and those
+ * that change vehicle, never a trip with a stop done on a route the plan does not carry; a planned minute of
+ * a stop done is not rewritten. `frozenStopIds`: the stops done, for planStopWrites.
  */
 export function planStartedWrite(args: {
   rows: readonly RouteRow[];
@@ -125,12 +155,16 @@ export function planStartedWrite(args: {
     }
   }
   const order = (stops: readonly { tripId: string; kind: StopKind }[]) => stops.map((s) => `${s.tripId}/${s.kind}`).join(" ");
+  const carried = new Set(rows.flatMap((row) => row.stops.map((stop) => stop.tripId)));
+  // A stop done of a trip the plan does not carry is history: it stays where it is and does not make a route touched.
+  const current = (route: StartedStoredRoute) =>
+    [...route.stops].sort((a, b) => a.sequence - b.sequence).filter((stop) => !(frozenStopIds.has(stop.id) && !carried.has(stop.tripId)));
   const written: PlaceWrite["routes"] = [];
   const touched = new Set<string>();
   let untouched = 0;
   for (const row of rows) {
     const route = storedByVehicle.get(row.vehicleId);
-    if (route && order([...route.stops].sort((a, b) => a.sequence - b.sequence)) === order(row.stops)) {
+    if (route && order(current(route)) === order(row.stops)) {
       untouched += 1;
       continue;
     }
@@ -143,13 +177,30 @@ export function planStartedWrite(args: {
     written.push({ routeId: route.id, row: started ? { ...row, startMinute: route.startMinute } : row });
   }
   const planned = new Set(rows.map((row) => row.vehicleId));
-  const deleted = stored.filter((route) => !planned.has(route.vehicleId) && !route.stops.some((stop) => frozenStopIds.has(stop.id)));
+  const unplanned = stored.filter((route) => !planned.has(route.vehicleId));
+  const deleted = unplanned.filter((route) => !route.stops.some((stop) => frozenStopIds.has(stop.id)));
   for (const route of deleted) touched.add(route.vehicleId);
+  // A route kept for its stops done: its stops still to do of trips the plan places leave it.
+  const placed = new Set(updates.map((update) => update.tripId));
+  const kept = unplanned.filter((route) => route.stops.some((stop) => frozenStopIds.has(stop.id)));
+  const deletedStopIds = kept.flatMap((route) =>
+    route.stops.filter((stop) => !frozenStopIds.has(stop.id) && placed.has(stop.tripId)).map((stop) => stop.id),
+  );
+  // Never a trip whose stops done stay on a route the plan does not carry: what was done there is a fact.
+  const held = new Set(kept.flatMap((route) => route.stops.filter((stop) => frozenStopIds.has(stop.id)).map((stop) => stop.tripId)));
   const changed = updates.filter((update) => {
+    if (held.has(update.tripId)) return false;
     const before = vehicleOf.get(update.tripId) ?? null;
     return before !== update.vehicleId || (before !== null && touched.has(before));
   });
-  return { routes: written, deletedRouteIds: deleted.map((route) => route.id), trips: keepDoneMinutes(changed, doneKeys), frozenStopIds, untouched };
+  return {
+    routes: written,
+    deletedRouteIds: deleted.map((route) => route.id),
+    ...(deletedStopIds.length > 0 ? { deletedStopIds } : {}),
+    trips: keepDoneMinutes(changed, doneKeys),
+    frozenStopIds,
+    untouched,
+  };
 }
 
 /**
@@ -164,7 +215,7 @@ export async function writePlacedRoutes(
   args: {
     serviceDate: Date;
     write: PlaceWrite;
-    storedByVehicle: ReadonlyMap<string, { stops: readonly Pick<StoredStopRef, "id" | "tripId" | "kind">[] }>;
+    storedByVehicle: ReadonlyMap<string, { stops: readonly Pick<StoredStopRef, "id" | "tripId" | "kind" | "sequence">[] }>;
     matrixSource: string;
     status: RouteStatus;
     validatedAt: Date;
@@ -222,6 +273,9 @@ export async function writePlacedRoutes(
         ...(locks.has(update.tripId) ? { lockedVehicleId: locks.get(update.tripId) ?? null } : {}),
       },
     });
+  }
+  if (write.deletedStopIds && write.deletedStopIds.length > 0) {
+    await tx.routeStop.deleteMany({ where: { id: { in: write.deletedStopIds }, completedAt: null } });
   }
   if (write.deletedRouteIds.length > 0) await tx.route.deleteMany({ where: { id: { in: write.deletedRouteIds } } });
 }

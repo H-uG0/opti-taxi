@@ -111,6 +111,39 @@ describe("planStartedWrite (« Réoptimiser la suite », DAY-02)", () => {
     expect(t2.data.plannedDropoffMinute).toBe(690);
   });
 
+  it("leaves a route alone when only its history differs (a patient absent earlier: their pickup done, not sent)", () => {
+    // t0's patient was absent: its pickup is done (by its status), its dropoff still on the route; the plan carries neither.
+    const withAbsent: StartedStoredRoute[] = [
+      { ...stored[2]!, stops: [storedStop("t0", "PICKUP", 0), storedStop("t5", "PICKUP", 1), storedStop("t5", "DROPOFF", 2)] },
+    ];
+    const status = (id: string) => (id === "t0" ? ("NO_SHOW" as const) : ("ASSIGNED" as const));
+    const first = planStartedWrite({ rows: [rows[2]!], updates: [update("t5", "taxi_3")], stored: withAbsent, statusOf: status });
+    expect(first.untouched).toBe(1);
+    expect(first.routes).toEqual([]);
+    // With its absent patient's dropoff still on it, the route is written once (the dropoff leaves); the pickup stays.
+    const pending: StartedStoredRoute[] = [{ ...withAbsent[0]!, stops: [...withAbsent[0]!.stops, storedStop("t0", "DROPOFF", 3)] }];
+    const second = planStartedWrite({ rows: [rows[2]!], updates: [update("t5", "taxi_3")], stored: pending, statusOf: status });
+    expect(second.routes.map((r) => r.routeId)).toEqual(["route-3"]);
+    expect([...second.frozenStopIds]).toEqual(["t0-PICKUP"]);
+  });
+
+  it("keeps the stops done of a vehicle the plan leaves out, takes its stops to do off, never rewrites what was done there", () => {
+    // Taxi 1 is no longer sent (a whole-day unavailability recorded since): t3, still to do, goes to taxi 2.
+    const outside = planStartedWrite({
+      rows: [rows[1]!, rows[2]!],
+      updates: [update("t3", "taxi_2"), update("t4", "taxi_2"), update("t5", "taxi_3")],
+      stored,
+      statusOf: (id) => (id === "t1" ? "DROPPED_OFF" : id === "t2" ? "PICKED_UP" : "ASSIGNED"),
+    });
+    expect(outside.deletedRouteIds).toEqual([]);
+    // t3 leaves taxi 1 (written on taxi 2); t2, on board, keeps its dropoff on taxi 1 (not sent, not placed elsewhere).
+    expect(outside.deletedStopIds).toEqual(["t3-PICKUP", "t3-DROPOFF"]);
+    expect(outside.trips.map((t) => t.tripId)).toEqual(["t3", "t4"]);
+    // A trip done there is never rewritten, even if a plan carried it elsewhere.
+    const careless = planStartedWrite({ rows: [rows[1]!], updates: [update("t1", "taxi_2")], stored, statusOf: (id) => (id === "t1" ? "DROPPED_OFF" : undefined) });
+    expect(careless.trips.map((t) => t.tripId)).toEqual([]);
+  });
+
   it("deletes a route left without stops, never one with a stop done", () => {
     const gone = planStartedWrite({ rows: rows.slice(0, 1), updates: [], stored, statusOf: () => undefined });
     expect(gone.deletedRouteIds).toEqual(["route-2", "route-3"]);
@@ -134,13 +167,24 @@ describe("planStopWrites with stops done", () => {
     expect(writes.updates[3]).toMatchObject({ id: "t2-DROPOFF", data: { sequence: 4, startMinute: 604 } });
     expect(writes.deleteIds).toEqual(["t3-PICKUP", "t3-DROPOFF"]);
     expect(writes.creates.map((c) => `${c.tripId}:${c.kind}`)).toEqual(["t7:PICKUP", "t7:DROPOFF"]);
-    // A stop done the plan no longer carries (its trip closed since: an interrupted transport) stays, after the plan's stops.
-    const closed = planStopWrites(stored[0]!.stops, [stopRow("t2", "PICKUP", 0)], new Set(["t1-PICKUP", "t2-PICKUP"]));
-    expect(closed.deleteIds).not.toContain("t1-PICKUP");
-    expect(closed.updates).toEqual([
-      { id: "t2-PICKUP", data: { sequence: 0 } },
-      { id: "t1-PICKUP", data: { sequence: 1 } },
+    // A stop done the plan no longer carries (its trip closed since: a patient absent, an interrupted transport) is
+    // history: it stays at its place among the stops done, never after the stops to do.
+    const closed = planStopWrites(
+      stored[0]!.stops,
+      [stopRow("t1", "PICKUP", 0), stopRow("t2", "PICKUP", 1), stopRow("t2", "DROPOFF", 2)],
+      new Set(["t1-PICKUP", "t1-DROPOFF", "t2-PICKUP"]),
+    );
+    expect(closed.deleteIds).toEqual(["t3-PICKUP", "t3-DROPOFF"]);
+    expect(closed.updates.map((u) => [u.id, u.data.sequence])).toEqual([
+      ["t1-PICKUP", 0],
+      ["t1-DROPOFF", 1],
+      ["t2-PICKUP", 2],
+      ["t2-DROPOFF", 3],
     ]);
+    // Without positions, at the end.
+    const unknown = planStopWrites([{ id: "x-PICKUP", tripId: "x", kind: "PICKUP" }], [stopRow("t2", "PICKUP", 0)], new Set(["x-PICKUP"]));
+    expect(unknown.updates).toEqual([{ id: "x-PICKUP", data: { sequence: 1 } }]);
+    expect(unknown.creates.map((c) => c.sequence)).toEqual([0]);
   });
 });
 

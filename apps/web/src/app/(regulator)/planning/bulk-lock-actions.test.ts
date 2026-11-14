@@ -209,7 +209,7 @@ describe("placeUnassigned", () => {
   it("runs a computation that places only the trips without a vehicle", async () => {
     run.runOptimization.mockResolvedValue({ ok: true, message: "1 course placée sur 1 non affectée.", runId: "r" });
     expect(await placeUnassigned(DATE)).toEqual({ ok: true, message: "1 course placée sur 1 non affectée." });
-    expect(run.runOptimization).toHaveBeenCalledWith(DATE, expect.objectContaining({ id: "u1" }), { placeOnly: true });
+    expect(run.runOptimization).toHaveBeenCalledWith(DATE, expect.objectContaining({ id: "u1" }), { placeOnly: true, confirmed: null });
     expect(await placeUnassigned("demain")).toMatchObject({ ok: false, error: "Date invalide." });
   });
 });

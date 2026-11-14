@@ -49,7 +49,7 @@ describe("PlanningToolbar (barre d'outils)", () => {
     expect(place.textContent).toContain("3");
     expect(place.getAttribute("title")).toMatch(/^Place les 3 courses non affectées dans les tournées en place/);
     fireEvent.click(place);
-    await waitFor(() => expect(actions.placeUnassigned).toHaveBeenCalledWith("2026-11-10"));
+    await waitFor(() => expect(actions.placeUnassigned).toHaveBeenCalledWith("2026-11-10", null));
     // The result shows in the toast.
     expect(await screen.findByText("2 courses placées sur 3 non affectées.")).toBeTruthy();
     cleanup();
@@ -65,7 +65,21 @@ describe("PlanningToolbar (barre d'outils)", () => {
   it("optimizes the date", async () => {
     renderToolbar();
     fireEvent.click(screen.getByRole("button", { name: /Optimiser demain/ }));
-    await waitFor(() => expect(actions.optimizeDay).toHaveBeenCalledWith("2026-11-10"));
+    await waitFor(() => expect(actions.optimizeDay).toHaveBeenCalledWith("2026-11-10", null));
+  });
+
+  it("asks first on a validated day under way, then re-plans the rest with the answer (DAY-02)", async () => {
+    const question = "Planning validé et journée commencée\u00a0: … Réoptimiser la suite quand même\u202f?";
+    const answer = async (_date: string, confirmed: string | null) =>
+      confirmed === question
+        ? { ok: true, message: "Suite de la journée réoptimisée." }
+        : { ok: false, error: question, needsConfirmation: true, askedFirst: true };
+    actions.optimizeDay.mockImplementationOnce(answer as never).mockImplementationOnce(answer as never);
+    renderToolbar({ optimizeLabel: "Réoptimiser la suite" });
+    fireEvent.click(screen.getByRole("button", { name: /Réoptimiser la suite/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Oui, réoptimiser la suite" }));
+    await waitFor(() => expect(actions.optimizeDay).toHaveBeenLastCalledWith("2026-11-10", question));
+    expect(await screen.findByText("Suite de la journée réoptimisée.")).toBeTruthy();
   });
 
   it("disables the buttons with the reason while a computation runs elsewhere", () => {

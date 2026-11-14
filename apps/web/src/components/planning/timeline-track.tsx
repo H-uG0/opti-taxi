@@ -321,7 +321,9 @@ function AppointmentLine({ mark, range, compact }: { mark: AppointmentMark; rang
   const left = percentOf(mark.minute, range);
   const margin = mark.tight && mark.marginMin !== null ? ` · ${marginText(mark.marginMin)}` : "";
   const label =
-    mark.kind === "appointment" ? `RDV ${formatMinute(mark.minute)}${margin}` : `Fin de séance ${formatMinute(mark.minute)}`;
+    mark.kind === "appointment"
+      ? `RDV ${formatMinute(mark.minute)}${margin}`
+      : `${mark.resumes ? "Reprise dès" : "Fin de séance"} ${formatMinute(mark.minute)}`;
   return (
     <span
       aria-hidden

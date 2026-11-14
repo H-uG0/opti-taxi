@@ -20,13 +20,14 @@
  * The answer for one vehicle (`vehicleIds`) is the check of a manual move onto it: the base of the
  * drag-and-drop draft (INS-03).
  */
-import type { RouteStatus, StopKind } from "@prisma/client";
+import type { RouteStatus, StopKind, TripStatus } from "@prisma/client";
 import type { DayRequest, InsertOption, InsertRequest, InsertResponse, Violation } from "@/lib/optimizer/contract";
 import { planRoutes, planTripUpdates, type CurrentTrip, type VehicleCrew } from "@/lib/optimizer/persist";
 import { formatMinute } from "@/lib/time";
 import { isDrivable, routesInPlace, type TodayCrew } from "./plan-compare";
 import { marginText, signedKmText, type PlaceRejectionView, type PlacesView } from "./place-view";
 import { relevantViolations } from "./refresh-routes";
+import { isStopDone } from "./stop-done";
 import type { PlaceWrite } from "./route-writes";
 
 /** A route of the date as « Où placer » reads it. */
@@ -63,18 +64,43 @@ export const ROUTE_HOLD_REASONS: Record<RouteHold, string> = {
   CREW: "a une tournée prévue avec un autre équipage que celui du jour (voir «\u202fÀ traiter\u202f»)",
 };
 
+/** Statuses of a trip closed for good: once one of its stops is done, its stops on the route are history. */
+const CLOSED_STATUSES: readonly TripStatus[] = ["NO_SHOW", "CANCELLED"];
+
+/**
+ * Trips of the route closed after a stop of theirs was done (a patient absent, a transport interrupted): their
+ * stops are history, not stops left to do; the request leaves them out (routesInPlace) and the writes keep the
+ * stops done in place (route-writes.ts).
+ */
+export function historyTripIds(
+  stops: readonly Pick<StoredPlaceRoute["stops"][number], "tripId" | "kind" | "completedAt">[],
+  statusOf: (tripId: string) => TripStatus | undefined,
+): Set<string> {
+  return new Set(
+    stops
+      .filter((stop) => {
+        const status = statusOf(stop.tripId);
+        return status !== undefined && CLOSED_STATUSES.includes(status) && isStopDone(stop, status);
+      })
+      .map((stop) => stop.tripId),
+  );
+}
+
 /**
  * Why the route cannot change now, or null: a vehicle off the road that day (no crew of the day: not
- * sent), a stop of a trip the request does not carry, or a crew that is no longer the vehicle's of
- * the day. A route under way can change after its stops done (the optimizer keeps them).
+ * sent), a stop of a trip the request does not carry (history aside: historyTripIds), or a crew that is
+ * no longer the vehicle's of the day. A route under way can change after its stops done (the optimizer
+ * keeps them).
  */
 export function routeHold(
   route: Pick<StoredPlaceRoute, "vehicleId" | "driverId" | "crewMateId" | "stops">,
   sentTripIds: ReadonlySet<string>,
   todayCrews: ReadonlyMap<string, TodayCrew>,
+  statusOf: (tripId: string) => TripStatus | undefined = () => undefined,
 ): RouteHold | null {
   if (!todayCrews.has(route.vehicleId)) return "UNAVAILABLE";
-  if (route.stops.some((stop) => !sentTripIds.has(stop.tripId))) return "OFF_REQUEST";
+  const history = historyTripIds(route.stops, statusOf);
+  if (route.stops.some((stop) => !sentTripIds.has(stop.tripId) && !history.has(stop.tripId))) return "OFF_REQUEST";
   if (!isDrivable(route, todayCrews)) return "CREW";
   return null;
 }

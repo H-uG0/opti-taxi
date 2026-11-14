@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildProgress, doneKeys, minuteOn, planHoldsProgress, type ProgressRoute } from "./day-progress";
+import { buildProgress, doneKeys, doneOnRoutes, minuteOn, planHoldsProgress, startedOutsideProgress, type ProgressRoute } from "./day-progress";
 
 /** 11:00 in Paris on 2026-11-14 (UTC+1). */
 const NOW = new Date("2026-11-14T10:00:00Z");
@@ -109,5 +109,43 @@ describe("planHoldsProgress", () => {
 
   it("lists the stops done as keys", () => {
     expect([...doneKeys(progress)]).toEqual(["t1/PICKUP"]);
+  });
+});
+
+describe("startedOutsideProgress (a vehicle the request no longer sends)", () => {
+  it("leaves out of the request the trips started on a route the progress does not carry, and those recorded by the field alone", () => {
+    // Taxi 2 was made unavailable for the whole day after t1 was dropped off and t2 picked up: it is not sent.
+    const routes = [route({ vehicleId: "taxi_9" })];
+    const statusOf = (id: string) => (({ t1: "DROPPED_OFF", t2: "PICKED_UP", t3: "ASSIGNED" }) as const)[id as "t1" | "t2" | "t3"];
+    const progress = buildProgress({ isoDate: "2026-11-14", now: NOW, routes, statusOf, request });
+    expect(progress?.routes).toEqual([]);
+    expect([...startedOutsideProgress({ routes, statusOf, tripIds: ["t1", "t2", "t3"], progress: progress! })]).toEqual(["t1", "t2"]);
+    // Carried by the progress of a vehicle sent: nothing left out; a trip picked up with no stop on any route is.
+    const sentRoutes = [route()];
+    const carried = buildProgress({ isoDate: "2026-11-14", now: NOW, routes: sentRoutes, statusOf, request })!;
+    expect([...startedOutsideProgress({ routes: sentRoutes, statusOf, tripIds: ["t1", "t2", "t3"], progress: carried })]).toEqual([]);
+    const loose = (id: string) => (id === "t3" ? "PICKED_UP" : statusOf(id));
+    expect([...startedOutsideProgress({ routes: sentRoutes, statusOf: loose, tripIds: ["t1", "t2", "t3"], progress: carried })]).toEqual(["t3"]);
+  });
+});
+
+describe("doneOnRoutes (a held plan checked under the locks)", () => {
+  it("reads the stops done as the progress would carry them, without their times", () => {
+    expect(doneOnRoutes({ routes: [route(), route({ vehicleId: "taxi_9" })], statusOf: () => undefined, request })).toEqual({
+      routes: [
+        {
+          vehicleId: "taxi_1",
+          done: [
+            { tripId: "t1", kind: "PICKUP" },
+            { tripId: "t1", kind: "DROPOFF" },
+            { tripId: "t2", kind: "PICKUP" },
+          ],
+        },
+      ],
+    });
+    // A stop done since the request was built: a plan that moved that trip no longer holds.
+    const now = doneOnRoutes({ routes: [route()], statusOf: (id) => (id === "t3" ? "PICKED_UP" : undefined), request });
+    const plan = { routes: [{ vehicleId: "taxi_1", stops: route().stops.filter((s) => s.tripId !== "t3") }, { vehicleId: "taxi_2", stops: route().stops.filter((s) => s.tripId === "t3") }] };
+    expect(planHoldsProgress(plan, now)).toBe(false);
   });
 });

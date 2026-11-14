@@ -56,6 +56,7 @@ import type {
   ViolationView,
 } from "./types";
 import { frenchSpacing } from "@/lib/typography";
+import { formatMinute } from "@/lib/time";
 
 type Person = { firstName: string; lastName: string };
 
@@ -85,6 +86,8 @@ export type RawTrip = TripInput & {
   patient: Person & { phone?: string | null; mobility?: Mobility; accessNotes?: string | null };
   facility: { name: string; phone?: string | null } | null;
   notes?: string | null;
+  /** Why it was cancelled (a transport interrupted: DAY-03); absent in older tests: unknown. */
+  cancellationReason?: string | null;
 };
 
 export type RawStop = {
@@ -594,6 +597,8 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
         outboundNoShow: returnsToCheck.has(t.id),
         exceptionalAmbulance: isExceptionalAmbulanceTrip(t, (id) => vehicleById.get(id)?.type),
         leftByOptimizer: vehicleId === null && optimizerReasons.has(t.id),
+        continuation: t.continuesTripId ? { interruptedAtMinute: t.interruptedAtMinute ?? null } : null,
+        interrupted: t.status === "CANCELLED" && t.cancellationReason === "INTERRUPTED",
       };
     })
     .sort((a, b) => tripTime(a) - tripTime(b));
@@ -603,11 +608,20 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
   const halfServed = halfServedPairs(
     input.trips.filter((t) => isActiveTrip(t.status)).map((t) => ({ ...t, vehicleId: vehicleOfTrip(t) })),
   );
+  // The patients waiting by a vehicle that broke down come first: the most urgent trips to place.
   const unassigned: UnassignedView[] = trips
     .filter((t) => t.vehicleId === null && isActiveTrip(t.status))
+    .sort((a, b) => Number(!a.continuation) - Number(!b.continuation))
     .map((t) => {
       const excluded = excludedById.get(t.id);
       let reason: string;
+      if (t.continuation && !excluded) {
+        const since = t.continuation.interruptedAtMinute;
+        return {
+          tripId: t.id,
+          reason: `Reprise après un transport interrompu${since !== null ? ` à ${formatMinute(since)}` : ""}\u00a0: le patient attend près du véhicule, placez cette course en premier («\u202fOù placer\u202f»).`,
+        };
+      }
       if (excluded) reason = `Non envoyée à l'optimiseur\u00a0: ${excluded}`;
       else if (optimizerReasons.has(t.id)) reason = optimizerReasons.get(t.id) ?? "";
       else if (!input.planRun) reason = "Pas encore optimisée";
@@ -619,6 +633,8 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
 
   const staleTrips: UnassignedView[] = [];
   for (const t of trips) {
+    // A transport interrupted keeps its pickup done on its route (history): its continuation is listed to place.
+    if (t.interrupted) continue;
     if (t.vehicleId && t.status === "CANCELLED") {
       staleTrips.push({ tripId: t.id, reason: "Course annulée après l'optimisation\u00a0: réoptimisez pour libérer le créneau" });
     } else if (t.vehicleId && t.status === "NO_SHOW") {

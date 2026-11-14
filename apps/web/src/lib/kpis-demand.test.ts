@@ -118,3 +118,16 @@ describe("demand funnel (KPI-01)", () => {
     expect(serviceRate(emptyDemand())).toBeNull();
   });
 });
+
+describe("demand funnel and interrupted transports (DAY-03)", () => {
+  it("counts a transport interrupted and its continuation as one trip, never as a cancellation on the day", () => {
+    const d = demandOfDay([
+      cancelled("2026-11-03T11:20:00+01:00", { cancellationReason: "INTERRUPTED" }),
+      // The continuation, placed on another vehicle.
+      trip({ direction: "RETURN" }),
+    ]);
+    expect(d.requested).toBe(1);
+    expect(d.cancelledOnDay).toBe(0);
+    expect(d.served).toBe(1);
+  });
+});

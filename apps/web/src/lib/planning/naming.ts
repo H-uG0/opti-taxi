@@ -12,10 +12,21 @@ export type TripLineSource = {
   direction: TripDirection;
   appointmentMinute: number | null;
   readyMinute: number | null;
+  /** A continuation (DAY-03): the patient waits by an interrupted vehicle since then. */
+  continuation?: { interruptedAtMinute: number | null } | null;
 };
 
-/** « MARTIN Jeanne (aller, RDV 08:30) », « MARTIN Jeanne (retour, fin 11:15) ». */
+/**
+ * « MARTIN Jeanne (aller, RDV 08:30) », « MARTIN Jeanne (retour, fin 11:15) »; a continuation: « MARTIN Jeanne
+ * (reprise du retour, en attente depuis 11:00) », « … (reprise de l'aller, RDV 14:00, en attente depuis 11:00) ».
+ */
 export function tripLineText(trip: TripLineSource): string {
+  if (trip.continuation) {
+    const since = trip.continuation.interruptedAtMinute;
+    const waiting = since !== null ? `en attente depuis ${formatMinute(since)}` : "en attente";
+    const leg = trip.direction === "OUTBOUND" ? `reprise de l'aller, RDV ${formatMinute(trip.appointmentMinute)}` : "reprise du retour";
+    return `${trip.patientName} (${leg}, ${waiting})`;
+  }
   const when =
     trip.direction === "OUTBOUND" ? `aller, RDV ${formatMinute(trip.appointmentMinute)}` : `retour, fin ${formatMinute(trip.readyMinute)}`;
   return `${trip.patientName} (${when})`;

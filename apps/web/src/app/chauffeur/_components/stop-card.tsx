@@ -96,6 +96,11 @@ function StopDetails({ stop }: { stop: StopView }) {
         {stop.oneOffAddress ? (
           <p className="mt-0.5 text-sm font-semibold text-amber-900">Adresse inhabituelle, pour cette course seulement</p>
         ) : null}
+        {stop.resumesInterrupted ? (
+          <p className="mt-0.5 text-sm font-semibold text-amber-900">
+            Reprise du patient là où son transport a été interrompu&nbsp;: il attend près du véhicule
+          </p>
+        ) : null}
       </Line>
 
       {stop.facility || stop.keyTime ? (
@@ -273,7 +278,8 @@ function Lateness({ lateness }: { lateness: RecordedLateness | null }) {
 /** A stop with nothing left to do: one line, details on demand, "Annuler" on the latest status. */
 function ClosedStopCard({ stop, routeStopIds }: { stop: StopView; routeStopIds: readonly string[] }) {
   if (stop.state === "pending") return null;
-  const label = CLOSED_LABELS[stop.state](stop.kind);
+  // A patient left on board by a breakdown: the crew tells them another vehicle picks them up again.
+  const label = stop.interrupted ? "Transport interrompu" : CLOSED_LABELS[stop.state](stop.kind);
   const struck = stop.state === "skipped" || stop.state === "cancelled";
   const shownMinute = stop.completedMinute ?? stop.plannedMinute;
 
@@ -292,6 +298,13 @@ function ClosedStopCard({ stop, routeStopIds }: { stop: StopView; routeStopIds: 
               {stop.recordedBy ? <span className="font-normal text-slate-600"> · par {stop.recordedBy}</span> : null}
             </span>
             <span className="block truncate text-sm text-slate-600">{stop.patient}</span>
+            {stop.interrupted ? (
+              <span className="block text-sm font-medium text-amber-900">
+                {stop.interrupted.pickupMinute !== null
+                  ? `Repris par un autre véhicule vers ${formatMinute(stop.interrupted.pickupMinute)}`
+                  : "Sera repris par un autre véhicule\u00a0: la régulation vous appelle"}
+              </span>
+            ) : null}
           </span>
           <ChevronDown aria-hidden className="size-5 shrink-0 text-slate-500 transition-transform group-open:rotate-180" />
           <span className="sr-only">Afficher le détail</span>

@@ -54,17 +54,21 @@ export function usePlanningActivity(): ActivityContext {
   return value;
 }
 
+/** `place`: the board also searches the trip's places (« Où placer » of the trips to place again). */
+export type TripLinkOptions = { place?: boolean };
+
 type TripLink = {
-  showTrip: (tripId: string) => void;
+  showTrip: (tripId: string, options?: TripLinkOptions) => void;
   /** The board listens (selects the trip, highlights it); returns the unsubscribe. */
-  subscribe: (listener: (tripId: string) => void) => () => void;
+  subscribe: (listener: (tripId: string, options: TripLinkOptions) => void) => () => void;
 };
 
 const TripLinkContext = createContext<TripLink>({ showTrip: () => {}, subscribe: () => () => {} });
 
 /**
- * Links to a trip from outside the board (the plan waiting for confirmation sits above it): the
- * board selects the trip and highlights it on the timeline (planning-board.tsx).
+ * Links to a trip from outside the board (the plan waiting for confirmation, the trips to place again after
+ * an interruption sit above it): the board selects the trip and highlights it on the timeline, and searches
+ * its places when asked (planning-board.tsx).
  */
 export function useTripLink() {
   return useContext(TripLinkContext);
@@ -131,11 +135,11 @@ export function PlanningActivityProvider({ timeLimitSec, children }: { timeLimit
   );
   const dismiss = useCallback(() => setFeedback(null), []);
   const status = useMemo(() => ({ activity, feedback, dismiss }), [activity, feedback, dismiss]);
-  const listeners = useRef(new Set<(tripId: string) => void>());
+  const listeners = useRef(new Set<(tripId: string, options: TripLinkOptions) => void>());
   const tripLink = useMemo<TripLink>(
     () => ({
-      showTrip: (tripId) => {
-        for (const listener of listeners.current) listener(tripId);
+      showTrip: (tripId, options = {}) => {
+        for (const listener of listeners.current) listener(tripId, options);
       },
       subscribe: (listener) => {
         listeners.current.add(listener);

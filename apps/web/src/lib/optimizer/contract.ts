@@ -33,6 +33,7 @@ export const violationCodeSchema = z.enum([
   "SHIFT",
   "BREAK",
   "REVENUE",
+  "PROGRESS",
 ]);
 
 export const latLngSchema = z.strictObject({
@@ -175,6 +176,11 @@ export const tripSchema = z
      */
     facilityOpenMin: dayMinute.nullish(),
     facilityCloseMin: dayMinute.nullish(),
+    /**
+     * A patient picked up again where their transport was interrupted (DAY-03, Trip.continuesTripId): a RETURN one
+     * waits by the vehicle, picked up within 2 hours of readyMin, outside the wait rules at the facility (README).
+     */
+    continuation: z.boolean().default(false),
   })
   .refine((t) => t.direction !== "OUTBOUND" || t.appointmentMin !== null, {
     message: "OUTBOUND trip requires appointmentMin",

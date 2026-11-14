@@ -33,6 +33,18 @@ wait at the facility). A break taken is the route's break: it is not checked aga
 a break window over before the vehicle goes on is not asked for any more. Read from the request
 alone, with this module's own code (not app/progress.py).
 
+The rules of a day under way themselves are checked (PROGRESS): each started route of the plan begins
+with its stops done, in their order, at their real times, and no stop done is anywhere else (a whole
+plan also keeps the route of every started vehicle); no stop still to do starts before the vehicle
+goes on (now, the end of its last stop done, the end of a break taken), except the dropoffs of the
+patients on board, which start no earlier than the end of the last stop done and of a break taken
+(the vehicle drove on with them since: where it is now is not known).
+
+Course de reprise (`continuation`, contract README): a RETURN continuation's patient waits by the vehicle where
+their transport was interrupted, not at the facility. Its pickup is checked against readyMin and
+CONTINUATION_PICKUP_WINDOW_MIN after it (TIME_WINDOW), never against the wait after the session, the
+facility's hours or the total wait at the facility, and it is not paired with the patient's outbound.
+
 Size of a breach (validate_measured, for /insert): how far a measured rule is exceeded, in its own
 unit: minutes beyond the window, the total wait, the time on board or the shift, km beyond the
 detour allowance, patients beyond the seats; None for a breach without a size (pairing, type, lock,
@@ -51,6 +63,7 @@ from app.labels import hhmm, km_text, types_text, vehicle_name
 from app.matrix import TravelMatrix
 from app.schemas import (
     DayRequest,
+    DoneStop,
     LatLng,
     Route,
     RoutePlan,
@@ -73,8 +86,15 @@ REVENUE_TOLERANCE_CENTS = 1
 """A recomputed invoice may differ by one cent (contract/README.md, « Calcul du CA »)."""
 MAX_WORK_WITHOUT_BREAK_MIN = 6 * 60
 MIN_BREAK_FOR_WORK_MIN = 20
+CONTINUATION_PICKUP_WINDOW_MIN = 120
+"""Latest pickup of a RETURN continuation after its readyMin (contract README « Course de reprise »)."""
 
 KIND_LABELS: dict[StopKind, str] = {"PICKUP": "prise en charge", "DROPOFF": "dépose"}
+
+
+def _waits_by_the_vehicle(trip: Trip) -> bool:
+    """A RETURN continuation: picked up where the transport was interrupted, not at the facility."""
+    return trip.continuation and trip.direction == "RETURN"
 
 
 class _Collector:
@@ -181,13 +201,14 @@ def check_plan_references(
 
 
 def validate(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix) -> list[Violation]:
-    """Every hard-rule violation of the produced routes (empty list = valid plan)."""
-    return _validate(request, routes, matrix).items
+    """Every hard-rule violation of the produced routes, a whole plan of the day (empty list = valid plan)."""
+    return _validate(request, routes, matrix, whole_day=True).items
 
 
 def validate_measured(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix) -> list[tuple[Violation, float | None]]:
-    """The violations of validate(), each with the size of the breach (module docstring)."""
-    out = _validate(request, routes, matrix)
+    """The violations of validate(), each with the size of the breach (module docstring), for some routes of the
+    day (/insert: a started vehicle without a route among them is not reported)."""
+    out = _validate(request, routes, matrix, whole_day=False)
     return list(zip(out.items, out.excess, strict=True))
 
 
@@ -195,10 +216,18 @@ def validate_measured(request: DayRequest, routes: Sequence[Route], matrix: Trav
 class _Started:
     """What the request says of a vehicle on a day under way."""
 
-    done: frozenset[tuple[str, StopKind]]
-    """Its stops done."""
+    heads: tuple[DoneStop, ...]
+    """Its stops done, in route order, with their real times."""
     going_on: int
     """Earliest minute it goes on: now, the end of its last stop done, the end of a break taken."""
+    on_board: frozenset[str]
+    """Trips picked up among its stops done and not dropped off."""
+    on_board_from: int
+    """Earliest start of the dropoff of a patient on board: the end of its last stop done and of a break taken."""
+
+    @property
+    def done(self) -> frozenset[tuple[str, StopKind]]:
+        return frozenset((stop.trip_id, stop.kind) for stop in self.heads)
 
 
 def _started(request: DayRequest) -> dict[str, _Started]:
@@ -209,13 +238,64 @@ def _started(request: DayRequest) -> dict[str, _Started]:
     for route in progress.routes:
         taken = route.break_taken.end_min if route.break_taken else 0
         last = route.done[-1].departure_min if route.done else 0
+        picked = {stop.trip_id for stop in route.done if stop.kind == "PICKUP"}
+        dropped = {stop.trip_id for stop in route.done if stop.kind == "DROPOFF"}
         started[route.vehicle_id] = _Started(
-            frozenset((stop.trip_id, stop.kind) for stop in route.done), max(progress.now_min, last, taken)
+            heads=tuple(route.done),
+            going_on=max(progress.now_min, last, taken),
+            on_board=frozenset(picked - dropped),
+            on_board_from=max(last, taken),
         )
     return started
 
 
-def _validate(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix) -> _Collector:
+def _check_progress(
+    out: _Collector,
+    vehicles: Mapping[str, Vehicle],
+    routes: Sequence[Route],
+    started: Mapping[str, _Started],
+    *,
+    whole_day: bool,
+) -> None:
+    """The stops done head their vehicle's route, in order, at their real times, and are nowhere else."""
+    routed = {route.vehicle_id: route for route in routes if route.vehicle_id in vehicles}
+    owner = {(stop.trip_id, stop.kind): vehicle_id for vehicle_id, mine in started.items() for stop in mine.heads}
+    for vehicle_id, mine in started.items():
+        vehicle = vehicles.get(vehicle_id)
+        if vehicle is None or not mine.heads:
+            continue
+        route = routed.get(vehicle_id)
+        if route is None:
+            if whole_day:
+                out.add(
+                    "PROGRESS",
+                    f"Les {len(mine.heads)} arrêt(s) faits de {vehicle_name(vehicle)} ne sont plus dans le planning",
+                    vehicle_id=vehicle_id,
+                )
+            continue
+        head = [(stop.trip_id, stop.kind, stop.start_min, stop.departure_min) for stop in route.stops[: len(mine.heads)]]
+        if head != [(stop.trip_id, stop.kind, stop.start_min, stop.departure_min) for stop in mine.heads]:
+            out.add(
+                "PROGRESS",
+                f"La tournée de {vehicle_name(vehicle)} ne commence pas par ses {len(mine.heads)} arrêt(s) faits, "
+                "dans leur ordre et à leurs heures réelles",
+                vehicle_id=vehicle_id,
+            )
+    for route in routed.values():
+        own = len(started[route.vehicle_id].heads) if route.vehicle_id in started else 0
+        for stop in route.stops[own:]:
+            done_by = owner.get((stop.trip_id, stop.kind))
+            if done_by is not None:
+                out.add(
+                    "PROGRESS",
+                    f"La {KIND_LABELS[stop.kind]} de la course {stop.trip_id}, déjà faite par {vehicle_name(vehicles[done_by])}, "
+                    f"est replanifiée dans la tournée de {vehicle_name(vehicles[route.vehicle_id])}",
+                    trip_id=stop.trip_id,
+                    vehicle_id=route.vehicle_id,
+                )
+
+
+def _validate(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix, *, whole_day: bool) -> _Collector:
     trips = {trip.id: trip for trip in request.trips}
     vehicles = {vehicle.id: vehicle for vehicle in request.vehicles}
     out = _Collector()
@@ -257,11 +337,17 @@ def _validate(request: DayRequest, routes: Sequence[Route], matrix: TravelMatrix
         mine = started.get(vehicle.id)
         done = 0
         if mine is not None:
-            while done < len(stops) and (stops[done][1].id, stops[done][0].kind) in mine.done:
+            mine_done = mine.done
+            while done < len(stops) and (stops[done][1].id, stops[done][0].kind) in mine_done:
                 done += 1
         going_on = mine.going_on if mine is not None else now
-        _RouteCheck(out, request.settings, vehicle, route, stops, trips, matrix, standing, done=done, going_on=going_on).run()
+        check = _RouteCheck(out, request.settings, vehicle, route, stops, trips, matrix, standing, done=done, going_on=going_on)
+        check.run()
+        if going_on is not None:
+            check.check_not_before(going_on, mine.on_board if mine else frozenset(), mine.on_board_from if mine else going_on)
 
+    if request.progress is not None:
+        _check_progress(out, vehicles, routes, started, whole_day=whole_day)
     _check_pairing(out, occurrences)
     _check_total_wait(out, request.settings, request.trips, occurrences, standing, done_everywhere)
     return out
@@ -301,7 +387,8 @@ def _patient_pairs(trips: Sequence[Trip]) -> list[tuple[Trip, Trip]]:
     pairs: list[tuple[Trip, Trip]] = []
     for items in by_patient.values():
         free = [t for t in items if t.direction == "OUTBOUND" and t.appointment_min is not None]
-        for ret in sorted((t for t in items if t.direction == "RETURN" and t.ready_min is not None), key=lambda t: t.ready_min or 0):
+        returns = (t for t in items if t.direction == "RETURN" and t.ready_min is not None and not _waits_by_the_vehicle(t))
+        for ret in sorted(returns, key=lambda t: t.ready_min or 0):
             options = [o for o in free if (o.appointment_min or 0) <= (ret.ready_min or 0)]
             if not options:
                 continue
@@ -370,7 +457,7 @@ def _check_total_wait(
                 excess=total - settings.max_total_wait_min,
             )
     for trip in trips:
-        if trip.id in paired or _wait_over(trip, done):
+        if trip.id in paired or _wait_over(trip, done) or _waits_by_the_vehicle(trip):
             continue
         wait = _facility_wait(trip, occurrences, standing)
         if wait is not None and wait[0] > maximum:
@@ -571,6 +658,10 @@ class _RouteCheck:
                     vehicle_id=vid,
                     excess=appointment - margin - start,
                 )
+        if _waits_by_the_vehicle(trip):
+            if stop.kind == "PICKUP" and trip.ready_min is not None:
+                self._check_continuation_pickup(stop, trip, trip.ready_min)
+            return
         if (trip.direction == "OUTBOUND" and stop.kind == "DROPOFF") or (trip.direction == "RETURN" and stop.kind == "PICKUP"):
             self._check_facility_hours(stop, trip)
         if trip.direction == "RETURN" and stop.kind == "PICKUP" and trip.ready_min is not None:
@@ -592,6 +683,27 @@ class _RouteCheck:
                     vehicle_id=vid,
                     excess=start - ready - margin,
                 )
+
+    def _check_continuation_pickup(self, stop: Stop, trip: Trip, ready: int) -> None:
+        """A patient waiting by the vehicle: picked up from readyMin, within CONTINUATION_PICKUP_WINDOW_MIN."""
+        start, vid = stop.start_min, self.vehicle.id
+        if start < ready - TIME_TOLERANCE_MIN:
+            self.out.add(
+                "TIME_WINDOW",
+                f"Reprise du patient à {hhmm(start)}, avant l'heure prévue ({hhmm(ready)})",
+                trip_id=trip.id,
+                vehicle_id=vid,
+                excess=ready - start,
+            )
+        elif start > ready + CONTINUATION_PICKUP_WINDOW_MIN + TIME_TOLERANCE_MIN:
+            self.out.add(
+                "TIME_WINDOW",
+                f"Reprise du patient à {hhmm(start)}, plus de {_duration_text(CONTINUATION_PICKUP_WINDOW_MIN)} après "
+                f"l'interruption de son transport ({hhmm(ready)})",
+                trip_id=trip.id,
+                vehicle_id=vid,
+                excess=start - ready - CONTINUATION_PICKUP_WINDOW_MIN,
+            )
 
     def _check_facility_hours(self, stop: Stop, trip: Trip) -> None:
         """Stop at the facility inside its hours of the day, when the trip's own time (appointment, end of
@@ -620,6 +732,24 @@ class _RouteCheck:
                 vehicle_id=vid,
                 excess=start - closing,
             )
+
+    # -- day under way: nothing still to do before the vehicle goes on
+    def check_not_before(self, going_on: int, on_board: frozenset[str], on_board_from: int) -> None:
+        """No stop still to do starts before `going_on`; the dropoff of a patient on board (`on_board`) not before
+        `on_board_from` (the vehicle drove on with them since its last stop done)."""
+        for stop, trip in self.stops[self.done :]:
+            aboard = stop.kind == "DROPOFF" and trip.id in on_board
+            earliest = on_board_from if aboard else going_on
+            if stop.start_min < earliest - TIME_TOLERANCE_MIN:
+                since = "la fin du dernier arrêt fait" if aboard else "l'heure où le véhicule repart"
+                self.out.add(
+                    "PROGRESS",
+                    f"{KIND_LABELS[stop.kind].capitalize()} de la course {trip.id} prévue à {hhmm(stop.start_min)}, "
+                    f"avant {since} ({hhmm(earliest)})",
+                    trip_id=trip.id,
+                    vehicle_id=self.vehicle.id,
+                    excess=earliest - stop.start_min,
+                )
 
     # -- shift
     def _check_shift(self) -> None:

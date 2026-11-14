@@ -9,6 +9,7 @@
  * Pure: minutes in, minutes out (the component turns them into percentages).
  */
 import type { TimeRange } from "./timeline";
+import { CONTINUATION_PICKUP_WINDOW_MIN } from "./interruption";
 
 export type ZoomLevel = "day" | "4h" | "2h";
 
@@ -255,6 +256,8 @@ type TripTimes = {
   readyMinute: number | null;
   plannedPickupMinute: number | null;
   plannedDropoffMinute: number | null;
+  /** A continuation (DAY-03): its patient waits by the vehicle (no end of session, no wait limit at the facility). */
+  continuation?: unknown;
 };
 
 export type WaitWindows = { beforeAppointmentMin: number; afterSessionMin: number };
@@ -272,7 +275,8 @@ export function unassignedWindow(trip: TripTimes, waits: WaitWindows): (TimeRang
     return { start: trip.appointmentMinute - before, end: trip.appointmentMinute, anchor: trip.appointmentMinute };
   }
   if (trip.readyMinute === null) return null;
-  const after = Math.max(10, waits.afterSessionMin);
+  // A patient waiting by an interrupted vehicle: the optimizer's window of a continuation, not the wait after a session.
+  const after = trip.continuation ? CONTINUATION_PICKUP_WINDOW_MIN : Math.max(10, waits.afterSessionMin);
   return { start: trip.readyMinute, end: trip.readyMinute + after, anchor: trip.readyMinute };
 }
 
@@ -284,6 +288,8 @@ export type AppointmentMark = {
   marginMin: number | null;
   /** Outbound trip dropped off less than 5 minutes before its appointment (or after it). */
   tight: boolean;
+  /** A return continuation (DAY-03): `minute` is when the patient waits from by the vehicle, not an end of session. */
+  resumes?: boolean;
 };
 
 /** The selected trip's appointment (outbound) or end of session (return), with its margin. */
@@ -296,7 +302,7 @@ export function appointmentMark(trip: TripTimes): AppointmentMark | null {
   }
   if (trip.readyMinute === null) return null;
   const margin = trip.plannedPickupMinute === null ? null : trip.plannedPickupMinute - trip.readyMinute;
-  return { kind: "ready", minute: trip.readyMinute, marginMin: margin, tight: false };
+  return { kind: "ready", minute: trip.readyMinute, marginMin: margin, tight: false, ...(trip.continuation ? { resumes: true } : {}) };
 }
 
 /** « MA » for « Monique Aubert », « ÉF » for « Élodie Fabre »: first letters of the first and last words. */

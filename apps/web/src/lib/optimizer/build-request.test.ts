@@ -584,6 +584,25 @@ describe("facility reception hours (PAT-04)", () => {
     expect(optimizeRequestSchema.safeParse(request).success).toBe(true);
   });
 
+  it("sends a continuation as such, a return one without the facility's hours (it waits by the vehicle, DAY-03)", () => {
+    const hours = { openMin: 435, closeMin: 700 };
+    const { request } = buildOptimizeRequest(
+      input({
+        trips: [
+          trip("c1", { direction: "RETURN", appointmentMinute: null, readyMinute: 690, facilityHours: hours, continuesTripId: "t0" }),
+          trip("c2", { facilityHours: hours, continuesTripId: "t9" }),
+          trip("t3"),
+        ],
+      }),
+    );
+    const [c1, c2, t3] = request.trips;
+    expect(c1).toMatchObject({ continuation: true });
+    expect(c1).not.toHaveProperty("facilityCloseMin");
+    expect(c2).toMatchObject({ continuation: true, facilityOpenMin: 435 });
+    expect(t3).not.toHaveProperty("continuation");
+    expect(optimizeRequestSchema.safeParse(request).success).toBe(true);
+  });
+
   it("leaves the hours out of a trip whose own time is outside them, and says so", () => {
     const build = buildOptimizeRequest(
       input({ trips: [trip("t1", { appointmentMinute: 390, facilityHours: { openMin: 420, closeMin: 1140 }, facilityName: "Institut Sud" })] }),

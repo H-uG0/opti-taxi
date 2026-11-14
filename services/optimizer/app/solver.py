@@ -347,7 +347,8 @@ class FleetVehicle:
         """The start schedule.py times the solver's sequences from (patients on board are pickup nodes there)."""
         if self.start is None:
             return None
-        return VehicleStart(self.vehicle.id, (), self.start.location, self.start.min, (), None, self.start.day_start)
+        # The break taken stays the route's break: its 6-hour rule (counted from day_start) is met by it.
+        return VehicleStart(self.vehicle.id, (), self.start.location, self.start.min, (), self.start.break_taken, self.start.day_start)
 
 
 @dataclass(frozen=True)
@@ -388,6 +389,12 @@ def _going_on(ctx: PlanContext, vehicle: Vehicle, start: VehicleStart) -> Vehicl
     return vehicle.model_copy(update={"shift_start_min": start.min, "shift_end_min": end, "break_": rule})
 
 
+def _took_legal_break(start: VehicleStart | None) -> bool:
+    """A break of at least MIN_LEGAL_BREAK_MIN already taken on a route under way (art. L. 3121-16)."""
+    taken = start.break_taken if start is not None else None
+    return taken is not None and taken[1] - taken[0] >= MIN_LEGAL_BREAK_MIN
+
+
 def usable_fleet(ctx: PlanContext) -> tuple[list[FleetVehicle], list[str]]:
     """Vehicles the solver can use, and warnings for the others. On a day under way, each vehicle
     from its start (app/progress.py); one whose day is over without a patient on board is left out
@@ -410,7 +417,9 @@ def usable_fleet(ctx: PlanContext) -> tuple[list[FleetVehicle], list[str]]:
             continue
         shift = effective_shift(planned, plan)
         started = start if start is not None and start.started else None
-        fleet.append(FleetVehicle(planned, plan, shift, work_limit_min(planned, plan, shift), started))
+        # A legal break already taken meets the 6-hour rule of the whole route: the rest of the day is not capped.
+        limit = None if _took_legal_break(start) else work_limit_min(planned, plan, shift)
+        fleet.append(FleetVehicle(planned, plan, shift, limit, started))
     return fleet, warnings
 
 

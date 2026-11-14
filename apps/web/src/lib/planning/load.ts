@@ -73,6 +73,8 @@ export async function loadPlanningDay(
         sharingRespondedAt: true,
         sharingRespondedBy: recorderSelect,
         notes: true,
+        // A transport interrupted (DAY-03) is not « annulée après l'optimisation »: its continuation takes over.
+        cancellationReason: true,
         // Shown in the trip panel to call the patient or brief the crew (the page traces plan.view).
         patient: { select: { firstName: true, lastName: true, phone: true, mobility: true, accessNotes: true } },
         facility: { select: { name: true, phone: true } },

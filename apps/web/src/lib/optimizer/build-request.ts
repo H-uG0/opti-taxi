@@ -175,6 +175,10 @@ export type TripInput = {
   facilityHours?: DayHours | null;
   /** Name of the trip's facility: the note of a trip outside its hours names it. */
   facilityName?: string | null;
+  /** A continuation (DAY-03): the interrupted trip whose patient it picks up again; absent or null: none. */
+  continuesTripId?: string | null;
+  /** A continuation: minute of the interruption, the patient waits since. */
+  interruptedAtMinute?: number | null;
 };
 
 /** Stop durations (Paramètres « Temps d'arrêt »); absent fields: no surcharge, ambulance as taxi and VSL. */
@@ -710,6 +714,10 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
     }
 
     const service = tripServiceMinutes(trip, input.settings);
+    // A patient picked up again where their transport was interrupted: a return waits by the vehicle, not at the
+    // facility (contract « Course de reprise »): no reception hours for it.
+    const continuation = (trip.continuesTripId ?? null) !== null;
+    const byTheVehicle = continuation && trip.direction === "RETURN";
     trips.push({
       id: trip.id,
       patientId: trip.patientId,
@@ -728,9 +736,10 @@ export function buildOptimizeRequest(input: OptimizeInput): BuildResult {
       tariffId,
       ...tripBillingFlags(trip, areas, headOffice),
       // The facility's hours, only when the trip's own time is inside them (otherwise noted below).
-      ...contractFacilityHours(trip.facilityHours, keyMinuteOf(trip)),
+      ...(byTheVehicle ? {} : contractFacilityHours(trip.facilityHours, keyMinuteOf(trip))),
+      ...(continuation ? { continuation: true } : {}),
     });
-    const outside = outsideHoursText(trip.facilityHours ?? null, trip.direction, keyMinuteOf(trip));
+    const outside = byTheVehicle ? null : outsideHoursText(trip.facilityHours ?? null, trip.direction, keyMinuteOf(trip));
     if (outside) outsideHours.push({ facility: trip.facilityName ?? "Établissement de la course", text: outside });
   }
 
@@ -823,6 +832,8 @@ export const tripInputSelect = {
   dropoffAddress: true,
   tollAmount: true,
   exceptionalAmbulanceAt: true,
+  continuesTripId: true,
+  interruptedAtMinute: true,
 } as const;
 
 /** Every vehicle (active or not: locks may point to an inactive one) with its default crew. */

@@ -33,6 +33,7 @@ ViolationCode = Literal[
     "SHIFT",
     "BREAK",
     "REVENUE",
+    "PROGRESS",
 ]
 EmptyLegRule = Literal["NONE", "DEPOT"]
 SurchargeOrder = Literal["MULTIPLICATIVE", "ADDITIVE"]
@@ -224,6 +225,10 @@ class Trip(ContractModel):
     [facilityOpenMin, facilityCloseMin] (model.facility_hours_apply, contract README)."""
     facility_close_min: DayMinute | None = None
     """Closing time of the facility that day; None: no bound."""
+    continuation: bool = False
+    """A patient picked up again where their transport was interrupted (a breakdown, a crew unavailable: contract
+    README « Course de reprise »). A RETURN one waits by the vehicle, not at the facility: its pickup is planned
+    within CONTINUATION_PICKUP_WINDOW_MIN of readyMin, with no wait rule at the facility nor its hours."""
 
     @model_validator(mode="after")
     def _times_match_direction(self) -> Trip:

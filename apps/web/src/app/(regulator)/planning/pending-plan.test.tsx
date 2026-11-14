@@ -94,7 +94,7 @@ describe("PendingPlanBanner, a re-optimization held for review (INS-02)", () => 
   it("shows a trip of the list on the board", () => {
     const { banner, onShow } = renderBanner();
     fireEvent.click(within(banner).getByRole("button", { name: "MARTIN Jeanne (aller, RDV 08:30)" }));
-    expect(onShow).toHaveBeenCalledWith("t1");
+    expect(onShow).toHaveBeenCalledWith("t1", {});
   });
 
   it("« Tout accepter » saves the whole plan, « Garder le planning actuel » drops it", async () => {

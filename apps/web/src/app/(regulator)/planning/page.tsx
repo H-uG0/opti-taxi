@@ -4,6 +4,7 @@ import { CalendarPlus, ListChecks, Share2 } from "lucide-react";
 import { auditRead } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { geocoderEnabled } from "@/lib/geocode";
 import { Badge } from "@/components/ui/badge";
 import { isSimulatedId } from "@/lib/simulated";
 import { LinkButton } from "@/components/ui/button";
@@ -57,10 +58,15 @@ function runningReasonOf(view: PlanningDayView): string | null {
   return `Une optimisation de cette date est en cours (lancée le ${formatDateTime(run.startedAt)}${run.requestedBy ? ` par ${run.requestedBy}` : ""})\u00a0: attendez la fin du calcul.`;
 }
 
-/** Why the routes of the day cannot be recomputed (mirrors replanBlocker on the server). */
+/**
+ * Why the routes of the day cannot be recomputed (mirrors replanBlocker on the server). A validated day under way is
+ * re-planned after a question (« Réoptimiser la suite »: the routes changed stay validated).
+ */
 function replanBlockedReason(view: PlanningDayView, past: boolean): string | null {
   if (past) return "Date passée\u00a0: le planning n'est plus modifiable.";
-  if (view.dayStatus === "VALIDATED" || view.dayStatus === "MIXED") return "Planning validé\u00a0: rouvrez-le pour le modifier.";
+  if ((view.dayStatus === "VALIDATED" || view.dayStatus === "MIXED") && !view.dayStarted) {
+    return "Planning validé\u00a0: rouvrez-le pour le modifier.";
+  }
   if (view.dayFinished) return "Toutes les tournées du jour sont terminées\u00a0: il ne reste rien à réoptimiser.";
   return null;
 }
@@ -74,9 +80,11 @@ function headerDescription(view: PlanningDayView, availableVehicles: number): st
       return `${pluralize(view.kpis.tripsTotal, "course")} à planifier · ${vehicles}.`;
     case "VALIDATED": {
       const validatedAt = view.vehicles.find((v) => v.route?.validatedAt)?.route?.validatedAt;
-      return validatedAt
-        ? `Planning validé le ${formatDateTime(validatedAt)}. Rouvrez-le pour l'ajuster.`
-        : "Planning validé. Rouvrez-le pour l'ajuster.";
+      // A day under way is adjusted without reopening it: « Réoptimiser la suite » keeps the routes validated.
+      const how = view.dayStarted
+        ? "Journée commencée\u00a0: «\u202fRéoptimiser la suite\u202f» ne réécrit que les tournées qui changent, elles restent validées."
+        : "Rouvrez-le pour l'ajuster.";
+      return validatedAt ? `Planning validé le ${formatDateTime(validatedAt)}. ${how}` : `Planning validé. ${how}`;
     }
     default:
       // Proposed: the board and its hint say what to do; the height goes to the timeline.
@@ -315,6 +323,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
               placeBlocked={placeBlocked}
               initialTripId={initialTripId}
               initialPlace={firstParam(params.placer) === "1"}
+              geocoder={geocoderEnabled()}
               crewChoices={view.crewChoices}
               crewRules={view.crewRules}
               crewChangeMode={past ? "none" : dayLocked ? "route" : "equipages"}

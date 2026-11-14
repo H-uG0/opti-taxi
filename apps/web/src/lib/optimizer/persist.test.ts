@@ -194,6 +194,13 @@ describe("replanBlockReason", () => {
     expect(replanBlockReason("2026-11-03", { ...clear, validatedRoutes: 2 })).toMatch(/est validé\u00a0: rouvrez-le/);
   });
 
+  it("re-plans a validated day under way once the regulator confirmed, never a validated day not started (DAY-02)", () => {
+    const underWay = { ...clear, validatedRoutes: 2, completedStops: 3 };
+    expect(replanBlockReason("2026-11-03", underWay)).toMatch(/est validé/);
+    expect(replanBlockReason("2026-11-03", underWay, { validatedUnderWay: true })).toBeNull();
+    expect(replanBlockReason("2026-11-03", { ...clear, validatedRoutes: 2 }, { validatedUnderWay: true })).toMatch(/est validé/);
+  });
+
   it("re-plans a day under way after its stops done (DAY-02), never a day whose every route is finished", () => {
     expect(replanBlockReason("2026-11-03", { ...clear, startedTrips: 1 })).toBeNull();
     expect(replanBlockReason("2026-11-03", { ...clear, completedStops: 3, routes: 2, finishedRoutes: 1 })).toBeNull();

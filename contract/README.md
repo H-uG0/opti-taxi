@@ -109,7 +109,8 @@ Les noms de champs sont en camelCase des deux côtés du fil (pydantic : `alias_
     "wheelchair": false,                //   patient transporté dans son fauteuil (supplément TPMR)
     "tollAmount": 0,                    //   péages de la facture de ce patient, € (0..1000)
     "facilityOpenMin": 425,             // facultatifs, absents ou null = aucune borne : heures d'accueil de
-    "facilityCloseMin": 1140            //   l'établissement ce jour-là (voir « Fenêtres horaires dérivées »)
+    "facilityCloseMin": 1140,           //   l'établissement ce jour-là (voir « Fenêtres horaires dérivées »)
+    "continuation": false               // facultatif (false) : course de reprise (voir « Course de reprise »)
   }],
   "tariffs": [{                         // les grilles citées par les véhicules et les courses, ids uniques
     "id": "taxi_13",
@@ -164,7 +165,10 @@ inconnus, un véhicule deux fois, un arrêt donné deux fois, une dépose sans s
    course faite n'est jamais non affectée ;
 2. fait repartir chaque véhicule **de son dernier arrêt fait**, au plus tôt à `max(nowMin, départ de cet arrêt,
    fin de la pause prise)` ; un véhicule sans arrêt fait part de son dépôt au plus tôt à
-   `max(shiftStartMin, nowMin)` : aucun arrêt à faire n'est prévu avant `nowMin` ;
+   `max(shiftStartMin, nowMin)` : aucun arrêt à faire n'est prévu avant `nowMin`. Seule exception, un véhicule
+   avec un **patient à bord** a roulé avec lui depuis son dernier arrêt fait (sa position n'est pas connue) : il
+   repart de cet arrêt à `max(départ de cet arrêt, fin de la pause prise)`, et la dépose de ce patient peut donc
+   être prévue avant `nowMin` ; une prise en charge reste toujours prévue à `nowMin` ou après ;
 3. garde chaque **patient à bord** (prise en charge faite, dépose à faire) sur son véhicule : sa dépose est
    toujours prévue, en retard s'il le faut (le retard est signalé, `TIME_WINDOW`), jamais laissée de côté ; un
    autre patient ne monte avec lui que dans ses règles, comptées depuis sa prise en charge réelle (temps à
@@ -177,7 +181,10 @@ inconnus, un véhicule deux fois, un arrêt donné deux fois, une dépose sans s
 Le validateur ne juge pas les arrêts faits (fenêtre, temps entre deux arrêts, début de service, places, type
 de véhicule) ni les trajets et attentes terminés avec eux : ce sont des faits. Il revérifie entier un trajet
 en cours (temps à bord et détour depuis la prise en charge réelle, places et transport exclusif avec les
-patients à bord) et l'attente cumulée d'un patient dont l'un des trajets reste à faire.
+patients à bord) et l'attente cumulée d'un patient dont l'un des trajets reste à faire. Il revérifie aussi les
+points 1 à 3 (`PROGRESS`) : chaque tournée commencée commence par ses arrêts faits, dans leur ordre et à leurs
+heures réelles (et, pour un planning entier, est présente), aucun arrêt fait n'est ailleurs, et aucun arrêt à
+faire ne commence avant l'heure où son véhicule repart (l'exception du point 2 comprise).
 
 ### Pénalité de changement (`settings.changePenalty`)
 
@@ -280,6 +287,18 @@ requête est la même qu'avant. Le solveur, le calcul des horaires et le validat
   arrivée la plus tôt `Facility.earliestArrivalMinute` à la place de l'ouverture) et ne les envoie pas
   sans horaire saisi : la requête est alors la même qu'avant. Le validateur revérifie l'arrêt
   (`TIME_WINDOW`, « Arrivée au lieu de soins à 06:40, avant l'accueil de l'établissement (07:00) »).
+
+### Course de reprise (`trips[].continuation`)
+
+Facultatif (false par défaut). Le web crée une course de reprise quand le transport d'un patient à bord est
+interrompu (panne, équipage indisponible : DAY-03) : elle le prend là où le véhicule s'est arrêté. Une reprise
+`OUTBOUND` est un aller ordinaire (dépose avant `appointmentMin`). Une reprise `RETURN` attend près du
+véhicule, pas au lieu de soins : sa prise en charge commence dans `[readyMin, readyMin + 120]` (`readyMin` :
+l'heure de l'interruption ou celle de sa saisie), sans `waitAfterSessionMin`, sans les heures d'accueil de
+l'établissement, hors de l'attente au lieu de soins (`TOTAL_WAIT`) et sans être appariée à l'aller du
+patient. Sur une journée commencée, une fenêtre déjà passée repart de `nowMin`, 120 minutes encore. Le
+validateur revérifie ces bornes (`TIME_WINDOW`, « Reprise du patient à 13:40, plus de 2 h 00 après
+l'interruption de son transport (11:20) »).
 
 ### Attente à bord au lieu de soins et temps à bord
 
@@ -505,3 +524,4 @@ compte chaque course seule, sur la distance directe, sans retour à vide ni abat
 | `SHIFT` | départ avant `shiftStartMin` ou retour après `shiftEndMin` |
 | `BREAK` | pas de pause de `durationMin` sans patient à bord dans la fenêtre de pause ; ou tournée de plus de 6 h sans pause d'au moins 20 min en son sein (Code du travail, art. L. 3121-16) |
 | `REVENUE` | CA d'une course différent de plus d'un centime de celui que le validateur recalcule, ou CA d'une tournée différent de la somme de ses courses |
+| `PROGRESS` | journée commencée : arrêts faits absents, déplacés ou à d'autres heures que leurs heures réelles, ou arrêt à faire prévu avant que son véhicule reparte (voir « Journée commencée ») |

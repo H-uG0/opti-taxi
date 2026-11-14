@@ -158,6 +158,7 @@ export const VIOLATION_LABELS: Record<string, string> = {
   SHIFT: "Hors horaires du chauffeur",
   BREAK: "Pause non respectée",
   REVENUE: "Écart sur le CA estimé",
+  PROGRESS: "Arrêts faits ou heure de reprise non respectés",
 };
 
 export function formatEuros(value: number | null | undefined): string {

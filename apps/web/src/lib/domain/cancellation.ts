@@ -21,7 +21,7 @@ export const CANCELLATION_REASON_LABELS: Record<CancellationReason, string> = {
   REGULATION: "Décision de la régulation",
   PATIENT_ABSENCE: "Absence du patient",
   FACILITY_CLOSED: "Établissement fermé",
-  INTERRUPTED: "Transport interrompu (panne ou indisponibilité), patient repris par une course de reprise",
+  INTERRUPTED: "Transport interrompu",
   OTHER: "Autre motif",
 };
 

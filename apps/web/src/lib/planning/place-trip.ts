@@ -80,7 +80,19 @@ const storedRouteSelect = {
   startMinute: true,
   breakStartMinute: true,
   breakEndMinute: true,
-  stops: { select: { id: true, tripId: true, kind: true, sequence: true, completedAt: true, startMinute: true, departureMinute: true } },
+  stops: {
+    select: {
+      id: true,
+      tripId: true,
+      kind: true,
+      sequence: true,
+      completedAt: true,
+      startMinute: true,
+      departureMinute: true,
+      // A trip closed since (patient absent, interrupted) is not in the day's trips: its stops are history (routeHold).
+      trip: { select: { status: true } },
+    },
+  },
 } satisfies Prisma.RouteSelect;
 
 /**
@@ -159,6 +171,9 @@ export async function loadPlaceDay(isoDate: string, now: Date = new Date()): Pro
   ]);
   if (stored.length === 0) return { ok: false, error: PLACE_NO_ROUTES };
   const statuses = new Map<string, TripStatus>(input.trips.map((t) => [t.id, t.status]));
+  for (const stop of stored.flatMap((route) => route.stops)) {
+    if (!statuses.has(stop.tripId) && stop.trip) statuses.set(stop.tripId, stop.trip.status);
+  }
   const plain = buildOptimizeRequest(input);
   // Today: the optimizer plans after the stops done and from now (contract `progress`).
   const progress = buildProgress({
@@ -186,7 +201,7 @@ export async function loadPlaceDay(isoDate: string, now: Date = new Date()): Pro
   );
   const held = new Map<string, RouteHold>();
   for (const route of stored) {
-    const hold = routeHold(route, sent, todayCrews);
+    const hold = routeHold(route, sent, todayCrews, (id) => statuses.get(id));
     if (hold) held.set(route.vehicleId, hold);
   }
   // One person, one vehicle a day: who is on a stored route, and the vehicles without a route whose crew of the day

@@ -17,7 +17,7 @@
  * keep coming in meanwhile.
  */
 import "server-only";
-import type { Prisma, StopKind } from "@prisma/client";
+import type { Prisma, StopKind, TripStatus } from "@prisma/client";
 import { audit, auditRead } from "@/lib/audit";
 import type { SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -35,9 +35,11 @@ import type { OptimizeRequest, PlanResponse, Progress, RoutePlan } from "@/lib/o
 import {
   countFinished,
   FIELD_TRIP_STATUSES,
+  isStarted,
   PlanBlockedError,
   replanBlockReason,
   savePlan,
+  type ReplanState,
   type SavePlanResult,
 } from "@/lib/optimizer/persist";
 import {
@@ -54,7 +56,7 @@ import { completeTrips } from "@/lib/trips/completion";
 import { tariffGapNote } from "./format";
 import { withBeforeCommit } from "./before-commit";
 import { lockPlanningDay } from "./day-lock";
-import { buildProgress, planHoldsProgress } from "./day-progress";
+import { buildProgress, planHoldsProgress, startedOutsideProgress, type DoneByRoute } from "./day-progress";
 import { emptyPlanIssue } from "./empty-plan";
 import { isExceptionalAmbulanceTrip } from "./exceptional-ambulance";
 import { lockAction } from "./lock";
@@ -109,6 +111,8 @@ export type RunOutcome =
       moveRejected?: boolean;
       /** The plan computed is worse than (or as invalid as) the routes in place: it waits for the regulator's word. */
       needsConfirmation?: boolean;
+      /** Asked before computing anything (a validated day under way): answer it by running again with `confirmed`. */
+      askedFirst?: boolean;
       /** The page shows a state that changed since (the plan was handled elsewhere): offer to reload it. */
       stale?: boolean;
     };
@@ -122,6 +126,8 @@ export type RunOptions = {
    * without a vehicle are placed (lib/planning/place-unassigned.ts).
    */
   placeOnly?: boolean;
+  /** The question of a validated day under way, answered (validatedUnderWayQuestion); null or absent: not yet. */
+  confirmed?: string | null;
 };
 
 /**
@@ -240,12 +246,35 @@ async function runningRuns(
 
 /**
  * Why the routes of isoDate cannot be recomputed right now, or null: past
- * date, validated planning, or every route finished by the crews. A day under
- * way is re-planned after its stops done (DAY-02). savePlan checks the same
- * rule again, under row locks, before writing.
+ * date, validated planning (on a day under way, unless the regulator
+ * confirmed: `validatedUnderWay`), or every route finished by the crews. A
+ * day under way is re-planned after its stops done (DAY-02). savePlan checks
+ * the same rule again, under row locks, before writing.
  */
-export async function replanBlocker(isoDate: string): Promise<string | null> {
-  if (isoDate < todayIso()) return `Le ${formatLongDate(isoDate)} est passé\u00a0: son planning n'est plus modifiable.`;
+export async function replanBlocker(isoDate: string, options: { validatedUnderWay?: boolean } = {}): Promise<string | null> {
+  const state = await readReplanState(isoDate);
+  return state === null
+    ? `Le ${formatLongDate(isoDate)} est passé\u00a0: son planning n'est plus modifiable.`
+    : replanBlockReason(isoDate, state, options);
+}
+
+/**
+ * The question asked before « Réoptimiser la suite » of a validated day under way (null: none to ask): the
+ * routes it changes stay validated, and their drivers' roadmaps change at once.
+ */
+export async function validatedUnderWayQuestion(isoDate: string): Promise<string | null> {
+  const state = await readReplanState(isoDate);
+  if (state === null || state.validatedRoutes === 0 || !isStarted(state)) return null;
+  if (replanBlockReason(isoDate, state, { validatedUnderWay: true })) return null;
+  return VALIDATED_UNDER_WAY_QUESTION;
+}
+
+export const VALIDATED_UNDER_WAY_QUESTION =
+  "Planning validé et journée commencée\u00a0: seules les tournées qui changent sont réécrites, elles restent validées, et les feuilles de route de leurs chauffeurs changent dès l'enregistrement\u00a0; prévenez-les. Les arrêts faits et les patients à bord ne bougent pas. Réoptimiser la suite quand même\u202f?";
+
+/** What decides whether isoDate can be re-planned (null: a past date). */
+async function readReplanState(isoDate: string): Promise<ReplanState | null> {
+  if (isoDate < todayIso()) return null;
   const serviceDate = fromIsoDate(isoDate);
   const [validatedRoutes, startedTrips, completedStops] = await Promise.all([
     db.route.count({ where: { serviceDate, status: "VALIDATED" } }),
@@ -262,15 +291,22 @@ export async function replanBlocker(isoDate: string): Promise<string | null> {
           }),
         )
       : {};
-  return replanBlockReason(isoDate, { validatedRoutes, startedTrips, completedStops, ...finished });
+  return { validatedRoutes, startedTrips, completedStops, ...finished };
 }
 
 /**
- * The progress of isoDate now (day-progress.ts): today only, null for another date. Read from the
- * stored routes and the trips' statuses.
+ * The request of isoDate with its progress now (day-progress.ts): today only, the request as it is for
+ * another date. Read from the stored routes and the trips' statuses (`tripStatuses`: those of the day's
+ * input). The trips the progress cannot carry (started on a vehicle the request does not send, or recorded
+ * by the field without a stop done) are left out: never planned again as if nothing was done.
  */
-export async function loadDayProgress(isoDate: string, request: OptimizeRequest, now: Date = new Date()): Promise<Progress | null> {
-  if (isoDate !== todayIso(now)) return null;
+export async function withDayProgress(
+  isoDate: string,
+  request: OptimizeRequest,
+  tripStatuses: ReadonlyMap<string, TripStatus>,
+  now: Date = new Date(),
+): Promise<OptimizeRequest> {
+  if (isoDate !== todayIso(now)) return request;
   const routes = await db.route.findMany({
     where: { serviceDate: fromIsoDate(isoDate) },
     select: {
@@ -282,8 +318,13 @@ export async function loadDayProgress(isoDate: string, request: OptimizeRequest,
       },
     },
   });
-  const statuses = new Map(routes.flatMap((route) => route.stops.flatMap((stop) => (stop.trip ? [[stop.tripId, stop.trip.status] as const] : []))));
-  return buildProgress({ isoDate, now, routes, statusOf: (id) => statuses.get(id), request });
+  const statuses = new Map(tripStatuses);
+  for (const stop of routes.flatMap((route) => route.stops)) if (stop.trip) statuses.set(stop.tripId, stop.trip.status);
+  const statusOf = (id: string) => statuses.get(id);
+  const progress = buildProgress({ isoDate, now, routes, statusOf, request });
+  if (!progress) return request;
+  const outside = startedOutsideProgress({ routes, statusOf, tripIds: request.trips.map((t) => t.id), progress });
+  return { ...request, trips: outside.size > 0 ? request.trips.filter((t) => !outside.has(t.id)) : request.trips, progress };
 }
 
 /** A progress with stops done: the day is under way. */
@@ -488,8 +529,10 @@ async function completeDayBeforeRun(isoDate: string, user: Actor): Promise<void>
 async function prepareRequest(
   isoDate: string,
   adjust: (input: OptimizeInput) => OptimizeInput = (input) => input,
+  /** A validated day under way may be re-planned (the regulator confirmed, or a plan held since). */
+  validatedUnderWay = false,
 ): Promise<{ ok: true; input: OptimizeInput; build: BuildResult } | { ok: false; error: string }> {
-  const blocker = await replanBlocker(isoDate);
+  const blocker = await replanBlocker(isoDate, { validatedUnderWay });
   if (blocker) return { ok: false, error: blocker };
   const input = adjust(await loadOptimizeInput(db, isoDate));
   const build = buildOptimizeRequest(input);
@@ -511,8 +554,8 @@ async function prepareRequest(
     };
   }
   // Today: planned after the stops done and from now (contract `progress`).
-  const progress = await loadDayProgress(isoDate, request);
-  return { ok: true, input, build: progress ? { ...build, request: { ...request, progress } } : build };
+  const underWay = await withDayProgress(isoDate, request, new Map(input.trips.map((t) => [t.id, t.status])));
+  return { ok: true, input, build: underWay === request ? build : { ...build, request: underWay } };
 }
 
 /** The routes in place of a date: as stored, and as sent to the optimizer (null: none, a start from scratch). */
@@ -755,6 +798,8 @@ async function finishRun(args: {
   placement?: Placement | null;
   /** Locks set by the regulator when the request also carries the pins of « Placer les non affectées ». */
   lockedCount?: number;
+  /** The regulator confirmed re-planning a validated day under way. */
+  validatedUnderWay?: boolean;
 }): Promise<RunOutcome> {
   const { kind, isoDate, user, runId, build, plan, move } = args;
   const lock = args.lock ?? null;
@@ -811,6 +856,7 @@ async function finishRun(args: {
       lockChange: lock?.change,
       ...(args.lockedCount !== undefined ? { lockedCount: args.lockedCount } : {}),
       onTrafficReset: (tx) => auditTrafficReset(tx, user, runId, isoDate),
+      validatedUnderWay: args.validatedUnderWay,
       check: ({ comparison, version, changes, routesKey: routes }) => {
         if (placement) {
           const loss = placementLoss(comparison.lostTripIds, request);
@@ -919,6 +965,10 @@ async function finishRun(args: {
  * leaves its run AWAITING_CONFIRMATION.
  */
 export async function runOptimization(isoDate: string, user: Actor, options: RunOptions = {}): Promise<RunOutcome> {
+  // A validated day under way: « Réoptimiser la suite » (or « Placer les non affectées ») once the regulator said yes.
+  const question = options.move ? null : await validatedUnderWayQuestion(isoDate);
+  if (question !== null && options.confirmed !== question) return { ok: false, needsConfirmation: true, askedFirst: true, error: question };
+  const validatedUnderWay = question !== null;
   await completeDayBeforeRun(isoDate, user);
   // « Placer les non affectées » : the trips in a route go locked on its vehicle, for this computation only.
   const assignments = options.placeOnly ? await loadAssignments(isoDate) : null;
@@ -933,6 +983,7 @@ export async function runOptimization(isoDate: string, user: Actor, options: Run
           return pinnedInput.input;
         }
       : undefined,
+    validatedUnderWay,
   );
   if (!prepared.ok) return { ok: false, error: prepared.error };
   const { input, build } = prepared;
@@ -973,6 +1024,7 @@ export async function runOptimization(isoDate: string, user: Actor, options: Run
     inPlace: inPlace?.stored,
     placement: assignments && toPlace ? { toPlace, assignments } : null,
     ...(toPlace ? { lockedCount: ownLocks } : {}),
+    validatedUnderWay,
   });
 }
 
@@ -1122,7 +1174,8 @@ async function selectableRun(
   const details = readRunDetails(run);
   if (!pending || !details?.changes) return { ok: false, error: SELECTION_NOT_OFFERED_ERROR };
   if ((details.kind ?? "optimize") !== "optimize" || pending.lockChange || pending.placeOnly) return { ok: false, error: SELECTION_NOT_OFFERED_ERROR };
-  const prepared = await prepareRequest(isoDate);
+  // A plan held on a validated day was computed after the validation (which drops the plans held), once confirmed.
+  const prepared = await prepareRequest(isoDate, undefined, true);
   if (!prepared.ok) return { ok: false, error: prepared.error };
   if (requestHash(prepared.build.request) !== pending.requestHash) return { ok: false, error: INPUT_CHANGED_ERROR, stale: true };
   return { ok: true, isoDate, pending, changes: details.changes, comparison: details.comparison ?? null, build: prepared.build, input: prepared.input };
@@ -1219,6 +1272,8 @@ export async function confirmPendingRun(runId: string, user: Actor, selection?: 
           return pinnedInput.input;
         }
       : relocked,
+    // A plan held on a validated day was computed after the validation (which drops the plans held), once confirmed.
+    true,
   );
   if (!prepared.ok) return dropPendingRun(run.id, run.details, `${NOT_KEPT_PREFIX}\u00a0: ${prepared.error}`);
   const { build } = prepared;
@@ -1271,11 +1326,13 @@ export async function confirmPendingRun(runId: string, user: Actor, selection?: 
       lockChange: lockChange ?? undefined,
       ...(assignments ? { lockedCount: build.request.trips.filter((t) => t.lockedVehicleId && !pinned.has(t.id)).length } : {}),
       onTrafficReset: (tx) => auditTrafficReset(tx, user, run.id, isoDate),
+      validatedUnderWay: true,
       // Under the planning lock of the date, which discardPendingRun takes too: never both confirmed and discarded.
-      check: async ({ tx, comparison, version, routesKey: routes, started }) => {
+      check: async ({ tx, comparison, version, routesKey: routes, started, doneNow }) => {
         const still = await tx.optimizationRun.findUnique({ where: { id: run.id }, select: { status: true } });
         if (still?.status !== "AWAITING_CONFIRMATION") throw new ReplaceRefused("gone", NOT_PENDING_ERROR);
-        if (!stillBasedOn(pending, version, started ? (routes ?? null) : null, build.request.progress, response)) {
+        // The stops done as read under the locks: a status recorded since the request was built counts too.
+        if (!stillBasedOn(pending, version, started ? (routes ?? null) : null, doneNow ?? build.request.progress, response)) {
           throw new ReplaceRefused("stale", PLAN_CHANGED_SINCE_ERROR);
         }
         // A placement is never confirmed into taking trips off their vehicle (a plan held before this rule).
@@ -1324,7 +1381,7 @@ function stillBasedOn(
   pending: Pick<PendingPlan, "basedOnVersion" | "basedOnRoutes" | "response">,
   version: string,
   routes: string | null,
-  progress: Progress | null | undefined,
+  progress: DoneByRoute | null | undefined,
   response: Pick<PlanResponse, "routes"> = pending.response,
 ): boolean {
   if (version === pending.basedOnVersion) return true;

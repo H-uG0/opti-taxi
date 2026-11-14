@@ -162,6 +162,33 @@ function ReturnMarker({ route, finished }: { route: RouteView; finished: boolean
       </Marker>
     );
   }
+  if (route.waitingPatients.length > 0) {
+    // A breakdown left a patient on board: the crew stays with them until the vehicle picking them up arrives.
+    return (
+      <li className="scroll-mt-24 space-y-2 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+        <p className="flex items-center gap-2 text-base font-semibold text-amber-950">
+          <Flag aria-hidden className="size-5" />
+          Tournée interrompue&nbsp;: restez avec {route.waitingPatients.length > 1 ? "les patients" : "le patient"}
+        </p>
+        <ul className="space-y-1 text-sm text-amber-950">
+          {route.waitingPatients.map((waiting) => (
+            <li key={waiting.patient}>
+              <span className="font-semibold">{waiting.patient}</span>
+              {waiting.pickupMinute !== null ? (
+                <>
+                  {" "}
+                  · repris par un autre véhicule vers <span className="tabular font-semibold">{formatMinute(waiting.pickupMinute)}</span>
+                </>
+              ) : (
+                " · un autre véhicule va être envoyé, la régulation vous appelle"
+              )}
+            </li>
+          ))}
+        </ul>
+        <p className="text-sm text-amber-950">Le retour au dépôt vient ensuite ({vehicle.depot.name}).</p>
+      </li>
+    );
+  }
   return (
     <li className="scroll-mt-24 space-y-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-4">
       <p className="flex items-center gap-2 text-base font-semibold text-emerald-950">

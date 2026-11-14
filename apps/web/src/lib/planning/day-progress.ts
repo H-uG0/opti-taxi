@@ -103,6 +103,37 @@ export function buildProgress(args: {
   return { nowMin, routes: started };
 }
 
+/** Statuses the crew records: the trip is under way or done, whatever its stops say. */
+const FIELD_STATUSES: readonly TripStatus[] = ["PICKED_UP", "DROPPED_OFF"];
+
+/**
+ * Trips the request must leave out on a day under way, because the progress cannot carry what was done of them: a
+ * stop done on a route whose vehicle the request does not send (a whole-day unavailability recorded since, a crew
+ * blocked), or a field status (picked up, dropped off) without any stop done in the progress. Sent, the optimizer
+ * would plan them again as if nothing was done (new stops on another route, results wiped). Their route keeps them
+ * as they are (route-writes.ts planStartedWrite).
+ */
+export function startedOutsideProgress(args: {
+  routes: readonly ProgressRoute[];
+  statusOf: (tripId: string) => TripStatus | undefined;
+  tripIds: Iterable<string>;
+  progress: Progress;
+}): Set<string> {
+  const { routes, statusOf, tripIds, progress } = args;
+  const carried = new Set((progress.routes ?? []).flatMap((route) => route.done.map((stop) => stop.tripId)));
+  const outside = new Set<string>();
+  for (const route of routes) {
+    for (const stop of route.stops) {
+      if (!carried.has(stop.tripId) && isStopDone(stop, statusOf(stop.tripId))) outside.add(stop.tripId);
+    }
+  }
+  for (const tripId of tripIds) {
+    const status = statusOf(tripId);
+    if (status !== undefined && FIELD_STATUSES.includes(status) && !carried.has(tripId)) outside.add(tripId);
+  }
+  return outside;
+}
+
 /** The stops done of a progress, as stopKey-like keys « tripId/KIND ». */
 export function doneKeys(progress: Progress | null | undefined): Set<string> {
   return new Set((progress?.routes ?? []).flatMap((route) => route.done.map((stop) => `${stop.tripId}/${stop.kind}`)));
@@ -114,9 +145,40 @@ export function doneKeys(progress: Progress | null | undefined): Set<string> {
  * still to do. Statuses keep coming in while the regulator reads the changes; the plan stays good as
  * long as no driver did a stop the plan moved away or put later.
  */
+/** The stops done of a day, route by route, as planHoldsProgress reads them (a progress, or doneOnRoutes). */
+export type DoneByRoute = { routes?: readonly { vehicleId: string; done: readonly { tripId: string; kind: StopKind }[] }[] };
+
+/**
+ * The stops done on `routes` as the progress would carry them (buildProgress's rules: the trips and vehicles of
+ * the request, a dropoff after its pickup done on the same route), without their times: read under savePlan's
+ * row locks, where a held plan is checked against what the crews did up to that moment.
+ */
+export function doneOnRoutes(args: {
+  routes: readonly { vehicleId: string; stops: readonly Pick<ProgressStop, "tripId" | "kind" | "sequence" | "completedAt">[] }[];
+  statusOf: (tripId: string) => TripStatus | undefined;
+  request: Pick<DayRequest, "vehicles" | "trips">;
+}): DoneByRoute {
+  const vehicles = new Set(args.request.vehicles.map((v) => v.id));
+  const trips = new Set(args.request.trips.map((t) => t.id));
+  const routes: { vehicleId: string; done: { tripId: string; kind: StopKind }[] }[] = [];
+  for (const route of args.routes) {
+    if (!vehicles.has(route.vehicleId)) continue;
+    const picked = new Set<string>();
+    const done: { tripId: string; kind: StopKind }[] = [];
+    for (const stop of [...route.stops].sort((a, b) => a.sequence - b.sequence)) {
+      if (!trips.has(stop.tripId) || !isStopDone(stop, args.statusOf(stop.tripId))) continue;
+      if (stop.kind === "DROPOFF" && !picked.has(stop.tripId)) continue;
+      if (stop.kind === "PICKUP") picked.add(stop.tripId);
+      done.push({ tripId: stop.tripId, kind: stop.kind });
+    }
+    if (done.length > 0) routes.push({ vehicleId: route.vehicleId, done });
+  }
+  return { routes };
+}
+
 export function planHoldsProgress(
   plan: { routes: readonly { vehicleId: string; stops: readonly { tripId: string; kind: StopKind }[] }[] },
-  progress: Progress | null | undefined,
+  progress: DoneByRoute | null | undefined,
 ): boolean {
   if (!progress) return true;
   const done = new Map<string, string>();

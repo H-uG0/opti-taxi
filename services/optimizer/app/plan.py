@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 from app.context import PlanContext
 from app.kpis import compute_kpis
-from app.model import service_minutes
+from app.model import service_minutes, waits_by_the_vehicle
 from app.pricing import Ride, cents_to_euros, revenue_cents
 from app.schedule import PlannedStop, RouteSchedule, schedule_route
 from app.schemas import (
@@ -93,7 +93,7 @@ def _wait_at_facility(trip: Trip, kind_minutes: Mapping[StopKind, int]) -> int |
             return None
         return max(0, trip.appointment_min - dropoff)
     pickup = kind_minutes.get("PICKUP")
-    if pickup is None or trip.ready_min is None:
+    if pickup is None or trip.ready_min is None or waits_by_the_vehicle(trip):
         return None
     return max(0, pickup - trip.ready_min)
 

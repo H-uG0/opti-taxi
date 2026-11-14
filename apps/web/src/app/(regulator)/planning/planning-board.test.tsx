@@ -13,6 +13,8 @@ const actions = vi.hoisted(() => ({
   findPlaces: vi.fn(async () => ({ ok: false, error: "Service indisponible." })),
   checkDraft: vi.fn(),
 }));
+// « Hors service… » offers « Localiser l'adresse » (a server action).
+vi.mock("@/components/address/actions", () => ({ geocodeAddressAction: vi.fn() }));
 vi.mock("./actions", () => ({
   lockTrip: vi.fn(),
   unlockTrip: vi.fn(),

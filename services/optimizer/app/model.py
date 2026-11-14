@@ -10,6 +10,10 @@
   the budget (the arrival margin keeps priority); a leg alone waits at most maxTotalWait. The wait
   on board in front of the facility (the vehicle waiting for another patient's window) counts in
   the window of the leg: the solver checks it on the reported times (solver._on_board_breaches).
+- A RETURN continuation (contract README « Course de reprise »: a patient picked up again where their transport
+  was interrupted) waits by the vehicle, not at the facility: its pickup starts in
+  [ready, ready + CONTINUATION_PICKUP_WINDOW_MIN], outside the facility's hours and the wait budget, and it is
+  never paired with the patient's outbound.
 - Stop durations: the trip's own when given, else the settings'.
 - Vehicle compatibility (prescribed vehicle types, regulator lock), break placement modes and the
   6-hour work limit without a break (Code du travail, art. L. 3121-16).
@@ -31,6 +35,14 @@ MAX_WORK_WITHOUT_BREAK_MIN = 6 * 60
 """Code du travail, art. L. 3121-16: a break of at least MIN_LEGAL_BREAK_MIN minutes is due once the
 daily work reaches 6 hours. A route (depot departure to return) longer than this needs one inside it."""
 MIN_LEGAL_BREAK_MIN = 20
+CONTINUATION_PICKUP_WINDOW_MIN = 120
+"""A RETURN continuation is picked up at most this long after its readyMin (the time it was interrupted, or
+now): the patient waits by the vehicle, the regulator arranges a later pickup by hand."""
+
+
+def waits_by_the_vehicle(trip: Trip) -> bool:
+    """A RETURN continuation: its pickup is where the transport was interrupted, not at the facility."""
+    return trip.continuation and trip.direction == "RETURN"
 
 
 @dataclass(frozen=True)
@@ -74,7 +86,7 @@ def same_day_pairs(trips: Sequence[Trip]) -> list[tuple[Trip, Trip]]:
     for patient_trips in by_patient.values():
         outbounds = [t for t in patient_trips if t.direction == "OUTBOUND" and t.appointment_min is not None]
         returns = sorted(
-            (t for t in patient_trips if t.direction == "RETURN" and t.ready_min is not None),
+            (t for t in patient_trips if t.direction == "RETURN" and t.ready_min is not None and not waits_by_the_vehicle(t)),
             key=lambda t: (t.ready_min or 0, t.id),
         )
         used: set[str] = set()
@@ -93,7 +105,7 @@ def facility_hours_apply(trip: Trip) -> bool:
     """The facility's hours bound the trip's stop there: some are given, and its own time (appointment
     of an OUTBOUND trip, end of session of a RETURN) is inside them. A time outside them is a data
     error the regulator must see (warning), never a trip made impossible."""
-    if trip.facility_open_min is None and trip.facility_close_min is None:
+    if (trip.facility_open_min is None and trip.facility_close_min is None) or waits_by_the_vehicle(trip):
         return False
     key = trip.appointment_min if trip.direction == "OUTBOUND" else trip.ready_min
     if key is None:
@@ -107,7 +119,8 @@ def facility_hours_warnings(request: DayRequest) -> list[str]:
     """French warnings for the trips whose own time is outside the facility's hours given (ignored)."""
     warnings: list[str] = []
     for trip in request.trips:
-        if (trip.facility_open_min is None and trip.facility_close_min is None) or facility_hours_apply(trip):
+        hours_given = trip.facility_open_min is not None or trip.facility_close_min is not None
+        if not hours_given or facility_hours_apply(trip) or waits_by_the_vehicle(trip):
             continue
         what = "rendez-vous" if trip.direction == "OUTBOUND" else "fin de séance"
         key = trip.appointment_min if trip.direction == "OUTBOUND" else trip.ready_min
@@ -152,6 +165,8 @@ def derive_windows(
             windows[trip.id] = TripWindows(pickup=FREE_WINDOW, dropoff=dropoff)
         else:
             ready = trip.ready_min if trip.ready_min is not None else 0
+            if waits_by_the_vehicle(trip):
+                after_budget[trip.id] = CONTINUATION_PICKUP_WINDOW_MIN
             pickup = Window(ready, min(HORIZON_MIN, ready + after_budget[trip.id]))
             if facility_hours_apply(trip):
                 pickup = _bounded(pickup, trip)

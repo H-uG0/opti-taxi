@@ -52,6 +52,17 @@ describe("routeHold", () => {
     expect(routeHold(storedRoute({ driverId: "drv-2" }), sent, crews)).toBe("CREW");
   });
 
+  it("hands over a route whose patient was absent or whose transport was interrupted: those stops are history", () => {
+    // trip_x's patient was absent: its pickup done, its dropoff still there; neither is sent (a closed trip).
+    const absent = storedRoute({ stops: [stop("trip_x", "PICKUP", 0, new Date()), stop("trip_x", "DROPOFF", 1), stop("trip_3", "PICKUP", 2), stop("trip_3", "DROPOFF", 3)] });
+    expect(routeHold(absent, sent, crews, (id) => (id === "trip_x" ? "NO_SHOW" : "ASSIGNED"))).toBeNull();
+    const interrupted = storedRoute({ stops: [stop("trip_x", "PICKUP", 0, new Date()), stop("trip_3", "PICKUP", 1), stop("trip_3", "DROPOFF", 2)] });
+    expect(routeHold(interrupted, sent, crews, (id) => (id === "trip_x" ? "CANCELLED" : "ASSIGNED"))).toBeNull();
+    // A trip cancelled before any stop of it was done still holds the route (a computation frees its place).
+    const cancelled = storedRoute({ stops: [stop("trip_x", "PICKUP", 0), stop("trip_x", "DROPOFF", 1)] });
+    expect(routeHold(cancelled, sent, crews, () => "CANCELLED")).toBe("OFF_REQUEST");
+  });
+
   it("says a vehicle off the road that day as such, not as another crew", () => {
     // Made unavailable (breakdown, maintenance…): no crew of the day, not sent to the optimizer.
     expect(routeHold(storedRoute({ vehicleId: "veh_down" }), sent, crews)).toBe("UNAVAILABLE");
