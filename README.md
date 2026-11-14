@@ -133,7 +133,7 @@ inchangé (générateurs séparés).
 défaut) avec les modules de l'application : génération des courses et courses ponctuelles, absences et
 véhicules au garage, optimisation, courses figées pour les patients qui demandent leur chauffeur, réponses
 de partage, courses non placées confiées à un confrère, annulations, absences, horaires réels saisis par
-environ 85 % des équipages, validation, journal d'audit (créations comprises), puis pleins et relevés de
+environ 85 % des équipages, validation (le plan validé est figé : le « Prévu » du tableau de bord), journal d'audit (créations comprises), puis pleins et relevés de
 compteur recalculés d'après les km simulés. Le tableau de bord, le planning, Courses, Équipages et Arrivées
 partagées marquent ces jours « simulé » (« Journée simulée »). Il ne touche jamais
 aujourd'hui ni les jours suivants, laisse tels quels les jours qui contiennent des données qu'il n'a pas
