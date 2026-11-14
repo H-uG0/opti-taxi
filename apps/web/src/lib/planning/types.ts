@@ -188,6 +188,7 @@ export type DayKpis = {
   totalKm: number;
   emptyKm: number;
   emptyKmRatio: number | null;
+  /** Shared transport as the Assurance maladie counts it: eligible trips in a taxi or a VSL (lib/kpis-sharing.ts). */
   sharedTrips: number;
   sharedTripRatio: number | null;
   revenue: number;

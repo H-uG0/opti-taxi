@@ -24,7 +24,10 @@
  *   tomorrow), shared_arrivals.view (Facility when a facility's sheet is
  *   opened), driver.view (/chauffeurs/[id]: absences), day_crew.view
  *   (/equipages: everyone's absences of the day), staff_list.view
- *   (/chauffeurs: everyone's situation tomorrow, absences included);
+ *   (/chauffeurs: everyone's situation tomorrow, absences included),
+ *   wait_cases.view (/tableau-de-bord: the shared care sessions over the
+ *   wait limit, patient initials only; details: from, to and the tripIds
+ *   listed);
  * - referentials: patient.*, prescription.*, recurrence.* (create, update,
  *   delete, deactivate, reactivate, attach_renewal), facility.*,
  *   patient_absence.create/update/delete (on the PatientAbsence, details:

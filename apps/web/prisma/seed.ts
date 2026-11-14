@@ -145,6 +145,7 @@ async function wipe(): Promise<void> {
   await prisma.$transaction([
     liftAuditGuard(prisma),
     prisma.auditEvent.deleteMany(),
+    prisma.validatedPlan.deleteMany(),
     prisma.fuelLog.deleteMany(),
     prisma.maintenanceDeadline.deleteMany(),
     prisma.vehicleUnavailability.deleteMany(),

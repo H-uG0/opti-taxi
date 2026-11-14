@@ -1,27 +1,29 @@
 import type { ReactNode } from "react";
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+import Link from "next/link";
 import { SimulatedDayBadge } from "@/components/planning/simulated-day-badge";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/components/ui/cn";
 import { Stat } from "@/components/ui/layout";
-import { deltaTrend, kpiDelta, mixedDistanceSources, type DayKpis } from "@/lib/kpis";
-import { formatKm, formatPercent } from "@/lib/labels";
-import { formatDuration, formatLongDate } from "@/lib/time";
+import { deltaTrend, kpiDelta, mixedDistanceSources, type DayKpis, type KpiSummary } from "@/lib/kpis";
+import type { PlannedComparison, PlanView, RealizedComparison } from "@/lib/kpis-compare";
+import { lostTrips, placedTrips, tripsToCarry } from "@/lib/kpis-demand";
+import { lostVehicleDays } from "@/lib/kpis-fleet";
+import { planRates } from "@/lib/kpis-plan";
+import { eligibleSharedRate, measuredSharedRate, SHARING_OBJECTIVE, tapTotal } from "@/lib/kpis-sharing";
+import { formatKm } from "@/lib/labels";
+import { addDays, formatDuration, formatLongDate } from "@/lib/time";
 import {
   capitalize,
   describeRealizedRate,
   formatDayShort,
   formatDecimal,
-  formatDeltaCount,
   formatDeltaDecimal,
   formatDeltaEuros,
-  formatDeltaMinutes,
   formatDeltaPoints,
   formatEurosRounded,
   formatInstant,
-  formatPlanningTime,
-  measuredLateArrivals,
-  plannedMargin,
+  formatRate,
   plural,
 } from "./format";
 
@@ -29,23 +31,47 @@ function Line({ children }: { children: ReactNode }) {
   return <span className="block">{children}</span>;
 }
 
-/** Change against the comparison day, with an arrow and a word, never color alone. */
-function Delta({
+/**
+ * Change against the same weekday of the week before (an arrow and a word,
+ * never color alone), and the value of the four same weekdays before.
+ */
+function Compare({
   current,
   previous,
+  fourWeeks,
   higherIsBetter,
-  format,
+  formatDelta,
+  formatValue,
 }: {
   current: number | null;
   previous: { date: string; value: number | null } | null;
+  fourWeeks: { count: number; value: number | null } | null;
   higherIsBetter: boolean;
-  format: (delta: number) => string;
+  formatDelta: (delta: number) => string;
+  formatValue: (value: number) => string;
 }) {
-  if (!previous) return null;
+  const reference =
+    fourWeeks && fourWeeks.value !== null ? (
+      <span title={`Les ${plural(fourWeeks.count, "même jour", "mêmes jours")} des 4 semaines précédentes, compteurs additionnés`}>
+        4&nbsp;sem.&nbsp;: <span className="tabular">{formatValue(fourWeeks.value)}</span>
+      </span>
+    ) : null;
+  if (!previous) {
+    return (
+      <span className="mt-1 block">
+        Semaine précédente&nbsp;: rien à comparer{reference ? <> · {reference}</> : null}
+      </span>
+    );
+  }
   const delta = kpiDelta(current, previous.value);
   const trend = deltaTrend(delta, higherIsBetter);
   if (delta === null || trend === null) {
-    return <Line>Pas de comparaison avec le {formatDayShort(previous.date)}</Line>;
+    return (
+      <span className="mt-1 block">
+        Pas de comparaison avec {formatDayShort(previous.date)}
+        {reference ? <> · {reference}</> : null}
+      </span>
+    );
   }
   const Icon = trend === "same" ? Minus : delta > 0 ? ArrowUpRight : ArrowDownRight;
   const tone = trend === "better" ? "text-emerald-700" : trend === "worse" ? "text-red-700" : "text-slate-600";
@@ -54,203 +80,519 @@ function Delta({
     <span className="mt-1 flex flex-wrap items-center gap-x-1">
       <span className={cn("tabular inline-flex items-center gap-0.5 font-medium", tone)}>
         <Icon aria-hidden className="size-3.5" />
-        {trend === "same" ? "stable" : format(delta)}
+        {trend === "same" ? "stable" : formatDelta(delta)}
       </span>
       <span>vs {formatDayShort(previous.date)}</span>
       {trend !== "same" ? <span className="sr-only">({verdict})</span> : null}
+      {reference ? <span>· {reference}</span> : null}
     </span>
   );
 }
 
-/** Headline tiles of the focus day, compared with the previous planned day. */
-export function Headline({
-  focus,
-  previous,
+function BlockTitle({ id, title, date, badges, children }: { id: string; title: string; date: string; badges: ReactNode; children?: ReactNode }) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <h3 id={id} className="text-base font-semibold text-slate-900">
+        {title} <span className="font-normal text-slate-600">— {capitalize(formatLongDate(date))}</span>
+      </h3>
+      {badges}
+      {children}
+    </div>
+  );
+}
+
+function StatusBadges({ day, today, tomorrow }: { day: DayKpis; today: string; tomorrow: string }) {
+  return (
+    <>
+      {day.date === tomorrow ? <Badge tone="brand">J+1</Badge> : null}
+      {day.date === today ? <Badge tone="info">Aujourd&apos;hui</Badge> : null}
+      {day.simulated ? <SimulatedDayBadge /> : null}
+      {day.planningStatus === "VALIDATED" ? (
+        <Badge tone="success">Planning validé</Badge>
+      ) : day.planningStatus === "NOT_VALIDATED" ? (
+        <Badge tone="warning">Planning non validé</Badge>
+      ) : (
+        <Badge>Pas de planning</Badge>
+      )}
+    </>
+  );
+}
+
+function comparedText(date: string, count: number): string {
+  return `Comparé au ${formatLongDate(addDays(date, -7))} (même jour la semaine précédente) et ${
+    count > 0 ? `aux ${plural(count, "même jour", "mêmes jours")} des 4 semaines précédentes` : "aux 4 semaines précédentes (aucun jour planifié)"
+  }.`;
+}
+
+/** Shared rate measured from the timestamps when the crews recorded both times, else the plan's. */
+function sharedFigure(day: Pick<KpiSummary, "sharing" | "eligibleSharedRate">): { value: number | null; measured: boolean } {
+  const measured = measuredSharedRate(day.sharing);
+  return measured !== null ? { value: measured, measured: true } : { value: day.eligibleSharedRate, measured: false };
+}
+
+/** « Hier (réalisé) »: what was done on a day, against the same weekday of the weeks before. */
+export function RealizedBlock({
+  day,
+  comparison,
+  today,
+  tomorrow,
+  toleranceMin,
+}: {
+  day: DayKpis;
+  comparison: RealizedComparison;
+  today: string;
+  tomorrow: string;
+  toleranceMin: number;
+}) {
+  const { previous, fourWeeks } = comparison;
+  const prev = (value: (d: KpiSummary) => number | null) => (previous ? { date: previous.date, value: value(previous) } : null);
+  const four = (value: (d: KpiSummary) => number | null) => (fourWeeks ? { count: fourWeeks.count, value: value(fourWeeks) } : null);
+  const realized = describeRealizedRate(day);
+  const frozen = day.frozen ? planRates(day.frozen.figures) : null;
+  const shared = sharedFigure(day);
+  const lost = lostTrips(day.demand);
+  const fleet = day.fleet;
+  const servedMargin = day.servedRevenue - day.cost;
+  const title = day.inProgress ? "Aujourd'hui (en cours)" : day.date === addDays(today, -1) ? "Hier (réalisé)" : "Réalisé";
+
+  return (
+    <section aria-labelledby="realized-title">
+      <BlockTitle id="realized-title" title={title} date={day.date} badges={<StatusBadges day={day} today={today} tomorrow={tomorrow} />}>
+        <p className="text-sm text-slate-600">{comparedText(day.date, fourWeeks?.count ?? 0)}</p>
+        {previous && mixedDistanceSources(day, previous) ? (
+          <p role="note" className="text-sm text-amber-800">
+            Distances calculées différemment ces deux jours (routières ou estimées à vol d&apos;oiseau)&nbsp;: comparaison des
+            km indicative.
+          </p>
+        ) : null}
+      </BlockTitle>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+        <Stat
+          label="Taux de service"
+          tone={lost > 0 ? "warn" : "default"}
+          value={formatRate(day.serviceRate)}
+          hint={
+            <>
+              <Line>
+                {placedTrips(day.demand)} placées sur {plural(tripsToCarry(day.demand), "course à transporter", "courses à transporter")}
+              </Line>
+              <Line>
+                {lost > 0
+                  ? `${plural(day.demand.unassigned, "non affectée", "non affectées")} · ${plural(day.demand.handedOver, "confiée", "confiées")} · CA perdu ≈ ${formatEurosRounded(day.demand.lostRevenue)}`
+                  : "Aucune course perdue"}
+              </Line>
+              <Compare
+                current={day.serviceRate}
+                previous={prev((d) => d.serviceRate)}
+                fourWeeks={four((d) => d.serviceRate)}
+                higherIsBetter
+                formatDelta={formatDeltaPoints}
+                formatValue={formatRate}
+              />
+            </>
+          }
+        />
+        <Stat
+          label="Courses / véhicule (réalisé)"
+          value={realized.value ?? "—"}
+          hint={
+            <>
+              <Line>{capitalize(realized.note)}</Line>
+              <Line>
+                Plan validé&nbsp;: <span className="tabular">{formatDecimal(frozen?.tripsPerVehicle ?? null)}</span> · servi&nbsp;:{" "}
+                <span className="tabular">{formatDecimal(day.tripsPerVehiclePlanned)}</span>
+              </Line>
+              <Line>
+                Par véhicule disponible&nbsp;: <span className="tabular">{formatDecimal(day.tripsPerAvailableVehicle)}</span>
+              </Line>
+              <Compare
+                current={day.tripsPerVehicleRealized}
+                previous={prev((d) => d.tripsPerVehicleRealized)}
+                fourWeeks={four((d) => d.tripsPerVehicleRealized)}
+                higherIsBetter
+                formatDelta={formatDeltaDecimal}
+                formatValue={(v) => formatDecimal(v)}
+              />
+            </>
+          }
+        />
+        <Stat
+          label="Utilisation de la flotte"
+          value={formatRate(day.useRate)}
+          hint={
+            fleet ? (
+              <>
+                <Line>
+                  {fleet.used} utilisés sur {plural(fleet.available, "disponible")} ({plural(fleet.active, "actif")})
+                </Line>
+                <Line>
+                  {plural(lostVehicleDays(fleet), "journée perdue", "journées perdues")}&nbsp;: {fleet.unavailable} indisponible
+                  {fleet.unavailable > 1 ? "s" : ""}, {fleet.crewless} sans équipage
+                </Line>
+                <Compare
+                  current={day.useRate}
+                  previous={prev((d) => d.useRate)}
+                  fourWeeks={four((d) => d.useRate)}
+                  higherIsBetter
+                  formatDelta={formatDeltaPoints}
+                  formatValue={formatRate}
+                />
+              </>
+            ) : (
+              <Line>Flotte du jour inconnue</Line>
+            )
+          }
+        />
+        <Stat
+          label={shared.measured ? "Partage mesuré (CPAM)" : "Partage prévu (CPAM)"}
+          value={formatRate(shared.value)}
+          hint={
+            <>
+              <Line>
+                VSL{" "}
+                <span className="tabular">
+                  {formatRate(shared.measured ? measuredSharedRate(day.sharing, "VSL") : eligibleSharedRate(day.sharing, "VSL"))}
+                </span>{" "}
+                · taxi{" "}
+                <span className="tabular">
+                  {formatRate(shared.measured ? measuredSharedRate(day.sharing, "TAXI") : eligibleSharedRate(day.sharing, "TAXI"))}
+                </span>
+              </Line>
+              <Line>
+                Prévu {formatRate(day.eligibleSharedRate)} sur {plural(tapTotal(day.sharing.eligible), "éligible")} · objectif{" "}
+                {formatRate(SHARING_OBJECTIVE)}
+              </Line>
+              <Compare
+                current={shared.value}
+                previous={prev((d) => sharedFigure(d).value)}
+                fourWeeks={four((d) => sharedFigure(d).value)}
+                higherIsBetter
+                formatDelta={formatDeltaPoints}
+                formatValue={formatRate}
+              />
+            </>
+          }
+        />
+        <Stat
+          label={`Retards (> ${toleranceMin} min)`}
+          tone={day.measuredOutbound === 0 ? "default" : day.lateArrivals > 0 ? "bad" : "good"}
+          value={day.measuredOutbound > 0 ? formatRate(day.lateRate) : "—"}
+          hint={
+            <>
+              <Line>
+                {day.measuredOutbound > 0
+                  ? `${day.lateArrivals} sur ${plural(day.measuredOutbound, "aller mesuré", "allers mesurés")}`
+                  : day.realizedOutbound > 0
+                    ? "Heures de dépose non saisies"
+                    : "Aucun aller déposé"}
+              </Line>
+              <Line>
+                Au-delà de 15&nbsp;min&nbsp;: {day.lateOver15}
+                {day.maxDelayMinutes !== null ? ` · max ${formatDuration(day.maxDelayMinutes)}` : ""}
+              </Line>
+              <Compare
+                current={day.lateRate}
+                previous={prev((d) => d.lateRate)}
+                fourWeeks={four((d) => d.lateRate)}
+                higherIsBetter={false}
+                formatDelta={formatDeltaPoints}
+                formatValue={formatRate}
+              />
+            </>
+          }
+        />
+        <Stat
+          label="Marge sans les absents"
+          tone={day.vehicles > 0 && servedMargin < 0 ? "bad" : "default"}
+          value={formatEurosRounded(day.vehicles > 0 ? servedMargin : null)}
+          hint={
+            <>
+              <Line>
+                CA déposé <span className="tabular">{formatEurosRounded(day.realizedRevenue)}</span> · sans statut{" "}
+                <span className="tabular">{formatEurosRounded(day.servedRevenue - day.realizedRevenue)}</span>
+              </Line>
+              <Line>
+                {day.noShowRevenue > 0
+                  ? `Absents non facturés : ${formatEurosRounded(day.noShowRevenue)}`
+                  : `Par course : ${formatEurosRounded(day.marginPerTrip)}`}
+              </Line>
+              <Compare
+                current={day.marginPerTrip}
+                previous={prev((d) => d.marginPerTrip)}
+                fourWeeks={four((d) => d.marginPerTrip)}
+                higherIsBetter
+                formatDelta={(delta) => `${formatDeltaEuros(delta)} / course`}
+                formatValue={(v) => `${formatEurosRounded(v)} / course`}
+              />
+            </>
+          }
+        />
+      </div>
+
+      <PlannedServedDone day={day} />
+    </section>
+  );
+}
+
+/** Prévu (as validated), servi (what stayed in the routes), réalisé (dropped off): the same day three times. */
+function PlannedServedDone({ day }: { day: DayKpis }) {
+  const plan = day.frozen?.figures ?? null;
+  const measured = tapTotal(day.sharing.measured);
+  const rows: { label: string; planned: string; served: string; done: string; title?: string }[] = [
+    {
+      label: "Courses",
+      planned: plan ? String(plan.served) : "—",
+      served: String(day.servedTrips),
+      done: day.upcoming ? "—" : String(day.realizedTrips),
+    },
+    {
+      label: "Partagées (périmètre CPAM)",
+      planned: plan ? `${tapTotal(plan.eligibleShared)} / ${tapTotal(plan.eligible)}` : "—",
+      served: `${tapTotal(day.sharing.eligibleShared)} / ${tapTotal(day.sharing.eligible)}`,
+      done: measured > 0 ? `${tapTotal(day.sharing.measuredShared)} / ${measured}` : "—",
+      title: "Courses partagées sur les courses éligibles\u202f; réalisé\u00a0: mesuré aux horodatages des équipages",
+    },
+    {
+      label: "CA estimé",
+      planned: plan ? formatEurosRounded(plan.revenue) : "—",
+      served: formatEurosRounded(day.servedRevenue),
+      done: day.upcoming ? "—" : formatEurosRounded(day.realizedRevenue),
+    },
+    {
+      label: "Véhicules",
+      planned: plan ? String(plan.vehicles) : "—",
+      served: String(day.vehicles),
+      done: day.upcoming ? "—" : `${day.realizedVehicles} suivis`,
+    },
+  ];
+  return (
+    <div className="mt-3 max-w-3xl overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-xs">
+      <table className="min-w-full text-sm">
+        <caption className="px-3 pt-2 text-left text-xs text-slate-600">
+          {day.frozen ? (
+            <>Prévu&nbsp;: le plan tel que validé le {formatInstant(day.frozen.validatedAt)}. </>
+          ) : day.planningStatus === "VALIDATED" ? (
+            <>Plan validé avant l&apos;enregistrement des plans validés&nbsp;: pas de prévu figé. </>
+          ) : (
+            <>Planning non validé&nbsp;: pas de prévu figé. </>
+          )}
+          Servi&nbsp;: les tournées après les absences ({day.demand.noShows}) et les annulations du jour ({day.demand.cancelledOnDay}).
+          Réalisé&nbsp;: les courses déposées.
+        </caption>
+        <thead>
+          <tr className="text-xs text-slate-600">
+            <th scope="col" className="px-3 py-1.5 text-left font-semibold">
+              <span className="sr-only">Indicateur</span>
+            </th>
+            <th scope="col" className="px-3 py-1.5 text-right font-semibold">
+              Prévu
+            </th>
+            <th scope="col" className="px-3 py-1.5 text-right font-semibold">
+              Servi
+            </th>
+            <th scope="col" className="px-3 py-1.5 text-right font-semibold">
+              Réalisé
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.map((row) => (
+            <tr key={row.label} title={row.title}>
+              <th scope="row" className="px-3 py-1.5 text-left font-normal text-slate-700">
+                {row.label}
+              </th>
+              <td className="tabular px-3 py-1.5 text-right text-slate-800">{row.planned}</td>
+              <td className="tabular px-3 py-1.5 text-right text-slate-800">{row.served}</td>
+              <td className="tabular px-3 py-1.5 text-right font-medium text-slate-900">{row.done}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** « Demain (prévu) »: the plan of a day to come, against the validated plans of the same weekday before. */
+export function PlannedBlock({
+  day,
+  plan,
+  comparison,
   today,
   tomorrow,
 }: {
-  focus: DayKpis;
-  previous: DayKpis | null;
+  day: DayKpis;
+  plan: PlanView | null;
+  comparison: PlannedComparison;
   today: string;
   tomorrow: string;
 }) {
-  const compare = (value: (day: DayKpis) => number | null) =>
-    previous ? { date: previous.date, value: value(previous) } : null;
-  const late = measuredLateArrivals(focus);
-  const lateTone = focus.lateArrivals > 0 || focus.plannedLateArrivals > 0 ? "bad" : late !== null ? "good" : "default";
-  const noRoutes = focus.vehicles === 0;
-  const realized = describeRealizedRate(focus);
+  const title = day.date === tomorrow ? "Demain (prévu)" : "Prévu";
+  const rates = plan ? planRates(plan.figures) : null;
+  const { previous, fourWeeks } = comparison;
+  const prevRates = previous ? planRates(previous.figures) : null;
+  const fourRates = fourWeeks ? planRates(fourWeeks.figures) : null;
+  const prev = (value: (r: ReturnType<typeof planRates>) => number | null) =>
+    previous && prevRates ? { date: previous.date, value: value(prevRates) } : null;
+  const four = (value: (r: ReturnType<typeof planRates>) => number | null) =>
+    fourWeeks && fourRates ? { count: fourWeeks.count, value: value(fourRates) } : null;
+  const figures = plan?.figures ?? null;
+  const fleet = day.fleet;
+  const frozenNote =
+    fourWeeks && fourWeeks.frozen < fourWeeks.count
+      ? ` (${plural(fourWeeks.count - fourWeeks.frozen, "jour sans plan figé, lu", "jours sans plan figé, lus")} sur ses tournées)`
+      : "";
 
   return (
-    <section aria-labelledby="focus-day-title" className="mb-8">
-      <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <h2 id="focus-day-title" className="text-base font-semibold text-slate-900">
-          {capitalize(formatLongDate(focus.date))}
-        </h2>
-        {focus.date === tomorrow ? <Badge tone="brand">J+1</Badge> : null}
-        {focus.date === today ? <Badge tone="info">Aujourd&apos;hui</Badge> : null}
-        {focus.simulated ? <SimulatedDayBadge /> : null}
-        {focus.planningStatus === "VALIDATED" ? (
-          <Badge tone="success">Planning validé</Badge>
-        ) : focus.planningStatus === "NOT_VALIDATED" ? (
-          <Badge tone="warning">Planning non validé</Badge>
-        ) : (
-          <Badge>Pas de planning</Badge>
-        )}
-        <p className="text-sm text-slate-600">
-          {previous
-            ? `Comparé au ${formatLongDate(previous.date)}, dernier jour planifié avant.`
-            : "Aucun jour planifié avant pour comparer."}
-        </p>
-        {previous && mixedDistanceSources(focus, previous) ? (
-          <p role="note" className="text-sm text-amber-800">
-            Distances calculées différemment ces deux jours (routières ou estimées à vol d&apos;oiseau)&nbsp;: comparaison des
-            km et des durées indicative.
+    <section aria-labelledby="planned-title">
+      <BlockTitle id="planned-title" title={title} date={day.date} badges={<StatusBadges day={day} today={today} tomorrow={tomorrow} />}>
+        {figures ? (
+          <p className="text-sm text-slate-600">
+            {`Comparé aux plans validés du ${formatLongDate(addDays(day.date, -7))} et des 4 mêmes jours précédents${frozenNote}.`}
           </p>
         ) : null}
-      </div>
+      </BlockTitle>
 
-      {noRoutes ? (
-        <p className="mb-3 text-sm text-slate-600">
-          Aucune tournée ce jour&nbsp;: les indicateurs s&apos;afficheront après l&apos;optimisation.
+      {!figures || !rates ? (
+        <p className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-xs">
+          Pas encore de tournée&nbsp;: {plural(placedTrips(day.demand) + day.demand.unassigned, "course à planifier", "courses à planifier")}.{" "}
+          <Link href={`/planning?date=${day.date}`} className="font-medium text-brand-700 underline underline-offset-2">
+            Ouvrir le planning
+          </Link>
         </p>
-      ) : null}
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-        <Stat
-          label="Courses / véhicule"
-          value={formatDecimal(focus.tripsPerVehiclePlanned)}
-          hint={
-            <>
-              <Line>
-                Réalisé&nbsp;:{" "}
-                {realized.value !== null ? (
-                  <>
-                    <span className="tabular font-medium text-slate-700">{realized.value}</span>
-                    {focus.inProgress ? " (en cours)" : null}
-                  </>
-                ) : (
-                  realized.note
-                )}
-              </Line>
-              {realized.value !== null ? <Line>{realized.note}</Line> : null}
-              <Line>
-                {plural(focus.servedTrips, "course")} · {plural(focus.vehicles, "véhicule")}
-              </Line>
-              <Delta
-                current={focus.tripsPerVehiclePlanned}
-                previous={compare((d) => d.tripsPerVehiclePlanned)}
-                higherIsBetter
-                format={formatDeltaDecimal}
-              />
-            </>
-          }
-        />
-        <Stat
-          label="Km à vide"
-          value={formatPercent(focus.emptyKmShare, 1)}
-          hint={
-            <>
-              <Line>
-                <span className="tabular">{formatKm(focus.emptyKm, 0)}</span> sur{" "}
-                <span className="tabular">{formatKm(focus.distanceKm, 0)}</span>
-              </Line>
-              <Delta
-                current={focus.emptyKmShare}
-                previous={compare((d) => d.emptyKmShare)}
-                higherIsBetter={false}
-                format={formatDeltaPoints}
-              />
-            </>
-          }
-        />
-        <Stat
-          label="Transport partagé"
-          value={formatPercent(focus.sharedRate, 1)}
-          hint={
-            <>
-              <Line>
-                {focus.sharedTrips} sur {plural(focus.servedTrips, "course servie", "courses servies")}
-              </Line>
-              <Delta
-                current={focus.sharedRate}
-                previous={compare((d) => d.sharedRate)}
-                higherIsBetter
-                format={formatDeltaPoints}
-              />
-            </>
-          }
-        />
-        <Stat
-          label="Arrivées après le RDV"
-          tone={lateTone}
-          value={late === null ? "—" : String(late)}
-          hint={
-            <>
-              <Line>
-                {late !== null
-                  ? `${formatPercent(focus.lateRate, 1)} des ${plural(focus.measuredOutbound, "aller mesuré", "allers mesurés")}${
-                      focus.maxDelayMinutes !== null ? ` · max ${formatDuration(focus.maxDelayMinutes)}` : ""
-                    }`
-                  : focus.upcoming
-                    ? "Réel\u00a0: jour à venir"
-                    : focus.realizedOutbound > 0
-                      ? "Heures de dépose non saisies"
-                      : "Aucun aller déposé"}
-              </Line>
-              <Line>
-                Prévu&nbsp;: {focus.plannedLateArrivals} en retard sur{" "}
-                {plural(focus.plannedOutbound, "aller")}
-              </Line>
-              <Delta
-                current={late}
-                previous={compare(measuredLateArrivals)}
-                higherIsBetter={false}
-                format={formatDeltaCount}
-              />
-            </>
-          }
-        />
-        <Stat
-          label="Temps de planification"
-          tone={focus.planningStatus === "NOT_VALIDATED" ? "warn" : "default"}
-          value={formatPlanningTime(focus)}
-          hint={
-            <>
-              <Line>
-                {plural(focus.optimizationRuns, "optimisation")}
-                {focus.firstRunAt ? ` · 1re le ${formatInstant(focus.firstRunAt)}` : ""}
-              </Line>
-              {focus.validatedAt ? <Line>Validé le {formatInstant(focus.validatedAt)}</Line> : null}
-              <Delta
-                current={focus.planningMinutes}
-                previous={compare((d) => d.planningMinutes)}
-                higherIsBetter={false}
-                format={formatDeltaMinutes}
-              />
-            </>
-          }
-        />
-        <Stat
-          label="Marge estimée"
-          tone={focus.vehicles > 0 && focus.margin < 0 ? "bad" : "default"}
-          value={formatEurosRounded(plannedMargin(focus))}
-          hint={
-            <>
-              <Line>
-                CA <span className="tabular">{formatEurosRounded(noRoutes ? null : focus.revenue)}</span> · coût{" "}
-                <span className="tabular">{formatEurosRounded(noRoutes ? null : focus.cost)}</span>
-              </Line>
-              <Delta
-                current={plannedMargin(focus)}
-                previous={compare(plannedMargin)}
-                higherIsBetter
-                format={formatDeltaEuros}
-              />
-            </>
-          }
-        />
-      </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+          <Stat
+            label="Taux de service prévu"
+            tone={figures.unassigned + figures.handedOver > 0 ? "warn" : "default"}
+            value={formatRate(rates.serviceRate)}
+            hint={
+              <>
+                <Line>
+                  {figures.served} servies · {plural(figures.unassigned, "non affectée", "non affectées")}
+                  {figures.handedOver > 0 ? ` · ${plural(figures.handedOver, "confiée", "confiées")}` : ""}
+                </Line>
+                <Compare
+                  current={rates.serviceRate}
+                  previous={prev((r) => r.serviceRate)}
+                  fourWeeks={four((r) => r.serviceRate)}
+                  higherIsBetter
+                  formatDelta={formatDeltaPoints}
+                  formatValue={formatRate}
+                />
+              </>
+            }
+          />
+          <Stat
+            label="Courses / véhicule"
+            value={formatDecimal(rates.tripsPerVehicle)}
+            hint={
+              <>
+                <Line>
+                  {figures.vehicles} utilisés{fleet ? ` sur ${plural(fleet.available, "disponible")}` : ""}
+                </Line>
+                <Line>
+                  Par véhicule disponible&nbsp;: <span className="tabular">{formatDecimal(day.tripsPerAvailableVehicle)}</span>
+                </Line>
+                <Compare
+                  current={rates.tripsPerVehicle}
+                  previous={prev((r) => r.tripsPerVehicle)}
+                  fourWeeks={four((r) => r.tripsPerVehicle)}
+                  higherIsBetter
+                  formatDelta={formatDeltaDecimal}
+                  formatValue={(v) => formatDecimal(v)}
+                />
+              </>
+            }
+          />
+          <Stat
+            label="Km à vide"
+            value={formatRate(rates.emptyKmShare)}
+            hint={
+              <>
+                <Line>
+                  <span className="tabular">{formatKm(figures.emptyKm, 0)}</span> sur{" "}
+                  <span className="tabular">{formatKm(figures.distanceKm, 0)}</span>
+                </Line>
+                <Compare
+                  current={rates.emptyKmShare}
+                  previous={prev((r) => r.emptyKmShare)}
+                  fourWeeks={four((r) => r.emptyKmShare)}
+                  higherIsBetter={false}
+                  formatDelta={formatDeltaPoints}
+                  formatValue={formatRate}
+                />
+              </>
+            }
+          />
+          <Stat
+            label="Partage prévu (CPAM)"
+            value={formatRate(rates.sharedRate)}
+            hint={
+              <>
+                <Line>
+                  VSL <span className="tabular">{formatRate(eligibleSharedRate(figures, "VSL"))}</span> · taxi{" "}
+                  <span className="tabular">{formatRate(eligibleSharedRate(figures, "TAXI"))}</span>
+                </Line>
+                <Line>
+                  {tapTotal(figures.eligibleShared)} sur {plural(tapTotal(figures.eligible), "éligible")} · objectif{" "}
+                  {formatRate(SHARING_OBJECTIVE)}
+                </Line>
+                <Compare
+                  current={rates.sharedRate}
+                  previous={prev((r) => r.sharedRate)}
+                  fourWeeks={four((r) => r.sharedRate)}
+                  higherIsBetter
+                  formatDelta={formatDeltaPoints}
+                  formatValue={formatRate}
+                />
+              </>
+            }
+          />
+          <Stat
+            label="Allers serrés"
+            tone={figures.tightOutbound > 0 ? "warn" : "default"}
+            value={String(figures.tightOutbound)}
+            hint={
+              <>
+                <Line>
+                  Dépose prévue moins de 5&nbsp;min avant le RDV, sur {plural(figures.plannedOutbound, "aller")} (
+                  {formatRate(rates.tightRate)})
+                </Line>
+                <Compare
+                  current={rates.tightRate}
+                  previous={prev((r) => r.tightRate)}
+                  fourWeeks={four((r) => r.tightRate)}
+                  higherIsBetter={false}
+                  formatDelta={formatDeltaPoints}
+                  formatValue={formatRate}
+                />
+              </>
+            }
+          />
+          <Stat
+            label="Marge estimée"
+            tone={figures.margin < 0 ? "bad" : "default"}
+            value={formatEurosRounded(figures.margin)}
+            hint={
+              <>
+                <Line>
+                  CA <span className="tabular">{formatEurosRounded(figures.revenue)}</span> · coût{" "}
+                  <span className="tabular">{formatEurosRounded(figures.cost)}</span>
+                </Line>
+                <Compare
+                  current={rates.marginPerTrip}
+                  previous={prev((r) => r.marginPerTrip)}
+                  fourWeeks={four((r) => r.marginPerTrip)}
+                  higherIsBetter
+                  formatDelta={(delta) => `${formatDeltaEuros(delta)} / course`}
+                  formatValue={(v) => `${formatEurosRounded(v)} / course`}
+                />
+              </>
+            }
+          />
+        </div>
+      )}
     </section>
   );
 }

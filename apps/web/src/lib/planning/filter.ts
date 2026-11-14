@@ -7,6 +7,7 @@
  */
 import type { VehicleType } from "@prisma/client";
 import { computeDayKpis as computeDashboardDayKpis, type KpiRoute, type KpiTrip } from "@/lib/kpis";
+import { tapTotal } from "@/lib/kpis-sharing";
 import type { ZoomLevel } from "./timeline-layout";
 import type { DayKpis, TripView, VehicleRowView, ViolationView } from "./types";
 
@@ -233,8 +234,10 @@ export function subsetKpis(
     if (!row.route) continue;
     routeIdOf.set(row.id, row.route.id);
     routes.push({
+      id: row.route.id,
       serviceDate: date,
       vehicleId: row.id,
+      vehicleType: row.type,
       distanceKm: row.route.distanceKm,
       emptyKm: row.route.emptyKm,
       revenue: row.route.revenue,
@@ -261,6 +264,9 @@ export function subsetKpis(
       plannedDropoffMinute: trip.plannedDropoffMinute,
       dropoffCompletedAt: null,
       exceptionalAmbulance: trip.exceptionalAmbulance === true,
+      payer: trip.payer,
+      sharingAllowed: trip.sharingAllowed,
+      allowedVehicleTypes: trip.allowedVehicleTypes,
     });
   }
   const day = computeDashboardDayKpis(date, { routes, trips: kpiTrips, runs: [] }, date);
@@ -276,8 +282,8 @@ export function subsetKpis(
     totalKm: day.distanceKm,
     emptyKm: day.emptyKm,
     emptyKmRatio: day.emptyKmShare,
-    sharedTrips: day.sharedTrips,
-    sharedTripRatio: day.sharedRate,
+    sharedTrips: tapTotal(day.sharing.eligibleShared),
+    sharedTripRatio: day.eligibleSharedRate,
     revenue: day.revenue,
     margin: day.margin,
     violations: violationsKnown ? ownViolations : null,

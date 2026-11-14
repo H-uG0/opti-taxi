@@ -1,5 +1,6 @@
 /** Number and date formatting of the dashboard (French, "—" for unknown values). */
 import type { DayKpis } from "@/lib/kpis";
+import { formatPercent } from "@/lib/labels";
 import { formatDateTime, formatDuration, fromIsoDate } from "@/lib/time";
 
 const decimalFormats = new Map<number, Intl.NumberFormat>();
@@ -55,6 +56,31 @@ export function formatDayMonth(isoDate: string): string {
 /** Late arrivals of a day, or null when no realized outbound trip could be measured. */
 export function measuredLateArrivals(day: Pick<DayKpis, "lateArrivals" | "measuredOutbound">): number | null {
   return day.measuredOutbound > 0 ? day.lateArrivals : null;
+}
+
+/** A rate with one decimal: "23,4 %" (or "—"). */
+export function formatRate(value: number | null | undefined): string {
+  return formatPercent(value, 1);
+}
+
+/** Minutes as a duration ("45 min", "1 h 05"), or "—". */
+export function formatMinutes(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  return formatDuration(value);
+}
+
+/** "12 / 40" for a count over its total, "—" without a total. */
+export function formatCountOf(count: number, total: number): string {
+  return total > 0 ? `${count} / ${total}` : "—";
+}
+
+/** Patient initials for the lists of the dashboard: "M. D." (first name, last name), never the full name. */
+export function patientInitials(person: { firstName: string; lastName: string }): string {
+  const initial = (name: string) => {
+    const letter = name.trim().charAt(0);
+    return letter ? `${letter.toUpperCase()}.` : "";
+  };
+  return [initial(person.firstName), initial(person.lastName)].filter(Boolean).join(" ") || "—";
 }
 
 /** Margin of a day, or null when there is no route (nothing was planned, not a zero margin). */

@@ -46,6 +46,7 @@ import { checkRouteCrewChange, remainingPart } from "@/lib/staff/route-crew";
 import { loadPlanVersion, STALE_PLAN_ERROR } from "@/lib/planning/version";
 import { VEHICLE_TYPE_SHORT } from "@/lib/labels";
 import { formatLongDate, fromIsoDate, isIsoDate, todayIso, toIsoDate } from "@/lib/time";
+import { freezeValidatedPlan } from "@/lib/kpis-plan-store";
 
 export type PlanningActionResult =
   | {
@@ -877,11 +878,16 @@ export async function validateDay(date: string, confirmed: string | null, shownV
       await lockPlanningDay(tx, isoDate);
       if (await optimizationInProgress(isoDate, tx)) return "running" as const;
       if ((await loadPlanVersion(tx, isoDate)) !== shownVersion) return "stale" as const;
+      const now = new Date();
       const { count } = await tx.route.updateMany({
         where: { serviceDate, status: "PROPOSED" },
-        data: { status: "VALIDATED", validatedAt: new Date() },
+        data: { status: "VALIDATED", validatedAt: now },
       });
-      if (count > 0) await audit(tx, user, { action: "plan.validate", entity: "Route", entityId: null, serviceDate: isoDate });
+      if (count > 0) {
+        await audit(tx, user, { action: "plan.validate", entity: "Route", entityId: null, serviceDate: isoDate });
+        // « Prévu » of the dashboard: the plan as validated (a validation on the day keeps the one of the day before).
+        await freezeValidatedPlan(tx, isoDate, { now, validatedById: user.id });
+      }
       // A computation still waiting for confirmation could no longer replace a validated plan,
       // nor bring the exceptional ambulance it was computed with.
       await dropPendingRuns(tx, serviceDate, "le planning a été validé.");

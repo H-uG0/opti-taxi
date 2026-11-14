@@ -1,64 +1,54 @@
 /**
- * Dashboard indicators (MVP item 7: the five indicators of the spec, day by day).
+ * Dashboard indicators (MVP item 7, and the indicators added for the
+ * manager: demand and service, fleet use, shared transport as the Assurance
+ * maladie counts it, waits and punctuality, planned / served / done).
  *
- * Pure module: it works on plain rows loaded by the dashboard page, never
- * touches the database, and is unit-tested with vitest. Every rate is a
- * fraction (0.23 = 23 %) computed from sums, and is null when its
- * denominator is zero (displayed as "—"), never NaN or Infinity.
+ * Pure module: it works on plain rows loaded by the dashboard page
+ * (@/lib/kpis-load), never touches the database, and is unit-tested with
+ * vitest. Every rate is a fraction (0.23 = 23 %) computed from sums, and is
+ * null when its denominator is zero (displayed as "—"), never NaN or
+ * Infinity. The parts live in kpis-demand, kpis-fleet, kpis-sharing,
+ * kpis-waits and kpis-plan; the input rows in kpis-rows.
  */
-import type { TripDirection, TripStatus } from "@prisma/client";
-import { addDays, formatShortDate, fromIsoDate, isIsoDate, isoDateOf, minuteOfDay } from "@/lib/time";
+import type { VehicleType } from "@prisma/client";
+import { addDays, formatShortDate, fromIsoDate, isIsoDate } from "@/lib/time";
+import { addDemand, demandOfDay, emptyDemand, serviceRate, type DemandTotals } from "./kpis-demand";
+import { addFleet, fleetOfDay, fleetUseRate, type FleetTotals } from "./kpis-fleet";
+import {
+  DEFAULT_KPI_OPTIONS,
+  isRealizedTrip,
+  isServedTrip,
+  isUsedRoute,
+  minuteOfServiceDay,
+  ratio,
+  type KpiData,
+  type KpiFleetDay,
+  type KpiFrozenPlan,
+  type KpiOptions,
+  type KpiRoute,
+  type KpiRun,
+  type KpiTrip,
+} from "./kpis-rows";
+import { addSharing, eligibleSharedRate, emptySharing, measuredSharedRate, sharingOfDay, type SharingTotals } from "./kpis-sharing";
+import { addWaits, emptyWaits, waitsOfDay, type WaitTotals } from "./kpis-waits";
 
-// ---------------------------------------------------------------------------
-// Input rows
-// ---------------------------------------------------------------------------
-
-export type KpiRoute = {
-  /** Service date, "YYYY-MM-DD". */
-  serviceDate: string;
-  vehicleId: string;
-  distanceKm: number;
-  emptyKm: number;
-  revenue: number;
-  cost: number;
-  margin: number;
-  validatedAt: Date | null;
-  /**
-   * Stops still in the route. Cancelling or moving a trip removes its stops
-   * but keeps the route row: a route left without stops no longer uses its
-   * vehicle (same rule as /planning).
-   */
-  stopCount: number;
-  /** The crew recorded at least one stop status (pickup, drop-off or absence) on this route. */
-  hasRecordedStatus: boolean;
-  /** Source of its times and km (Route.matrixSource: osrm, haversine, mixed); absent or null: unknown. */
-  matrixSource?: string | null;
-};
-
-export type KpiTrip = {
-  serviceDate: string;
-  status: TripStatus;
-  routeId: string | null;
-  direction: TripDirection;
-  shared: boolean;
-  appointmentMinute: number | null;
-  plannedDropoffMinute: number | null;
-  /** Real drop-off instant entered by the driver (completedAt of the trip's DROPOFF stop). */
-  dropoffCompletedAt: Date | null;
-  /**
-   * A seated trip carried by an ambulance on a regulator's proposal (« recours
-   * exceptionnel », billed at the VSL tariff); absent: false.
-   */
-  exceptionalAmbulance?: boolean;
-};
-
-/** `simulated`: a run of the history simulation (pnpm db:history), whose day is marked « simulé ». */
-export type KpiRun = { serviceDate: string; startedAt: Date; simulated?: boolean };
-
-export type KpiData = { routes: KpiRoute[]; trips: KpiTrip[]; runs: KpiRun[] };
-
-/** Trips that are in a route and will be (or were) billed. */
-export const SERVED_TRIP_STATUSES = ["ASSIGNED", "PICKED_UP", "DROPPED_OFF"] as const satisfies readonly TripStatus[];
+export {
+  DEFAULT_KPI_OPTIONS,
+  isRealizedTrip,
+  isServedTrip,
+  isUsedRoute,
+  minuteOfServiceDay,
+  quantile,
+  ratio,
+  SERVED_TRIP_STATUSES,
+  type KpiData,
+  type KpiFleetDay,
+  type KpiFrozenPlan,
+  type KpiOptions,
+  type KpiRoute,
+  type KpiRun,
+  type KpiTrip,
+} from "./kpis-rows";
 
 // ---------------------------------------------------------------------------
 // Output
@@ -84,25 +74,36 @@ export type KpiTotals = {
   realizedTrips: number;
   distanceKm: number;
   emptyKm: number;
+  /** Served trips with another patient on board in the plan (every vehicle type and payer). */
   sharedTrips: number;
   /** Realized (DROPPED_OFF) outbound trips that have an appointment time. */
   realizedOutbound: number;
   /** Of which the driver recorded the drop-off time: the lateness can be measured. */
   measuredOutbound: number;
-  /** Measured outbound trips dropped off after the appointment minute. */
+  /** Measured outbound trips dropped off more than the tolerance after the appointment (KpiOptions.lateToleranceMin). */
   lateArrivals: number;
-  /** Largest delay among late arrivals, in minutes. */
+  /** Measured outbound trips dropped off more than 5 and more than 15 minutes after the appointment. */
+  lateOver5: number;
+  lateOver15: number;
+  /** Largest delay among the measured outbound trips dropped off after the appointment, in minutes. */
   maxDelayMinutes: number | null;
   /** Served outbound trips with both an appointment and a planned drop-off. */
   plannedOutbound: number;
-  /** Of which the plan already drops the patient after the appointment (should be 0). */
-  plannedLateArrivals: number;
+  /** Of which the plan starts the drop-off less than KpiOptions.tightMarginMin before the appointment. */
+  tightOutbound: number;
   optimizationRuns: number;
   /** Served seated trips carried by an ambulance as an exceptional measure (protocol of 24 September 2025). */
   exceptionalAmbulanceTrips: number;
+  /** Money of the routes (optimizer, last plan or recomputation): an absent patient's trip still counts in it. */
   revenue: number;
   cost: number;
   margin: number;
+  /** Estimated revenue of the served trips (trip by trip: an absent patient's trip is no longer in it). */
+  servedRevenue: number;
+  /** Of which the trips dropped off. */
+  realizedRevenue: number;
+  /** Estimated revenue of the trips whose patient was absent (not billed). */
+  noShowRevenue: number;
 };
 
 export type KpiRates = {
@@ -116,10 +117,22 @@ export type KpiRates = {
   tripsPerVehicleRealized: number | null;
   /** 2. Part des km à vide. */
   emptyKmShare: number | null;
-  /** 3. Taux de transport partagé. */
-  sharedRate: number | null;
-  /** 4. Share of measured outbound trips that arrived after the appointment. */
+  /** 3. Shared rate as the Assurance maladie counts it: eligible CPAM trips in a taxi or a VSL, planned. */
+  eligibleSharedRate: number | null;
+  /** Same, measured from the crews' timestamps on the eligible trips dropped off. */
+  measuredSharedRate: number | null;
+  /** 4. Share of measured outbound trips that arrived after the appointment plus the tolerance. */
   lateRate: number | null;
+  /** Share of the planned outbound trips planned less than the margin before the appointment. */
+  tightRate: number | null;
+  /** Placed ÷ to carry (kpis-demand.ts). */
+  serviceRate: number | null;
+  /** Served trips per vehicle available (kpis-fleet.ts). */
+  tripsPerAvailableVehicle: number | null;
+  /** Used ÷ available vehicles. */
+  useRate: number | null;
+  /** (Served revenue − cost of the routes) ÷ served trips. */
+  marginPerTrip: number | null;
 };
 
 /**
@@ -128,8 +141,21 @@ export type KpiRates = {
  */
 export type PlanningStatus = "NONE" | "NOT_VALIDATED" | "VALIDATED";
 
+/** The parts of the indicators that are not flat counters. */
+export type KpiParts = {
+  demand: DemandTotals;
+  /** Null when the fleet of the day is unknown (rows without it). */
+  fleet: FleetTotals | null;
+  sharing: SharingTotals;
+  waits: WaitTotals;
+};
+
+/** What a day and a period have in common: counters, rates and parts. */
+export type KpiSummary = KpiTotals & KpiRates & KpiParts;
+
 export type DayKpis = KpiTotals &
-  KpiRates & {
+  KpiRates &
+  KpiParts & {
     date: string;
     /** Day after `today`: nothing can have been realized yet. */
     upcoming: boolean;
@@ -149,10 +175,13 @@ export type DayKpis = KpiTotals &
      * lateness and planning time are parameters of the simulation, not measurements.
      */
     simulated: boolean;
+    /** The validated plan, frozen at its validation (kpis-plan.ts); null when there is none. */
+    frozen: KpiFrozenPlan | null;
   };
 
 export type PeriodKpis = KpiTotals &
-  KpiRates & {
+  KpiRates &
+  KpiParts & {
     from: string;
     to: string;
     days: number;
@@ -180,12 +209,6 @@ export type PeriodKpis = KpiTotals &
 
 const DAY_MS = 86_400_000;
 
-/** numerator / denominator, or null when the denominator is zero. */
-export function ratio(numerator: number, denominator: number): number | null {
-  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) return null;
-  return numerator / denominator;
-}
-
 /** Inclusive list of "YYYY-MM-DD" dates from `from` to `to` (empty when from > to). */
 export function listDates(from: string, to: string): string[] {
   const dates: string[] = [];
@@ -196,29 +219,6 @@ export function listDates(from: string, to: string): string[] {
 /** Number of days from `from` to `to`, both included. */
 export function dayCount(from: string, to: string): number {
   return Math.round((fromIsoDate(to).getTime() - fromIsoDate(from).getTime()) / DAY_MS) + 1;
-}
-
-/**
- * Real instant -> minute of the planned day `serviceDate` (Europe/Paris), so
- * that it compares with planned minutes: a drop-off at 00:10 the next day is
- * minute 1450, not 10.
- */
-export function minuteOfServiceDay(instant: Date, serviceDate: string): number {
-  const offsetDays = Math.round((fromIsoDate(isoDateOf(instant)).getTime() - fromIsoDate(serviceDate).getTime()) / DAY_MS);
-  return offsetDays * 1440 + minuteOfDay(instant);
-}
-
-export function isServedTrip(trip: Pick<KpiTrip, "status" | "routeId">): boolean {
-  return trip.routeId !== null && (SERVED_TRIP_STATUSES as readonly TripStatus[]).includes(trip.status);
-}
-
-export function isRealizedTrip(trip: Pick<KpiTrip, "status" | "routeId">): boolean {
-  return trip.routeId !== null && trip.status === "DROPPED_OFF";
-}
-
-/** A route that still has stops: its vehicle, km and money count. */
-export function isUsedRoute(route: Pick<KpiRoute, "stopCount">): boolean {
-  return route.stopCount > 0;
 }
 
 /**
@@ -242,14 +242,19 @@ function emptyTotals(): KpiTotals {
     realizedOutbound: 0,
     measuredOutbound: 0,
     lateArrivals: 0,
+    lateOver5: 0,
+    lateOver15: 0,
     maxDelayMinutes: null,
     plannedOutbound: 0,
-    plannedLateArrivals: 0,
+    tightOutbound: 0,
     optimizationRuns: 0,
     exceptionalAmbulanceTrips: 0,
     revenue: 0,
     cost: 0,
     margin: 0,
+    servedRevenue: 0,
+    realizedRevenue: 0,
+    noShowRevenue: 0,
   };
 }
 
@@ -271,25 +276,36 @@ function addTotals(sum: KpiTotals, day: KpiTotals): KpiTotals {
     realizedOutbound: sum.realizedOutbound + day.realizedOutbound,
     measuredOutbound: sum.measuredOutbound + day.measuredOutbound,
     lateArrivals: sum.lateArrivals + day.lateArrivals,
+    lateOver5: sum.lateOver5 + day.lateOver5,
+    lateOver15: sum.lateOver15 + day.lateOver15,
     maxDelayMinutes: maxOrNull(sum.maxDelayMinutes, day.maxDelayMinutes),
     plannedOutbound: sum.plannedOutbound + day.plannedOutbound,
-    plannedLateArrivals: sum.plannedLateArrivals + day.plannedLateArrivals,
+    tightOutbound: sum.tightOutbound + day.tightOutbound,
     optimizationRuns: sum.optimizationRuns + day.optimizationRuns,
     exceptionalAmbulanceTrips: sum.exceptionalAmbulanceTrips + day.exceptionalAmbulanceTrips,
     revenue: sum.revenue + day.revenue,
     cost: sum.cost + day.cost,
     margin: sum.margin + day.margin,
+    servedRevenue: sum.servedRevenue + day.servedRevenue,
+    realizedRevenue: sum.realizedRevenue + day.realizedRevenue,
+    noShowRevenue: sum.noShowRevenue + day.noShowRevenue,
   };
 }
 
 /** Rates derived from counters: the same formulas for a day and for a period. */
-export function deriveRates(totals: KpiTotals): KpiRates {
+export function deriveRates(totals: KpiTotals, parts: KpiParts): KpiRates {
   return {
     tripsPerVehiclePlanned: ratio(totals.servedTrips, totals.vehicles),
     tripsPerVehicleRealized: ratio(totals.realizedTrips, totals.realizedVehicles),
     emptyKmShare: ratio(totals.emptyKm, totals.distanceKm),
-    sharedRate: ratio(totals.sharedTrips, totals.servedTrips),
+    eligibleSharedRate: eligibleSharedRate(parts.sharing),
+    measuredSharedRate: measuredSharedRate(parts.sharing),
     lateRate: ratio(totals.lateArrivals, totals.measuredOutbound),
+    tightRate: ratio(totals.tightOutbound, totals.plannedOutbound),
+    serviceRate: serviceRate(parts.demand),
+    tripsPerAvailableVehicle: parts.fleet ? ratio(totals.servedTrips, parts.fleet.available) : null,
+    useRate: fleetUseRate(parts.fleet),
+    marginPerTrip: ratio(totals.servedRevenue - totals.cost, totals.servedTrips),
   };
 }
 
@@ -297,16 +313,21 @@ export function deriveRates(totals: KpiTotals): KpiRates {
 // Per-day computation
 // ---------------------------------------------------------------------------
 
+/** Rows of the dashboard, the fleet and the frozen plans optional. */
+export type KpiRows = {
+  routes: readonly KpiRoute[];
+  trips: readonly KpiTrip[];
+  runs: readonly KpiRun[];
+  fleet?: readonly KpiFleetDay[];
+  plans?: readonly KpiFrozenPlan[];
+};
+
 /**
  * Indicators of one service date. The rows may contain other dates: only
  * those of `date` are used. `today` ("YYYY-MM-DD", Europe/Paris) decides
  * whether realized indicators make sense yet.
  */
-export function computeDayKpis(
-  date: string,
-  rows: { routes: readonly KpiRoute[]; trips: readonly KpiTrip[]; runs: readonly KpiRun[] },
-  today: string,
-): DayKpis {
+export function computeDayKpis(date: string, rows: KpiRows, today: string, options: KpiOptions = DEFAULT_KPI_OPTIONS): DayKpis {
   const dayRoutes = rows.routes.filter((r) => r.serviceDate === date);
   // Routes emptied by cancellations keep stale km and money: leave them out, like /planning.
   const routes = dayRoutes.filter(isUsedRoute);
@@ -315,7 +336,8 @@ export function computeDayKpis(
   const upcoming = date > today;
 
   const totals = emptyTotals();
-  totals.vehicles = new Set(routes.map((r) => r.vehicleId)).size;
+  const usedVehicleIds = new Set(routes.map((r) => r.vehicleId));
+  totals.vehicles = usedVehicleIds.size;
   totals.realizedVehicles = upcoming
     ? 0
     : new Set(routes.filter((r) => r.hasRecordedStatus).map((r) => r.vehicleId)).size;
@@ -329,29 +351,42 @@ export function computeDayKpis(
   }
 
   for (const trip of trips) {
+    const revenue = typeof trip.estimatedRevenue === "number" && Number.isFinite(trip.estimatedRevenue) ? trip.estimatedRevenue : 0;
+    if (trip.status === "NO_SHOW") totals.noShowRevenue += revenue;
     if (!isServedTrip(trip)) continue;
     totals.servedTrips += 1;
+    totals.servedRevenue += revenue;
     if (trip.shared) totals.sharedTrips += 1;
     if (trip.exceptionalAmbulance) totals.exceptionalAmbulanceTrips += 1;
 
     const outboundWithAppointment = trip.direction === "OUTBOUND" && trip.appointmentMinute !== null;
     if (outboundWithAppointment && trip.plannedDropoffMinute !== null) {
       totals.plannedOutbound += 1;
-      if (trip.plannedDropoffMinute > (trip.appointmentMinute ?? 0)) totals.plannedLateArrivals += 1;
+      if ((trip.appointmentMinute ?? 0) - trip.plannedDropoffMinute < options.tightMarginMin) totals.tightOutbound += 1;
     }
 
     if (!isRealizedTrip(trip)) continue;
     totals.realizedTrips += 1;
+    totals.realizedRevenue += revenue;
     if (!outboundWithAppointment) continue;
     totals.realizedOutbound += 1;
     const delay = arrivalDelayMinutes(trip);
     if (delay === null) continue;
     totals.measuredOutbound += 1;
-    if (delay > 0) {
-      totals.lateArrivals += 1;
-      totals.maxDelayMinutes = maxOrNull(totals.maxDelayMinutes, delay);
-    }
+    if (delay > options.lateToleranceMin) totals.lateArrivals += 1;
+    if (delay > 5) totals.lateOver5 += 1;
+    if (delay > 15) totals.lateOver15 += 1;
+    if (delay > 0) totals.maxDelayMinutes = maxOrNull(totals.maxDelayMinutes, delay);
   }
+
+  const vehicleTypeOf = new Map<string, VehicleType>();
+  for (const route of routes) if (route.id && route.vehicleType) vehicleTypeOf.set(route.id, route.vehicleType);
+  const parts: KpiParts = {
+    demand: demandOfDay(trips),
+    fleet: fleetOfDay(rows.fleet?.find((f) => f.serviceDate === date), usedVehicleIds),
+    sharing: sharingOfDay(trips, (routeId) => vehicleTypeOf.get(routeId)),
+    waits: waitsOfDay(trips, options),
+  };
 
   const firstRunAt = runs.reduce<Date | null>(
     (first, run) => (first === null || run.startedAt < first ? run.startedAt : first),
@@ -368,13 +403,17 @@ export function computeDayKpis(
       ? "NOT_VALIDATED"
       : "NONE";
   const elapsed = validatedAt && firstRunAt ? (validatedAt.getTime() - firstRunAt.getTime()) / 60_000 : null;
+  const rates = deriveRates(totals, parts);
 
   return {
     date,
     upcoming,
     inProgress: date === today,
     ...totals,
-    ...deriveRates(totals),
+    ...rates,
+    // Nothing planned yet: no service rate (every trip would read « non affectée ») nor fleet use (every vehicle idle).
+    ...(routes.length > 0 || runs.length > 0 ? {} : { serviceRate: null, useRate: null, tripsPerAvailableVehicle: null }),
+    ...parts,
     planningStatus,
     firstRunAt,
     validatedAt,
@@ -382,6 +421,7 @@ export function computeDayKpis(
     planningMinutes: elapsed !== null && elapsed >= 0 ? elapsed : null,
     matrixSources: distinctSources(routes),
     simulated: runs.some((run) => run.simulated === true),
+    frozen: rows.plans?.find((plan) => plan.serviceDate === date) ?? null,
   };
 }
 
@@ -400,12 +440,18 @@ function distinctSources(routes: readonly Pick<KpiRoute, "matrixSource">[]): str
 }
 
 /** Indicators of every date from `from` to `to` (empty days included), oldest first. */
-export function computeKpisByDay(from: string, to: string, data: KpiData, today: string): DayKpis[] {
-  const byDate = new Map<string, { routes: KpiRoute[]; trips: KpiTrip[]; runs: KpiRun[] }>();
+export function computeKpisByDay(from: string, to: string, data: KpiData, today: string, options: KpiOptions = DEFAULT_KPI_OPTIONS): DayKpis[] {
+  return computeKpisForDates(listDates(from, to), data, today, options);
+}
+
+/** Indicators of the given dates, in their order (comparison days that are not consecutive). */
+export function computeKpisForDates(dates: readonly string[], data: KpiData, today: string, options: KpiOptions = DEFAULT_KPI_OPTIONS): DayKpis[] {
+  type Bucket = { routes: KpiRoute[]; trips: KpiTrip[]; runs: KpiRun[]; fleet: KpiFleetDay[]; plans: KpiFrozenPlan[] };
+  const byDate = new Map<string, Bucket>();
   const bucket = (date: string) => {
     let rows = byDate.get(date);
     if (!rows) {
-      rows = { routes: [], trips: [], runs: [] };
+      rows = { routes: [], trips: [], runs: [], fleet: [], plans: [] };
       byDate.set(date, rows);
     }
     return rows;
@@ -413,22 +459,37 @@ export function computeKpisByDay(from: string, to: string, data: KpiData, today:
   for (const route of data.routes) bucket(route.serviceDate).routes.push(route);
   for (const trip of data.trips) bucket(trip.serviceDate).trips.push(trip);
   for (const run of data.runs) bucket(run.serviceDate).runs.push(run);
+  for (const day of data.fleet ?? []) bucket(day.serviceDate).fleet.push(day);
+  for (const plan of data.plans ?? []) bucket(plan.serviceDate).plans.push(plan);
 
-  return listDates(from, to).map((date) =>
-    computeDayKpis(date, byDate.get(date) ?? { routes: [], trips: [], runs: [] }, today),
-  );
+  return dates.map((date) => computeDayKpis(date, byDate.get(date) ?? { routes: [], trips: [], runs: [] }, today, options));
+}
+
+/** Day with planning activity (an optimization or a route). */
+export function hasPlanning(day: Pick<DayKpis, "vehicles" | "optimizationRuns">): boolean {
+  return day.vehicles > 0 || day.optimizationRuns > 0;
 }
 
 /**
  * Period summary: rates are recomputed from summed counters, not averaged day
  * by day. The realized trips-per-vehicle rate only sums finished days: the
  * day in progress would add all its vehicles but only part of its drop-offs.
+ * Demand and fleet only sum the days with planning: a day not optimized yet
+ * would read « every trip unassigned », a Sunday without transport « every
+ * vehicle idle ».
  */
 export function summarizePeriod(days: readonly DayKpis[]): PeriodKpis {
   const totals = days.reduce<KpiTotals>((sum, day) => addTotals(sum, day), emptyTotals());
   const finished = days.filter((d) => !d.inProgress);
   totals.realizedTrips = finished.reduce((sum, d) => sum + d.realizedTrips, 0);
   totals.realizedVehicles = finished.reduce((sum, d) => sum + d.realizedVehicles, 0);
+  const planned = days.filter(hasPlanning);
+  const parts: KpiParts = {
+    demand: planned.reduce((sum, d) => addDemand(sum, d.demand), emptyDemand()),
+    fleet: planned.reduce<FleetTotals | null>((sum, d) => addFleet(sum, d.fleet), null),
+    sharing: days.reduce((sum, d) => addSharing(sum, d.sharing), emptySharing()),
+    waits: days.reduce((sum, d) => addWaits(sum, d.waits), emptyWaits()),
+  };
   const measured = days.filter((d) => d.planningMinutes !== null);
   const planningSum = measured.reduce((sum, d) => sum + (d.planningMinutes ?? 0), 0);
   return {
@@ -443,12 +504,13 @@ export function summarizePeriod(days: readonly DayKpis[]): PeriodKpis {
     matrixSources: [...new Set(days.flatMap((day) => day.matrixSources))].sort(),
     simulatedDays: days.filter((d) => d.simulated).length,
     ...totals,
-    ...deriveRates(totals),
+    ...parts,
+    ...deriveRates(totals, parts),
   };
 }
 
 // ---------------------------------------------------------------------------
-// Page helpers: range, focus day, comparison
+// Page helpers: range, headline days, comparison
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_RANGE_DAYS = 14;
@@ -488,33 +550,42 @@ export function resolveKpiRange(input: { from?: string | null; to?: string | nul
   return { from, to, error: errors.length > 0 ? errors.join(" ") : null };
 }
 
-/** Day with planning activity (an optimization or a route). */
-export function hasPlanning(day: Pick<DayKpis, "vehicles" | "optimizationRuns">): boolean {
-  return day.vehicles > 0 || day.optimizationRuns > 0;
+/** Tolerances offered for a late arrival (minutes after the appointment): the PO decides V's. */
+export const LATE_TOLERANCES = [0, 5, 10, 15] as const;
+
+/** Tolerance of the query string (?retard=), DEFAULT_KPI_OPTIONS.lateToleranceMin when absent or not offered. */
+export function resolveLateTolerance(raw: string | null | undefined): number {
+  const value = Number(raw);
+  return raw !== null && raw !== undefined && raw.trim() !== "" && (LATE_TOLERANCES as readonly number[]).includes(value)
+    ? value
+    : DEFAULT_KPI_OPTIONS.lateToleranceMin;
 }
 
 /**
- * Day shown in the headline tiles and the day it is compared with.
- * Focus: the requested day when it is in [from, last day], otherwise the most
- * recent day with routes (J+1 once optimized), otherwise the most recent day
- * with planning activity, otherwise the last day. Comparison: the closest
- * earlier day with routes (weekends without transport are skipped); `days`
- * may start before `from` so the first visible day still has one.
+ * The two days of the headline: the last day done (« Hier (réalisé) ») and the
+ * next day planned (« Demain (prévu) »).
+ * - A requested day in the range replaces the block of its kind: a day before
+ *   tomorrow is shown as done (today: in progress), a later one as planned.
+ * - Done, by default: the most recent day before today with routes.
+ * - Planned, by default: tomorrow when the range contains it, else the first
+ *   day after today with planning activity.
  */
-export function pickFocusDay(
+export function pickHeadlineDays(
   days: readonly DayKpis[],
-  options: { from: string; requested?: string | null },
-): { focus: DayKpis | null; previous: DayKpis | null } {
-  const visible = days.filter((d) => d.date >= options.from);
+  options: { from: string; to: string; today: string; tomorrow: string; requested?: string | null },
+): { realized: DayKpis | null; planned: DayKpis | null } {
+  const visible = days.filter((d) => d.date >= options.from && d.date <= options.to);
+  const requested = options.requested ? (visible.find((d) => d.date === options.requested) ?? null) : null;
   const latest = <T>(list: readonly T[]): T | null => list[list.length - 1] ?? null;
-  const focus =
-    (options.requested ? visible.find((d) => d.date === options.requested) : undefined) ??
-    latest(visible.filter((d) => d.vehicles > 0)) ??
-    latest(visible.filter(hasPlanning)) ??
-    latest(visible);
-  if (!focus) return { focus: null, previous: null };
-  const previous = latest(days.filter((d) => d.date < focus.date && d.vehicles > 0));
-  return { focus, previous };
+  const realized =
+    requested && requested.date < options.tomorrow
+      ? requested
+      : latest(visible.filter((d) => d.date < options.today && d.vehicles > 0));
+  const planned =
+    requested && requested.date >= options.tomorrow
+      ? requested
+      : (visible.find((d) => d.date === options.tomorrow) ?? visible.find((d) => d.date > options.today && hasPlanning(d)) ?? null);
+  return { realized, planned };
 }
 
 /** Change from `previous` to `current`, or null when either is unknown. */

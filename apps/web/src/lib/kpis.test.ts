@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computeDayKpis,
+  DEFAULT_KPI_OPTIONS,
   computeKpisByDay,
   dayCount,
   deltaTrend,
@@ -9,12 +10,14 @@ import {
   MAX_RANGE_DAYS,
   minuteOfServiceDay,
   mixedDistanceSources,
-  pickFocusDay,
+  pickHeadlineDays,
+  resolveLateTolerance,
   ratio,
   resolveKpiRange,
   summarizePeriod,
   type DayKpis,
   type KpiData,
+  type KpiOptions,
   type KpiRoute,
   type KpiRun,
   type KpiTrip,
@@ -32,6 +35,8 @@ function paris(date: string, hhmm: string, offset = "+01:00"): Date {
 
 function route(overrides: Partial<KpiRoute> = {}): KpiRoute {
   return {
+    id: "r1",
+    vehicleType: "TAXI",
     serviceDate: DAY,
     vehicleId: "v1",
     distanceKm: 100,
@@ -64,8 +69,13 @@ function run(startedAt: Date, serviceDate = DAY): KpiRun {
   return { serviceDate, startedAt };
 }
 
-function day(rows: Partial<KpiData>, date = DAY, today = TODAY) {
-  return computeDayKpis(date, { routes: rows.routes ?? [], trips: rows.trips ?? [], runs: rows.runs ?? [] }, today);
+function day(rows: Partial<KpiData>, date = DAY, today = TODAY, options?: Partial<KpiOptions>) {
+  return computeDayKpis(
+    date,
+    { routes: rows.routes ?? [], trips: rows.trips ?? [], runs: rows.runs ?? [], fleet: rows.fleet, plans: rows.plans },
+    today,
+    { ...DEFAULT_KPI_OPTIONS, ...options },
+  );
 }
 
 describe("helpers", () => {
@@ -127,10 +137,15 @@ describe("computeDayKpis", () => {
       tripsPerVehiclePlanned: null,
       tripsPerVehicleRealized: null,
       emptyKmShare: null,
-      sharedRate: null,
+      eligibleSharedRate: null,
+      measuredSharedRate: null,
       lateRate: null,
+      serviceRate: null,
+      useRate: null,
       maxDelayMinutes: null,
       planningStatus: "NONE",
+      frozen: null,
+      fleet: null,
       firstRunAt: null,
       validatedAt: null,
       planningMinutes: null,
@@ -284,27 +299,32 @@ describe("computeDayKpis", () => {
     });
   });
 
-  describe("3. taux de transport partagé", () => {
-    it("is shared served trips over served trips", () => {
+  describe("3. taux de transport partagé (périmètre de l'Assurance maladie)", () => {
+    it("counts the eligible CPAM trips in a taxi or a VSL only, apart", () => {
+      const eligible = (overrides: Partial<KpiTrip> = {}) => trip({ sharingAllowed: true, ...overrides });
       const kpis = day({
-        routes: [route()],
+        routes: [route(), route({ id: "r2", vehicleId: "v2", vehicleType: "VSL" }), route({ id: "r3", vehicleId: "v3", vehicleType: "AMBULANCE" })],
         trips: [
-          trip({ shared: true }),
-          trip({ shared: true, status: "DROPPED_OFF" }),
-          trip({ shared: true, direction: "RETURN" }),
-          trip({ shared: false }),
-          // Not served: ignored even if flagged shared.
-          trip({ shared: true, status: "CANCELLED" }),
-          trip({ shared: true, routeId: null, status: "PLANNED" }),
+          eligible({ shared: true }),
+          eligible({ shared: false }),
+          eligible({ routeId: "r2", shared: true }),
+          // Not eligible: the prescription does not allow it, a private client, an ambulance, not served.
+          trip({ shared: false, sharingAllowed: false }),
+          eligible({ shared: true, payer: "PRIVATE" }),
+          eligible({ routeId: "r3", shared: false }),
+          eligible({ shared: true, status: "CANCELLED" }),
         ],
       });
+      // Every served trip with a co-passenger, whatever its scope (the planning's flag).
       expect(kpis.sharedTrips).toBe(3);
-      expect(kpis.servedTrips).toBe(4);
-      expect(kpis.sharedRate).toBe(0.75);
+      expect(kpis.sharing.eligible).toEqual({ TAXI: 2, VSL: 1 });
+      expect(kpis.sharing.eligibleShared).toEqual({ TAXI: 1, VSL: 1 });
+      expect(kpis.sharing.tap).toEqual({ TAXI: 3, VSL: 1 });
+      expect(kpis.eligibleSharedRate).toBeCloseTo(2 / 3);
     });
 
-    it("is null without served trips", () => {
-      expect(day({ routes: [route()] }).sharedRate).toBeNull();
+    it("is null without eligible trips", () => {
+      expect(day({ routes: [route()], trips: [trip({ shared: true })] }).eligibleSharedRate).toBeNull();
     });
   });
 
@@ -312,8 +332,8 @@ describe("computeDayKpis", () => {
     const realized = (hhmm: string, overrides: Partial<KpiTrip> = {}) =>
       trip({ status: "DROPPED_OFF", appointmentMinute: 450, dropoffCompletedAt: paris(DAY, hhmm), ...overrides });
 
-    it("counts a patient dropped off 1 minute after the appointment as late", () => {
-      const kpis = day({ routes: [route()], trips: [realized("07:31")] });
+    it("counts a patient dropped off 1 minute after the appointment as late without tolerance", () => {
+      const kpis = day({ routes: [route()], trips: [realized("07:31")] }, DAY, TODAY, { lateToleranceMin: 0 });
       expect(kpis.realizedOutbound).toBe(1);
       expect(kpis.measuredOutbound).toBe(1);
       expect(kpis.lateArrivals).toBe(1);
@@ -322,11 +342,26 @@ describe("computeDayKpis", () => {
     });
 
     it("counts a drop-off within the appointment minute as on time", () => {
-      const kpis = day({ routes: [route()], trips: [realized("07:30"), realized("07:30:59"), realized("07:05")] });
+      const kpis = day({ routes: [route()], trips: [realized("07:30"), realized("07:30:59"), realized("07:05")] }, DAY, TODAY, {
+        lateToleranceMin: 0,
+      });
       expect(kpis.measuredOutbound).toBe(3);
       expect(kpis.lateArrivals).toBe(0);
       expect(kpis.lateRate).toBe(0);
       expect(kpis.maxDelayMinutes).toBeNull();
+    });
+
+    it("applies the tolerance (5 min by default) and counts the bands beyond 5 and 15 min whatever it is", () => {
+      const trips = [realized("07:33"), realized("07:35"), realized("07:36"), realized("07:46"), realized("07:20")];
+      const kpis = day({ routes: [route()], trips });
+      expect(kpis.lateArrivals).toBe(2);
+      expect(kpis.lateOver5).toBe(2);
+      expect(kpis.lateOver15).toBe(1);
+      expect(kpis.maxDelayMinutes).toBe(16);
+      expect(kpis.lateRate).toBeCloseTo(2 / 5);
+      const strict = day({ routes: [route()], trips }, DAY, TODAY, { lateToleranceMin: 0 });
+      expect(strict.lateArrivals).toBe(4);
+      expect(strict.lateOver5).toBe(2);
     });
 
     it("rates late arrivals over measured realized outbound trips only", () => {
@@ -343,7 +378,7 @@ describe("computeDayKpis", () => {
           trip({ status: "PICKED_UP", dropoffCompletedAt: null }),
           realized("08:00", { routeId: null }),
         ],
-      });
+      }, DAY, TODAY, { lateToleranceMin: 0 });
       expect(kpis.realizedOutbound).toBe(4);
       expect(kpis.measuredOutbound).toBe(3);
       expect(kpis.lateArrivals).toBe(1);
@@ -356,23 +391,26 @@ describe("computeDayKpis", () => {
         routes: [route()],
         trips: [trip({ status: "DROPPED_OFF", appointmentMinute: 1430, dropoffCompletedAt: paris("2026-11-04", "00:05") })],
       });
+      // 15 minutes late: beyond the default tolerance.
       expect(kpis.lateArrivals).toBe(1);
       expect(kpis.maxDelayMinutes).toBe(15);
     });
 
-    it("reports planned lateness (plan dropping off after the appointment)", () => {
+    it("counts the outbound trips planned less than the margin before the appointment (« serrés »)", () => {
       const kpis = day({
         routes: [route()],
         trips: [
-          trip({ plannedDropoffMinute: 451 }),
-          trip({ plannedDropoffMinute: 450 }),
+          trip({ plannedDropoffMinute: 448 }),
+          trip({ plannedDropoffMinute: 445 }),
           trip({ plannedDropoffMinute: 420, status: "DROPPED_OFF" }),
           trip({ plannedDropoffMinute: null }),
           trip({ direction: "RETURN", appointmentMinute: null, plannedDropoffMinute: 900 }),
         ],
       });
       expect(kpis.plannedOutbound).toBe(3);
-      expect(kpis.plannedLateArrivals).toBe(1);
+      expect(kpis.tightOutbound).toBe(1);
+      expect(kpis.tightRate).toBeCloseTo(1 / 3);
+      expect(day({ routes: [route()], trips: [trip({ plannedDropoffMinute: 440 })] }, DAY, TODAY, { tightMarginMin: 15 }).tightOutbound).toBe(1);
     });
 
     it("has no late rate when no realized trip was measured", () => {
@@ -470,7 +508,7 @@ describe("summarizePeriod", () => {
       ],
       trips: [
         trip({ serviceDate: "2026-11-02", status: "DROPPED_OFF" }),
-        ...Array.from({ length: 9 }, () => trip({ serviceDate: "2026-11-03", shared: true })),
+        ...Array.from({ length: 9 }, () => trip({ serviceDate: "2026-11-03", shared: true, sharingAllowed: true })),
       ],
       runs: [],
     };
@@ -490,7 +528,7 @@ describe("summarizePeriod", () => {
     expect(period.tripsPerVehiclePlanned).toBe(2.5); // 10 / 4, not (1 + 3) / 2
     expect(period.tripsPerVehicleRealized).toBe(0.25); // 1 / 4, not (1 + 0) / 2
     expect(period.emptyKmShare).toBeCloseTo(0.2); // 80 / 400, not (0.5 + 0.1) / 2
-    expect(period.sharedRate).toBe(0.9);
+    expect(period.eligibleSharedRate).toBe(1);
   });
 
   it("leaves the day in progress, upcoming days and untracked crews out of the realized rate", () => {
@@ -574,7 +612,8 @@ describe("summarizePeriod", () => {
       tripsPerVehiclePlanned: null,
       tripsPerVehicleRealized: null,
       emptyKmShare: null,
-      sharedRate: null,
+      eligibleSharedRate: null,
+      serviceRate: null,
       lateRate: null,
       averagePlanningMinutes: null,
     });
@@ -621,7 +660,7 @@ describe("resolveKpiRange", () => {
   });
 });
 
-describe("pickFocusDay", () => {
+describe("pickHeadlineDays", () => {
   const data: KpiData = {
     routes: [
       route({ serviceDate: "2026-10-30" }),
@@ -629,32 +668,48 @@ describe("pickFocusDay", () => {
       route({ serviceDate: "2026-11-03" }),
     ],
     trips: [],
-    // 2026-11-04 only has a failed optimization run.
-    runs: [run(paris("2026-11-03", "18:00"), "2026-11-04")],
+    // 2026-11-05 only has a failed optimization run.
+    runs: [run(paris("2026-11-04", "18:00"), "2026-11-05")],
   };
-  const days = computeKpisByDay("2026-10-28", "2026-11-05", data, "2026-11-02");
+  // Today is Wednesday 4 November; tomorrow Thursday 5.
+  const days = computeKpisByDay("2026-10-28", "2026-11-05", data, "2026-11-04");
+  const window = { from: "2026-11-01", to: "2026-11-05", today: "2026-11-04", tomorrow: "2026-11-05" };
 
-  it("focuses on the most recent day with routes and compares with the previous one, skipping the weekend", () => {
-    const { focus, previous } = pickFocusDay(days, { from: "2026-11-01" });
-    expect(focus?.date).toBe("2026-11-03");
-    expect(previous?.date).toBe("2026-11-02");
-    const monday = pickFocusDay(days, { from: "2026-11-01", requested: "2026-11-02" });
-    expect(monday.focus?.date).toBe("2026-11-02");
-    // The comparison may come from the lookback days before `from`.
-    expect(monday.previous?.date).toBe("2026-10-30");
+  it("shows the last day done with routes and tomorrow", () => {
+    const { realized, planned } = pickHeadlineDays(days, window);
+    expect(realized?.date).toBe("2026-11-03");
+    expect(planned?.date).toBe("2026-11-05");
+  });
+
+  it("puts a requested day in the block of its kind", () => {
+    expect(pickHeadlineDays(days, { ...window, requested: "2026-11-02" })).toMatchObject({
+      realized: { date: "2026-11-02" },
+      planned: { date: "2026-11-05" },
+    });
+    // Today is shown as done (in progress).
+    expect(pickHeadlineDays(days, { ...window, requested: "2026-11-04" }).realized?.date).toBe("2026-11-04");
   });
 
   it("ignores a requested day outside the visible range", () => {
-    expect(pickFocusDay(days, { from: "2026-11-01", requested: "2026-10-30" }).focus?.date).toBe("2026-11-03");
-    expect(pickFocusDay(days, { from: "2026-11-01", requested: "2027-01-01" }).focus?.date).toBe("2026-11-03");
+    expect(pickHeadlineDays(days, { ...window, requested: "2026-10-30" }).realized?.date).toBe("2026-11-03");
   });
 
-  it("falls back on a day with planning activity, then on the last day", () => {
-    const noRoutes = computeKpisByDay("2026-11-01", "2026-11-05", { ...data, routes: [] }, "2026-11-02");
-    expect(pickFocusDay(noRoutes, { from: "2026-11-01" })).toMatchObject({ focus: { date: "2026-11-04" }, previous: null });
-    const empty = computeKpisByDay("2026-11-01", "2026-11-05", { routes: [], trips: [], runs: [] }, "2026-11-02");
-    expect(pickFocusDay(empty, { from: "2026-11-01" }).focus?.date).toBe("2026-11-05");
-    expect(pickFocusDay([], { from: "2026-11-01" })).toEqual({ focus: null, previous: null });
+  it("has no planned day when the range ends before tomorrow, and no day done when nothing ran", () => {
+    expect(pickHeadlineDays(days, { ...window, to: "2026-11-03" }).planned).toBeNull();
+    const empty = computeKpisByDay("2026-11-01", "2026-11-05", { routes: [], trips: [], runs: [] }, "2026-11-04");
+    expect(pickHeadlineDays(empty, window)).toMatchObject({ realized: null, planned: { date: "2026-11-05" } });
+    expect(pickHeadlineDays([], window)).toEqual({ realized: null, planned: null });
+  });
+});
+
+describe("resolveLateTolerance", () => {
+  it("keeps an offered tolerance and falls back on 5 minutes", () => {
+    expect(resolveLateTolerance("0")).toBe(0);
+    expect(resolveLateTolerance("15")).toBe(15);
+    expect(resolveLateTolerance("7")).toBe(5);
+    expect(resolveLateTolerance("abc")).toBe(5);
+    expect(resolveLateTolerance("")).toBe(5);
+    expect(resolveLateTolerance(undefined)).toBe(5);
   });
 });
 

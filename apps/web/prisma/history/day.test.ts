@@ -61,6 +61,7 @@ function fakePrisma(options: { proposed?: object[]; savedTrip?: (id: string) => 
         deleteMany: deleteMany("trip"),
       },
       route: { deleteMany: deleteMany("route") },
+      validatedPlan: { deleteMany: deleteMany("validatedPlan") },
       prescription: { deleteMany: deleteMany("prescription") },
       staffAbsence: { deleteMany: deleteMany("staffAbsence") },
       vehicleUnavailability: { deleteMany: deleteMany("vehicleUnavailability") },
@@ -288,6 +289,7 @@ describe("clearSimulatedDay", () => {
 
     expect(committed.map((w) => `${w.model}.${w.model === "raw" ? (w.op.includes("DISABLE") ? "disable" : "enable") : w.op}`)).toEqual([
       "raw.disable",
+      "validatedPlan.deleteMany",
       "route.deleteMany",
       "trip.deleteMany",
       "prescription.deleteMany",
@@ -312,5 +314,7 @@ describe("clearSimulatedDay", () => {
     expect(where("staffAbsence")).toEqual({ id: { startsWith: "hist-20261012-" } });
     expect(where("vehicleUnavailability")).toEqual({ id: { startsWith: "hist-20261012-" } });
     expect(where("auditEvent")).toEqual(own.events);
+    // The frozen plan of the date is the simulation's: a date with rows of the app is never cleared.
+    expect(where("validatedPlan")).toEqual({ serviceDate: new Date("2026-10-12T00:00:00.000Z") });
   });
 });

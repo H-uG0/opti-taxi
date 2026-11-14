@@ -175,6 +175,7 @@ describe("indicators of the vehicles shown", () => {
     const route = vehicles[0]!.route!;
     const routes: KpiRouteSource[] = [
       {
+        id: route.id,
         vehicleId: "taxi-1",
         distanceKm: route.distanceKm,
         emptyKm: route.emptyKm,
@@ -193,8 +194,13 @@ describe("indicators of the vehicles shown", () => {
       shared: t.shared,
       appointmentMinute: t.appointmentMinute,
       plannedDropoffMinute: t.plannedDropoffMinute,
+      payer: t.payer,
+      sharingAllowed: t.sharingAllowed,
+      allowedVehicleTypes: t.allowedVehicleTypes,
     }));
-    const day = computeDayKpis("2026-11-10", tripRows, routes, 0);
+    const day = computeDayKpis("2026-11-10", tripRows, routes, 0, (id) => vehicles.find((v) => v.id === id)?.type);
+    // Shared transport as the Assurance maladie counts it: both trips are eligible, in a taxi.
+    expect(day).toMatchObject({ sharedTrips: 2, sharedTripRatio: 1 });
     expect({ ...subset, tripsTotal: day.tripsTotal }).toEqual(day);
   });
 

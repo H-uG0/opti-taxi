@@ -58,15 +58,21 @@ export function toIsoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+// One formatter each, built once: creating an Intl.DateTimeFormat costs far more than formatting with it
+// (the dashboard converts tens of thousands of instants per page).
+let parisDateFormat: Intl.DateTimeFormat | null = null;
+let parisTimeFormat: Intl.DateTimeFormat | null = null;
+
 /** Today's calendar date in Europe/Paris as "YYYY-MM-DD". */
 export function todayIso(now: Date = new Date()): string {
   // Assembled from parts rather than relying on a locale's pattern (en-CA's has changed across ICU versions).
-  const parts = new Intl.DateTimeFormat("en-GB", {
+  parisDateFormat ??= new Intl.DateTimeFormat("en-GB", {
     timeZone: TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).formatToParts(now);
+  });
+  const parts = parisDateFormat.formatToParts(now);
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
   return `${part("year").padStart(4, "0")}-${part("month")}-${part("day")}`;
 }
@@ -95,12 +101,13 @@ export function startOfIsoWeek(isoDate: string): string {
 
 /** Real instant -> minutes since local midnight in Europe/Paris (for comparing with planned minutes). */
 export function minuteOfDay(instant: Date): number {
-  const parts = new Intl.DateTimeFormat("en-GB", {
+  parisTimeFormat ??= new Intl.DateTimeFormat("en-GB", {
     timeZone: TIME_ZONE,
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
-  }).formatToParts(instant);
+  });
+  const parts = parisTimeFormat.formatToParts(instant);
   const h = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
   const m = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
   return h * 60 + m;

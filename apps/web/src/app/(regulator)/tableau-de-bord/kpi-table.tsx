@@ -3,6 +3,9 @@ import type { ComponentProps } from "react";
 import { cn } from "@/components/ui/cn";
 import { Table, TBody, THead } from "@/components/ui/table";
 import { hasPlanning, type DayKpis, type PeriodKpis } from "@/lib/kpis";
+import { lostTrips, placedTrips, tripsToCarry } from "@/lib/kpis-demand";
+import { planRates } from "@/lib/kpis-plan";
+import { tapTotal } from "@/lib/kpis-sharing";
 import { formatKm, formatPercent, MATRIX_SOURCE_LABELS } from "@/lib/labels";
 import { formatDuration, formatLongDate } from "@/lib/time";
 import {
@@ -11,13 +14,14 @@ import {
   formatDayShort,
   formatDecimal,
   formatEurosRounded,
+  formatInstant,
   formatPlanningTime,
   plural,
 } from "./format";
 import { dashboardHref } from "./range-form";
 
 /** Columns after the day column (colSpan of days without planning). */
-const DATA_COLUMNS = 14;
+const DATA_COLUMNS = 13;
 
 const SOURCE_SHORT: Record<string, string> = { osrm: "routières", haversine: "vol d'oiseau", mixed: "mixte" };
 
@@ -30,7 +34,7 @@ function sourcesCell(sources: readonly string[]): { tone: Tone; text: string; ti
     tone: mixed ? "warn" : "default",
     // Short under the date (the column must not widen); the title says what it is.
     text: mixed && sources.length > 1 ? "sources mélangées" : text,
-    title: `Temps et distances\u00a0: ${sources.map((source) => MATRIX_SOURCE_LABELS[source] ?? source).join(", ")}`,
+    title: `Temps et distances : ${sources.map((source) => MATRIX_SOURCE_LABELS[source] ?? source).join(", ")}`,
   };
 }
 
@@ -55,7 +59,7 @@ function HeadCell({
     <th
       scope="col"
       className={cn(
-        "px-3 py-2 text-xs font-semibold tracking-wide whitespace-nowrap text-slate-600 uppercase",
+        "px-2 py-2 text-xs font-semibold whitespace-nowrap text-slate-600 uppercase",
         ALIGN[align],
         divider && "border-l border-slate-200",
         className,
@@ -75,7 +79,7 @@ function Num({
   return (
     <td
       className={cn(
-        "tabular px-3 py-2 text-right align-middle whitespace-nowrap",
+        "tabular px-2 py-2 text-right align-middle whitespace-nowrap",
         TONES[tone],
         divider && "border-l border-slate-100",
         className,
@@ -90,9 +94,9 @@ function lateCell(late: number, measured: number, upcoming = false): { tone: Ton
   return { tone: late > 0 ? "bad" : "default", text: `${late} / ${measured}` };
 }
 
-function plannedLateCell(late: number, planned: number): { tone: Tone; text: string } {
+function tightCell(tight: number, planned: number): { tone: Tone; text: string } {
   if (planned === 0) return { tone: "muted", text: "—" };
-  return { tone: late > 0 ? "bad" : "default", text: String(late) };
+  return { tone: "default", text: String(tight) };
 }
 
 function realizedCell(day: DayKpis): { tone: Tone; text: string; title: string } {
@@ -101,29 +105,58 @@ function realizedCell(day: DayKpis): { tone: Tone; text: string; title: string }
   return { tone: "default", text: realized.value, title: capitalize(realized.note) };
 }
 
+/** « Prévu » trips per vehicle: the plan as validated (frozen) for a day started, else the routes as they stand. */
+function plannedCell(day: DayKpis, today: string): { text: string; title: string } {
+  if (day.date <= today && day.frozen) {
+    return {
+      text: formatDecimal(planRates(day.frozen.figures).tripsPerVehicle),
+      title: `Plan validé le ${formatInstant(day.frozen.validatedAt)} : ${plural(day.frozen.figures.served, "course")}, ${plural(day.frozen.figures.vehicles, "véhicule")}. Servi aujourd'hui : ${formatDecimal(day.tripsPerVehiclePlanned)}`,
+    };
+  }
+  return {
+    text: formatDecimal(day.tripsPerVehiclePlanned),
+    title: day.date <= today ? "Pas de plan validé figé ce jour : les tournées telles qu'elles sont" : "Tournées prévues",
+  };
+}
+
 function planningTone(day: Pick<DayKpis, "planningStatus">): Tone {
   return day.planningStatus === "NOT_VALIDATED" ? "warn" : "default";
+}
+
+function demandTitle(d: DayKpis["demand"]): string {
+  return [
+    `${d.requested} demandées`,
+    `${d.cancelledBefore + d.cancelledOnDay} annulées (dont ${d.cancelledOnDay} le jour même)`,
+    `${d.served} servies`,
+    `${d.noShows} absents`,
+    `${d.unassigned} non affectées`,
+    `${d.handedOver} confiées à un confrère`,
+  ].join(" · ");
 }
 
 /** Every indicator, day by day (most recent first), with the period totals in the footer. */
 export function KpiTable({
   days,
   period,
-  focusDate,
+  highlighted,
   range,
+  tolerance,
   today,
   tomorrow,
 }: {
   days: readonly DayKpis[];
   period: PeriodKpis;
-  focusDate: string | null;
+  /** The days shown at the top of the page. */
+  highlighted: readonly string[];
   range: { from: string; to: string };
+  tolerance: number;
   today: string;
   tomorrow: string;
 }) {
   const rows = [...days].reverse();
   const periodLate = lateCell(period.lateArrivals, period.measuredOutbound);
-  const periodPlannedLate = plannedLateCell(period.plannedLateArrivals, period.plannedOutbound);
+  const periodTight = tightCell(period.tightOutbound, period.plannedOutbound);
+  const periodLost = lostTrips(period.demand);
 
   return (
     <Table>
@@ -136,65 +169,62 @@ export function KpiTable({
           <HeadCell rowSpan={2} align="left" className="sticky left-0 z-10 bg-slate-50 align-bottom">
             Jour
           </HeadCell>
-          <HeadCell rowSpan={2} className="align-bottom">
-            Véhicules
+          <HeadCell colSpan={3} scope="colgroup" align="center">
+            Demande
           </HeadCell>
-          <HeadCell rowSpan={2} className="align-bottom">
-            Courses servies
+          <HeadCell rowSpan={2} divider className="align-bottom" title="Véhicules utilisés / véhicules disponibles (ni indisponibles ni sans équipage)">
+            Véhicules
           </HeadCell>
           <HeadCell colSpan={2} scope="colgroup" align="center" divider>
             Courses / véhicule
           </HeadCell>
-          <HeadCell colSpan={2} scope="colgroup" align="center" divider>
-            Kilomètres
+          <HeadCell rowSpan={2} divider className="align-bottom" title="Part des km roulés sans patient à bord (km totaux au survol)">
+            Km à vide
           </HeadCell>
-          <HeadCell rowSpan={2} divider className="align-bottom">
+          <HeadCell rowSpan={2} divider className="align-bottom" title="Partage prévu des courses éligibles en taxi ou VSL (Assurance maladie)">
             Partagé
           </HeadCell>
           <HeadCell colSpan={2} scope="colgroup" align="center" divider>
-            Arrivées après le RDV
+            Ponctualité
           </HeadCell>
           <HeadCell rowSpan={2} divider className="align-bottom">
             Planning
           </HeadCell>
-          <HeadCell rowSpan={2} className="align-bottom" title="Optimisations lancées pour la date">
-            Optim.
-          </HeadCell>
-          <HeadCell rowSpan={2} divider className="align-bottom">
+          <HeadCell rowSpan={2} divider className="align-bottom" title="CA estimé des courses servies (absents exclus)">
             CA estimé
           </HeadCell>
-          <HeadCell rowSpan={2} className="align-bottom">
-            Coût
-          </HeadCell>
-          <HeadCell rowSpan={2} className="align-bottom">
+          <HeadCell rowSpan={2} className="align-bottom" title="CA estimé des courses servies − coût des tournées">
             Marge
           </HeadCell>
         </tr>
         <tr>
-          <HeadCell divider>Prévu</HeadCell>
-          <HeadCell>Réalisé</HeadCell>
-          <HeadCell divider>Total</HeadCell>
-          <HeadCell>À vide</HeadCell>
-          <HeadCell divider title="Retards constatés / allers déposés avec heure saisie">
-            Réels
+          <HeadCell title="Courses demandées moins les annulations (la veille ou le jour même)">À transp.</HeadCell>
+          <HeadCell title="Courses placées (servies ou patient absent) ÷ courses à transporter">Service</HeadCell>
+          <HeadCell title={"Courses perdues\u00a0: non affectées ou confiées à un confrère"}>Perdues</HeadCell>
+          <HeadCell divider title="Plan validé (figé à la validation) pour un jour commencé, tournées prévues sinon">
+            Prévu
           </HeadCell>
-          <HeadCell title="Déposes planifiées après l'heure du RDV">Prévus</HeadCell>
+          <HeadCell>Réalisé</HeadCell>
+          <HeadCell divider title={`Allers déposés plus de ${tolerance} min après le RDV / allers déposés avec heure saisie`}>
+            Retards
+          </HeadCell>
+          <HeadCell title={"Allers dont la dépose est prévue moins de 5\u00a0min avant le RDV"}>Serrés</HeadCell>
         </tr>
       </THead>
       <TBody>
         {rows.map((day) => {
-          const isFocus = day.date === focusDate;
-          const background = isFocus ? "bg-brand-50" : "bg-white";
+          const isHighlighted = highlighted.includes(day.date);
+          const background = isHighlighted ? "bg-brand-50" : "bg-white";
           const sources = sourcesCell(day.matrixSources);
           const dayCell = (
             <th scope="row" className={cn("sticky left-0 z-10 px-3 py-2 text-left font-normal whitespace-nowrap", background)}>
               <Link
-                href={dashboardHref({ ...range, day: day.date })}
-                aria-current={isFocus ? "true" : undefined}
+                href={dashboardHref({ ...range, day: day.date, tolerance })}
+                aria-current={isHighlighted ? "true" : undefined}
                 title={`Afficher le ${formatLongDate(day.date)} en tête de page`}
                 className={cn(
                   "tabular rounded-sm font-medium underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-brand-600",
-                  isFocus ? "text-brand-800" : "text-slate-900",
+                  isHighlighted ? "text-brand-800" : "text-slate-900",
                 )}
               >
                 {formatDayShort(day.date)}
@@ -207,7 +237,7 @@ export function KpiTable({
               {day.simulated ? (
                 <span
                   className="ml-1.5 rounded-sm bg-violet-100 px-1 py-px text-[11px] font-semibold text-violet-800"
-                  title="Journée simulée pour la démonstration&nbsp;: retards et temps de planification sont des paramètres de la simulation, pas des mesures"
+                  title="Journée simulée pour la démonstration&nbsp;: retards, absences, annulations et temps de planification sont des paramètres de la simulation, pas des mesures"
                 >
                   simulé
                 </span>
@@ -224,8 +254,10 @@ export function KpiTable({
             return (
               <tr key={day.date} className={background}>
                 {dayCell}
-                <td colSpan={DATA_COLUMNS} className="px-3 py-2 text-slate-500">
-                  Aucune tournée
+                <td colSpan={DATA_COLUMNS} className="px-3 py-2 text-slate-600">
+                  {day.demand.requested > 0
+                    ? `Aucune tournée · ${plural(day.demand.requested, "course demandée", "courses demandées")}`
+                    : "Aucune tournée"}
                 </td>
               </tr>
             );
@@ -233,53 +265,77 @@ export function KpiTable({
 
           const noRoutes = day.vehicles === 0;
           const realized = realizedCell(day);
+          const planned = plannedCell(day, today);
           const late = lateCell(day.lateArrivals, day.measuredOutbound, day.upcoming);
-          const plannedLate = plannedLateCell(day.plannedLateArrivals, day.plannedOutbound);
+          const tight = tightCell(day.tightOutbound, day.plannedOutbound);
+          const lost = lostTrips(day.demand);
+          const servedMargin = day.servedRevenue - day.cost;
           return (
             <tr key={day.date} className={background}>
               {dayCell}
-              <Num>{day.vehicles}</Num>
-              <Num>{day.servedTrips}</Num>
-              <Num divider tone="strong">
-                {formatDecimal(day.tripsPerVehiclePlanned)}
+              <Num title={demandTitle(day.demand)}>{tripsToCarry(day.demand)}</Num>
+              <Num tone="strong" title={`${placedTrips(day.demand)} placées sur ${tripsToCarry(day.demand)} à transporter`}>
+                {formatPercent(day.serviceRate, 1)}
+              </Num>
+              <Num tone={lost > 0 ? "warn" : "muted"} title={`${day.demand.unassigned} non affectées · ${day.demand.handedOver} confiées`}>
+                {lost}
+              </Num>
+              <Num
+                divider
+                title={
+                  day.fleet
+                    ? `${day.fleet.active} actifs · ${day.fleet.unavailable} indisponibles · ${day.fleet.crewless} sans équipage`
+                    : undefined
+                }
+              >
+                {day.fleet ? `${day.vehicles} / ${day.fleet.available}` : day.vehicles}
+              </Num>
+              <Num divider tone="strong" title={planned.title}>
+                {planned.text}
               </Num>
               <Num tone={realized.tone} title={realized.title}>
                 {realized.text}
                 {day.inProgress && realized.tone !== "muted" ? (
-                  <span className="ml-1 text-[11px] font-normal text-slate-500">en cours</span>
+                  <span className="ml-1 text-[11px] font-normal text-slate-600">en cours</span>
                 ) : null}
               </Num>
-              <Num divider>{noRoutes ? "—" : formatKm(day.distanceKm, 0)}</Num>
-              <Num title={noRoutes ? undefined : `${formatKm(day.emptyKm, 0)} à vide`}>
+              <Num divider title={noRoutes ? undefined : `${formatKm(day.emptyKm, 0)} à vide sur ${formatKm(day.distanceKm, 0)}`}>
                 {formatPercent(day.emptyKmShare, 1)}
               </Num>
-              <Num divider title={`${plural(day.sharedTrips, "course partagée", "courses partagées")}`}>
-                {formatPercent(day.sharedRate, 1)}
+              <Num
+                divider
+                title={`${tapTotal(day.sharing.eligibleShared)} sur ${plural(tapTotal(day.sharing.eligible), "course éligible", "courses éligibles")} · mesuré ${formatPercent(day.measuredSharedRate, 1)}`}
+              >
+                {formatPercent(day.eligibleSharedRate, 1)}
               </Num>
               <Num
                 divider
                 tone={late.tone}
-                title={day.maxDelayMinutes !== null ? `Retard maximal\u00a0: ${formatDuration(day.maxDelayMinutes)}` : undefined}
+                title={
+                  day.measuredOutbound > 0
+                    ? `Au-delà de 15 min : ${day.lateOver15}${day.maxDelayMinutes !== null ? ` · retard maximal ${formatDuration(day.maxDelayMinutes)}` : ""}`
+                    : undefined
+                }
               >
                 {late.text}
               </Num>
-              <Num tone={plannedLate.tone}>{plannedLate.text}</Num>
+              <Num tone={tight.tone} title={`${day.tightOutbound} sur ${plural(day.plannedOutbound, "aller planifié", "allers planifiés")}`}>
+                {tight.text}
+              </Num>
               <Num
                 divider
                 tone={planningTone(day)}
                 title={
                   day.planningStatus === "VALIDATED" && day.planningMinutes === null
-                    ? "Validé sans optimisation enregistrée\u00a0: durée non mesurable"
-                    : undefined
+                    ? "Validé sans optimisation enregistrée : durée non mesurable"
+                    : plural(day.optimizationRuns, "optimisation")
                 }
               >
                 {formatPlanningTime(day)}
               </Num>
-              <Num>{day.optimizationRuns}</Num>
-              <Num divider>{formatEurosRounded(noRoutes ? null : day.revenue)}</Num>
-              <Num>{formatEurosRounded(noRoutes ? null : day.cost)}</Num>
-              <Num tone={!noRoutes && day.margin < 0 ? "bad" : "strong"}>
-                {formatEurosRounded(noRoutes ? null : day.margin)}
+              <Num divider>{formatEurosRounded(noRoutes ? null : day.servedRevenue)}</Num>
+              <Num tone={!noRoutes && servedMargin < 0 ? "bad" : "strong"} title={noRoutes ? undefined : `Coût ${formatEurosRounded(day.cost)}`}>
+                {formatEurosRounded(noRoutes ? null : servedMargin)}
               </Num>
             </tr>
           );
@@ -289,7 +345,7 @@ export function KpiTable({
         <tr>
           <th scope="row" className="sticky left-0 z-10 bg-slate-50 px-3 py-2 text-left whitespace-nowrap text-slate-900">
             Période
-            <span className="block text-[11px] font-normal text-slate-500">
+            <span className="block text-[11px] font-normal text-slate-600">
               {plural(period.plannedDays, "jour planifié", "jours planifiés")}
             </span>
             {period.matrixSources.length > 0 ? (
@@ -301,45 +357,47 @@ export function KpiTable({
               </span>
             ) : null}
           </th>
-          <Num tone="strong" title="Journées-véhicules">
-            {period.vehicles}
+          <Num tone="strong" title={demandTitle(period.demand)}>
+            {tripsToCarry(period.demand)}
           </Num>
-          <Num tone="strong">{period.servedTrips}</Num>
-          <Num divider tone="strong">
+          <Num tone="strong">{formatPercent(period.serviceRate, 1)}</Num>
+          <Num tone={periodLost > 0 ? "warn" : "strong"}>{periodLost}</Num>
+          <Num divider tone="strong" title="Journées-véhicules utilisées / disponibles">
+            {period.fleet ? `${period.vehicles} / ${period.fleet.available}` : period.vehicles}
+            <span className="block text-[11px] font-normal text-slate-600">journées-véhicules</span>
+          </Num>
+          <Num divider tone="strong" title="Courses servies ÷ journées-véhicules utilisées">
             {formatDecimal(period.tripsPerVehiclePlanned)}
           </Num>
           <Num
             tone="strong"
             title={
               period.inProgressDate
-                ? "Jours terminés uniquement\u00a0: la journée en cours n'est pas comptée"
+                ? "Jours terminés uniquement : la journée en cours n'est pas comptée"
                 : "Courses déposées ÷ véhicules dont l'équipage a saisi un statut"
             }
           >
             {formatDecimal(period.tripsPerVehicleRealized)}
           </Num>
-          <Num divider tone="strong">
-            {formatKm(period.distanceKm, 0)}
+          <Num divider tone="strong" title={`${formatKm(period.emptyKm, 0)} à vide sur ${formatKm(period.distanceKm, 0)}`}>
+            {formatPercent(period.emptyKmShare, 1)}
           </Num>
-          <Num tone="strong">{formatPercent(period.emptyKmShare, 1)}</Num>
           <Num divider tone="strong">
-            {formatPercent(period.sharedRate, 1)}
+            {formatPercent(period.eligibleSharedRate, 1)}
           </Num>
           <Num divider tone={periodLate.tone === "default" ? "strong" : periodLate.tone}>
             {periodLate.text}
           </Num>
-          <Num tone={periodPlannedLate.tone === "default" ? "strong" : periodPlannedLate.tone}>
-            {periodPlannedLate.text}
-          </Num>
+          <Num tone={periodTight.tone === "default" ? "strong" : periodTight.tone}>{periodTight.text}</Num>
           <Num divider tone="strong" title="Moyenne des jours validés dont la durée est mesurable">
             {period.averagePlanningMinutes === null ? "—" : `moy. ${formatDuration(period.averagePlanningMinutes)}`}
           </Num>
-          <Num tone="strong">{period.optimizationRuns}</Num>
           <Num divider tone="strong">
-            {formatEurosRounded(period.revenue)}
+            {formatEurosRounded(period.servedRevenue)}
           </Num>
-          <Num tone="strong">{formatEurosRounded(period.cost)}</Num>
-          <Num tone={period.margin < 0 ? "bad" : "strong"}>{formatEurosRounded(period.margin)}</Num>
+          <Num tone={period.servedRevenue - period.cost < 0 ? "bad" : "strong"} title={`Coût ${formatEurosRounded(period.cost)}`}>
+            {formatEurosRounded(period.servedRevenue - period.cost)}
+          </Num>
         </tr>
       </tfoot>
     </Table>

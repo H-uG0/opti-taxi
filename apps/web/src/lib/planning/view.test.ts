@@ -3,6 +3,7 @@ import { tariffRow } from "@/test/tariff-fixtures";
 import type { DriverInput, SettingsInput } from "@/lib/optimizer/build-request";
 import type { RunDetails } from "@/lib/optimizer/run-details";
 import { computeDayKpis as computeDashboardDayKpis, type KpiData } from "@/lib/kpis";
+import { tapTotal } from "@/lib/kpis-sharing";
 import { addDays } from "@/lib/time";
 import {
   buildPlanningView,
@@ -537,6 +538,7 @@ describe("day KPIs", () => {
       ],
       [route({ stops: [stop("s1", 0, "a", "PICKUP", 420, 1), stop("s2", 1, "a", "DROPOFF", 460, 0)] })],
       0,
+      () => "TAXI",
     );
     expect(kpis).toEqual({
       tripsTotal: 3,
@@ -584,8 +586,10 @@ describe("day KPIs", () => {
     const served = new Set(["ASSIGNED", "PICKED_UP", "DROPPED_OFF"]);
     return {
       routes: dayRoutes.map((r) => ({
+        id: r.id,
         serviceDate: DATE,
         vehicleId: r.vehicleId,
+        vehicleType: "TAXI" as const,
         distanceKm: r.distanceKm,
         emptyKm: r.emptyKm,
         revenue: r.revenue,
@@ -606,6 +610,9 @@ describe("day KPIs", () => {
           appointmentMinute: t.appointmentMinute,
           plannedDropoffMinute: t.plannedDropoffMinute,
           dropoffCompletedAt: t.id === "a" ? done : null,
+          payer: t.payer,
+          sharingAllowed: t.sharingAllowed,
+          allowedVehicleTypes: t.allowedVehicleTypes,
         })),
       runs: [],
     };
@@ -632,8 +639,8 @@ describe("day KPIs", () => {
       totalKm: dashboard.distanceKm,
       emptyKm: dashboard.emptyKm,
       emptyKmRatio: dashboard.emptyKmShare,
-      sharedTrips: dashboard.sharedTrips,
-      sharedTripRatio: dashboard.sharedRate,
+      sharedTrips: tapTotal(dashboard.sharing.eligibleShared),
+      sharedTripRatio: dashboard.eligibleSharedRate,
       revenue: dashboard.revenue,
       margin: dashboard.margin,
     });
@@ -652,7 +659,7 @@ describe("day KPIs", () => {
   });
 
   it("builds the dashboard rows as load-kpis.ts does (@/lib/kpis keeps only the served trips)", () => {
-    const rows = toKpiRows(DATE, dayTrips, dayRoutes);
+    const rows = toKpiRows(DATE, dayTrips, dayRoutes, () => "TAXI");
     const expected = dashboardRows();
     expect(rows.routes).toEqual(expected.routes);
     expect(rows.trips.filter((t) => t.routeId !== null && t.status !== "NO_SHOW")).toEqual(expected.trips);

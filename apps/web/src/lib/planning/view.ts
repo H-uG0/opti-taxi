@@ -29,6 +29,7 @@ import type { RunDetails } from "@/lib/optimizer/run-details";
 import { returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
 import { halfServedPairs } from "./half-served";
 import { computeDayKpis as computeDashboardDayKpis, type KpiRoute, type KpiTrip } from "@/lib/kpis";
+import { tapTotal } from "@/lib/kpis-sharing";
 import { VIOLATION_LABELS } from "@/lib/labels";
 import { tripLineText, violationLineText } from "./naming";
 import { changesOfVehicle, type PlanChanges } from "./plan-changes";
@@ -335,21 +336,25 @@ function runView(
 export type KpiTripSource = Pick<
   RawTrip,
   "id" | "status" | "routeId" | "direction" | "shared" | "appointmentMinute" | "plannedDropoffMinute"
->;
+> &
+  Partial<Pick<RawTrip, "payer" | "sharingAllowed" | "allowedVehicleTypes">>;
 export type KpiRouteSource = Pick<
   RawRoute,
   "vehicleId" | "distanceKm" | "emptyKm" | "revenue" | "cost" | "margin" | "validatedAt"
-> & { stops: ReadonlyArray<Pick<RawStop, "tripId" | "kind" | "completedAt">> };
+> &
+  Partial<Pick<RawRoute, "id">> & { stops: ReadonlyArray<Pick<RawStop, "tripId" | "kind" | "completedAt">> };
 
 /**
  * The planning rows of `date` as the dashboard reads them from the database
  * (tableau-de-bord/load-kpis.ts): stop count and recorded status per route,
- * real drop-off instant per trip.
+ * real drop-off instant per trip; `vehicleTypeOf` gives each route's vehicle
+ * type (the shared rate counts the eligible trips in a taxi or a VSL).
  */
 export function toKpiRows(
   date: string,
   trips: readonly KpiTripSource[],
   routes: readonly KpiRouteSource[],
+  vehicleTypeOf: (vehicleId: string) => VehicleType | undefined = () => undefined,
 ): { routes: KpiRoute[]; trips: KpiTrip[] } {
   const dropoffAt = new Map<string, Date>();
   for (const stop of routes.flatMap((r) => r.stops)) {
@@ -359,8 +364,10 @@ export function toKpiRows(
   }
   return {
     routes: routes.map((r) => ({
+      ...(r.id ? { id: r.id } : {}),
       serviceDate: date,
       vehicleId: r.vehicleId,
+      vehicleType: vehicleTypeOf(r.vehicleId),
       distanceKm: r.distanceKm,
       emptyKm: r.emptyKm,
       revenue: r.revenue,
@@ -379,6 +386,9 @@ export function toKpiRows(
       appointmentMinute: t.appointmentMinute,
       plannedDropoffMinute: t.plannedDropoffMinute,
       dropoffCompletedAt: dropoffAt.get(t.id) ?? null,
+      ...(t.payer ? { payer: t.payer } : {}),
+      ...(t.sharingAllowed !== undefined ? { sharingAllowed: t.sharingAllowed } : {}),
+      ...(t.allowedVehicleTypes ? { allowedVehicleTypes: t.allowedVehicleTypes } : {}),
     })),
   };
 }
@@ -387,15 +397,18 @@ export function toKpiRows(
  * KPIs of the day from the saved routes and trips (always current), with the
  * dashboard formulas of @/lib/kpis: served trips, used vehicles, km, shared
  * rate and money are computed there, so both pages show the same numbers.
+ * The shared rate is the Assurance maladie's: eligible trips in a taxi or a
+ * VSL (lib/kpis-sharing.ts).
  */
 export function computeDayKpis(
   date: string,
   trips: readonly KpiTripSource[],
   routes: readonly KpiRouteSource[],
   violations: number | null,
+  vehicleTypeOf: (vehicleId: string) => VehicleType | undefined = () => undefined,
 ): DayKpis {
   // Only planned figures are read: `today` (here the date itself) does not change them.
-  const day = computeDashboardDayKpis(date, { ...toKpiRows(date, trips, routes), runs: [] }, date);
+  const day = computeDashboardDayKpis(date, { ...toKpiRows(date, trips, routes, vehicleTypeOf), runs: [] }, date);
   return {
     tripsTotal: trips.filter((t) => isActiveTrip(t.status)).length,
     tripsServed: day.servedTrips,
@@ -404,8 +417,8 @@ export function computeDayKpis(
     totalKm: day.distanceKm,
     emptyKm: day.emptyKm,
     emptyKmRatio: day.emptyKmShare,
-    sharedTrips: day.sharedTrips,
-    sharedTripRatio: day.sharedRate,
+    sharedTrips: tapTotal(day.sharing.eligibleShared),
+    sharedTripRatio: day.eligibleSharedRate,
     revenue: day.revenue,
     margin: day.margin,
     violations,
@@ -626,7 +639,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
     unassigned,
     violations,
     violationsKnown,
-    kpis: computeDayKpis(input.date, input.trips, input.routes, violationsKnown ? violations.length : null),
+    kpis: computeDayKpis(input.date, input.trips, input.routes, violationsKnown ? violations.length : null, (id) => vehicleById.get(id)?.type),
     skippedVehicles: build.skippedVehicles,
     droppedLocks: build.droppedLocks,
     excludedTrips: build.excludedTrips,

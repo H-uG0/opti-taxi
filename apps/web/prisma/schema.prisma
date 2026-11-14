@@ -927,6 +927,22 @@ model OptimizationRun {
   @@index([serviceDate])
 }
 
+/// Plan validé figé d'une date (« Prévu » du tableau de bord) : les indicateurs de ses tournées au moment de
+/// la validation, pour les comparer ensuite au servi et au réalisé (absences et annulations du jour retirées).
+/// Une validation faite avant le jour de service remplace le plan figé ; une validation le jour même (après une
+/// réouverture) ne remplace pas celui de la veille. Ni nom ni adresse : des comptes, des km et des montants.
+model ValidatedPlan {
+  serviceDate   DateTime @id @db.Date
+  /// Instant de la validation figée.
+  validatedAt   DateTime
+  validatedById String?
+  /// Indicateurs figés (lib/kpis-plan.ts, schéma versionné) : totaux du jour et une ligne par véhicule utilisé.
+  figures       Json
+  updatedAt     DateTime @updatedAt
+
+  validatedBy User? @relation("ValidatedPlanBy", fields: [validatedById], references: [id], onDelete: SetNull)
+}
+
 model User {
   id             String   @id @default(cuid())
   email          String   @unique
@@ -952,6 +968,7 @@ model User {
   cancelledTrips   Trip[]            @relation("TripCancelledBy")
   exceptionalAmbulanceTrips Trip[]   @relation("TripExceptionalAmbulanceBy")
   dayCrews         DayCrew[]         @relation("DayCrewUpdatedBy")
+  validatedPlans   ValidatedPlan[]   @relation("ValidatedPlanBy")
   auditEvents      AuditEvent[]
 }
 

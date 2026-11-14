@@ -7,11 +7,13 @@
  * trips frozen for the patients who ask for their driver, sharing answers, a
  * re-optimization after each round with a refusal, the trips no plan could
  * place handed over to a partner company (« Confiée à un confrère »),
- * validation, then the statuses about 85 % of the crews tap on the roadmap
- * (pickups, drop-offs, absences, cancellations). Then the fill-ups and
+ * validation (the validated plan is frozen: the dashboard's « Prévu »), then
+ * the statuses about 85 % of the crews tap on the roadmap (pickups,
+ * drop-offs, absences, cancellations). Then the fill-ups and
  * odometer readings are rebuilt from the simulated km (history/fuel.ts).
- * The dashboard marks these days « simulé »: their lateness and planning
- * time are parameters of the simulation, not measurements.
+ * The dashboard marks these days « simulé »: their lateness, planning time,
+ * cancellations, absences, session overruns (the waits after a session) and
+ * sharing refusals are parameters of the simulation, not measurements.
  *
  * Run with `pnpm db:history [--days N] [--budget S]` (tsx prisma/history.ts);
  * the optimizer must be running (OPTIMIZER_URL, default http://localhost:8100).
@@ -35,7 +37,8 @@ import {
   recurrencesInRange,
   type RecurrenceForGeneration,
 } from "@/lib/domain/trip-generation";
-import { computeKpisByDay, summarizePeriod } from "@/lib/kpis";
+import { computeKpisByDay, listDates, summarizePeriod } from "@/lib/kpis";
+import { loadKpiFleet } from "@/lib/kpis-fleet-load";
 import { loadKpiRows } from "@/lib/kpis-load";
 import { logError } from "@/lib/log";
 import { formatAddress } from "@/lib/domain/rules";
@@ -347,7 +350,8 @@ async function main(): Promise<void> {
     }
   }
 
-  const days = computeKpisByDay(first, last, await loadKpiRows(prisma, first, last), today);
+  const [rows, fleet] = await Promise.all([loadKpiRows(prisma, { from: first, to: last }), loadKpiFleet(prisma, listDates(first, last))]);
+  const days = computeKpisByDay(first, last, { ...rows, fleet }, today);
   console.log("\nIndicateurs du tableau de bord sur la période (calcul de @/lib/kpis, comme /tableau-de-bord) :");
   for (const line of periodSummaryLines(summarizePeriod(days))) console.log(`  ${line}`);
 

@@ -21,6 +21,7 @@
  */
 import type { Prisma, PrismaClient, TripStatus } from "@prisma/client";
 import { isLateCancellation, userCancellation } from "@/lib/domain/cancellation";
+import { freezeValidatedPlan } from "@/lib/kpis-plan-store";
 import { isSameEpisode } from "@/lib/domain/no-show";
 import { planTripsFromRecurrences, type RecurrenceForGeneration } from "@/lib/domain/trip-generation";
 import { buildOptimizeRequest, loadOptimizeInput } from "@/lib/optimizer/build-request";
@@ -150,13 +151,15 @@ export async function foreignDates(prisma: PrismaClient, from: string, to: strin
 
 /**
  * Deletes what a previous simulation created on the date (stops cascade with
- * routes and trips). Its own audit events only ("hist-" ids): the append-only
+ * routes and trips), its frozen validated plan included. Its own audit events only ("hist-" ids): the append-only
  * trigger is lifted for this transaction alone (audit-guard.ts).
  */
 export async function clearSimulatedDay(prisma: PrismaClient, isoDate: string): Promise<ClearedRows> {
   const where = simulatedRowsWhere(fromIsoDate(isoDate));
-  const [, routes, trips, , , , runs, events] = await prisma.$transaction([
+  const [, , routes, trips, , , , runs, events] = await prisma.$transaction([
     liftAuditGuard(prisma),
+    // The frozen plan of a simulated date is the simulation's (a date with rows of the app is never cleared).
+    prisma.validatedPlan.deleteMany({ where: { serviceDate: fromIsoDate(isoDate) } }),
     prisma.route.deleteMany({ where: where.routes }),
     prisma.trip.deleteMany({ where: where.trips }),
     prisma.prescription.deleteMany({ where: where.prescriptions }),
@@ -669,7 +672,11 @@ export async function simulateDay(ctx: DayContext, isoDate: string): Promise<Day
         where: { serviceDate, status: "PROPOSED" },
         data: { status: "VALIDATED", validatedAt },
       });
-      if (count > 0) await tx.auditEvent.createMany({ data: [trail.event(regulator(ctx), "plan.validate", null, validatedAt)] });
+      if (count > 0) {
+        await tx.auditEvent.createMany({ data: [trail.event(regulator(ctx), "plan.validate", null, validatedAt)] });
+        // As « Valider le planning »: the validated plan is frozen (the dashboard's « Prévu »).
+        await freezeValidatedPlan(tx, isoDate, { now: validatedAt, validatedById: ctx.regulatorId });
+      }
     },
     { maxWait: 30_000, timeout: 60_000 },
   );

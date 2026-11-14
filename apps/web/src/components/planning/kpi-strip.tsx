@@ -82,7 +82,7 @@ export function KpiStrip({
       <Figure label="Km à vide" title="Part des km roulés sans patient à bord" value={formatPercent(kpis.emptyKmRatio)} hint={formatKmRounded(kpis.emptyKm)} />
       <Figure
         label="Partagé"
-        title="Transport partagé&nbsp;: part des courses servies avec un autre patient à bord"
+        title={"Transport partagé, comme l'Assurance maladie le compte\u00a0: part des courses en taxi ou VSL de ses assurés, dont la prescription autorise le partage, avec un autre patient à bord"}
         value={formatPercent(kpis.sharedTripRatio)}
         hint={pluralize(kpis.sharedTrips, "course", "courses")}
       />
