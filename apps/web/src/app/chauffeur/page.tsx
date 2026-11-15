@@ -16,6 +16,7 @@ import {
   loadNoShowMinWait,
   loadRegulatorContact,
   loadReturnTripsAfterOutboundNoShow,
+  loadVehicleDays,
 } from "./_lib/load";
 import { isReadableRoadmapDate, type NextDaySummary } from "./_lib/roadmap";
 import { buildRouteView, nextDayCardFirst, NO_FIELD_CONTEXT } from "./_lib/view";
@@ -160,13 +161,15 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
   // Before 03:00, the day before is still open to its forgotten statuses (« Fin de tournée »).
   const openDays = lateEntryDates(now);
   const yesterday = editable && openDays.length > 1 ? openDays[0]! : null;
-  const [afterOutboundNoShow, field, nextDay, yesterdayRoutes] = await Promise.all([
+  const [afterOutboundNoShow, field, nextDay, yesterdayRoutes, vehicleDays] = await Promise.all([
     loadReturnTripsAfterOutboundNoShow(routes, date),
     // Signals and requests of the crew (DAY-05): the patients' returns and what was already sent, today only.
     editable ? loadFieldContext(routes, date) : NO_FIELD_CONTEXT,
     // The evening before: tomorrow's start and first stop (DAY-04).
     date === today ? loadNextDaySummary(user.driverId, tomorrow) : [],
     yesterday ? loadEndOfRouteRoutes(user.driverId, yesterday, now) : [],
+    // The day's vehicle: its odometer readings and the last mileage known (FLD-03), today only.
+    editable ? loadVehicleDays(routes, date) : new Map(),
   ]);
   const yesterdayForgotten = yesterdayRoutes.reduce((sum, route) => sum + endOfRouteView(route.stops).pending.length, 0);
   const nowMinute = minuteOfDay(now);
@@ -202,6 +205,7 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
                 key={view.id}
                 route={view}
                 regulator={regulator}
+                vehicleDay={vehicleDays.get(view.id) ?? null}
                 endOfRoute={
                   editable
                     ? {

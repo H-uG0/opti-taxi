@@ -25,17 +25,17 @@ import { Check, Clock, CloudOff, LoaderCircle, MapPinCheck, TriangleAlert, Undo2
 import { cn } from "@/components/ui/cn";
 import { NO_SHOW_REASON_LABELS, NO_SHOW_REASONS, noShowAllowedFrom, waitedMinutes, waitStartMinute } from "@/lib/domain/field-wait";
 import { formatMinute, minuteOfDay } from "@/lib/time";
-import { localArrival, localStatusShown, type LocalStatus } from "../_lib/status-queue";
-import type { StopAction } from "../_lib/transitions";
+import { localArrival, localStatusShown, type LocalStatus, type QueueAction } from "../_lib/status-queue";
 import { useDriverApp, useMinuteClock, useQueueSnapshot } from "./driver-app";
 
-const STATUS_LABELS: Record<StopAction, string> = {
+const STATUS_LABELS: Record<QueueAction, string> = {
   PICKUP: "Pris en charge",
   DROPOFF: "Déposé",
   NO_SHOW: "Patient absent",
   UNDO: "Annulation du statut",
   ARRIVE: "Arrivé",
   UNDO_ARRIVE: "Annulation de l'arrivée",
+  ODOMETER: "Relevé du compteur",
 };
 
 const SLOW_AFTER_MS = 6000;

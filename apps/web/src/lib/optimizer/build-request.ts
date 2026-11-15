@@ -64,6 +64,7 @@ import {
 } from "@/lib/staff/day-crews";
 import { breakInShift, workTimeSummary } from "@/lib/staff/work-time";
 import { addDays, formatMinute, fromIsoDate, isoWeekday, toIsoDate, WEEKDAY_LABELS } from "@/lib/time";
+import { loadLatestKm } from "@/lib/fleet/odometer-load";
 import { freeHoursOfAll, type FreeHours } from "@/lib/fleet/partial-day";
 import {
   DEFAULT_MAX_RIDE_EXTRA_MIN,
@@ -908,11 +909,12 @@ export async function loadDayCrewContext(prisma: PrismaClient | Prisma.Transacti
       where: { kind: { in: [...COMPLIANCE_KINDS] }, doneDate: null },
       select: { vehicleId: true, kind: true, label: true, dueDate: true, dueKm: true, doneDate: true },
     }),
-    prisma.fuelLog.groupBy({ by: ["vehicleId"], _max: { odometerKm: true } }),
+    // The last mileage known: fill-ups and the crews' readings (FLD-03).
+    loadLatestKm(prisma),
     prisma.depot.findMany({ select: { id: true, name: true, lat: true, lng: true } }),
     loadCrewRules(prisma),
   ]);
-  const odometerOf = new Map(odometers.map((o) => [o.vehicleId, o._max.odometerKm ?? null]));
+  const odometerOf = odometers;
   const fleetAlerts = new Map<string, string[]>();
   for (const vehicle of vehicles) {
     const own = deadlines

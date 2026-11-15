@@ -8,9 +8,11 @@ import { cn } from "@/components/ui/cn";
 import { formatLongDate, formatMinute, minuteOfDay, todayIso } from "@/lib/time";
 import { LATE_ENTRY_UNTIL_MINUTE, lateEntryDates } from "../_lib/access";
 import { endOfRouteView } from "../_lib/end-of-route";
-import { loadEndOfRouteRoutes } from "../_lib/load";
+import { loadEndOfRouteRoutes, loadVehicleDays } from "../_lib/load";
 import { ServerRenderMark } from "../_components/driver-app";
 import { LateEntry } from "../_components/late-entry";
+import { OdometerCard } from "../_components/odometer-card";
+import { VehicleDayPanel } from "../_components/route-section";
 
 export const metadata: Metadata = { title: "Fin de tournée" };
 
@@ -37,7 +39,8 @@ export default async function EndOfRoutePage({ searchParams }: { searchParams: S
   const routes = await loadEndOfRouteRoutes(user.driverId, date, now);
   // Patient names of the stops left without a status are on screen: traced like the roadmap.
   await auditRead(user, { action: "roadmap.view", entity: "Driver", entityId: user.driverId, serviceDate: date, details: { page: "end_of_route" } });
-  const views = routes.map((route) => ({ route, view: endOfRouteView(route.stops) }));
+  const vehicleDays = await loadVehicleDays(routes, date);
+  const views = routes.map((route) => ({ route, view: endOfRouteView(route.stops), day: vehicleDays.get(route.id) ?? null }));
   const yesterday = open.length > 1 ? open[0] : null;
 
   return (
@@ -80,7 +83,7 @@ export default async function EndOfRoutePage({ searchParams }: { searchParams: S
       {views.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-8 text-center text-base text-slate-700">Aucune tournée ce jour-là.</p>
       ) : (
-        views.map(({ route, view }) => (
+        views.map(({ route, view, day }) => (
           <section key={route.id} aria-labelledby={`end-${route.id}`} className="space-y-3">
             <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3">
               <h2 id={`end-${route.id}`} className="text-lg font-bold text-slate-950">
@@ -88,9 +91,12 @@ export default async function EndOfRoutePage({ searchParams }: { searchParams: S
               </h2>
               <p className="tabular mt-1 text-base text-slate-800">
                 Statuts saisis&nbsp;: <span className="font-semibold">{view.closed}</span> sur {view.total}
-                {view.total > 0 ? ` (${Math.floor((view.closed / view.total) * 100)} %)` : ""}
+                {view.total > 0 ? ` (${Math.floor((view.closed / view.total) * 100)}\u00a0%)` : ""}
               </p>
             </div>
+            {/* The end of the day: the odometer back at the depot (FLD-03); the start's, if it was forgotten. */}
+            {day && day.start === null ? <OdometerCard routeId={route.id} date={day.date} moment="START" recorded={null} lastKnown={day.lastKnown} startKm={null} /> : null}
+            {day ? <OdometerCard routeId={route.id} date={day.date} moment="END" recorded={day.end} lastKnown={day.lastKnown} startKm={day.start} prominent={day.end === null} /> : null}
             {view.pending.length === 0 ? (
               <p className="flex items-center gap-2 rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-base font-semibold text-emerald-950">
                 <CircleCheck aria-hidden className="size-5" />
@@ -116,6 +122,7 @@ export default async function EndOfRoutePage({ searchParams }: { searchParams: S
                 </ol>
               </>
             )}
+            {day ? <VehicleDayPanel routeId={route.id} day={day} readings={false} /> : null}
           </section>
         ))
       )}

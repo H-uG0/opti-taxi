@@ -17,6 +17,41 @@ export function stopStatusUrl(stopId: string): string {
 
 export const SESSION_URL = "/api/chauffeur/session";
 
+/** POST /api/chauffeur/routes/:id/odometer: a reading of the odometer (FLD-03), sent from the queue like a status. */
+export function odometerUrl(routeId: string): string {
+  return `/api/chauffeur/routes/${encodeURIComponent(routeId)}/odometer`;
+}
+
+/** POST /api/chauffeur/routes/:id/fuel: a fill-up or a charge of the day's vehicle (FLD-03), online only. */
+export function fuelUrl(routeId: string): string {
+  return `/api/chauffeur/routes/${encodeURIComponent(routeId)}/fuel`;
+}
+
+/**
+ * The queue's key of an odometer reading (FLD-03): a route and a moment, kept in the place of a stop id (« odometer:
+ * <route>:START »), so a reading waits, is withdrawn and is sent like a status. Never a patient's anything.
+ */
+export function odometerKey(routeId: string, moment: "START" | "END"): string {
+  return `odometer:${routeId}:${moment}`;
+}
+
+/** The route and moment of an odometer reading's key, null for a stop's id. */
+export function parseOdometerKey(key: string): { routeId: string; moment: "START" | "END" } | null {
+  const match = /^odometer:([A-Za-z0-9_-]{1,40}):(START|END)$/.exec(key);
+  return match ? { routeId: match[1]!, moment: match[2] as "START" | "END" } : null;
+}
+
+/** Body of an odometer request. Times are the phone's clock, epoch milliseconds. */
+export type OdometerRequestBody = {
+  moment: "START" | "END";
+  km: number;
+  /** The crew confirmed an unusual jump. */
+  confirmed: boolean;
+  observedAt: number;
+  sentAt: number;
+  ownerId: string;
+};
+
 /** Body of a status request. Times are the phone's clock, epoch milliseconds. */
 export type StatusRequestBody = {
   action: StopAction;
@@ -50,6 +85,10 @@ export type StatusErrorCode =
   | "wait"
   /** « Fin de tournée »: a time in the future, or out of the order of the route's statuses. */
   | "declared"
+  /** An odometer reading below the last one known (FLD-03). */
+  | "odometer"
+  /** An odometer reading with an unusual jump: recorded once the crew confirms it. */
+  | "confirm"
   /** The transition rules refuse it (already picked up, cancelled trip…). */
   | "refused"
   /** The other crew member changed the stop meanwhile. */
@@ -79,8 +118,8 @@ const KEEP_CODES: ReadonlySet<StatusErrorCode> = new Set(["session", "password",
 /** What the phone does with the answer to one queued status. */
 export type SendOutcome =
   | { kind: "ok"; message: string; serverTime: number; sessionExpiresAt: string | null }
-  /** Not recorded and never will be: drop it from the queue and tell the crew. */
-  | { kind: "refused"; error: string; serverTime: number | null }
+  /** Not recorded and never will be: drop it from the queue and tell the crew (code: why, when the server said). */
+  | { kind: "refused"; error: string; serverTime: number | null; code?: StatusErrorCode }
   /**
    * Not recorded yet as far as the phone knows (network, timeout, server): keep it, try again later.
    * maybeReceived: the request left the phone and got no final answer (timeout, cut, 5xx), so the
@@ -113,5 +152,6 @@ export function classifyStatusResponse(httpStatus: number, body: unknown): SendO
     kind: "refused",
     error: isRecord(body) && typeof body.error === "string" ? body.error : "Statut refusé par le serveur.",
     serverTime: isRecord(body) && typeof body.serverTime === "number" ? body.serverTime : null,
+    code,
   };
 }

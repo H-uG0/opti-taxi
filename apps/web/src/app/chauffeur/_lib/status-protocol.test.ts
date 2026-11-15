@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyStatusResponse, stopStatusUrl } from "./status-protocol";
+import { classifyStatusResponse, odometerKey, odometerUrl, parseOdometerKey, stopStatusUrl } from "./status-protocol";
 
 describe("stopStatusUrl", () => {
   it("puts the stop id in the path, encoded", () => {
@@ -49,7 +49,28 @@ describe("classifyStatusResponse", () => {
         kind: "refused",
         error: `Refus ${code}`,
         serverTime: 7,
+        code,
       });
     }
   });
 });
+
+describe("odometer readings in the queue (FLD-03)", () => {
+  it("keys a reading by its route and moment, and reads the key back", () => {
+    expect(odometerKey("route_1", "START")).toBe("odometer:route_1:START");
+    expect(parseOdometerKey("odometer:route_1:END")).toEqual({ routeId: "route_1", moment: "END" });
+    expect(parseOdometerKey("stop_1")).toBeNull();
+    expect(parseOdometerKey("odometer:../x:START")).toBeNull();
+    expect(odometerUrl("route_1")).toBe("/api/chauffeur/routes/route_1/odometer");
+  });
+
+  it("keeps the code of a refusal, so the phone can offer to confirm an unusual jump", () => {
+    expect(classifyStatusResponse(422, { ok: false, code: "confirm", error: "Saut inhabituel", serverTime: 5 })).toEqual({
+      kind: "refused",
+      error: "Saut inhabituel",
+      serverTime: 5,
+      code: "confirm",
+    });
+  });
+});
+

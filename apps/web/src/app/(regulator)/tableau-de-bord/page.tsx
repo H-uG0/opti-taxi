@@ -339,6 +339,7 @@ async function FleetTab({ dashboard }: { dashboard: Dashboard }) {
       offRoadDays: offRoad.get(vehicle.id) ?? 0,
       deadlines: inputs.deadlines.get(vehicle.id) ?? [],
       latestOdometerKm: inputs.latestOdometer.get(vehicle.id) ?? null,
+      readingDays: inputs.readingDays.get(vehicle.id) ?? [],
     }),
   );
   const depotOf = new Map(vehicles.map((v) => [v.id, v.depotId]));

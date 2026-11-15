@@ -21,10 +21,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useRouter } from "next/navigation";
 import type { RegulatorContact } from "../_lib/links";
 import { serverReachable } from "../_lib/reachability";
-import { EMPTY_QUEUE_SNAPSHOT, StatusQueue, type QueueSnapshot, type StatusExtra } from "../_lib/status-queue";
+import { EMPTY_QUEUE_SNAPSHOT, StatusQueue, type QueueAction, type QueueSnapshot, type StatusExtra } from "../_lib/status-queue";
 import { openIndexedDbQueue } from "../_lib/status-queue-idb";
 import { renewSession, sendQueuedStatus, type SessionState } from "../_lib/status-send";
-import type { StopAction } from "../_lib/transitions";
 
 /** While statuses wait, sending is tried again this often (the "online" event is unreliable on phones). */
 const RETRY_EVERY_MS = 30_000;
@@ -38,7 +37,7 @@ type DriverApp = {
   ownerId: string;
   queue: StatusQueue;
   /** `extra`: the reason of « Patient absent », the real time typed in « Fin de tournée ». */
-  submit: (stopId: string, action: StopAction, extra?: StatusExtra) => void;
+  submit: (stopId: string, action: QueueAction, extra?: StatusExtra) => void;
   cancelQueued: (stopId: string) => void;
   sendNow: () => void;
   /** End of the session on the phone's clock (epoch ms), null until known. */

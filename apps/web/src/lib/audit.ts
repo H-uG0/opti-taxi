@@ -111,8 +111,10 @@
  *   crew_incompatibility.create/delete;
  * - fleet: vehicle.create/update/deactivate/reactivate,
  *   vehicle_unavailability.create/delete, maintenance_deadline.create/
- *   complete/delete, fuel_log.create/delete, depot.create/update/deactivate/
- *   reactivate;
+ *   complete/delete, fuel_log.create/delete (details.source "driver" for a
+ *   fill-up typed by the crew, FLD-03), odometer.record (a crew's odometer
+ *   reading, on the Vehicle: details.moment START | END, details.km { from,
+ *   to }), depot.create/update/deactivate/reactivate;
  * - settings: settings.update, traffic.update, traffic.apply_observed (details:
  *   changed fields, old and new value), traffic.calibration_reset (the first
  *   plan computed with OSRM starts the measured traffic factors over, details:

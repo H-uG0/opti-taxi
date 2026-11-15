@@ -1,11 +1,14 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { ChevronDown, ClipboardCheck, Coffee, Flag, Info, Warehouse } from "lucide-react";
+import { Car, ChevronDown, ClipboardCheck, Coffee, Flag, Info, Warehouse } from "lucide-react";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { cn } from "@/components/ui/cn";
 import { formatKm, STOP_KIND_LABELS } from "@/lib/labels";
 import { formatDuration, formatMinute } from "@/lib/time";
 import type { RegulatorContact } from "../_lib/links";
+import type { VehicleDay } from "../_lib/load";
+import { FuelForm } from "./fuel-form";
+import { OdometerCard } from "./odometer-card";
 import type { RouteView, StopView } from "../_lib/view";
 import { NavLinks } from "./nav-links";
 import { PhoneLink } from "./phone-link";
@@ -230,15 +233,59 @@ function EndOfRouteLink({ forgotten }: { forgotten: number }) {
   );
 }
 
+/** The day's vehicle (FLD-03): the odometer at the start and the end, a fill-up or a charge. */
+export function VehicleDayPanel({
+  routeId,
+  day,
+  open = false,
+  readings = true,
+}: {
+  routeId: string;
+  day: VehicleDay;
+  open?: boolean;
+  /** The odometer readings too (« Fin de tournée » shows the end's on its own). */
+  readings?: boolean;
+}) {
+  return (
+    <details open={open} className="group rounded-2xl border border-slate-300 bg-white">
+      <summary className="flex min-h-14 cursor-pointer touch-manipulation list-none items-center gap-3 px-4 py-2 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand-600 [&::-webkit-details-marker]:hidden">
+        <Car aria-hidden className="size-5 shrink-0 text-brand-700" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-base font-semibold text-slate-950">Véhicule</span>
+          <span className="block text-sm text-slate-600">
+            {readings ? "Compteur, " : ""}
+            {day.energy === "ELECTRIC" ? "recharge" : "plein ou recharge"}
+          </span>
+        </span>
+        <ChevronDown aria-hidden className="size-5 shrink-0 text-slate-500 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="space-y-3 border-t border-slate-200 px-3 py-3">
+        {readings ? (
+          <>
+            <OdometerCard routeId={routeId} date={day.date} moment="START" recorded={day.start} lastKnown={day.lastKnown} startKm={null} />
+            <OdometerCard routeId={routeId} date={day.date} moment="END" recorded={day.end} lastKnown={day.lastKnown} startKm={day.start} />
+          </>
+        ) : null}
+        <div className="rounded-2xl border border-slate-200 px-3 py-3">
+          <FuelForm routeId={routeId} energy={day.energy} odometerHint={day.end ?? day.start} />
+        </div>
+      </div>
+    </details>
+  );
+}
+
 export function RouteSection({
   route,
   regulator,
   endOfRoute = null,
+  vehicleDay = null,
 }: {
   route: RouteView;
   regulator: RegulatorContact | null;
   /** Today's route: the stops left without a status although their time is past (« Fin de tournée »). */
   endOfRoute?: { forgotten: number } | null;
+  /** Today's route: the vehicle's odometer readings and fill-ups (FLD-03). */
+  vehicleDay?: VehicleDay | null;
 }) {
   const titleId = `route-${route.id}`;
   const finished = route.stops.length > 0 && route.nextStop === null;
@@ -247,6 +294,10 @@ export function RouteSection({
   return (
     <section aria-labelledby={titleId} className="space-y-3">
       <RouteHeader route={route} titleId={titleId} />
+      {/* The first thing of the day: the odometer as the vehicle leaves the depot. */}
+      {vehicleDay && vehicleDay.start === null ? (
+        <OdometerCard routeId={route.id} date={vehicleDay.date} moment="START" recorded={null} lastKnown={vehicleDay.lastKnown} startKm={null} prominent />
+      ) : null}
       {route.nextStop && route.progress.closed > 0 ? <NextStopLink stop={route.nextStop} /> : null}
       <ol aria-label={`Arrêts de la tournée ${route.vehicle.label}`} className="space-y-3">
         {route.timeline.map((item) => {
@@ -272,6 +323,7 @@ export function RouteSection({
         })}
       </ol>
       {endOfRoute ? <EndOfRouteLink forgotten={endOfRoute.forgotten} /> : null}
+      {vehicleDay ? <VehicleDayPanel routeId={route.id} day={vehicleDay} /> : null}
     </section>
   );
 }

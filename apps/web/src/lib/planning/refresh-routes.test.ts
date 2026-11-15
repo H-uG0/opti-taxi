@@ -806,6 +806,7 @@ function fakePrisma(routes: FakeRoute[], trips: RefreshTrip[]) {
     vehicleUnavailability: { findMany: async () => [] },
     maintenanceDeadline: { findMany: async () => [] },
     fuelLog: { groupBy: async () => [] },
+    odometerReading: { groupBy: async () => [] },
     tariffGrid: { findMany: async () => [] },
     companyCertification: { findMany: async () => [] },
     tariffArea: { findMany: async () => [] },

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { unavailabilityOn, unavailabilityText } from "./availability";
-import { consumptionStats, energyUnit, type FuelEntry } from "./consumption";
+import { consumptionSince, consumptionStats, energyUnit, type FuelEntry } from "./consumption";
 import { complianceAlerts, deadlineAlerts, deadlineState, type Deadline } from "./maintenance";
 
 const TODAY = "2026-11-08";
@@ -113,3 +113,17 @@ describe("complianceAlerts (inspection and insurance on the service date)", () =
     ]);
   });
 });
+
+describe("consumptionSince (3 derniers mois, FLD-03)", () => {
+  it("measures the fills of the window from the last full tank before it", () => {
+    const fills = [
+      { date: "2026-05-01", odometerKm: 50_000, quantity: 40, cost: 70, fullTank: true },
+      { date: "2026-08-01", odometerKm: 60_000, quantity: 800, cost: 1400, fullTank: true },
+      { date: "2026-09-01", odometerKm: 61_000, quantity: 60, cost: 105, fullTank: true },
+      { date: "2026-10-01", odometerKm: 62_000, quantity: 70, cost: 120, fullTank: true },
+    ];
+    const recent = consumptionSince(fills, "2026-08-15");
+    expect(recent).toMatchObject({ measuredKm: 2000, per100Km: 6.5, fromDate: "2026-08-01", toDate: "2026-10-01" });
+  });
+});
+

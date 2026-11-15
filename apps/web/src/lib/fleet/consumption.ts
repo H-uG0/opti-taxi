@@ -69,3 +69,18 @@ export function consumptionStats(entries: readonly FuelEntry[]): ConsumptionStat
     toDate: sorted[lastFull]!.date,
   };
 }
+
+/** The rolling window of the consumption shown on a vehicle's record: about 3 months. */
+export const RECENT_CONSUMPTION_DAYS = 92;
+
+/**
+ * The consumption since `from` (the last RECENT_CONSUMPTION_DAYS on the vehicle's record, FLD-03): the fills of the
+ * window, bounded by the last full tank before it, so a long history does not hide a recent change (a new driver, a
+ * winter, an electric vehicle charged differently).
+ */
+export function consumptionSince(entries: readonly FuelEntry[], from: string): ConsumptionStats {
+  const before = entries.filter((e) => e.date < from && e.fullTank).sort((a, b) => a.date.localeCompare(b.date) || a.odometerKm - b.odometerKm);
+  const anchor = before[before.length - 1];
+  return consumptionStats([...(anchor ? [anchor] : []), ...entries.filter((e) => e.date >= from)]);
+}
+

@@ -148,6 +148,7 @@ async function wipe(): Promise<void> {
     prisma.validatedPlan.deleteMany(),
     prisma.kpiTarget.deleteMany(),
     prisma.fuelLog.deleteMany(),
+    prisma.odometerReading.deleteMany(),
     prisma.maintenanceDeadline.deleteMany(),
     prisma.vehicleUnavailability.deleteMany(),
     prisma.dayCrew.deleteMany(),
@@ -516,6 +517,44 @@ async function seedFleetPlanning(rng: Rng, dates: Dates): Promise<void> {
       },
     ],
   });
+  await seedOdometerReadings(rng, dates, [idOf("Taxi 2 (Manosque)"), vsl2]);
+}
+
+/**
+ * The crews' odometer readings (FLD-03) of two vehicles, the electric Taxi 2 among them: a start and an end reading
+ * each working day from the day after its last fill-up to yesterday, from its last mileage, and for the electric taxi
+ * a service due in about 1 800 km (its record then says « révision dans environ N jours »). Drawn after the rest of
+ * the fleet's examples: the other fixtures stay the same.
+ */
+async function seedOdometerReadings(rng: Rng, dates: Dates, vehicleIds: readonly string[]): Promise<void> {
+  for (const vehicleId of vehicleIds) {
+    const vehicle = await prisma.vehicle.findUniqueOrThrow({
+      where: { id: vehicleId },
+      select: { energy: true, defaultDriver: { select: { user: { select: { id: true } } } } },
+    });
+    const lastFill = await prisma.fuelLog.findFirst({ where: { vehicleId }, orderBy: { odometerKm: "desc" }, select: { date: true, odometerKm: true } });
+    if (!lastFill) continue;
+    let km = lastFill.odometerKm;
+    const readings: Prisma.OdometerReadingCreateManyInput[] = [];
+    for (let date = addDays(toIsoDate(lastFill.date), 1); date < dates.today; date = addDays(date, 1)) {
+      if (isoWeekday(date) === 7) continue;
+      const start = km + rng.int(0, 6);
+      const end = start + rng.int(120, 260);
+      const at = (hour: number) => new Date(`${date}T${String(hour).padStart(2, "0")}:00:00.000Z`);
+      const recordedById = vehicle.defaultDriver?.user?.id ?? null;
+      readings.push(
+        { vehicleId, serviceDate: fromIsoDate(date), moment: "START", km: start, recordedAt: at(5), recordedById },
+        { vehicleId, serviceDate: fromIsoDate(date), moment: "END", km: end, recordedAt: at(17), recordedById },
+      );
+      km = end;
+    }
+    await prisma.odometerReading.createMany({ data: readings });
+    if (vehicle.energy === "ELECTRIC") {
+      await prisma.maintenanceDeadline.create({
+        data: { vehicleId, kind: "SERVICE", label: "Révision annuelle (véhicule électrique)", dueKm: km + 1800 },
+      });
+    }
+  }
 }
 
 /** The regulator account (its id records the seeded sharing answers) and one account per driver. */

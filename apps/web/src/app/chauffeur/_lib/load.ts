@@ -7,6 +7,9 @@ import { fromIsoDate, todayIso } from "@/lib/time";
 import type { FieldRequestView } from "@/lib/domain/field-requests";
 import { isSameEpisode } from "@/lib/domain/no-show";
 import { fieldRequestView } from "@/lib/planning/live-load";
+import type { EnergyType } from "@prisma/client";
+import { latestKm, type KmPoint } from "@/lib/fleet/odometer";
+import { loadKmPoints } from "@/lib/fleet/odometer-load";
 import { lateEntryDates } from "./access";
 import { regulatorContact, type RegulatorContact } from "./links";
 import { isReadableRoadmapDate, returnTripsAfterOutboundNoShow, townOf, type NextDaySummary } from "./roadmap";
@@ -45,6 +48,8 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
           label: true,
           registration: true,
           type: true,
+          // L or kWh of a fill-up typed by the crew (FLD-03).
+          energy: true,
           // Notes: access to the depot (gate, keys, parking), shown at the departure and the return.
           depot: { select: { name: true, address: true, lat: true, lng: true, notes: true } },
         },
@@ -273,6 +278,40 @@ export async function loadEndOfRouteRoutes(driverId: string, isoDate: string, no
 }
 
 export type EndOfRouteRoute = Awaited<ReturnType<typeof loadEndOfRouteRoutes>>[number];
+
+/**
+ * The vehicle of a route on its day (FLD-03): its energy (L or kWh for a fill-up), the last mileage known before that
+ * day (fill-ups and the crew's readings: the reading's hint and its check on the phone), and the day's readings.
+ */
+export type VehicleDay = {
+  /** The route's day, YYYY-MM-DD. */
+  date: string;
+  energy: EnergyType | null;
+  lastKnown: KmPoint | null;
+  start: number | null;
+  end: number | null;
+};
+
+/** The vehicle day of each route (by route id); only the crew's own routes are passed. */
+export async function loadVehicleDays(
+  routes: readonly { id: string; vehicleId: string; vehicle: { energy?: EnergyType | null } }[],
+  isoDate: string,
+): Promise<Map<string, VehicleDay>> {
+  const days = new Map<string, VehicleDay>();
+  for (const route of routes) {
+    const points = await loadKmPoints(db, route.vehicleId);
+    const ofDay = (moment: "START" | "END") => points.find((p) => p.date === isoDate && p.moment === moment)?.km ?? null;
+    days.set(route.id, {
+      date: isoDate,
+      energy: route.vehicle.energy ?? null,
+      // Before the day: the fill-ups up to it, the readings of the days before.
+      lastKnown: latestKm(points.filter((p) => (p.moment === "FILL" ? p.date <= isoDate : p.date < isoDate))),
+      start: ofDay("START"),
+      end: ofDay("END"),
+    });
+  }
+  return days;
+}
 
 /** The minimum wait at the door before « Patient absent » (Paramètres, FLD-01), minutes; 0: none. */
 export async function loadNoShowMinWait(): Promise<number> {

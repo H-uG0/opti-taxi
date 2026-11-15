@@ -80,3 +80,25 @@ describe("groups", () => {
     expect(energyRates(byEnergy.get("ELECTRIC")!).per100Km).toEqual({ kWh: 18 });
   });
 });
+
+describe("the crews' odometer readings against the planned km (FLD-03)", () => {
+  it("compares the days read at the start and the end, in the period, and sums them by group", () => {
+    const base = { from: "2026-11-02", to: "2026-11-14", today: "2026-11-14", fills: [], plannedKm: new Map<string, number>(), plannedSince: null, offRoadDays: 0, deadlines: [] };
+    const v1 = vehicleEnergy(diesel, {
+      ...base,
+      readingDays: [
+        { date: "2026-11-03", startKm: 1000, endKm: 1230, plannedKm: 200 },
+        { date: "2026-11-04", startKm: 1230, endKm: 1400, plannedKm: null },
+        // Before the period.
+        { date: "2026-10-30", startKm: 900, endKm: 1000, plannedKm: 50 },
+      ],
+    });
+    expect(v1).toMatchObject({ readingDays: 1, readingKm: 230, readingPlannedKm: 200 });
+    const v2 = vehicleEnergy(electric, { ...base, readingDays: [{ date: "2026-11-05", startKm: 0, endKm: 90, plannedKm: 100 }] });
+    const total = sumEnergy([v1, v2]);
+    expect(total).toMatchObject({ readingDays: 2, readingKm: 320, readingPlannedKm: 300 });
+    expect(energyRates(total).readingGap).toBeCloseTo(20 / 300);
+    expect(energyRates(sumEnergy([])).readingGap).toBeNull();
+  });
+});
+

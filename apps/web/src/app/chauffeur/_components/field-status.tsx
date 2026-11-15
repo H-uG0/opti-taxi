@@ -16,7 +16,7 @@ import { DRIVER_MAX_SESSION_DAYS } from "@/lib/auth/session-renewal";
 import { formatMinute, minuteOfDay } from "@/lib/time";
 import { sessionNotice } from "../_lib/session-notice";
 import type { Refusal } from "../_lib/status-queue";
-import type { StopAction } from "../_lib/transitions";
+import type { QueueAction } from "../_lib/status-queue";
 import { useDriverApp, useMinuteClock, useQueueSnapshot } from "./driver-app";
 
 function subscribeOnline(onChange: () => void): () => void {
@@ -153,13 +153,14 @@ export function FieldStatusBars() {
 }
 
 /** What a refused status was, as the crew tapped it: « Annulation », never the order « Annuler ». */
-const REFUSED_LABELS: Record<StopAction, { label: string; tapped: string }> = {
+const REFUSED_LABELS: Record<QueueAction, { label: string; tapped: string }> = {
   PICKUP: { label: "Pris en charge", tapped: "saisi" },
   DROPOFF: { label: "Déposé", tapped: "saisi" },
   NO_SHOW: { label: "Patient absent", tapped: "saisi" },
   UNDO: { label: "Annulation", tapped: "saisie" },
   ARRIVE: { label: "Arrivé", tapped: "saisi" },
   UNDO_ARRIVE: { label: "Annulation de l'arrivée", tapped: "saisie" },
+  ODOMETER: { label: "Relevé du compteur", tapped: "saisi" },
 };
 
 /** « Pris en charge, saisi à 10:02 » : which status and when, to tell the regulation. */

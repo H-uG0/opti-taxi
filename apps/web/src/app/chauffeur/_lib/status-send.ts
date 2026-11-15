@@ -5,8 +5,11 @@
  */
 import {
   classifyStatusResponse,
+  odometerUrl,
+  parseOdometerKey,
   SESSION_URL,
   stopStatusUrl,
+  type OdometerRequestBody,
   type SendOutcome,
   type SessionRequestBody,
   type SessionResponseBody,
@@ -44,6 +47,20 @@ export async function sendQueuedStatus(status: QueuedStatus, ownerId: string): P
   if (navigator.onLine === false) return { kind: "retry", reason: "offline" };
   const startedAt = Date.now();
   try {
+    const reading = status.action === "ODOMETER" ? parseOdometerKey(status.stopId) : null;
+    if (reading) {
+      const body: OdometerRequestBody = {
+        moment: reading.moment,
+        km: status.km ?? 0,
+        confirmed: status.confirmed === true,
+        observedAt: status.observedAt,
+        sentAt: startedAt,
+        ownerId,
+      };
+      const { status: httpStatus, json } = await postJson(odometerUrl(reading.routeId), body, SEND_TIMEOUT_MS);
+      return classifyStatusResponse(httpStatus, json);
+    }
+    if (status.action === "ODOMETER") return { kind: "refused", error: "Relevé illisible\u00a0: saisissez-le de nouveau.", serverTime: null };
     const body: StatusRequestBody = {
       action: status.action,
       observedAt: status.observedAt,

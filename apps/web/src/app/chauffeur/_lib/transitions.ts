@@ -40,7 +40,7 @@ export const STOP_ACTION_LABELS: Record<StopAction, string> = {
 };
 
 /** Actions that only date the arrival at a pickup (RouteStop.arrivedAt): the stop's status is not touched. */
-export function isArrivalAction(action: StopAction): action is "ARRIVE" | "UNDO_ARRIVE" {
+export function isArrivalAction(action: string): action is "ARRIVE" | "UNDO_ARRIVE" {
   return action === "ARRIVE" || action === "UNDO_ARRIVE";
 }
 

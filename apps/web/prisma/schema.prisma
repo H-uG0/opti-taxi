@@ -606,6 +606,7 @@ model Vehicle {
   unavailabilities VehicleUnavailability[]
   maintenance     MaintenanceDeadline[]
   fuelLogs        FuelLog[]
+  odometerReadings OdometerReading[]
   lockedTrips     Trip[]  @relation("TripLockedVehicle")
   routeVersions   RouteVersion[]
 
@@ -698,11 +699,46 @@ model FuelLog {
   /// Plein complet (ou charge complète) : seuls les pleins complets bornent un calcul de consommation.
   fullTank   Boolean  @default(true)
   note       String?
+  /// Compte qui a saisi le plein : le régulateur (tickets), ou l'équipage depuis son téléphone (FLD-03). Null : inconnu.
+  recordedById String?
   createdAt  DateTime @default(now())
 
-  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  vehicle    Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  recordedBy User?   @relation("FuelLogRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
 
   @@index([vehicleId, date])
+}
+
+/// Moment d'un relevé du compteur saisi par l'équipage (FLD-03).
+enum OdometerMoment {
+  /// Prise du véhicule, en début de journée.
+  START
+  /// Retour au dépôt, en fin de journée.
+  END
+}
+
+/// Relevé du compteur kilométrique saisi par l'équipage sur son téléphone (FLD-03), un par véhicule, jour et moment
+/// (un nouveau relevé remplace le précédent, sous audit). Contrôlé : jamais inférieur au dernier relevé connu (pleins
+/// compris), saut inhabituel confirmé. Le dernier kilométrage connu (relevés et pleins) sert aux échéances.
+model OdometerReading {
+  id           String         @id @default(cuid())
+  vehicleId    String
+  serviceDate  DateTime       @db.Date
+  moment       OdometerMoment
+  km           Int
+  /// Heure du geste sur le téléphone (bornée comme un statut).
+  recordedAt   DateTime
+  recordedById String?
+  /// Saut inhabituel confirmé par l'équipage.
+  confirmed    Boolean        @default(false)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  vehicle    Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  recordedBy User?   @relation("OdometerReadingRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@unique([vehicleId, serviceDate, moment])
+  @@index([vehicleId, km])
 }
 
 /// Indisponibilité d'une personne du startDate au endDate inclus (congé, maladie, formation, garde…). Avec
@@ -1161,6 +1197,8 @@ model User {
   kpiTargets       KpiTarget[]       @relation("KpiTargetUpdatedBy")
   routeVersionsSeen RouteVersion[]   @relation("RouteVersionSeenBy")
   fieldRequests    FieldRequest[]    @relation("FieldRequestCreatedBy")
+  odometerReadings OdometerReading[] @relation("OdometerReadingRecordedBy")
+  fuelLogs         FuelLog[]         @relation("FuelLogRecordedBy")
   fieldRequestsResolved FieldRequest[] @relation("FieldRequestResolvedBy")
   auditEvents      AuditEvent[]
 }

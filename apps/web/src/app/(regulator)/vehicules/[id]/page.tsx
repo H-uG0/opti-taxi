@@ -9,7 +9,9 @@ import { db } from "@/lib/db";
 import { addDays, formatShortDate, fromIsoDate, todayIso, toIsoDate, tomorrowIso } from "@/lib/time";
 import { formatEuros } from "@/lib/labels";
 import { unavailabilityText } from "@/lib/fleet/availability";
-import { consumptionStats, energyUnit } from "@/lib/fleet/consumption";
+import { consumptionSince, energyUnit, RECENT_CONSUMPTION_DAYS } from "@/lib/fleet/consumption";
+import { dailyPace, daysUntilKm, latestKm, paceText, realAgainstPlanned, type ReadingDay } from "@/lib/fleet/odometer";
+import { loadKmPoints } from "@/lib/fleet/odometer-load";
 import { deadlineName, deadlineState, type DeadlineStatus } from "@/lib/fleet/maintenance";
 import type { BadgeTone } from "@/components/ui/badge";
 import {
@@ -46,6 +48,51 @@ const STATUS_ORDER: Record<DeadlineStatus, number> = { overdue: 0, soon: 1, ok: 
 const STATUS_TONES: Record<DeadlineStatus, BadgeTone> = { overdue: "danger", soon: "warning", ok: "neutral", done: "success" };
 const STATUS_LABELS: Record<DeadlineStatus, string> = { overdue: "Dépassée", soon: "Bientôt", ok: "À venir", done: "Faite" };
 
+/** Days of crews' readings shown on the record. */
+const READINGS_DAYS = 14;
+
+type ReadingRow = { serviceDate: Date; moment: "START" | "END"; km: number; confirmed: boolean };
+
+/** The days with both readings, with the km planned on the vehicle's route that day (FLD-03). */
+async function readingDaysWithPlan(vehicleId: string, readings: readonly ReadingRow[]): Promise<ReadingDay[]> {
+  const dates = [...new Set(readings.map((r) => toIsoDate(r.serviceDate)))];
+  if (dates.length === 0) return [];
+  const routes = await db.route.findMany({
+    where: { vehicleId, serviceDate: { in: dates.map(fromIsoDate) }, stops: { some: {} } },
+    select: { serviceDate: true, distanceKm: true },
+  });
+  const planned = new Map(routes.map((r) => [toIsoDate(r.serviceDate), r.distanceKm]));
+  return dates.flatMap((date) => {
+    const start = readings.find((r) => toIsoDate(r.serviceDate) === date && r.moment === "START");
+    const end = readings.find((r) => toIsoDate(r.serviceDate) === date && r.moment === "END");
+    return start && end ? [{ date, startKm: start.km, endKm: end.km, plannedKm: planned.get(date) ?? null }] : [];
+  });
+}
+
+/** One line per day read, the latest first. */
+function readingRows(readings: readonly ReadingRow[], days: readonly ReadingDay[]) {
+  const dates = [...new Set(readings.map((r) => toIsoDate(r.serviceDate)))].sort().reverse();
+  return dates.map((date) => {
+    const of = (moment: "START" | "END") => readings.find((r) => toIsoDate(r.serviceDate) === date && r.moment === moment);
+    const day = days.find((d) => d.date === date);
+    return {
+      date,
+      start: of("START")?.km ?? null,
+      end: of("END")?.km ?? null,
+      real: day ? day.endKm - day.startKm : null,
+      planned: day?.plannedKm ?? null,
+      confirmed: Boolean(of("START")?.confirmed || of("END")?.confirmed),
+    };
+  });
+}
+
+/** « +4 % », « −2 % », « 0 % », « — ». */
+function signedPercentText(value: number | null): string {
+  if (value === null) return "—";
+  const rounded = Math.round(value * 100);
+  return `${rounded > 0 ? "+" : rounded < 0 ? "−" : ""}${Math.abs(rounded)}\u00a0%`;
+}
+
 export default async function EditVehiclePage({
   params,
   searchParams,
@@ -71,7 +118,7 @@ export default async function EditVehiclePage({
     }),
   ]);
   const todayText = todayIso();
-  const [outages, deadlines, fuel] = await Promise.all([
+  const [outages, deadlines, fuel, points, readings] = await Promise.all([
     db.vehicleUnavailability.findMany({
       where: { vehicleId: vehicle.id, endDate: { gte: fromIsoDate(addDays(todayText, -30)) } },
       orderBy: { startDate: "asc" },
@@ -81,14 +128,35 @@ export default async function EditVehiclePage({
       where: { vehicleId: vehicle.id, OR: [{ doneDate: null }, { doneDate: { gte: fromIsoDate(addDays(todayText, -365)) } }] },
       orderBy: [{ dueDate: "asc" }, { dueKm: "asc" }],
     }),
-    db.fuelLog.findMany({ where: { vehicleId: vehicle.id }, orderBy: [{ date: "desc" }, { odometerKm: "desc" }] }),
+    db.fuelLog.findMany({
+      where: { vehicleId: vehicle.id },
+      orderBy: [{ date: "desc" }, { odometerKm: "desc" }],
+      include: { recordedBy: { select: { role: true } } },
+    }),
+    // Every mileage known (fill-ups, the crews' readings: FLD-03), and the readings of the last days.
+    loadKmPoints(db, vehicle.id),
+    db.odometerReading.findMany({
+      where: { vehicleId: vehicle.id, serviceDate: { gte: fromIsoDate(addDays(todayText, -READINGS_DAYS)) } },
+      select: { serviceDate: true, moment: true, km: true, confirmed: true },
+    }),
   ]);
-  const stats = consumptionStats(fuel.map((f) => ({ ...f, date: toIsoDate(f.date) })));
+  // The consumption of the last 3 months (FLD-03), the mileage from the fill-ups and the crews' readings.
+  const stats = consumptionSince(
+    fuel.map((f) => ({ ...f, date: toIsoDate(f.date) })),
+    addDays(todayText, -RECENT_CONSUMPTION_DAYS),
+  );
+  const latest = latestKm(points);
+  const pace = dailyPace(points, todayText);
+  const readingDays = await readingDaysWithPlan(vehicle.id, readings);
+  const readingTotals = realAgainstPlanned(readingDays);
   const unit = energyUnit(vehicle.energy);
   const deadlineRows = deadlines
     .map((d) => {
       const due = { ...d, dueDate: d.dueDate ? toIsoDate(d.dueDate) : null, doneDate: d.doneDate ? toIsoDate(d.doneDate) : null };
-      return { ...due, state: deadlineState(due, todayText, stats.odometerKm) };
+      const state = deadlineState(due, todayText, latest?.km ?? null);
+      // « révision dans environ N jours »: a mileage still ahead, at the pace of the last weeks.
+      const forecast = !due.doneDate && due.dueKm !== null ? paceText(daysUntilKm(due.dueKm, latest?.km ?? null, pace)) : null;
+      return { ...due, state: forecast && state.status !== "overdue" ? { ...state, text: `${state.text} · ${forecast}` } : state };
     })
     .sort((a, b) => STATUS_ORDER[a.state.status] - STATUS_ORDER[b.state.status]);
   const nf = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
@@ -199,7 +267,7 @@ export default async function EditVehiclePage({
                             question={
                               <p>
                                 «&#x202F;{deadlineName(d)}&#x202F;» faite aujourd&apos;hui
-                                {stats.odometerKm !== null ? `, à ${nf.format(stats.odometerKm)}\u00a0km (dernier relevé)` : ""}&#x202F;?
+                                {latest !== null ? `, à ${nf.format(latest.km)}\u00a0km (dernier relevé)` : ""}&#x202F;?
                               </p>
                             }
                           />
@@ -225,15 +293,18 @@ export default async function EditVehiclePage({
           </Card>
 
           <Card className="lg:col-span-2">
-            <CardHeader title={`Consommation (${unit === "kWh" ? "recharges" : "pleins"})`} />
+            <CardHeader title={`Consommation des 3 derniers mois (${unit === "kWh" ? "recharges" : "pleins"})`} />
             <CardBody className="space-y-4 text-sm text-slate-700">
               <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-3">
                 <div>
                   <dt className="text-xs text-slate-500">Dernier relevé du compteur</dt>
                   <dd className="tabular font-medium">
-                    {stats.odometerKm !== null && stats.odometerDate
-                      ? `${nf.format(stats.odometerKm)}\u00a0km (${formatShortDate(stats.odometerDate)})`
-                      : "—"}
+                    {latest !== null ? `${nf.format(latest.km)}\u00a0km (${formatShortDate(latest.date)})` : "—"}
+                    {pace !== null ? (
+                      <span className="block text-xs font-normal text-slate-500">
+                        Rythme actuel&nbsp;: {nf.format(Math.round(pace))}&nbsp;km par jour (pleins et relevés des équipages, 30 derniers jours).
+                      </span>
+                    ) : null}
                   </dd>
                 </div>
                 <div>
@@ -262,6 +333,7 @@ export default async function EditVehiclePage({
                         {formatShortDate(toIsoDate(f.date))} · {nf.format(f.odometerKm)}&nbsp;km · {nf.format(f.quantity)} {unit} ·{" "}
                         {formatEuros(f.cost)}
                         {f.fullTank ? "" : " · partiel"}
+                        {f.recordedBy?.role === "DRIVER" ? " · saisi par l'équipage" : ""}
                       </span>
                       <ConfirmAction
                         action={deleteFuelLog.bind(null, vehicle.id, f.id)}
@@ -278,6 +350,45 @@ export default async function EditVehiclePage({
               <div className="border-t border-slate-200 pt-4">
                 <FuelForm action={addFuelLog.bind(null, vehicle.id)} defaultDate={todayText} unit={unit} />
               </div>
+            </CardBody>
+          </Card>
+
+          <Card className="lg:col-span-2">
+            <CardHeader title="Relevés du compteur par les équipages" />
+            <CardBody className="space-y-3 text-sm text-slate-700">
+              <p className="text-xs text-slate-500">
+                Saisis sur la feuille de route au départ et au retour au dépôt&nbsp;: ils tiennent à jour le kilométrage des échéances
+                (véhicules électriques compris) et comparent les km réels aux km planifiés de la tournée.
+              </p>
+              {readingDays.length === 0 && readings.length === 0 ? (
+                <p className="text-slate-500">Aucun relevé ces {READINGS_DAYS} derniers jours.</p>
+              ) : (
+                <>
+                  {readingTotals.days > 0 ? (
+                    <p className="tabular">
+                      Sur {readingTotals.days}&nbsp;journée{readingTotals.days > 1 ? "s" : ""} relevée{readingTotals.days > 1 ? "s" : ""}&nbsp;:{" "}
+                      <span className="font-medium">{nf.format(readingTotals.realKm)}&nbsp;km réels</span> pour {nf.format(Math.round(readingTotals.plannedKm))}&nbsp;km
+                      planifiés ({signedPercentText(readingTotals.plannedKm > 0 ? (readingTotals.realKm - readingTotals.plannedKm) / readingTotals.plannedKm : null)}).
+                    </p>
+                  ) : null}
+                  <ul className="divide-y divide-slate-100">
+                    {readingRows(readings, readingDays).map((row) => (
+                      <li key={row.date} className="tabular flex flex-wrap gap-x-3 py-1.5">
+                        <span className="w-16 text-slate-500">{formatShortDate(row.date)}</span>
+                        <span>
+                          Départ {row.start !== null ? `${nf.format(row.start)}\u00a0km` : "—"} · retour {row.end !== null ? `${nf.format(row.end)}\u00a0km` : "—"}
+                        </span>
+                        {row.real !== null ? (
+                          <span className="text-slate-600">
+                            {nf.format(row.real)}&nbsp;km réels{row.planned !== null ? ` · ${nf.format(Math.round(row.planned))}\u00a0km planifiés` : ""}
+                          </span>
+                        ) : null}
+                        {row.confirmed ? <span className="text-amber-800">saut confirmé par l&apos;équipage</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
             </CardBody>
           </Card>
         </div>

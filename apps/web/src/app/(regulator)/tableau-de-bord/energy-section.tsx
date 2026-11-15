@@ -46,6 +46,16 @@ function Row({ label, g, strong = false }: { label: string; g: EnergyGroup; stro
       >
         {signedPercent(r.kmGap)}
       </td>
+      <td
+        className={`${cell}${r.readingGap !== null && Math.abs(r.readingGap) >= 0.05 ? " text-amber-700" : ""}`}
+        title={
+          r.readingGap === null
+            ? undefined
+            : `${formatKm(g.readingKm, 0)} relevés par les équipages pour ${formatKm(g.readingPlannedKm, 0)} planifiés, sur ${g.readingDays} journée${g.readingDays > 1 ? "s" : ""}`
+        }
+      >
+        {signedPercent(r.readingGap)}
+      </td>
       <td className={`${cell} border-l border-slate-100`}>{g.offRoadDays}</td>
       <td className={g.overdueDeadlines > 0 ? `${NUM} font-semibold text-red-700` : cell}>{g.overdueDeadlines}</td>
     </tr>
@@ -78,6 +88,13 @@ function GroupTable({ caption, first, rows, total }: { caption: string; first: s
           </th>
           <th scope="col" className={`${HEAD} border-l border-slate-200`} title="(km au compteur − km planifiés) ÷ km planifiés, sur les mêmes jours">
             Compteur / planifié
+          </th>
+          <th
+            scope="col"
+            className={HEAD}
+            title="Journées relevées au départ et au retour par les équipages (feuille de route)&nbsp;: (km réels − km planifiés) ÷ km planifiés"
+          >
+            Relevés / planifié
           </th>
           <th
             scope="col"
@@ -128,7 +145,7 @@ export function EnergySection({
         D&apos;après les pleins et recharges saisis sur les fiches des véhicules&nbsp;: consommation et coût de l&apos;énergie entre le
         dernier plein complet avant la période et le dernier de la période, face au coût au km configuré (qui couvre aussi
         l&apos;entretien et l&apos;usure). L&apos;écart entre le compteur et les km planifiés révèle les distances sous-estimées et les
-        trajets hors tournée. Litres et kWh ne s&apos;additionnent pas&nbsp;: la consommation est donnée par unité. De quoi comparer
+        trajets hors tournée&nbsp;; les relevés du compteur saisis par les équipages au départ et au retour le donnent jour par jour. Litres et kWh ne s&apos;additionnent pas&nbsp;: la consommation est donnée par unité. De quoi comparer
         le coût réel d&apos;un véhicule diesel et d&apos;un électrique.
       </p>
       <div className="space-y-4">

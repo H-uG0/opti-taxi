@@ -10,6 +10,7 @@ import { EmptyState, PageHeader } from "@/components/ui/layout";
 import { GroupHeaderRow, TBody, THead, Table, Td, Th } from "@/components/ui/table";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { loadLatestKm } from "@/lib/fleet/odometer-load";
 import { compareLabels, compareVehicles } from "@/lib/fleet/order";
 import { ENERGY_LABELS, formatEuros, VEHICLE_TYPE_SHORT } from "@/lib/labels";
 import { loadDayCrewContext } from "@/lib/optimizer/build-request";
@@ -65,12 +66,13 @@ export default async function VehiclesPage({
         },
       },
     }),
-    db.fuelLog.groupBy({ by: ["vehicleId"], _max: { odometerKm: true } }),
+    // The last mileage known: fill-ups and the crews' readings (FLD-03).
+    loadLatestKm(db),
     db.depot.findMany({ select: { id: true, name: true } }),
     // Tomorrow's crews, as on Équipages: who drives, a replacement, an outage, a vehicle left out.
     loadDayCrewContext(db, tomorrow),
   ]);
-  const odometerOf = new Map(odometers.map((o) => [o.vehicleId, o._max.odometerKm ?? null]));
+  const odometerOf = odometers;
   const crewOf = new Map(crews.plan.crews.map((c) => [c.vehicleId, c]));
   const outages = crews.input.vehicleUnavailabilities ?? [];
 

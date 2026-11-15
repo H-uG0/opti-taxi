@@ -23,31 +23,38 @@
  */
 import type { NoShowReason } from "@prisma/client";
 import { isNoShowReason } from "@/lib/domain/field-wait";
-import type { SendOutcome } from "./status-protocol";
+import { parseOdometerKey, type SendOutcome, type StatusErrorCode } from "./status-protocol";
 import { isArrivalAction, type StopAction } from "./transitions";
+
+/** What the queue holds: a stop's status, or a reading of the odometer (FLD-03, keyed by odometerKey). */
+export type QueueAction = StopAction | "ODOMETER";
 
 /**
  * The action that takes `action` back: « Annuler l'arrivée » for « Arrivé », « Annuler » for a status; null for an
  * undo (nothing takes it back).
  */
-export function undoActionOf(action: StopAction): "UNDO" | "UNDO_ARRIVE" | null {
-  if (action === "UNDO" || action === "UNDO_ARRIVE") return null;
+export function undoActionOf(action: QueueAction): "UNDO" | "UNDO_ARRIVE" | null {
+  if (action === "UNDO" || action === "UNDO_ARRIVE" || action === "ODOMETER") return null;
   return action === "ARRIVE" ? "UNDO_ARRIVE" : "UNDO";
 }
 
 /** A status waiting on the phone: nothing else is stored. */
 export type QueuedStatus = {
+  /** The stop, or for a reading of the odometer its key (odometerKey: route and moment). */
   stopId: string;
-  action: StopAction;
+  action: QueueAction;
   observedAt: number;
   /** « Patient absent »: the reason code chosen in the list. */
   reason?: NoShowReason;
   /** « Fin de tournée » (FLD-02): the real time typed, minute of the service day (sent instead of the gesture's). */
   declaredMinute?: number;
+  /** A reading of the odometer (FLD-03): the km typed, and an unusual jump confirmed by the crew. */
+  km?: number;
+  confirmed?: boolean;
 };
 
-/** What a status carries besides its stop, action and time: the reason of an absence, a time typed afterwards. */
-export type StatusExtra = Pick<QueuedStatus, "reason" | "declaredMinute">;
+/** What a status carries besides its stop, action and time: the reason of an absence, a time typed afterwards, a reading. */
+export type StatusExtra = Pick<QueuedStatus, "reason" | "declaredMinute" | "km" | "confirmed">;
 
 /** A queued status with its storage key (increasing: the order of the taps). */
 export type StoredStatus = { key: number; value: QueuedStatus };
@@ -67,10 +74,12 @@ export interface QueueStorage {
 export type LocalPhase = "queued" | "sending" | "sent";
 
 export type LocalStatus = {
-  action: StopAction;
+  action: QueueAction;
   observedAt: number;
   /** « Fin de tournée »: the real time typed (minute of the service day), shown instead of the gesture's. */
   declaredMinute?: number;
+  /** A reading of the odometer: the km typed. */
+  km?: number;
   phase: LocalPhase;
   /** Server clock once saved (phase "sent"): a page rendered later shows it. */
   serverTime?: number;
@@ -79,7 +88,7 @@ export type LocalStatus = {
 };
 
 /** A status the server refused for good (removed from the queue): shown until the crew reads it. */
-export type Refusal = { id: number; stopId: string; action: StopAction; observedAt: number; error: string };
+export type Refusal = { id: number; stopId: string; action: QueueAction; observedAt: number; error: string; code?: StatusErrorCode };
 
 export type QueueSnapshot = {
   /** The saved statuses are loaded (before that, nothing is shown as waiting). */
@@ -136,12 +145,17 @@ export function memoryStorage(initial: QueuedStatus[] = []): QueueStorage & { va
   };
 }
 
-const STOP_ACTION_SET: ReadonlySet<string> = new Set(["PICKUP", "DROPOFF", "NO_SHOW", "UNDO", "ARRIVE", "UNDO_ARRIVE"]);
+const STOP_ACTION_SET: ReadonlySet<string> = new Set(["PICKUP", "DROPOFF", "NO_SHOW", "UNDO", "ARRIVE", "UNDO_ARRIVE", "ODOMETER"]);
 
 /** A stored value read back from the phone is used only if it has exactly the expected shape. */
 export function isQueuedStatus(value: unknown): value is QueuedStatus {
   if (typeof value !== "object" || value === null) return false;
-  const { stopId, action, observedAt, reason, declaredMinute } = value as Record<string, unknown>;
+  const { stopId, action, observedAt, reason, declaredMinute, km, confirmed } = value as Record<string, unknown>;
+  // A reading of the odometer: its key and a whole number of km; a stop's status: neither.
+  const odometer = action === "ODOMETER";
+  if (odometer !== (typeof stopId === "string" && parseOdometerKey(stopId) !== null)) return false;
+  if (odometer ? !(typeof km === "number" && Number.isInteger(km) && km >= 0) : km !== undefined) return false;
+  if (confirmed !== undefined && typeof confirmed !== "boolean") return false;
   return (
     (reason === undefined || isNoShowReason(reason)) &&
     (declaredMinute === undefined || (typeof declaredMinute === "number" && Number.isInteger(declaredMinute) && declaredMinute >= 0 && declaredMinute < 1440)) &&
@@ -156,8 +170,11 @@ export function isQueuedStatus(value: unknown): value is QueuedStatus {
 }
 
 /** The declared time of a status typed in « Fin de tournée », to show with it. */
-function declaredOf(value: QueuedStatus): Pick<LocalStatus, "declaredMinute"> {
-  return value.declaredMinute !== undefined ? { declaredMinute: value.declaredMinute } : {};
+function declaredOf(value: QueuedStatus): Pick<LocalStatus, "declaredMinute" | "km"> {
+  return {
+    ...(value.declaredMinute !== undefined ? { declaredMinute: value.declaredMinute } : {}),
+    ...(value.km !== undefined ? { km: value.km } : {}),
+  };
 }
 
 export class StatusQueue {
@@ -210,7 +227,7 @@ export class StatusQueue {
   }
 
   /** Records a tap: saved at once with the time of the gesture, then sent. */
-  async submit(stopId: string, action: StopAction, extra: StatusExtra = {}): Promise<void> {
+  async submit(stopId: string, action: QueueAction, extra: StatusExtra = {}): Promise<void> {
     const observedAt = this.deps.now();
     await this.start();
     this.refusals = this.refusals.filter((refusal) => refusal.stopId !== stopId);
@@ -223,7 +240,11 @@ export class StatusQueue {
       return;
     }
     if (last && last.value.action === action) {
-      const changed = last.value.reason !== extra.reason || last.value.declaredMinute !== extra.declaredMinute;
+      const changed =
+        last.value.reason !== extra.reason ||
+        last.value.declaredMinute !== extra.declaredMinute ||
+        last.value.km !== extra.km ||
+        last.value.confirmed !== extra.confirmed;
       if (!changed || last.key === this.inFlight || this.uncertain.has(last.key)) {
         // Same status tapped again while the first one waits: already kept.
         this.emit();
@@ -240,6 +261,8 @@ export class StatusQueue {
       observedAt,
       ...(extra.reason ? { reason: extra.reason } : {}),
       ...(extra.declaredMinute !== undefined ? { declaredMinute: extra.declaredMinute } : {}),
+      ...(extra.km !== undefined ? { km: extra.km } : {}),
+      ...(extra.confirmed ? { confirmed: true } : {}),
     });
     this.emit();
     await this.flush();
@@ -422,7 +445,7 @@ export class StatusQueue {
           this.deps.onDelivered?.(outcome);
           for (const listener of this.deliveryListeners) listener(outcome);
         } else {
-          const refusal: Refusal = { id: ++this.refusalIds, stopId, action, observedAt, error: outcome.error };
+          const refusal: Refusal = { id: ++this.refusalIds, stopId, action, observedAt, error: outcome.error, ...(outcome.code ? { code: outcome.code } : {}) };
           this.refusals = [...this.refusals, refusal];
           if (latestForStop) this.refreshStop(stopId);
           for (const listener of this.refusalListeners) listener(refusal);

@@ -6,7 +6,8 @@ import { audit, type AuditEntity, type AuditEntry } from "@/lib/audit";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { errorState, idSchema, invalidState, messageState, readForm, successState, type FormState } from "@/lib/forms";
-import { formatShortDate, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
+import { formatShortDate, fromIsoDate, todayIso } from "@/lib/time";
+import { loadKmPoints, loadLatestKm } from "@/lib/fleet/odometer-load";
 import { deadlineSchema, fuelSchema, odometerConflict, unavailabilitySchema } from "./fleet-schema";
 import { toUpcomingRoutes, upcomingRouteDates } from "./_lib/upcoming-routes";
 
@@ -130,7 +131,7 @@ export async function addDeadline(vehicleId: string, _state: FormState, formData
 }
 
 /**
- * Marks a deadline done today, at the last odometer reading (fuel log). The
+ * Marks a deadline done today, at the last mileage known (fill-ups and the crews' readings, FLD-03). The
  * next deadline of the same kind is entered separately: its date or mileage
  * depends on the vehicle and the garage.
  */
@@ -139,15 +140,11 @@ export async function completeDeadline(vehicleId: string, deadlineId: string): P
   const id = idSchema.safeParse(deadlineId);
   const vehicle = idSchema.safeParse(vehicleId);
   if (!id.success || !vehicle.success) return messageState("Demande invalide.");
-  const last = await db.fuelLog.findFirst({
-    where: { vehicleId: vehicle.data },
-    orderBy: { odometerKm: "desc" },
-    select: { odometerKm: true },
-  });
+  const last = (await loadLatestKm(db, [vehicle.data])).get(vehicle.data) ?? null;
   const count = await db.$transaction(async (tx) => {
     const done = await tx.maintenanceDeadline.updateMany({
       where: { id: id.data, vehicleId: vehicle.data, doneDate: null },
-      data: { doneDate: fromIsoDate(todayIso()), doneKm: last?.odometerKm ?? null },
+      data: { doneDate: fromIsoDate(todayIso()), doneKm: last },
     });
     if (done.count > 0) {
       await audit(tx, user, {
@@ -193,16 +190,17 @@ export async function addFuelLog(vehicleId: string, _state: FormState, formData:
   const values = readForm(formData);
   const parsed = fuelSchema.safeParse(values);
   if (!parsed.success) return invalidState(parsed.error, values);
-  const others = await db.fuelLog.findMany({ where: { vehicleId: id }, select: { date: true, odometerKm: true } });
+  // Against the other fill-ups and the crews' odometer readings (FLD-03).
+  const others = await loadKmPoints(db, id);
   const conflict = odometerConflict(
     parsed.data,
-    others.map((o) => ({ date: toIsoDate(o.date), odometerKm: o.odometerKm })),
+    others.map((o) => ({ date: o.date, odometerKm: o.km })),
   );
   if (conflict) return errorState({ odometerKm: conflict }, values);
   const { date, ...rest } = parsed.data;
   await db.$transaction(async (tx) => {
     const created = await tx.fuelLog.create({
-      data: { vehicleId: id, date: fromIsoDate(date), ...rest },
+      data: { vehicleId: id, date: fromIsoDate(date), ...rest, recordedById: user.id },
       select: { id: true },
     });
     await audit(tx, user, {

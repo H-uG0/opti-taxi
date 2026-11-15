@@ -19,6 +19,8 @@ import type { KpiScope, VehicleMeta } from "@/lib/kpis-scope";
 import { yearToDateMonths, type SharingMonth } from "@/lib/kpis-sharing";
 import type { TargetRow } from "@/lib/kpis-targets";
 import type { FuelEntry } from "@/lib/fleet/consumption";
+import type { ReadingDay } from "@/lib/fleet/odometer";
+import { loadLatestKm } from "@/lib/fleet/odometer-load";
 import { addDays, fromIsoDate, toIsoDate } from "@/lib/time";
 import { patientInitials } from "./format";
 
@@ -68,6 +70,29 @@ export async function loadPeople(ids: readonly string[]): Promise<{ id: string; 
   });
 }
 
+/** The days with both readings of each vehicle, with the km planned on its route that day (null: no route). */
+function readingDaysOf(
+  readings: readonly { vehicleId: string; serviceDate: Date; moment: "START" | "END"; km: number }[],
+  routes: readonly { vehicleId: string; serviceDate: Date; distanceKm: number }[],
+): Map<string, ReadingDay[]> {
+  const planned = new Map(routes.map((r) => [`${r.vehicleId}|${toIsoDate(r.serviceDate)}`, r.distanceKm]));
+  const days = new Map<string, { start?: number; end?: number }>();
+  for (const r of readings) {
+    const key = `${r.vehicleId}|${toIsoDate(r.serviceDate)}`;
+    const day = days.get(key) ?? {};
+    if (r.moment === "START") day.start = r.km;
+    else day.end = r.km;
+    days.set(key, day);
+  }
+  const result = new Map<string, ReadingDay[]>();
+  for (const [key, day] of days) {
+    if (day.start === undefined || day.end === undefined) continue;
+    const [vehicleId = "", date = ""] = key.split("|");
+    result.set(vehicleId, [...(result.get(vehicleId) ?? []), { date, startKm: day.start, endKm: day.end, plannedKm: planned.get(key) ?? null }]);
+  }
+  return result;
+}
+
 /** Days searched before the period for the last full tank that starts a vehicle's measured interval. */
 const FUEL_LOOKBACK_DAYS = 120;
 
@@ -84,24 +109,39 @@ export async function loadFleetEnergyInputs(
 ): Promise<{
   fills: Map<string, FuelEntry[]>;
   latestOdometer: Map<string, number>;
+  /** The days of the period read at the start and the end by the crews (FLD-03), with the km planned those days. */
+  readingDays: Map<string, ReadingDay[]>;
   deadlines: Map<string, EnergyDeadline[]>;
   routeKm: Map<string, Map<string, number>>;
   plannedSince: string | null;
   plannedUntil: string | null;
 }> {
   const ids = [...vehicleIds];
-  const [fills, odometers, deadlines, first] = await Promise.all([
+  const [fills, odometers, deadlines, first, readings] = await Promise.all([
     db.fuelLog.findMany({
       where: { vehicleId: { in: ids }, date: { gte: fromIsoDate(addDays(range.from, -FUEL_LOOKBACK_DAYS)), lte: fromIsoDate(range.to) } },
       select: { vehicleId: true, date: true, odometerKm: true, quantity: true, cost: true, fullTank: true },
     }),
-    db.fuelLog.groupBy({ by: ["vehicleId"], where: { vehicleId: { in: ids } }, _max: { odometerKm: true } }),
+    // The last mileage known: fill-ups and the crews' readings (FLD-03).
+    loadLatestKm(db, ids),
     db.maintenanceDeadline.findMany({
       where: { vehicleId: { in: ids }, doneDate: null },
       select: { vehicleId: true, kind: true, label: true, dueDate: true, dueKm: true, doneDate: true },
     }),
     db.route.findFirst({ orderBy: { serviceDate: "asc" }, select: { serviceDate: true } }),
+    db.odometerReading.findMany({
+      where: { vehicleId: { in: ids }, serviceDate: { gte: fromIsoDate(range.from), lte: fromIsoDate(range.to) } },
+      select: { vehicleId: true, serviceDate: true, moment: true, km: true },
+    }),
   ]);
+  const readDates = [...new Set(readings.map((r) => toIsoDate(r.serviceDate)))];
+  const readRoutes =
+    readDates.length > 0
+      ? await db.route.findMany({
+          where: { vehicleId: { in: [...new Set(readings.map((r) => r.vehicleId))] }, serviceDate: { in: readDates.map(fromIsoDate) }, stops: { some: {} } },
+          select: { vehicleId: true, serviceDate: true, distanceKm: true },
+        })
+      : [];
   const last = await db.route.findFirst({
     where: { serviceDate: { lte: fromIsoDate(range.to) }, stops: { some: {} } },
     orderBy: { serviceDate: "desc" },
@@ -128,7 +168,8 @@ export async function loadFleetEnergyInputs(
   }
   return {
     fills: byVehicle(fills.map((f) => ({ ...f, date: toIsoDate(f.date) }))),
-    latestOdometer: new Map(odometers.flatMap((o) => (o._max.odometerKm !== null ? [[o.vehicleId, o._max.odometerKm] as const] : []))),
+    latestOdometer: odometers,
+    readingDays: readingDaysOf(readings, readRoutes),
     deadlines: byVehicle(
       deadlines.map((d) => ({ ...d, dueDate: d.dueDate ? toIsoDate(d.dueDate) : null, doneDate: d.doneDate ? toIsoDate(d.doneDate) : null })),
     ),

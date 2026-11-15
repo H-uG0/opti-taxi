@@ -14,13 +14,16 @@
  * compared when the interval starts before the first planned day. Then its
  * days off the road in the period (unavailabilities) and its deadlines
  * overdue today, at its latest odometer reading (whatever the period, like
- * the vehicle's record). A group sums its
+ * the vehicle's record). Then the days the crew read the odometer at the
+ * start and the end (FLD-03): their real km against the km planned on the
+ * vehicle's route those days. A group sums its
  * vehicles: litres and kWh never mix, the consumption of a group is given per
  * unit.
  */
 import type { EnergyType, MaintenanceKind, VehicleType } from "@prisma/client";
 import { consumptionStats, energyUnit, type FuelEntry } from "@/lib/fleet/consumption";
 import { deadlineState } from "@/lib/fleet/maintenance";
+import { realAgainstPlanned, type ReadingDay } from "@/lib/fleet/odometer";
 import { ratio } from "./kpis-rows";
 
 export type EnergyVehicle = {
@@ -53,6 +56,10 @@ export type VehicleEnergy = {
   configuredCost: number;
   offRoadDays: number;
   overdueDeadlines: number;
+  /** Days of the period read at the start and the end (with a route), their real km and the km planned. */
+  readingDays: number;
+  readingKm: number;
+  readingPlannedKm: number;
 };
 
 /**
@@ -75,6 +82,8 @@ export function vehicleEnergy(
     deadlines: readonly EnergyDeadline[];
     /** Its latest odometer reading, all fills (null: none); absent: the highest of `fills`. */
     latestOdometerKm?: number | null;
+    /** The days of the period its crew read the odometer at the start and the end (FLD-03). */
+    readingDays?: readonly ReadingDay[];
   },
 ): VehicleEnergy {
   const before = input.fills.filter((f) => f.date < input.from && f.fullTank).sort((a, b) => a.date.localeCompare(b.date) || a.odometerKm - b.odometerKm);
@@ -94,6 +103,7 @@ export function vehicleEnergy(
     comparedKm = end.odometerKm - start.odometerKm;
   }
   const lastOdometer = input.latestOdometerKm !== undefined ? input.latestOdometerKm : consumptionStats(input.fills).odometerKm;
+  const readings = realAgainstPlanned((input.readingDays ?? []).filter((day) => day.date >= input.from && day.date <= input.to));
   return {
     vehicleId: vehicle.id,
     energy: vehicle.energy,
@@ -106,6 +116,9 @@ export function vehicleEnergy(
     configuredCost: vehicle.costPerKm * stats.measuredKm,
     offRoadDays: input.offRoadDays,
     overdueDeadlines: input.deadlines.filter((d) => deadlineState(d, input.today, lastOdometer).status === "overdue").length,
+    readingDays: readings.days,
+    readingKm: readings.realKm,
+    readingPlannedKm: readings.plannedKm,
   };
 }
 
@@ -123,6 +136,10 @@ export type EnergyGroup = {
   comparedKm: number;
   offRoadDays: number;
   overdueDeadlines: number;
+  /** The days read at the start and the end, their real km and the km planned (FLD-03). */
+  readingDays: number;
+  readingKm: number;
+  readingPlannedKm: number;
 };
 
 export function emptyEnergyGroup(): EnergyGroup {
@@ -137,6 +154,9 @@ export function emptyEnergyGroup(): EnergyGroup {
     comparedKm: 0,
     offRoadDays: 0,
     overdueDeadlines: 0,
+    readingDays: 0,
+    readingKm: 0,
+    readingPlannedKm: 0,
   };
 }
 
@@ -154,6 +174,9 @@ export function addVehicleEnergy(group: EnergyGroup, v: VehicleEnergy): EnergyGr
     comparedKm: group.comparedKm + (v.plannedKm !== null ? (v.comparedKm ?? 0) : 0),
     offRoadDays: group.offRoadDays + v.offRoadDays,
     overdueDeadlines: group.overdueDeadlines + v.overdueDeadlines,
+    readingDays: group.readingDays + v.readingDays,
+    readingKm: group.readingKm + v.readingKm,
+    readingPlannedKm: group.readingPlannedKm + v.readingPlannedKm,
   };
 }
 
@@ -177,6 +200,8 @@ export type EnergyRates = {
   configuredCostPerKm: number | null;
   /** (odometer km - planned km) ÷ planned km: positive, the vehicles drove more than planned. */
   kmGap: number | null;
+  /** The same over the days read at the start and the end by the crews (FLD-03). */
+  readingGap: number | null;
 };
 
 export function energyRates(g: EnergyGroup): EnergyRates {
@@ -190,5 +215,6 @@ export function energyRates(g: EnergyGroup): EnergyRates {
     energyCostPerKm: ratio(g.energyCost, g.measuredKm),
     configuredCostPerKm: ratio(g.configuredCost, g.measuredKm),
     kmGap: g.plannedKm > 0 ? (g.comparedKm - g.plannedKm) / g.plannedKm : null,
+    readingGap: g.readingPlannedKm > 0 ? (g.readingKm - g.readingPlannedKm) / g.readingPlannedKm : null,
   };
 }

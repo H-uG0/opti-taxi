@@ -99,6 +99,7 @@ function makeRoute(stops: DriverRouteStop[], overrides: Partial<DriverRoute> = {
       label: "Taxi 1",
       registration: "AB-123-CD",
       type: "TAXI",
+      energy: null,
       depot: { name: "Dépôt Marseille", address: "1 bd du Dépôt, 13010 Marseille", lat: 43.28, lng: 5.42, notes: null },
     },
     driver: {

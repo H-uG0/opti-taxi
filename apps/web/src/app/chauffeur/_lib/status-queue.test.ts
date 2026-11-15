@@ -321,3 +321,24 @@ describe("StatusQueue: arrival and reason (FLD-01)", () => {
     expect(localArrival(3, undefined)).toBe(3);
   });
 });
+
+describe("StatusQueue: odometer readings (FLD-03)", () => {
+  it("keeps a reading offline with its km, sends it, and replaces one typed again before it left", async () => {
+    const { queue, sent, storage } = setup({ answers: [OFFLINE, OFFLINE] });
+    await queue.submit("odometer:r1:START", "ODOMETER", { km: 120_400 });
+    expect(storage.values()).toEqual([{ stopId: "odometer:r1:START", action: "ODOMETER", observedAt: expect.any(Number), km: 120_400 }]);
+    expect(queue.getSnapshot().byStop["odometer:r1:START"]).toMatchObject({ action: "ODOMETER", phase: "queued", km: 120_400 });
+    await queue.submit("odometer:r1:START", "ODOMETER", { km: 120_040, confirmed: true });
+    expect(storage.values()).toEqual([{ stopId: "odometer:r1:START", action: "ODOMETER", observedAt: expect.any(Number), km: 120_040, confirmed: true }]);
+    expect(sent.at(-1)).toMatchObject({ km: 120_040, confirmed: true });
+  });
+
+  it("reads back only well-formed readings", () => {
+    expect(isQueuedStatus({ stopId: "odometer:r1:END", action: "ODOMETER", observedAt: 1, km: 5 })).toBe(true);
+    expect(isQueuedStatus({ stopId: "odometer:r1:END", action: "ODOMETER", observedAt: 1 })).toBe(false);
+    expect(isQueuedStatus({ stopId: "stop_1", action: "ODOMETER", observedAt: 1, km: 5 })).toBe(false);
+    expect(isQueuedStatus({ stopId: "odometer:r1:END", action: "PICKUP", observedAt: 1 })).toBe(false);
+    expect(isQueuedStatus({ stopId: "stop_1", action: "PICKUP", observedAt: 1, km: 5 })).toBe(false);
+  });
+});
+
