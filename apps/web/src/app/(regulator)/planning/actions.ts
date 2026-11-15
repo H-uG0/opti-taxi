@@ -47,6 +47,7 @@ import {
 import { EXCEPTIONAL_AMBULANCE_REASON, exceptionalAmbulanceIssue } from "@/lib/planning/exceptional-ambulance";
 import { validationIssues, validationQuestion } from "@/lib/planning/validation";
 import { checkRouteCrewChange, remainingPart } from "@/lib/staff/route-crew";
+import { shownPlanHolds } from "@/lib/planning/live-load";
 import { loadPlanVersion, STALE_PLAN_ERROR } from "@/lib/planning/version";
 import { VEHICLE_TYPE_SHORT } from "@/lib/labels";
 import { formatPersonName } from "@/lib/names";
@@ -914,13 +915,13 @@ export async function lockRoutes(date: string, scope: LockScope, shownVersion: s
     const isoDate = parsed.data.date;
     const past = pastDateError(isoDate);
     if (past) return past;
-    if (typeof shownVersion !== "string" || (await loadPlanVersion(db, isoDate)) !== shownVersion) return STALE_PLAN;
+    if (!(await shownPlanHolds(db, isoDate, shownVersion))) return STALE_PLAN;
 
     const outcome = await db.$transaction(async (tx) => {
       await lockPlanningDay(tx, isoDate);
       // The computation running would not see these locks: its plan could put the trips elsewhere.
       if (await optimizationInProgress(isoDate, tx)) return "running" as const;
-      if ((await loadPlanVersion(tx, isoDate)) !== shownVersion) return "stale" as const;
+      if (!(await shownPlanHolds(tx, isoDate, shownVersion))) return "stale" as const;
       const loaded = await loadLockScope(tx, isoDate, parsed.data.scope);
       if (!loaded) return "stale" as const;
       const plan = tripsToLock(loaded.trips, loaded.inScope);
@@ -960,13 +961,13 @@ export async function unlockRoutes(date: string, scope: LockScope, shownVersion:
     const isoDate = parsed.data.date;
     const past = pastDateError(isoDate);
     if (past) return past;
-    if (typeof shownVersion !== "string" || (await loadPlanVersion(db, isoDate)) !== shownVersion) return STALE_PLAN;
+    if (!(await shownPlanHolds(db, isoDate, shownVersion))) return STALE_PLAN;
 
     const outcome = await db.$transaction(async (tx) => {
       await lockPlanningDay(tx, isoDate);
       // The computation running was sent these locks: its plan would keep the trips where they were locked.
       if (await optimizationInProgress(isoDate, tx)) return "running" as const;
-      if ((await loadPlanVersion(tx, isoDate)) !== shownVersion) return "stale" as const;
+      if (!(await shownPlanHolds(tx, isoDate, shownVersion))) return "stale" as const;
       const loaded = await loadLockScope(tx, isoDate, parsed.data.scope);
       if (!loaded) return "stale" as const;
       const plan = tripsToUnlock(loaded.trips, loaded.inScope);
@@ -1014,7 +1015,7 @@ export async function validateDay(date: string, confirmed: string | null, shownV
     if (await optimizationInProgress(isoDate)) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
 
     // Refused at once on a stale page: never ask to confirm the issues of a plan the regulator did not see.
-    if (typeof shownVersion !== "string" || (await loadPlanVersion(db, isoDate)) !== shownVersion) return STALE_PLAN;
+    if (!(await shownPlanHolds(db, isoDate, shownVersion))) return STALE_PLAN;
 
     const serviceDate = fromIsoDate(isoDate);
     // The same view as the page: unassigned trips, violations, trips and routes to review.
@@ -1031,7 +1032,7 @@ export async function validateDay(date: string, confirmed: string | null, shownV
     const outcome = await db.$transaction(async (tx) => {
       await lockPlanningDay(tx, isoDate);
       if (await optimizationInProgress(isoDate, tx)) return "running" as const;
-      if ((await loadPlanVersion(tx, isoDate)) !== shownVersion) return "stale" as const;
+      if (!(await shownPlanHolds(tx, isoDate, shownVersion))) return "stale" as const;
       const now = new Date();
       const { count } = await tx.route.updateMany({
         where: { serviceDate, status: "PROPOSED" },
@@ -1166,12 +1167,12 @@ export async function changeRouteCrew(
       };
     }
     if (await optimizationInProgress(isoDate)) return { ok: false, error: OPTIMIZATION_IN_PROGRESS_ERROR };
-    if (typeof shownVersion !== "string" || (await loadPlanVersion(db, isoDate)) !== shownVersion) return STALE_PLAN;
+    if (!(await shownPlanHolds(db, isoDate, shownVersion))) return STALE_PLAN;
 
     const serviceDate = fromIsoDate(isoDate);
     const outcome = await db.$transaction(async (tx) => {
       await lockPlanningDay(tx, isoDate);
-      if ((await loadPlanVersion(tx, isoDate)) !== shownVersion) return { kind: "stale" as const };
+      if (!(await shownPlanHolds(tx, isoDate, shownVersion))) return { kind: "stale" as const };
       const [route, people, absences, incompatibilities, otherRoutes, rules] = await Promise.all([
         tx.route.findUnique({
           where: { id: args.data.routeId },

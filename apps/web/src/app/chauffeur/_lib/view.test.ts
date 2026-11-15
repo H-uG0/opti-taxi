@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Prisma, StopKind, TripDirection, TripStatus } from "@prisma/client";
 import type { DriverRoute, DriverRouteStop } from "./load";
-import { buildRouteView } from "./view";
+import { buildRouteView, nextDayCardFirst } from "./view";
 
 const DRIVER = "drv_1";
 const CREW = "drv_2";
@@ -493,10 +493,38 @@ describe("roadmap changes and field requests (DAY-04, DAY-05)", () => {
       nextSession: true,
       nextSessionMin: "2026-11-04",
       askCancel: false,
-      sent: ["Patient prêt à 11:45 (prévu 11:30) · envoyé à 10:05, transmis à la régulation"],
+      sent: ["Patient prêt à 11:45 (prévu 11:30) · demande envoyée à 10:05, transmise à la régulation"],
     });
     // Not on another day than the service day.
     expect(buildRouteView(route, DRIVER, false, new Set(), field).stops[1]?.field).toBeNull();
+  });
+
+  it("shows the answer to « Annuler le retour » once accepted, without offering a return as if none was planned", () => {
+    const route = makeRoute([
+      makeStop(0, "trip_a", "PICKUP", { ...A, status: "PICKED_UP" }, "2026-11-03T07:02:00Z"),
+      makeStop(1, "trip_a", "DROPOFF", { ...A, status: "PICKED_UP" }),
+    ]);
+    const asked = { id: "r3", kind: "CANCEL" as const, tripId: "trip_back", readyMinute: null, previousReadyMinute: null, cancellationReason: "HOSPITALIZATION" as const, nextSessionDate: null, createdAt: "2026-11-03T09:47:00.000Z", createdBy: null };
+    const field = (status: "ACCEPTED" | "REFUSED", returnStatus: "CANCELLED" | "ASSIGNED") => ({
+      returns: new Map([["trip_a", { id: "trip_back", status: returnStatus, readyMinute: 705 }]]),
+      requests: new Map([["trip_back", [{ ...asked, status }]]]),
+    });
+    const accepted = buildRouteView(route, DRIVER, true, new Set(), field("ACCEPTED", "CANCELLED")).stops[1]?.field;
+    expect(accepted).toMatchObject({
+      signalReady: false,
+      cancelReturn: false,
+      askReturn: false,
+      sent: ["Annulation demandée\u00a0: patient hospitalisé · demande envoyée à 10:47, acceptée par la régulation"],
+    });
+    // A return cancelled by the regulation itself: a new one may be asked for.
+    const byRegulation = buildRouteView(route, DRIVER, true, new Set(), { returns: field("ACCEPTED", "CANCELLED").returns, requests: new Map() }).stops[1]?.field;
+    expect(byRegulation).toMatchObject({ askReturn: true, sent: [] });
+  });
+
+  it("puts tomorrow's card first once the day's stops are done, and on a day without a route", () => {
+    expect(nextDayCardFirst([])).toBe(true);
+    expect(nextDayCardFirst([{ nextStop: null }])).toBe(true);
+    expect(nextDayCardFirst([{ nextStop: null }, { nextStop: buildRouteView(sharedRoute(), DRIVER, true).nextStop }])).toBe(false);
   });
 
   it("offers a return asked for when none is planned, and the cancellation of a pickup still to do, once", () => {
@@ -506,6 +534,6 @@ describe("roadmap changes and field requests (DAY-04, DAY-05)", () => {
     expect(pickup?.field).toMatchObject({ askCancel: true, sent: [] });
     expect(dropoff?.field).toMatchObject({ askReturn: true, signalReady: false, cancelReturn: false, nextSession: false });
     const asked = buildRouteView(route, DRIVER, true, new Set(), { returns: new Map(), requests: new Map([["trip_a", pending]]) }).stops[0];
-    expect(asked?.field).toMatchObject({ askCancel: false, sent: ["Annulation demandée : rentre par ses propres moyens · envoyé à 08:00, en attente de la régulation"] });
+    expect(asked?.field).toMatchObject({ askCancel: false, sent: ["Annulation demandée : rentre par ses propres moyens · demande envoyée à 08:00, en attente de la régulation"] });
   });
 });

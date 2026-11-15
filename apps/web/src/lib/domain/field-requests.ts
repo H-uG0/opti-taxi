@@ -104,11 +104,14 @@ export function fieldRequestText(request: Pick<FieldRequestView, "kind" | "ready
   }
 }
 
-/** The crew's line about its own request: « Patient prêt à 11:20 · envoyé à 10:05, en attente de la régulation ». */
+/**
+ * The crew's line about its own request, the request named so that everything agrees with it: « Patient prêt à 11:20 ·
+ * demande envoyée à 10:05, en attente de la régulation ».
+ */
 export function fieldRequestCrewText(request: Pick<FieldRequestView, "kind" | "status" | "readyMinute" | "previousReadyMinute" | "cancellationReason" | "nextSessionDate">, sentAt: string): string {
   // An end of session is in force at once: the regulator only takes note of it.
-  const state = request.kind === "READY_TIME" && request.status === "PENDING" ? "transmis à la régulation" : FIELD_REQUEST_STATUS_LABELS[request.status];
-  return `${fieldRequestText(request)} · envoyé à ${sentAt}, ${state}`;
+  const state = request.kind === "READY_TIME" && request.status === "PENDING" ? "transmise à la régulation" : FIELD_REQUEST_STATUS_LABELS[request.status];
+  return `${fieldRequestText(request)} · demande envoyée à ${sentAt}, ${state}`;
 }
 
 /** The leg this request concerns, as the screens name the trip (aller, retour). */

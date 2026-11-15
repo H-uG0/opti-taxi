@@ -50,8 +50,8 @@ export type TripPanelProps = {
   onAutoPlaceStarted?: () => void;
   onSelectTrip: (tripId: string) => void;
   onClose: () => void;
-  /** Today: where the trip's pickup and drop-off stand (« fait à 08:12 », « vers 09:05, +10 min »). */
-  live?: { pickup: string | null; dropoff: string | null } | null;
+  /** Today: where the trip's pickup and drop-off stand (« prise en charge faite à 08:12 · dépose vers 09:05, +10 min »). */
+  live?: string | null;
 };
 
 const SHARING_TONES = {
@@ -462,11 +462,9 @@ export function TripPanel({
           <Row label="Dépose prévue">
             <span className="tabular">{formatMinute(trip.plannedDropoffMinute)}</span>
           </Row>
-          {live && (live.pickup || live.dropoff) ? (
+          {live ? (
             <Row label="Suivi du jour">
-              <span className="tabular">
-                {[live.pickup ? `prise en charge ${live.pickup}` : null, live.dropoff ? `dépose ${live.dropoff}` : null].filter(Boolean).join(" · ")}
-              </span>
+              <span className="tabular">{live}</span>
             </Row>
           ) : null}
           {trip.fieldRecords.map((record) => (

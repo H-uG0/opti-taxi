@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { TripStatus } from "@prisma/client";
 import { MousePointerClick, PencilLine } from "lucide-react";
 import { ActionButton } from "@/components/ui/action-button";
 import { LinkButton } from "@/components/ui/button";
@@ -14,9 +15,9 @@ import { Timeline } from "@/components/planning/timeline";
 import type { TripDragApi } from "@/components/planning/use-trip-drag";
 import { VehiclePanel } from "@/components/planning/vehicle-panel";
 import type { DroppedLock } from "@/lib/optimizer/build-request";
-import { FIELD_CANCEL_REASON_LABELS, type FieldRequestView } from "@/lib/domain/field-requests";
+import type { FieldRequestView } from "@/lib/domain/field-requests";
 import type { RoadmapStateView } from "@/lib/planning/live-load";
-import { liveRowView, vehicleLiveView, type LiveRowView } from "@/lib/planning/live-view";
+import { liveRowView, tripLiveText, vehicleLiveView, type LiveRowView } from "@/lib/planning/live-view";
 import { scopeLockCounts, scopeTripOf } from "@/lib/planning/bulk-lock";
 import { displayColors, IDLE_VEHICLE_COLOR } from "@/lib/planning/colors";
 import { dragIssue, dropIssue, rowsWithDraft, tripsWithDraft } from "@/lib/planning/draft";
@@ -35,6 +36,7 @@ import { STOP_KIND_LABELS } from "@/lib/labels";
 import { formatMinute } from "@/lib/time";
 import { DraftBar } from "./draft-bar";
 import { resolveFieldRequest } from "./field-request-actions";
+import { requestAnswer } from "./request-answer";
 import { useLiveDay } from "./live-day";
 import { LockScopeButtons } from "./lock-scope-buttons";
 import { usePlanningActivity, useTripLink } from "./planning-activity";
@@ -82,8 +84,13 @@ export type PlanningBoardProps = {
   crewChangeBlocked: string | null;
   /** The date shown is today's (« Hors service… » proposes the time of now). */
   today?: boolean;
-  /** Plan version shown (actions on a stale page are refused). */
+  /** Plan version shown: the drag-and-drop draft is checked and saved on it. */
   version: string;
+  /**
+   * What « Figer » and « Changer l'équipage » are checked against (actions on a stale page are refused): today, the
+   * plan's key of « Suivi du jour », which the crews' statuses do not move. Absent: `version`.
+   */
+  actionVersion?: string;
   /** Where each crew stands with its roadmap (tomorrow; today the live poll gives it). */
   roadmaps?: Record<string, RoadmapStateView> | null;
   /** Longest wait at the care place (setting maxTotalWaitMin), for « Suivi du jour ». */
@@ -92,8 +99,20 @@ export type PlanningBoardProps = {
 };
 
 /** The regulator's answers to a crew's request, in « À traiter » (DAY-05). */
-function RequestActions({ request, trip }: { request: FieldRequestView; trip: TripView | undefined }) {
-  const fields = (decision: string) => ({ requestId: request.id, decision });
+function RequestActions({
+  request,
+  trip,
+  status,
+  otherLeg,
+}: {
+  request: FieldRequestView;
+  trip: TripView | undefined;
+  /** The trip's status now (live poll): a trip cancelled meanwhile is no longer among the day's trips. */
+  status: TripStatus | null;
+  /** The patient's other leg the same day (the return of an outbound). */
+  otherLeg: TripView | undefined;
+}) {
+  const fields = (decision: string, extra: Record<string, string> = {}) => ({ requestId: request.id, decision, ...extra });
   if (request.kind === "READY_TIME" || request.kind === "NEXT_SESSION") {
     return (
       <div className="flex flex-wrap items-start gap-1.5">
@@ -108,22 +127,26 @@ function RequestActions({ request, trip }: { request: FieldRequestView; trip: Tr
       </div>
     );
   }
-  const reason = request.cancellationReason && request.cancellationReason in FIELD_CANCEL_REASON_LABELS ? FIELD_CANCEL_REASON_LABELS[request.cancellationReason as keyof typeof FIELD_CANCEL_REASON_LABELS] : null;
+  const answer = requestAnswer({ request, trip, status, otherLeg });
+  // Done otherwise meanwhile (« Annuler la course », a return created by hand): the request is closed as accepted.
+  if (answer.kind === "settled") {
+    return (
+      <ActionButton action={resolveFieldRequest} fields={fields("accept")} align="start">
+        {answer.label}
+      </ActionButton>
+    );
+  }
   return (
     <div className="flex flex-wrap items-start gap-1.5">
-      {request.kind === "CANCEL" ? (
+      {answer.kind === "cancel" ? (
         <ActionButton
           action={resolveFieldRequest}
-          fields={fields("accept")}
+          fields={fields("accept", answer.withReturn ? { withReturn: "1" } : {})}
           align="start"
           variant="primary"
-          confirm={{
-            question: `Annuler la course de ${trip?.patientName ?? "ce patient"}${reason ? ` (${reason.toLowerCase()})` : ""}\u202f? Elle sort de sa tournée.`,
-            confirmLabel: "Oui, annuler la course",
-            keepLabel: "Garder la course",
-          }}
+          confirm={{ question: answer.question, confirmLabel: answer.confirmLabel, keepLabel: "Garder la course" }}
         >
-          Annuler la course
+          {answer.label}
         </ActionButton>
       ) : (
         <ActionButton action={resolveFieldRequest} fields={fields("accept")} align="start" variant="primary" pendingLabel="Création…">
@@ -197,6 +220,7 @@ export function PlanningBoard({
   crewChangeBlocked,
   today = false,
   version,
+  actionVersion = version,
   roadmaps: pageRoadmaps = null,
   maxTotalWaitMin = 45,
   className,
@@ -226,12 +250,21 @@ export function PlanningBoard({
   }, [live]);
   const liveIssues = useMemo<LiveIssues | null>(() => {
     if (!live) return null;
-    const unseen = Object.entries(live.snapshot.roadmaps).flatMap(([vehicleId, state]) => (state.tone === "pending" && state.pendingSince ? [{ vehicleId, text: state.text }] : []));
+    // Every change the crew has not seen, received by its phone or not (screen off, no network): the oldest first.
+    const unseen = Object.entries(live.snapshot.roadmaps)
+      .flatMap(([vehicleId, state]) => (state.tone === "pending" && state.pendingSince ? [{ vehicleId, text: state.text, since: state.pendingSince }] : []))
+      .sort((a, b) => a.since.localeCompare(b.since) || a.vehicleId.localeCompare(b.vehicleId))
+      .map(({ vehicleId, text }) => ({ vehicleId, text }));
+    const byId = new Map(live.trips.map((t) => [t.id, t]));
     return {
       nowMinute: live.nowMinute,
       maxTotalWaitMin,
       requests: live.snapshot.requests,
-      requestActions: (request) => <RequestActions request={request} trip={live.trips.find((t) => t.id === request.tripId)} />,
+      requestActions: (request) => {
+        const trip = byId.get(request.tripId);
+        const otherLeg = trip?.otherLegTripId ? byId.get(trip.otherLegTripId) : undefined;
+        return <RequestActions request={request} trip={trip} status={live.snapshot.trips[request.tripId]?.status ?? null} otherLeg={otherLeg} />;
+      },
       threatened: live.projection.threatened,
       silent: live.projection.silent,
       overdue: live.projection.overdue,
@@ -629,7 +662,7 @@ export function PlanningBoard({
             dayLocks={
               <LockScopeButtons
                 date={date}
-                version={version}
+                version={actionVersion}
                 scope={{ kind: "day" }}
                 name={null}
                 lockable={dayCounts.lockable}
@@ -669,7 +702,7 @@ export function PlanningBoard({
                     return (
                       <LockScopeButtons
                         date={date}
-                        version={version}
+                        version={actionVersion}
                         scope={{ kind: "depot", depotId: group.id }}
                         name={group.label}
                         lockable={counts.lockable}
@@ -728,13 +761,7 @@ export function PlanningBoard({
                 onClose={clear}
                 live={(() => {
                   const route = selectedTrip.vehicleId ? live?.projection.routes.get(selectedTrip.vehicleId) : undefined;
-                  if (!route) return null;
-                  const texts = vehicleLiveView(route).stops;
-                  const textOf = (kind: "PICKUP" | "DROPOFF") => {
-                    const stop = route.stops.find((s) => s.tripId === selectedTrip.id && s.kind === kind);
-                    return stop ? (texts[stop.stopId]?.text ?? null) : null;
-                  };
-                  return { pickup: textOf("PICKUP"), dropoff: textOf("DROPOFF") };
+                  return route ? tripLiveText(route, selectedTrip.id) : null;
                 })()}
               />
             ) : selectedVehicle ? (
@@ -751,7 +778,7 @@ export function PlanningBoard({
                   lockedLabel ? (
                     <LockScopeButtons
                       date={date}
-                      version={version}
+                      version={actionVersion}
                       scope={{ kind: "route", vehicleId: selectedVehicle.id }}
                       name={selectedVehicle.label}
                       lockable={lockedLabel.lockable}
@@ -768,7 +795,7 @@ export function PlanningBoard({
                     vehicle={selectedVehicle}
                     choices={crewChoices}
                     rules={crewRules}
-                    version={version}
+                    version={actionVersion}
                     mode={crewChangeMode}
                     blocked={crewChangeBlocked}
                   />

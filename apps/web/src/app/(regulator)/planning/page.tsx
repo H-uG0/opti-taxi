@@ -19,7 +19,7 @@ import { loadPlanningDay } from "@/lib/planning/load";
 import { PLACE_NO_ROUTES } from "@/lib/planning/place-view";
 import type { PlanningDayView } from "@/lib/planning/types";
 import { loadDayVersion } from "@/lib/planning/version";
-import { loadLiveSnapshot, loadRoadmapStates, type LiveSnapshot } from "@/lib/planning/live-load";
+import { livePlanToken, loadLiveSnapshot, loadRoadmapStates, type LiveSnapshot } from "@/lib/planning/live-load";
 import { formatDateTime, formatDayDate, formatLongDate, isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
 import { currentHorizon, inHorizon } from "@/lib/trips/completion";
 import { loadRecurrencesWithoutTrip } from "@/lib/trips/missing-load";
@@ -149,6 +149,9 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   const showMissing = !past && view.dayStatus !== "VALIDATED";
   const hasRoutes = view.vehicles.some((v) => v.route !== null);
   const live = liveRead && hasRoutes ? liveRead : null;
+  // What « Valider », « Figer » and « Changer l'équipage » are checked against: today, the plan's key the page watches
+  // (the crews' statuses do not make them stale, as they do not show « Planning modifié »); otherwise the plan version.
+  const actionVersion = live ? livePlanToken(live.planKey) : shownVersion.version;
   const availableVehicles = view.vehicles.filter((v) => v.available).length;
   const replanBlocked = replanBlockedReason(view, past);
   // A validated or started day keeps its routes: their crew changes on the route itself.
@@ -214,7 +217,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
                 />
                 <PlanningToolbar
                   date={date}
-                  version={shownVersion.version}
+                  version={actionVersion}
                   optimizeLabel={optimizeLabel}
                   optimizeHint={
                     underWay
@@ -348,6 +351,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
                 crewChangeBlocked={runningReason}
                 today={date === today}
                 version={shownVersion.version}
+                actionVersion={actionVersion}
                 roadmaps={roadmaps}
                 maxTotalWaitMin={view.maxTotalWaitMin}
               />

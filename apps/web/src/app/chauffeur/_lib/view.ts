@@ -54,7 +54,7 @@ export type StopFieldView = {
 
 /** The crew's requests and the patient's return, read for the stops of today (load.ts loadFieldContext). */
 export type FieldContext = {
-  /** Outbound trip id -> its return the same day (same care), when there is one. */
+  /** Outbound trip id -> its return the same day (same care), when there is one: a cancelled one only when no other. */
   returns: ReadonlyMap<string, { id: string; status: TripStatus; readyMinute: number | null }>;
   /** Trip id -> the crews' requests about it, oldest first. */
   requests: ReadonlyMap<string, readonly FieldRequestView[]>;
@@ -241,6 +241,9 @@ export function stopFieldView(
     const back = field.returns.get(stop.tripId) ?? null;
     const backRequests = back ? field.requests.get(back.id) : undefined;
     const open = back !== null && OPEN_TRIP_STATUSES.includes(back.status);
+    // The return cancelled as the crew asked: the answer shows (below), no new return is offered as if none was planned.
+    const cancelledAsAsked = back?.status === "CANCELLED" && (backRequests ?? []).some((request) => request.kind === "CANCEL" && request.status === "ACCEPTED");
+    const noReturn = back === null || (back.status === "CANCELLED" && !cancelledAsAsked);
     const sent = [...(own ?? []), ...(backRequests ?? [])]
       .filter((request) => request.kind !== "CANCEL" || back?.id === request.tripId)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
@@ -250,7 +253,7 @@ export function stopFieldView(
       appointmentMinute: trip.appointmentMinute,
       signalReady: open,
       cancelReturn: open && !hasPending(backRequests, "CANCEL"),
-      askReturn: back === null && !hasPending(own, "RETURN"),
+      askReturn: noReturn && !hasPending(own, "RETURN"),
       nextSession: trip.recurrenceId !== null,
       nextSessionMin: addDays(serviceDate, 1),
       askCancel: false,
@@ -272,6 +275,27 @@ export function stopFieldView(
     };
   }
   return null;
+}
+
+/**
+ * Whether tomorrow's card (« Demain ») comes first on today's roadmap: in the evening, once every stop of the day is
+ * done, and on a day without a route; after the routes otherwise. Shown once either way.
+ */
+export function nextDayCardFirst(views: readonly Pick<RouteView, "nextStop">[]): boolean {
+  return views.every((view) => view.nextStop === null);
+}
+
+/** The route's fingerprint as the server computes it (roadmap-sync.ts): the page drawn is stale when it differs. */
+function roadmapFingerprint(route: DriverRoute): string {
+  const tripOf = (tripId: string) => route.stops.find((stop) => stop.tripId === tripId)?.trip;
+  return roadmapSnapshot(
+    route.stops,
+    (tripId) => tripOf(tripId)?.status === "CANCELLED",
+    (tripId) => {
+      const trip = tripOf(tripId);
+      return trip?.direction === "RETURN" ? trip.readyMinute : null;
+    },
+  ).fingerprint;
 }
 
 /**
@@ -413,7 +437,7 @@ export function buildRouteView(
   return {
     id: route.id,
     vehicleId: route.vehicleId,
-    fingerprint: roadmapSnapshot(route.stops, (tripId) => route.stops.find((stop) => stop.tripId === tripId)?.trip.status === "CANCELLED").fingerprint,
+    fingerprint: roadmapFingerprint(route),
     status: route.status,
     vehicle: { ...route.vehicle, depot: { ...route.vehicle.depot, notes: route.vehicle.depot.notes?.trim() || null } },
     startMinute: route.startMinute,

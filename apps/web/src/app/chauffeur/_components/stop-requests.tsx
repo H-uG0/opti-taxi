@@ -7,7 +7,7 @@
  * (POST /api/chauffeur/stops/:id/requests), online only: without network the crew calls the regulation. Never a free
  * text: a time, a date, a reason from a list. What was sent shows on the stop with where it stands.
  */
-import { useState, useTransition, type FormEvent, type ReactNode } from "react";
+import { useId, useState, useTransition, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { MessageSquareShare, Send } from "lucide-react";
 import { cn } from "@/components/ui/cn";
@@ -48,7 +48,9 @@ function shifted(value: string, minutes: number): string {
   return formatMinute(Math.min(24 * 60 - 1, Math.max(0, minute + minutes)));
 }
 
+// Each form's ids come from useId(): a roadmap shows these forms on several stops at once.
 function ReadyForm({ initial, busy, onSend }: { initial: number | null; busy: boolean; onSend: (body: RequestBody) => void }) {
+  const id = useId();
   const [value, setValue] = useState(initial !== null ? formatMinute(initial) : "");
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -68,10 +70,10 @@ function ReadyForm({ initial, busy, onSend }: { initial: number | null; busy: bo
           )}
         </p>
         <div className="grid grid-cols-[1fr_auto_auto] gap-2">
-          <label className="sr-only" htmlFor="ready-time">
+          <label className="sr-only" htmlFor={id}>
             Patient prêt à
           </label>
-          <input id="ready-time" type="time" step={300} required value={value} onChange={(e) => setValue(e.target.value)} className={cn(field, "tabular")} />
+          <input id={id} type="time" step={300} required value={value} onChange={(e) => setValue(e.target.value)} className={cn(field, "tabular")} />
           <button type="button" className={secondary} onClick={() => setValue((v) => shifted(v, -15))} aria-label="15 minutes plus tôt">
             −15
           </button>
@@ -89,6 +91,7 @@ function ReadyForm({ initial, busy, onSend }: { initial: number | null; busy: bo
 }
 
 function AskReturnForm({ busy, onSend }: { busy: boolean; onSend: (body: RequestBody) => void }) {
+  const id = useId();
   const [value, setValue] = useState("");
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -100,10 +103,10 @@ function AskReturnForm({ busy, onSend }: { busy: boolean; onSend: (body: Request
       <Block title="Demander un retour">
         <p className="text-sm text-slate-600">Aucun retour n&apos;est prévu pour ce patient aujourd&apos;hui. La régulation valide la demande.</p>
         <div className="grid grid-cols-[auto_1fr] items-center gap-2">
-          <label htmlFor="return-time" className="text-sm font-medium text-slate-800">
+          <label htmlFor={id} className="text-sm font-medium text-slate-800">
             Prêt à
           </label>
-          <input id="return-time" type="time" step={300} required value={value} onChange={(e) => setValue(e.target.value)} className={cn(field, "tabular")} />
+          <input id={id} type="time" step={300} required value={value} onChange={(e) => setValue(e.target.value)} className={cn(field, "tabular")} />
         </div>
         <button type="submit" disabled={busy || parseMinute(value) === null} className={cn(primary, "w-full")}>
           <Send aria-hidden className="size-4" />
@@ -116,7 +119,7 @@ function AskReturnForm({ busy, onSend }: { busy: boolean; onSend: (body: Request
 
 function CancelForm({ target, busy, onSend }: { target: "return" | "trip"; busy: boolean; onSend: (body: RequestBody) => void }) {
   const [reason, setReason] = useState<FieldCancelReason | "">("");
-  const id = `cancel-reason-${target}`;
+  const id = useId();
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (reason) onSend({ kind: "CANCEL", reason, ...(target === "return" ? { target: "return" as const } : {}) });
@@ -145,6 +148,7 @@ function CancelForm({ target, busy, onSend }: { target: "return" | "trip"; busy:
 }
 
 function NextSessionForm({ min, busy, onSend }: { min: string | null; busy: boolean; onSend: (body: RequestBody) => void }) {
+  const id = useId();
   const [value, setValue] = useState("");
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -154,10 +158,10 @@ function NextSessionForm({ min, busy, onSend }: { min: string | null; busy: bool
     <form onSubmit={submit}>
       <Block title="Prochaine séance">
         <p className="text-sm text-slate-600">Date donnée par le patient ou l&apos;accueil, transmise à la régulation.</p>
-        <label htmlFor="next-session" className="sr-only">
+        <label htmlFor={id} className="sr-only">
           Date de la prochaine séance
         </label>
-        <input id="next-session" type="date" required min={min ?? undefined} value={value} onChange={(e) => setValue(e.target.value)} className={cn(field, "w-full")} />
+        <input id={id} type="date" required min={min ?? undefined} value={value} onChange={(e) => setValue(e.target.value)} className={cn(field, "w-full")} />
         <button type="submit" disabled={busy || !value} className={cn(secondary, "w-full")}>
           Transmettre la date
         </button>

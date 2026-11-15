@@ -18,7 +18,7 @@ const atDropoff: StopFieldView = {
   nextSession: true,
   nextSessionMin: "2026-11-17",
   askCancel: false,
-  sent: ["Prochaine séance le 18/11/2026 · envoyé à 10:05, en attente de la régulation"],
+  sent: ["Prochaine séance le 18/11/2026 · demande envoyée à 10:05, en attente de la régulation"],
 };
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -62,6 +62,19 @@ describe("StopRequests", () => {
     fireEvent.click(screen.getByRole("button", { name: "Transmettre la date" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(bodyOf(1)).toEqual({ kind: "NEXT_SESSION", nextSessionDate: "2026-11-18", ownerId: "u1" });
+  });
+
+  it("labels each stop's fields on their own, several stops on the page", () => {
+    const { container } = render(
+      <>
+        <StopRequests stopId="s1" view={atDropoff} />
+        <StopRequests stopId="s2" view={{ ...atDropoff, signalReady: false, cancelReturn: false, askReturn: true, sent: [] }} />
+      </>,
+    );
+    const ids = [...container.querySelectorAll("[id]")].map((element) => element.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(screen.getAllByLabelText("Date de la prochaine séance")).toHaveLength(2);
+    expect(screen.getByLabelText("Prêt à").getAttribute("type")).toBe("time");
   });
 
   it("says nothing was sent without network", async () => {

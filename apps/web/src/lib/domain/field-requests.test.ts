@@ -44,10 +44,10 @@ describe("fieldRequestText", () => {
 
   it("tells the crew where its request stands", () => {
     expect(fieldRequestCrewText({ ...base, kind: "READY_TIME", status: "PENDING", readyMinute: 680 }, "10:05")).toBe(
-      "Patient prêt à 11:20 · envoyé à 10:05, transmis à la régulation",
+      "Patient prêt à 11:20 · demande envoyée à 10:05, transmise à la régulation",
     );
     expect(fieldRequestCrewText({ ...base, kind: "CANCEL", status: "REFUSED" }, "10:05")).toBe(
-      "Annulation demandée · envoyé à 10:05, refusée par la régulation",
+      "Annulation demandée · demande envoyée à 10:05, refusée par la régulation",
     );
   });
 

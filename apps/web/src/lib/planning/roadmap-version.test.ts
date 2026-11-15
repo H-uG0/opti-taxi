@@ -6,9 +6,11 @@ import {
   publicationTime,
   removedText,
   roadmapChanges,
+  roadmapPending,
   roadmapSnapshot,
   roadmapStanding,
   roadmapStateText,
+  seenByCrew,
   storedStops,
   type RoadmapStop,
   type StoredVersion,
@@ -37,8 +39,16 @@ describe("roadmapSnapshot", () => {
     expect(roadmapSnapshot(stops, (id) => id === "a").fingerprint).not.toBe(a.fingerprint);
   });
 
+  it("keeps the end of session of a return on its pickup: a new end of session redraws the roadmap", () => {
+    const ready = (minute: number) => (id: string) => (id === "b" ? minute : null);
+    const snap = roadmapSnapshot(stops, () => false, ready(840));
+    expect(snap.stops).toEqual([P("a", 480), D("a", 510), { ...P("b", 570), r: 840 }, D("b", 600)]);
+    expect(roadmapSnapshot(stops, () => false, ready(855)).fingerprint).not.toBe(snap.fingerprint);
+    expect(roadmapSnapshot(stops, () => false, ready(840)).fingerprint).toBe(snap.fingerprint);
+  });
+
   it("reads back the stops stored as JSON, dropping what it cannot read", () => {
-    expect(storedStops([P("a", 1), { t: "x" }, null, D("a", 2, 1)])).toEqual([P("a", 1), D("a", 2, 1)]);
+    expect(storedStops([P("a", 1), { t: "x" }, null, D("a", 2, 1), { ...P("b", 3), r: 840 }])).toEqual([P("a", 1), D("a", 2, 1), { ...P("b", 3), r: 840 }]);
     expect(storedStops("nope")).toEqual([]);
   });
 });
@@ -63,6 +73,14 @@ describe("roadmapChanges", () => {
 
   it("finds nothing to tell for small moves", () => {
     expect(hasChanges(roadmapChanges([P("a", 480), D("a", 510)], [P("a", 483), D("a", 514)]))).toBe(false);
+  });
+
+  it("tells a return whose end of session moved by 5 min or more, even at the same planned time", () => {
+    const changes = roadmapChanges([{ ...P("b", 840), r: 840 }, D("b", 870)], [{ ...P("b", 840), r: 855 }, D("b", 870)]);
+    expect(changes.shifted).toEqual([{ tripId: "b", kind: "PICKUP", from: 840, to: 855 }]);
+    expect(changes.highlight).toEqual(["b/PICKUP"]);
+    // A version stored before the end of session was kept tells nothing about it.
+    expect(hasChanges(roadmapChanges([P("b", 840), D("b", 870)], [{ ...P("b", 840), r: 855 }, D("b", 870)]))).toBe(false);
   });
 
   it("agrees the counts in number", () => {
@@ -107,19 +125,52 @@ describe("roadmapStanding", () => {
   });
 });
 
-describe("roadmapStateText", () => {
+describe("seenByCrew", () => {
+  it("counts only what the route's crew acknowledged", () => {
+    const counts = seenByCrew({ driverId: "d1", crewMateId: "d2" });
+    const seen = version(1, [], "06:00", "06:10");
+    expect(counts({ ...seen, seenByDriverId: "d2" })).toBe(true);
+    expect(counts({ ...seen, seenByDriverId: "d9" })).toBe(false);
+    expect(counts({ ...seen, seenByDriverId: null })).toBe(false);
+    const v1 = { ...version(1, [P("a", 480)], "06:00", "06:10"), seenByDriverId: "d9" };
+    expect(roadmapStanding([v1], counts)?.seen).toBeNull();
+  });
+});
+
+describe("roadmapPending and roadmapStateText", () => {
   const time = (d: Date) => d.toISOString().slice(11, 16);
-  it("says what the regulator needs: not yet opened, opened, changed and not seen, seen", () => {
-    expect(roadmapStateText({ standing: null, undelivered: false, time })).toEqual({ text: "Feuille de route pas encore ouverte sur le téléphone", tone: "info" });
-    const v1 = version(1, [P("a", 480)], "06:00", "06:10", "Julien");
-    expect(roadmapStateText({ standing: roadmapStanding([v1]), undelivered: false, time })).toEqual({ text: "Ouverte à 05:10 par Julien", tone: "ok" });
-    const v2 = version(2, [], "09:12");
-    expect(roadmapStateText({ standing: roadmapStanding([v1, v2]), undelivered: false, time })?.text).toBe("Modifiée à 08:12 (1\u00a0course retirée), pas encore vue");
-    const v2seen = { ...v2, seenAt: at("09:15"), seenByName: "Julien" };
-    expect(roadmapStateText({ standing: roadmapStanding([v1, v2seen]), undelivered: true, time })).toEqual({
-      text: "Changements vus à 08:15 par Julien\u202f; modifiée depuis, pas encore reçue sur le téléphone",
+  const snap = (stops: RoadmapStop[], fingerprint: string) => ({ stops, fingerprint });
+  const v1 = version(1, [P("a", 480), P("b", 600)], "06:00", "06:10", "Julien");
+  const undeliveredAt = () => at("10:47");
+
+  it("says what the regulator needs: not yet opened, opened, up to date", () => {
+    expect(roadmapStateText({ standing: null, pending: null, time })).toEqual({ text: "Feuille de route pas encore ouverte sur le téléphone", tone: "info" });
+    expect(roadmapStateText({ standing: roadmapStanding([v1]), pending: null, time })).toEqual({ text: "Feuille de route ouverte à 05:10 par Julien", tone: "ok" });
+    const v2seen = { ...version(2, [P("a", 480)], "09:12"), seenAt: at("09:15"), seenByName: "Julien" };
+    expect(roadmapStateText({ standing: roadmapStanding([v1, v2seen]), pending: null, time })).toEqual({ text: "Feuille de route à jour, vue à 08:15 par Julien", tone: "ok" });
+  });
+
+  it("tells a change published and not seen, and one the phone has not received yet", () => {
+    const v2 = version(2, [P("a", 480)], "09:12");
+    const received = roadmapPending(roadmapStanding([v1, v2]), snap(v2.stops, "f2"), undeliveredAt);
+    expect(received).toMatchObject({ changedAt: at("09:12"), received: true });
+    expect(roadmapStateText({ standing: roadmapStanding([v1, v2]), pending: received, time }).text).toBe(
+      "Feuille de route modifiée à 08:12 (1\u00a0course retirée), pas encore vue",
+    );
+    // Changed again since the phone's latest check: the whole change counted, dated by the latest one.
+    const later = roadmapPending(roadmapStanding([v1, v2]), snap([P("a", 500)], "f3"), undeliveredAt);
+    expect(later).toMatchObject({ changedAt: at("10:47"), received: false });
+    expect(changeCountsText(later!.changes)).toBe("1\u00a0course retirée, 1\u00a0décalée");
+    expect(roadmapStateText({ standing: roadmapStanding([v1, v2]), pending: later, time })).toEqual({
+      text: "Feuille de route modifiée à 09:47 (1\u00a0course retirée, 1\u00a0décalée), pas encore reçue sur le téléphone",
       tone: "pending",
     });
+  });
+
+  it("has nothing pending for a move not worth telling, nor before the crew opened its roadmap", () => {
+    expect(roadmapPending(roadmapStanding([v1]), snap([P("a", 482), P("b", 600)], "f1b"), undeliveredAt)).toBeNull();
+    expect(roadmapPending(roadmapStanding([version(1, [P("a", 480)], "06:00")]), snap([], "f0"), undeliveredAt)).toBeNull();
+    expect(roadmapPending(null, snap([], "f0"), undeliveredAt)).toBeNull();
   });
 });
 

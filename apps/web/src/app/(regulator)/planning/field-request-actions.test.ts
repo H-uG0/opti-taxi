@@ -51,10 +51,11 @@ const OUTBOUND = {
   prescription: { mode: "TAP", sharing: "BOTH" },
 };
 
-function form(requestId: string, decision: string): FormData {
+function form(requestId: string, decision: string, extra: Record<string, string> = {}): FormData {
   const data = new FormData();
   data.set("requestId", requestId);
   data.set("decision", decision);
+  for (const [name, value] of Object.entries(extra)) data.set(name, value);
   return data;
 }
 
@@ -95,11 +96,47 @@ describe("resolveFieldRequest", () => {
     expect(audited()).toEqual(["field_request.accept:t_back"]);
   });
 
-  it("leaves the request pending when the cancellation is refused", async () => {
+  it("cancels an outbound with its planned return when the regulator was asked so", async () => {
+    request("CANCEL", { cancellationReason: "HOSPITALIZATION" });
+    fake.db.trip.findUnique.mockResolvedValue({ ...OUTBOUND, status: "ASSIGNED" });
+    fake.db.trip.findMany.mockResolvedValue([
+      { id: "t_other", status: "ASSIGNED", patientId: "p1", recurrenceId: null, facilityId: "f9" },
+      { id: "t_back", status: "ASSIGNED", patientId: "p1", recurrenceId: null, facilityId: "f1" },
+    ]);
+    fake.cancelTrip.mockResolvedValue({ ok: true, message: "Aller et retour annulés et retirés de leur tournée (hospitalisation)." });
+    const result = await resolveFieldRequest({ ok: true, message: null }, form("req1", "accept", { withReturn: "1" }));
+    expect(result.ok).toBe(true);
+    expect((fake.cancelTrip.mock.calls[0]![1] as FormData).get("returnTripId")).toBe("t_back");
+    // Without the question saying so, the return stays.
+    fake.cancelTrip.mockClear();
+    await resolveFieldRequest({ ok: true, message: null }, form("req1", "accept"));
+    expect((fake.cancelTrip.mock.calls[0]![1] as FormData).get("returnTripId")).toBeNull();
+  });
+
+  it("gives the request back when the cancellation is refused, and cancels nothing when another regulator answered", async () => {
     request("CANCEL", { cancellationReason: "PATIENT" });
     fake.cancelTrip.mockResolvedValue({ ok: false, message: "Seule une course pas encore commencée peut être annulée." });
     expect(await resolveFieldRequest({ ok: true, message: null }, form("req1", "accept"))).toEqual({ ok: false, message: "Seule une course pas encore commencée peut être annulée." });
-    expect(fake.db.fieldRequest.updateMany).not.toHaveBeenCalled();
+    expect(fake.db.fieldRequest.updateMany.mock.calls.map((call) => call[0].data.status)).toEqual(["ACCEPTED", "PENDING"]);
+    expect(audited()).toEqual([]);
+    // « Refuser » from another regulator first: the request is no longer pending, the trip is left as it is.
+    fake.cancelTrip.mockClear();
+    fake.db.fieldRequest.updateMany.mockResolvedValue({ count: 0 });
+    expect(await resolveFieldRequest({ ok: true, message: null }, form("req1", "accept"))).toEqual({ ok: false, message: "Demande déjà traitée\u00a0: rechargez la page." });
+    expect(fake.cancelTrip).not.toHaveBeenCalled();
+  });
+
+  it("closes as accepted a request done otherwise meanwhile: the trip cancelled, a return already planned", async () => {
+    request("CANCEL", { cancellationReason: "PATIENT" });
+    fake.db.trip.findUnique.mockResolvedValue({ ...OUTBOUND, status: "CANCELLED" });
+    expect(await resolveFieldRequest({ ok: true, message: null }, form("req1", "accept"))).toEqual({ ok: true, message: "Course déjà annulée\u00a0: demande de l'équipage close." });
+    expect(fake.cancelTrip).not.toHaveBeenCalled();
+    expect(fake.db.fieldRequest.updateMany).toHaveBeenCalledWith({ where: { id: "req1", status: "PENDING" }, data: expect.objectContaining({ status: "ACCEPTED" }) });
+    request("RETURN", { readyMinute: 930 });
+    fake.db.trip.findUnique.mockResolvedValue(OUTBOUND);
+    fake.db.trip.findMany.mockResolvedValue([{ id: "t_back", status: "ASSIGNED", patientId: "p1", recurrenceId: null, facilityId: "f1" }]);
+    expect((await resolveFieldRequest({ ok: true, message: null }, form("req1", "accept"))).message).toBe("Un retour est déjà prévu pour ce patient aujourd'hui\u00a0: demande de l'équipage close.");
+    expect(fake.db.trip.create).not.toHaveBeenCalled();
   });
 
   it("creates the return asked for, without a vehicle, and opens « Où placer » on it", async () => {
@@ -112,11 +149,7 @@ describe("resolveFieldRequest", () => {
     expect(audited()).toEqual(["trip.create:t_new", "field_request.accept:t_out"]);
   });
 
-  it("refuses to create a second return, and answers a request already handled", async () => {
-    request("RETURN", { readyMinute: 930 });
-    fake.db.trip.findMany.mockResolvedValue([{ patientId: "p1", recurrenceId: null, facilityId: "f1" }]);
-    expect((await resolveFieldRequest({ ok: true, message: null }, form("req1", "accept"))).ok).toBe(false);
-    expect(fake.db.trip.create).not.toHaveBeenCalled();
+  it("answers a request already handled", async () => {
     request("RETURN", { status: "REFUSED" });
     expect(await resolveFieldRequest({ ok: true, message: null }, form("req1", "refuse"))).toEqual({ ok: false, message: "Demande déjà traitée : rechargez la page." });
   });

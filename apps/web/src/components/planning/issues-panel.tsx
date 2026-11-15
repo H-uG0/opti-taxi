@@ -208,7 +208,9 @@ export function IssuesPanel({
   onSelectVehicle,
   live = null,
 }: IssuesPanelProps) {
-  // A patient driven to the facility and not back home (or the reverse) comes first.
+  // Sections by severity: the crews' requests, then a patient driven to the facility and not back home (or the
+  // reverse), the appointments at risk, the silent routes, the vehicles to review and the returns after an absence
+  // (the order of issueTargets); the amber ones after.
   const halfServed = planned ? unassigned.filter((u) => u.servedPartner) : [];
   const otherUnassigned = planned ? unassigned.filter((u) => !u.servedPartner) : unassigned;
   const count =
@@ -260,6 +262,26 @@ export function IssuesPanel({
             </Section>
           ) : null}
 
+          {halfServed.length > 0 ? (
+            <Section
+              icon={<House aria-hidden className="size-3.5" />}
+              title={`Aller ou retour sans véhicule (${halfServed.length})`}
+              tone="red"
+              intro="L'autre trajet du patient est planifié&nbsp;: sans celui-ci, il reste au lieu de soins ou n'y est pas conduit. Placez la course à la main, réoptimisez, ou annulez-la avec le motif «&#x202F;Confiée à un confrère&#x202F;»."
+            >
+              {halfServed.map((u) => (
+                <li key={u.tripId}>
+                  <TripButton tripId={u.tripId} trips={trips} selected={u.tripId === selectedTripId} onSelect={onSelectTrip}>
+                    <span className="font-medium text-red-800">
+                      {halfServedText(trips[u.tripId], vehicleLabels[u.servedPartner?.vehicleId ?? ""] ?? "un véhicule")}
+                    </span>
+                    <span className="block">{u.reason}</span>
+                  </TripButton>
+                </li>
+              ))}
+            </Section>
+          ) : null}
+
           {live && live.threatened.length > 0 ? (
             <Section
               icon={<CalendarClock aria-hidden className="size-3.5" />}
@@ -294,84 +316,6 @@ export function IssuesPanel({
                       Aucun statut depuis {formatMinute(s.sinceMinute)} ({formatDuration(s.minutes)})
                     </span>
                   </VehicleButton>
-                </li>
-              ))}
-            </Section>
-          ) : null}
-
-          {live && live.overdue.length > 0 ? (
-            <Section
-              icon={<Clock4 aria-hidden className="size-3.5" />}
-              title={`Arrêts sans statut (${live.overdue.length})`}
-              tone="amber"
-              intro="Heure dépassée de plus de 10&nbsp;min sans statut, ou statut oublié avant un arrêt déjà fait."
-            >
-              {live.overdue.map((o) => (
-                <li key={o.stopId}>
-                  <TripButton tripId={o.tripId} trips={trips} selected={o.tripId === selectedTripId} onSelect={onSelectTrip}>
-                    <span className="font-medium text-amber-900">
-                      {o.kind === "PICKUP" ? "Prise en charge" : "Dépose"}{" "}
-                      {o.missing ? "sans statut, l'arrêt suivant est fait" : `attendue vers ${formatMinute(live.nowMinute - o.minutes)}, sans statut depuis ${formatDuration(o.minutes)}`}
-                    </span>
-                    <span className="block">{vehicleOf(o.vehicleId)}</span>
-                  </TripButton>
-                </li>
-              ))}
-            </Section>
-          ) : null}
-
-          {live && live.longWaits.length > 0 ? (
-            <Section
-              icon={<Hourglass aria-hidden className="size-3.5" />}
-              title={`Attentes de plus de ${live.maxTotalWaitMin}\u00a0min (${live.longWaits.length})`}
-              tone="amber"
-              intro="Attente du patient au lieu de soins (avant le RDV et après la séance), retour estimé comme les RDV&nbsp;: replacez le retour («&#x202F;Où placer&#x202F;»)."
-            >
-              {live.longWaits.map((w) => (
-                <li key={w.tripId}>
-                  <TripButton tripId={w.tripId} trips={trips} selected={w.tripId === selectedTripId} onSelect={onSelectTrip}>
-                    <span className="font-medium text-amber-900">
-                      Attente estimée {formatDuration(w.waitMinutes)}, dont {formatDuration(w.afterMinutes)} après la séance
-                    </span>
-                    <span className="block">{vehicleOf(w.vehicleId)}</span>
-                  </TripButton>
-                </li>
-              ))}
-            </Section>
-          ) : null}
-
-          {live && live.unseenRoadmaps.length > 0 ? (
-            <Section
-              icon={<FileWarning aria-hidden className="size-3.5" />}
-              title={`Changements pas encore vus (${live.unseenRoadmaps.length})`}
-              tone="amber"
-              intro="L'équipage n'a pas encore appuyé sur «&#x202F;J'ai vu&#x202F;»&nbsp;: appelez-le si le changement est proche."
-            >
-              {live.unseenRoadmaps.map((r) => (
-                <li key={r.vehicleId}>
-                  <VehicleButton label={vehicleOf(r.vehicleId)} onSelect={() => onSelectVehicle(r.vehicleId)}>
-                    {r.text}
-                  </VehicleButton>
-                </li>
-              ))}
-            </Section>
-          ) : null}
-
-          {halfServed.length > 0 ? (
-            <Section
-              icon={<House aria-hidden className="size-3.5" />}
-              title={`Aller ou retour sans véhicule (${halfServed.length})`}
-              tone="red"
-              intro="L'autre trajet du patient est planifié&nbsp;: sans celui-ci, il reste au lieu de soins ou n'y est pas conduit. Placez la course à la main, réoptimisez, ou annulez-la avec le motif «&#x202F;Confiée à un confrère&#x202F;»."
-            >
-              {halfServed.map((u) => (
-                <li key={u.tripId}>
-                  <TripButton tripId={u.tripId} trips={trips} selected={u.tripId === selectedTripId} onSelect={onSelectTrip}>
-                    <span className="font-medium text-red-800">
-                      {halfServedText(trips[u.tripId], vehicleLabels[u.servedPartner?.vehicleId ?? ""] ?? "un véhicule")}
-                    </span>
-                    <span className="block">{u.reason}</span>
-                  </TripButton>
                 </li>
               ))}
             </Section>
@@ -454,6 +398,64 @@ export function IssuesPanel({
                       </button>
                     ) : null}
                   </p>
+                </li>
+              ))}
+            </Section>
+          ) : null}
+
+          {live && live.overdue.length > 0 ? (
+            <Section
+              icon={<Clock4 aria-hidden className="size-3.5" />}
+              title={`Arrêts sans statut (${live.overdue.length})`}
+              tone="amber"
+              intro="Heure dépassée de plus de 10&nbsp;min sans statut, ou statut oublié avant un arrêt déjà fait."
+            >
+              {live.overdue.map((o) => (
+                <li key={o.stopId}>
+                  <TripButton tripId={o.tripId} trips={trips} selected={o.tripId === selectedTripId} onSelect={onSelectTrip}>
+                    <span className="font-medium text-amber-900">
+                      {o.kind === "PICKUP" ? "Prise en charge" : "Dépose"}{" "}
+                      {o.missing ? "sans statut, l'arrêt suivant est fait" : `attendue vers ${formatMinute(live.nowMinute - o.minutes)}, sans statut depuis ${formatDuration(o.minutes)}`}
+                    </span>
+                    <span className="block">{vehicleOf(o.vehicleId)}</span>
+                  </TripButton>
+                </li>
+              ))}
+            </Section>
+          ) : null}
+
+          {live && live.longWaits.length > 0 ? (
+            <Section
+              icon={<Hourglass aria-hidden className="size-3.5" />}
+              title={`Attentes de plus de ${live.maxTotalWaitMin}\u00a0min (${live.longWaits.length})`}
+              tone="amber"
+              intro="Attente du patient au lieu de soins (avant le RDV et après la séance), retour estimé comme les RDV&nbsp;: replacez le retour («&#x202F;Où placer&#x202F;»)."
+            >
+              {live.longWaits.map((w) => (
+                <li key={w.tripId}>
+                  <TripButton tripId={w.tripId} trips={trips} selected={w.tripId === selectedTripId} onSelect={onSelectTrip}>
+                    <span className="font-medium text-amber-900">
+                      Attente estimée {formatDuration(w.waitMinutes)}, dont {formatDuration(w.afterMinutes)} après la séance
+                    </span>
+                    <span className="block">{vehicleOf(w.vehicleId)}</span>
+                  </TripButton>
+                </li>
+              ))}
+            </Section>
+          ) : null}
+
+          {live && live.unseenRoadmaps.length > 0 ? (
+            <Section
+              icon={<FileWarning aria-hidden className="size-3.5" />}
+              title={`Changements pas encore vus (${live.unseenRoadmaps.length})`}
+              tone="amber"
+              intro="Changements que l'équipage n'a pas encore vus («&#x202F;J'ai vu&#x202F;»), ou que son téléphone n'a pas encore reçus (écran éteint, pas de réseau)&nbsp;: appelez-le si le changement est proche."
+            >
+              {live.unseenRoadmaps.map((r) => (
+                <li key={r.vehicleId}>
+                  <VehicleButton label={vehicleOf(r.vehicleId)} onSelect={() => onSelectVehicle(r.vehicleId)}>
+                    {r.text}
+                  </VehicleButton>
                 </li>
               ))}
             </Section>

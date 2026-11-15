@@ -67,6 +67,16 @@ describe("Changes of the roadmap made by the regulation", () => {
     expect(screen.getByTestId("changed").textContent).toBe("");
   });
 
+  it("says when « J'ai vu » did not go through, and keeps the banner", async () => {
+    fetchMock.mockResolvedValueOnce(answer([pending])).mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    renderWatch("f2");
+    await screen.findByRole("alert");
+    fireEvent.click(screen.getByRole("button", { name: "J'ai vu" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Pas de réseau"));
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "J'ai vu" })).toBeTruthy();
+  });
+
   it("draws the page again when the roadmap shown is not the one stored", async () => {
     fetchMock.mockResolvedValue(answer([{ ...pending, pending: null }]));
     renderWatch("f1");

@@ -13,19 +13,29 @@
  * Takes the Prisma client as a parameter (no server-only import), like version.ts.
  */
 import { createHash } from "node:crypto";
-import type { CancellationReason, FieldRequestKind, FieldRequestStatus, Prisma, PrismaClient, StopKind, TripStatus } from "@prisma/client";
+import type { CancellationReason, FieldRequestKind, FieldRequestStatus, Prisma, PrismaClient, StopKind, TripDirection, TripStatus } from "@prisma/client";
 import type { FieldRequestView } from "@/lib/domain/field-requests";
 import { returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
 import { formatTimeOn, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import { minuteOn } from "./day-progress";
-import { roadmapSnapshot, roadmapStanding, roadmapStateText, storedStops, type StoredVersion } from "./roadmap-version";
-import { loadDayVersion } from "./version";
+import {
+  changedTripIds,
+  publicationTime,
+  roadmapPending,
+  roadmapSnapshot,
+  roadmapStanding,
+  roadmapStateText,
+  seenByCrew,
+  storedStops,
+  type StoredVersion,
+} from "./roadmap-version";
+import { loadDayVersion, loadPlanVersion } from "./version";
 
 /** Where a crew stands with its roadmap, as the regulator reads it. */
 export type RoadmapStateView = {
   text: string;
   tone: "ok" | "pending" | "info";
-  /** Changes not acknowledged by the crew, since (ISO); null when none. */
+  /** When the latest change not acknowledged by the crew (or not received by its phone) was made (ISO); null when none. */
   pendingSince: string | null;
 };
 
@@ -65,6 +75,7 @@ const ROUTE_SELECT = {
   endMinute: true,
   breakStartMinute: true,
   breakEndMinute: true,
+  updatedAt: true,
   stops: { select: { id: true, tripId: true, kind: true, sequence: true, startMinute: true, completedAt: true } },
 } satisfies Prisma.RouteSelect;
 
@@ -73,6 +84,7 @@ const TRIP_SELECT = {
   status: true,
   direction: true,
   readyMinute: true,
+  updatedAt: true,
   appointmentMinute: true,
   routeId: true,
   lockedVehicleId: true,
@@ -137,6 +149,41 @@ export function planKeyOf(routes: readonly LiveRoute[], trips: readonly LiveTrip
   return token(`${routeText}#${tripText}`);
 }
 
+/** planKeyOf of isoDate's plan as stored (usable inside a transaction). */
+export async function loadPlanKey(
+  client: Pick<PrismaClient, "route" | "trip"> | Pick<Prisma.TransactionClient, "route" | "trip">,
+  isoDate: string,
+): Promise<string> {
+  const serviceDate = fromIsoDate(isoDate);
+  const [routes, trips] = await Promise.all([
+    client.route.findMany({ where: { serviceDate }, select: ROUTE_SELECT }),
+    client.trip.findMany({ where: { serviceDate }, select: TRIP_SELECT }),
+  ]);
+  return planKeyOf(routes, trips);
+}
+
+const LIVE_TOKEN = "live:";
+
+/** What the planning page of today guards its actions with: the plan's key it was drawn with (« Suivi du jour »). */
+export function livePlanToken(planKey: string): string {
+  return `${LIVE_TOKEN}${planKey}`;
+}
+
+/**
+ * Whether the plan an action was taken on (`shown`) is still the one stored: the plan version (version.ts), or on the
+ * planning page of today its plan key (livePlanToken). The crews' statuses and ends of session move the version
+ * all day long but not the key: the page shows them live, and says « Planning modifié » only when the key moves.
+ */
+export async function shownPlanHolds(
+  client: Pick<PrismaClient, "route" | "trip" | "$queryRaw"> | Pick<Prisma.TransactionClient, "route" | "trip" | "$queryRaw">,
+  isoDate: string,
+  shown: unknown,
+): Promise<boolean> {
+  if (typeof shown !== "string") return false;
+  if (shown.startsWith(LIVE_TOKEN)) return isoDate === todayIso() && livePlanToken(await loadPlanKey(client, isoDate)) === shown;
+  return (await loadPlanVersion(client, isoDate)) === shown;
+}
+
 const VERSION_SELECT = {
   vehicleId: true,
   version: true,
@@ -144,7 +191,7 @@ const VERSION_SELECT = {
   stops: true,
   publishedAt: true,
   seenAt: true,
-  seenBy: { select: { name: true } },
+  seenBy: { select: { name: true, driverId: true } },
 } satisfies Prisma.RouteVersionSelect;
 
 type VersionRow = {
@@ -154,35 +201,76 @@ type VersionRow = {
   stops: Prisma.JsonValue;
   publishedAt: Date;
   seenAt: Date | null;
-  seenBy: { name: string } | null;
+  seenBy: { name: string; driverId: string | null } | null;
+};
+
+/**
+ * The versions of isoDate's roadmaps where the crews stand: for each vehicle, its latest version acknowledged and the
+ * later ones (the earlier ones tell nothing more, and they pile up through the day). All of them for a vehicle whose
+ * versions were never acknowledged (a race of the first opening).
+ */
+async function loadStandingVersions(client: Pick<PrismaClient, "routeVersion">, serviceDate: Date): Promise<VersionRow[]> {
+  const seen = await client.routeVersion.groupBy({ by: ["vehicleId"], where: { serviceDate, seenAt: { not: null } }, _max: { version: true } });
+  const from = seen.flatMap((row) => (row._max.version !== null ? [{ vehicleId: row.vehicleId, version: { gte: row._max.version } }] : []));
+  return client.routeVersion.findMany({
+    where: { serviceDate, OR: [...from, { vehicleId: { notIn: from.map((row) => row.vehicleId) } }] },
+    select: VERSION_SELECT,
+  });
+}
+
+/** A route as its roadmap state needs it: the crew, the stops, and when it was last changed. */
+type RoadmapRoute = {
+  vehicleId: string;
+  driverId: string | null;
+  crewMateId: string | null;
+  updatedAt: Date;
+  stops: readonly { tripId: string; kind: StopKind; sequence: number; startMinute: number }[];
 };
 
 /** Each route's roadmap state: its versions against the roadmap as stored now. */
 export function roadmapStatesOf(args: {
   isoDate: string;
-  routes: readonly { vehicleId: string; stops: readonly { tripId: string; kind: StopKind; sequence: number; startMinute: number }[] }[];
-  cancelled: (tripId: string) => boolean;
+  routes: readonly RoadmapRoute[];
+  trips: ReadonlyMap<string, { status: TripStatus; direction: TripDirection; readyMinute: number | null; updatedAt: Date }>;
   versions: readonly VersionRow[];
   now: Date;
 }): Record<string, RoadmapStateView> {
-  const { isoDate, routes, cancelled, versions, now } = args;
+  const { isoDate, routes, trips, versions, now } = args;
   const byVehicle = new Map<string, StoredVersion[]>();
   for (const row of versions) {
     const list = byVehicle.get(row.vehicleId) ?? [];
-    list.push({ version: row.version, fingerprint: row.fingerprint, stops: storedStops(row.stops), publishedAt: row.publishedAt, seenAt: row.seenAt, seenByName: row.seenBy?.name ?? null });
+    list.push({
+      version: row.version,
+      fingerprint: row.fingerprint,
+      stops: storedStops(row.stops),
+      publishedAt: row.publishedAt,
+      seenAt: row.seenAt,
+      seenByName: row.seenBy?.name ?? null,
+      seenByDriverId: row.seenBy?.driverId ?? null,
+    });
     byVehicle.set(row.vehicleId, list);
   }
   const states: Record<string, RoadmapStateView> = {};
   for (const route of routes) {
-    const standing = roadmapStanding(byVehicle.get(route.vehicleId) ?? []);
-    const current = roadmapSnapshot(route.stops, cancelled).fingerprint;
-    const state = roadmapStateText({
-      standing,
-      undelivered: standing !== null && standing.latest.fingerprint !== current,
-      time: (instant) => formatTimeOn(instant, isoDate, now),
-    });
-    if (!state) continue;
-    states[route.vehicleId] = { ...state, pendingSince: standing?.changedAt?.toISOString() ?? null };
+    const standing = roadmapStanding(byVehicle.get(route.vehicleId) ?? [], seenByCrew(route));
+    const current = roadmapSnapshot(
+      route.stops,
+      (tripId) => trips.get(tripId)?.status === "CANCELLED",
+      (tripId) => {
+        const trip = trips.get(tripId);
+        return trip?.direction === "RETURN" ? trip.readyMinute : null;
+      },
+    );
+    // A change the phone has not received yet: dated as the phone will date it (roadmap-sync.ts).
+    const pending = roadmapPending(standing, current, () =>
+      publicationTime({
+        previous: standing?.latest.publishedAt ?? null,
+        noticedAt: now,
+        updates: [route.updatedAt, ...changedTripIds(standing?.latest.stops ?? [], current.stops).flatMap((id) => trips.get(id)?.updatedAt ?? [])],
+      }),
+    );
+    const state = roadmapStateText({ standing, pending, time: (instant) => formatTimeOn(instant, isoDate, now) });
+    states[route.vehicleId] = { ...state, pendingSince: pending?.changedAt.toISOString() ?? null };
   }
   return states;
 }
@@ -241,13 +329,21 @@ export async function loadPendingRequests(client: Pick<PrismaClient, "fieldReque
 /** The roadmap states of isoDate's routes (the planning page of tomorrow, without the live poll). */
 export async function loadRoadmapStates(client: Pick<PrismaClient, "route" | "trip" | "routeVersion">, isoDate: string, now: Date = new Date()): Promise<Record<string, RoadmapStateView>> {
   const serviceDate = fromIsoDate(isoDate);
-  const [routes, cancelled, versions] = await Promise.all([
-    client.route.findMany({ where: { serviceDate }, select: { vehicleId: true, stops: { select: { tripId: true, kind: true, sequence: true, startMinute: true } } } }),
-    client.trip.findMany({ where: { serviceDate, status: "CANCELLED", routeId: { not: null } }, select: { id: true } }),
-    client.routeVersion.findMany({ where: { serviceDate }, select: VERSION_SELECT }),
+  const [routes, trips, versions] = await Promise.all([
+    client.route.findMany({
+      where: { serviceDate },
+      select: {
+        vehicleId: true,
+        driverId: true,
+        crewMateId: true,
+        updatedAt: true,
+        stops: { select: { tripId: true, kind: true, sequence: true, startMinute: true } },
+      },
+    }),
+    client.trip.findMany({ where: { serviceDate }, select: { id: true, status: true, direction: true, readyMinute: true, updatedAt: true } }),
+    loadStandingVersions(client, serviceDate),
   ]);
-  const gone = new Set(cancelled.map((t) => t.id));
-  return roadmapStatesOf({ isoDate, routes, cancelled: (id) => gone.has(id), versions, now });
+  return roadmapStatesOf({ isoDate, routes, trips: new Map(trips.map((t) => [t.id, t])), versions, now });
 }
 
 /** The live state of isoDate at `now` (see the module's comment). */
@@ -257,14 +353,13 @@ export async function loadLiveSnapshot(client: Client, isoDate: string, now: Dat
     loadDayVersion(client, isoDate, now),
     client.route.findMany({ where: { serviceDate }, select: ROUTE_SELECT }),
     client.trip.findMany({ where: { serviceDate }, select: TRIP_SELECT }),
-    client.routeVersion.findMany({ where: { serviceDate }, select: VERSION_SELECT }),
+    loadStandingVersions(client, serviceDate),
     loadPendingRequests(client, isoDate),
   ]);
   const done: Record<string, number> = {};
   for (const route of routes) {
     for (const stop of route.stops) if (stop.completedAt) done[stop.id] = minuteOn(stop.completedAt, isoDate);
   }
-  const statusOf = new Map(trips.map((trip) => [trip.id, trip.status]));
   return {
     date: isoDate,
     serverTime: now.getTime(),
@@ -276,7 +371,7 @@ export async function loadLiveSnapshot(client: Client, isoDate: string, now: Dat
     done,
     trips: Object.fromEntries(trips.map((trip) => [trip.id, { status: trip.status, readyMinute: trip.readyMinute }])),
     returnsToCheck: [...returnsToCheckAfterNoShow(trips)],
-    roadmaps: roadmapStatesOf({ isoDate, routes, cancelled: (id) => statusOf.get(id) === "CANCELLED", versions, now }),
+    roadmaps: roadmapStatesOf({ isoDate, routes, trips: new Map(trips.map((trip) => [trip.id, trip])), versions, now }),
     requests,
   };
 }

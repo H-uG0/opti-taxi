@@ -150,8 +150,9 @@ export async function loadReturnTripsAfterOutboundNoShow(routes: readonly Driver
 
 /**
  * What the crew's signals and requests need (DAY-05): the return the same day of each outbound dropped off on these
- * routes (on any vehicle: only its id, status and end of session come out), and the crews' requests about these
- * trips and returns.
+ * routes (on any vehicle: only its id, status and end of session come out; a cancelled one when there is no other, so
+ * that the answer to « Annuler le retour » still shows), and the crews' requests about these trips and returns. A
+ * signal replaced by a newer one (an end of session or a next session typed again) is left out.
  */
 export async function loadFieldContext(routes: readonly DriverRoute[], isoDate: string): Promise<FieldContext> {
   const stops = routes.flatMap((route) => route.stops);
@@ -162,14 +163,15 @@ export async function loadFieldContext(routes: readonly DriverRoute[], isoDate: 
   const candidates =
     patientIds.length > 0
       ? await db.trip.findMany({
-          where: { serviceDate, direction: "RETURN", status: { not: "CANCELLED" }, patientId: { in: patientIds } },
+          where: { serviceDate, direction: "RETURN", patientId: { in: patientIds } },
           orderBy: { createdAt: "asc" },
           select: { id: true, status: true, readyMinute: true, patientId: true, recurrenceId: true, facilityId: true },
         })
       : [];
   const returns = new Map<string, { id: string; status: (typeof candidates)[number]["status"]; readyMinute: number | null }>();
   for (const stop of outbound) {
-    const back = candidates.find((trip) => isSameEpisode(stop.trip, trip));
+    const legs = candidates.filter((trip) => isSameEpisode(stop.trip, trip));
+    const back = legs.find((trip) => trip.status !== "CANCELLED") ?? legs.at(-1);
     if (back) returns.set(stop.tripId, { id: back.id, status: back.status, readyMinute: back.readyMinute });
   }
   const tripIds = [...new Set([...stops.map((stop) => stop.tripId), ...[...returns.values()].map((back) => back.id)])];
@@ -187,10 +189,15 @@ export async function loadFieldContext(routes: readonly DriverRoute[], isoDate: 
       nextSessionDate: true,
       createdAt: true,
       createdBy: { select: { name: true } },
+      resolvedById: true,
     },
   });
   const requests = new Map<string, FieldRequestView[]>();
-  for (const row of rows) requests.set(row.tripId, [...(requests.get(row.tripId) ?? []), fieldRequestView(row)]);
+  for (const row of rows) {
+    // Closed without a regulator: replaced by a newer signal of the crew (requests route), never « pris en compte ».
+    if (row.status === "NOTED" && row.resolvedById === null) continue;
+    requests.set(row.tripId, [...(requests.get(row.tripId) ?? []), fieldRequestView(row)]);
+  }
   return { returns, requests };
 }
 

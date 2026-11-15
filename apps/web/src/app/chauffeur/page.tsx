@@ -10,7 +10,7 @@ import { STOP_KIND_LABELS } from "@/lib/labels";
 import type { RegulatorContact } from "./_lib/links";
 import { loadDriverRoutes, loadFieldContext, loadNextDaySummary, loadRegulatorContact, loadReturnTripsAfterOutboundNoShow } from "./_lib/load";
 import { isReadableRoadmapDate, type NextDaySummary } from "./_lib/roadmap";
-import { buildRouteView, NO_FIELD_CONTEXT } from "./_lib/view";
+import { buildRouteView, nextDayCardFirst, NO_FIELD_CONTEXT } from "./_lib/view";
 import { DaySwitch } from "./_components/day-switch";
 import { RefreshControl } from "./_components/refresh-control";
 import { ServerRenderMark } from "./_components/driver-app";
@@ -137,7 +137,9 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
     date === today ? loadNextDaySummary(user.driverId, tomorrow) : [],
   ]);
   const views = routes.map((route) => buildRouteView(route, user.driverId, editable, afterOutboundNoShow, field));
-  const dayDone = views.every((view) => view.nextStop === null);
+  // Tomorrow's card, once: first in the evening (today's stops done, or no route today), after the routes otherwise.
+  const nextDayCard = <NextDayCard tomorrow={tomorrow} routes={nextDay} />;
+  const nextDayFirst = nextDayCardFirst(views);
 
   return (
     // Changes made by the regulation since the crew last looked (DAY-04): banner, highlighted stops, « J'ai vu ».
@@ -154,20 +156,16 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
         </div>
 
         <RoadmapChangeBanner labels={Object.fromEntries(views.map((view) => [view.vehicleId, view.vehicle.label]))} />
-      {/* The evening, once today's routes are done (or without any): tomorrow first. */}
-      {dayDone ? <NextDayCard tomorrow={tomorrow} routes={nextDay} /> : null}
+        {nextDayFirst ? nextDayCard : null}
 
         {views.length === 0 ? (
-          <>
-            <NextDayCard tomorrow={tomorrow} routes={nextDay} />
-            <NoRoute date={date} tomorrow={tomorrow} regulator={regulator} />
-          </>
+          <NoRoute date={date} tomorrow={tomorrow} regulator={regulator} />
         ) : (
           <div className="space-y-8">
             {views.map((view) => (
               <RouteSection key={view.id} route={view} regulator={regulator} />
             ))}
-            <NextDayCard tomorrow={tomorrow} routes={nextDay} />
+            {nextDayFirst ? null : nextDayCard}
           </div>
         )}
 

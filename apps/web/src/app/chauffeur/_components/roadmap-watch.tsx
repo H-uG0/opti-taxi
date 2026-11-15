@@ -29,7 +29,12 @@ type RoadmapWatch = {
   highlight: ReadonlySet<string>;
   acknowledge: (vehicleId: string, version: number) => void;
   acknowledging: boolean;
+  /** Why the latest « J'ai vu » did not go through (no network, server unreachable), null otherwise. */
+  ackFailure: { vehicleId: string; text: string } | null;
 };
+
+const ACK_OFFLINE = "Pas de réseau\u00a0: «\u202fJ'ai vu\u202f» n'est pas parti. Réessayez, ou appelez la régulation.";
+const ACK_FAILED = "«\u202fJ'ai vu\u202f» n'a pas pu être enregistré. Réessayez, ou appelez la régulation.";
 
 const RoadmapWatchContext = createContext<RoadmapWatch | null>(null);
 
@@ -56,6 +61,7 @@ export function RoadmapWatchProvider({
   const { ownerId } = useDriverApp();
   const [states, setStates] = useState<CrewRoadmapState[]>([]);
   const [acknowledging, setAcknowledging] = useState(false);
+  const [ackFailure, setAckFailure] = useState<RoadmapWatch["ackFailure"]>(null);
   const [, startTransition] = useTransition();
   const drawn = useRef(routes);
   const lastRefresh = useRef(0);
@@ -63,9 +69,10 @@ export function RoadmapWatchProvider({
     drawn.current = routes;
   }, [routes]);
 
+  /** Asks the server; says whether it answered (« J'ai vu » tells the crew when it did not). */
   const sync = useCallback(
-    async (ack?: { vehicleId: string; version: number }) => {
-      if (navigator.onLine === false) return;
+    async (ack?: { vehicleId: string; version: number }): Promise<"ok" | "offline" | "failed"> => {
+      if (navigator.onLine === false) return "offline";
       try {
         const response = await fetch(SYNC_URL, {
           method: "POST",
@@ -76,7 +83,7 @@ export function RoadmapWatchProvider({
           redirect: "error",
         });
         const body = (await response.json().catch(() => null)) as RoadmapSyncResponse | null;
-        if (!body?.ok) return;
+        if (!body?.ok) return "failed";
         setStates(body.routes);
         // The page drawn is not the roadmap as it is now: draw it again (at most every 10 s).
         const shown = new Map(drawn.current.map((route) => [route.vehicleId, route.fingerprint]));
@@ -85,8 +92,10 @@ export function RoadmapWatchProvider({
           lastRefresh.current = Date.now();
           startTransition(() => router.refresh());
         }
+        return "ok";
       } catch {
         // No network: the next check will tell.
+        return "offline";
       }
     },
     [date, ownerId, router],
@@ -113,15 +122,20 @@ export function RoadmapWatchProvider({
   const acknowledge = useCallback(
     (vehicleId: string, version: number) => {
       setAcknowledging(true);
-      void sync({ vehicleId, version }).finally(() => setAcknowledging(false));
+      setAckFailure(null);
+      void sync({ vehicleId, version })
+        .then((result) => {
+          if (result !== "ok") setAckFailure({ vehicleId, text: result === "offline" ? ACK_OFFLINE : ACK_FAILED });
+        })
+        .finally(() => setAcknowledging(false));
     },
     [sync],
   );
 
   const value = useMemo<RoadmapWatch>(() => {
     const pending = states.filter((state) => state.pending !== null);
-    return { pending, highlight: new Set(pending.flatMap((state) => state.pending?.highlight ?? [])), acknowledge, acknowledging };
-  }, [states, acknowledge, acknowledging]);
+    return { pending, highlight: new Set(pending.flatMap((state) => state.pending?.highlight ?? [])), acknowledge, acknowledging, ackFailure };
+  }, [states, acknowledge, acknowledging, ackFailure]);
   return <RoadmapWatchContext.Provider value={value}>{children}</RoadmapWatchContext.Provider>;
 }
 
@@ -164,6 +178,11 @@ export function RoadmapChangeBanner({ labels }: { labels: Record<string, string>
               <Check aria-hidden className="size-5" />
               {watch.acknowledging ? "Envoi…" : "J'ai vu"}
             </button>
+            {watch.ackFailure?.vehicleId === state.vehicleId ? (
+              <p role="status" className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-900">
+                {watch.ackFailure.text}
+              </p>
+            ) : null}
           </section>
         );
       })}

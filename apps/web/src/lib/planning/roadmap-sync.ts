@@ -2,7 +2,8 @@
  * A crew's phone checking its roadmap (DAY-04, POST /api/chauffeur/roadmap): each route of the crew on the date gets
  * its version published when it changed since the latest one (RouteVersion), and the phone is told what changed since
  * the version the crew acknowledged. Version 1 is acknowledged by its first opening (there is nothing earlier to
- * compare with). « J'ai vu » acknowledges the latest version.
+ * compare with), and so is the latest one when a new crew opens it (« Changer l'équipage »: what the previous crew saw
+ * does not count for it). « J'ai vu » acknowledges the latest version.
  *
  * Takes the Prisma client as a parameter (no server-only import); the route handler writes the audit event of « J'ai vu ».
  */
@@ -15,6 +16,7 @@ import {
   publicationTime,
   roadmapSnapshot,
   roadmapStanding,
+  seenByCrew,
   storedStops,
   type RoadmapChanges,
   type StoredVersion,
@@ -41,10 +43,24 @@ export type CrewRoadmapState = {
 
 type Client = Pick<PrismaClient, "route" | "trip" | "routeVersion">;
 
-const VERSION_SELECT = { version: true, fingerprint: true, stops: true, publishedAt: true, seenAt: true } satisfies Prisma.RouteVersionSelect;
+const VERSION_SELECT = {
+  version: true,
+  fingerprint: true,
+  stops: true,
+  publishedAt: true,
+  seenAt: true,
+  seenBy: { select: { driverId: true } },
+} satisfies Prisma.RouteVersionSelect;
 
 function toStored(row: Prisma.RouteVersionGetPayload<{ select: typeof VERSION_SELECT }>): StoredVersion {
-  return { version: row.version, fingerprint: row.fingerprint, stops: storedStops(row.stops), publishedAt: row.publishedAt, seenAt: row.seenAt };
+  return {
+    version: row.version,
+    fingerprint: row.fingerprint,
+    stops: storedStops(row.stops),
+    publishedAt: row.publishedAt,
+    seenAt: row.seenAt,
+    seenByDriverId: row.seenBy?.driverId ?? null,
+  };
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -62,13 +78,25 @@ export async function syncCrewRoadmaps(client: Client, args: { isoDate: string; 
     where: { serviceDate, OR: [{ driverId }, { crewMateId: driverId }] },
     select: {
       vehicleId: true,
+      driverId: true,
+      crewMateId: true,
       updatedAt: true,
-      stops: { select: { tripId: true, kind: true, sequence: true, startMinute: true, trip: { select: { status: true } } } },
+      stops: {
+        select: { tripId: true, kind: true, sequence: true, startMinute: true, trip: { select: { status: true, direction: true, readyMinute: true } } },
+      },
     },
   });
   const states: CrewRoadmapState[] = [];
   for (const route of routes) {
-    const current = roadmapSnapshot(route.stops, (tripId) => route.stops.find((s) => s.tripId === tripId)?.trip.status === "CANCELLED");
+    const tripOf = (tripId: string) => route.stops.find((s) => s.tripId === tripId)?.trip;
+    const current = roadmapSnapshot(
+      route.stops,
+      (tripId) => tripOf(tripId)?.status === "CANCELLED",
+      (tripId) => {
+        const trip = tripOf(tripId);
+        return trip?.direction === "RETURN" ? trip.readyMinute : null;
+      },
+    );
     const where = { serviceDate, vehicleId: route.vehicleId };
     let versions = (await client.routeVersion.findMany({ where, select: VERSION_SELECT, orderBy: { version: "asc" } })).map(toStored);
     const latest = versions.at(-1);
@@ -99,8 +127,17 @@ export async function syncCrewRoadmaps(client: Client, args: { isoDate: string; 
       }
       versions = (await client.routeVersion.findMany({ where, select: VERSION_SELECT, orderBy: { version: "asc" } })).map(toStored);
     }
-    const standing = roadmapStanding(versions);
+    const crewSaw = seenByCrew(route);
+    let standing = roadmapStanding(versions, crewSaw);
     if (!standing) continue;
+    if (!standing.seen) {
+      // A crew opening a roadmap it never saw (put on the vehicle after its first opening): its first sight, nothing
+      // earlier to tell it about. The previous crew's acknowledgement of that version is replaced.
+      await client.routeVersion.updateMany({ where: { ...where, version: standing.latest.version }, data: { seenAt: now, seenById: userId } });
+      versions = (await client.routeVersion.findMany({ where, select: VERSION_SELECT, orderBy: { version: "asc" } })).map(toStored);
+      standing = roadmapStanding(versions, crewSaw);
+      if (!standing) continue;
+    }
     const { changes, changedAt } = standing;
     states.push({
       vehicleId: route.vehicleId,

@@ -122,11 +122,25 @@ describe("POST /api/chauffeur/stops/:id/requests", () => {
     expect((await answer(await post({ kind: "CANCEL", reason: "PATIENT" }))).body).toMatchObject({ ok: false, code: "refused" });
   });
 
-  it("passes the next session on, after the day of service", async () => {
+  it("passes the next session on, after the day of service, a real date only", async () => {
     stop("DROPOFF", outbound);
     expect((await answer(await post({ kind: "NEXT_SESSION", nextSessionDate: "2026-11-09" }))).body).toMatchObject({ ok: false, code: "invalid" });
+    // Never stored as 2026-12-01, never sent to the database as an Invalid Date.
+    expect(await answer(await post({ kind: "NEXT_SESSION", nextSessionDate: "2026-11-31" }))).toMatchObject({ status: 400, body: { ok: false, error: "Date invalide." } });
+    expect(await answer(await post({ kind: "NEXT_SESSION", nextSessionDate: "2026-13-01" }))).toMatchObject({ status: 400, body: { ok: false, error: "Date invalide." } });
+    expect(fake.tx.fieldRequest.create).not.toHaveBeenCalled();
     expect((await answer(await post({ kind: "NEXT_SESSION", nextSessionDate: "2026-11-11" }))).body).toMatchObject({ ok: true });
     expect(fake.tx.fieldRequest.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ kind: "NEXT_SESSION", nextSessionDate: new Date("2026-11-11T00:00:00.000Z") }) }));
+  });
+
+  it("signals nothing from the drop-off of an outbound cancelled or closed as « patient absent », as the roadmap hides it", async () => {
+    for (const status of ["CANCELLED", "NO_SHOW"]) {
+      stop("DROPOFF", { ...outbound, status });
+      expect(await answer(await post({ kind: "READY_TIME", readyMinute: 680 }))).toMatchObject({ status: 409, body: { ok: false, code: "refused" } });
+      expect(await answer(await post({ kind: "RETURN", readyMinute: 700 }))).toMatchObject({ status: 409, body: { ok: false, code: "refused" } });
+    }
+    expect(fake.tx.trip.updateMany).not.toHaveBeenCalled();
+    expect(fake.tx.fieldRequest.create).not.toHaveBeenCalled();
   });
 
   it("refuses someone else's stop, another day, another account's page and a request from another site", async () => {

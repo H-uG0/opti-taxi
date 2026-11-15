@@ -11,7 +11,7 @@ const trips = {
   "trip-b": tripView({ id: "trip-b", patientName: "Paul Durand", direction: "RETURN", readyMinute: 690, appointmentMinute: null }),
 };
 
-function renderPanel(live: Partial<LiveIssues>) {
+function renderPanel(live: Partial<LiveIssues>, props: Partial<Parameters<typeof IssuesPanel>[0]> = {}) {
   const onSelectTrip = vi.fn();
   const onSelectVehicle = vi.fn();
   render(
@@ -42,6 +42,7 @@ function renderPanel(live: Partial<LiveIssues>) {
         unseenRoadmaps: [],
         ...live,
       }}
+      {...props}
     />,
   );
   return { onSelectTrip, onSelectVehicle };
@@ -73,13 +74,22 @@ describe("IssuesPanel: « Suivi du jour »", () => {
       requests: [
         { id: "r1", kind: "READY_TIME", status: "PENDING", tripId: "trip-b", readyMinute: 680, previousReadyMinute: 690, cancellationReason: null, nextSessionDate: null, createdAt: "2026-11-16T09:05:00.000Z", createdBy: "Julien Marchetti" },
       ],
-      unseenRoadmaps: [{ vehicleId: "taxi-1", text: "Modifiée à 10:42 (1\u00a0course retirée), pas encore vue" }],
+      unseenRoadmaps: [{ vehicleId: "taxi-1", text: "Feuille de route modifiée à 10:42 (1\u00a0course retirée), pas encore reçue sur le téléphone" }],
     });
     const requests = section(/Demandes des équipages \(1\)/);
     expect(requests.textContent).toContain("Patient prêt à 11:20 (prévu 11:30)");
     expect(requests.textContent).toContain("Julien Marchetti, à 10:05");
     expect(within(requests).getByRole("button", { name: "Pris en compte" })).toBeTruthy();
-    expect(section(/Changements pas encore vus \(1\)/).textContent).toContain("Modifiée à 10:42");
+    expect(section(/Changements pas encore vus \(1\)/).textContent).toContain("Feuille de route modifiée à 10:42");
+  });
+
+  it("puts a patient left at the care place and the returns to check before the stops without status", () => {
+    renderPanel(
+      { overdue: [{ stopId: "s1", tripId: "trip-b", vehicleId: "taxi-1", kind: "PICKUP", minutes: 14, missing: false }] },
+      { unassigned: [{ tripId: "trip-b", reason: "Aucun véhicule", servedPartner: { tripId: "trip-a", vehicleId: "taxi-1" } }], returnsToCheck: ["trip-b"] },
+    );
+    const titles = screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent);
+    expect(titles).toEqual(["Aller ou retour sans véhicule (1)", "Retours à vérifier (1)", "Arrêts sans statut (1)"]);
   });
 
   it("adds nothing without the follow-up", () => {

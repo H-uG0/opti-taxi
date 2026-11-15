@@ -25,7 +25,7 @@ import { db } from "@/lib/db";
 import { FIELD_CANCEL_REASONS, nextSessionIssue, OPEN_TRIP_STATUSES, readyMinuteIssue } from "@/lib/domain/field-requests";
 import { isSameEpisode } from "@/lib/domain/no-show";
 import { logError } from "@/lib/log";
-import { formatMinute, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
+import { formatMinute, fromIsoDate, isIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import { jsonReply, ORIGIN_ERROR, PASSWORD_ERROR, SESSION_ERROR } from "@/app/api/chauffeur/_lib/reply";
 
 const bodySchema = z.object({
@@ -138,6 +138,10 @@ async function record(user: { id: string; role: "DRIVER" | "REGULATOR"; driverId
   }
 
   if (!atDropoff) return failure(409, "refused", "Cette demande se fait depuis la dépose de l'aller.");
+  // As the roadmap shows it (stopFieldView): nothing to signal after an outbound cancelled or closed as « absent ».
+  if (trip.status === "CANCELLED" || trip.status === "NO_SHOW") {
+    return failure(409, "refused", "L'aller est annulé ou le patient absent\u00a0: appelez la régulation.");
+  }
 
   return db.$transaction(async (tx) => {
     const back = await returnOf(tx, trip);
@@ -189,6 +193,8 @@ async function record(user: { id: string; role: "DRIVER" | "REGULATOR"; driverId
       }
       case "NEXT_SESSION": {
         if (!input.nextSessionDate) return failure(400, "invalid", "Indiquez la date de la prochaine séance.");
+        // A real date: 2026-02-30 is never stored as 2026-03-02, 2026-13-01 never reaches the database.
+        if (!isIsoDate(input.nextSessionDate)) return failure(400, "invalid", "Date invalide.");
         const issue = nextSessionIssue(input.nextSessionDate, isoDate);
         if (issue) return failure(400, "invalid", issue);
         await tx.fieldRequest.updateMany({ where: { tripId: trip.id, kind: "NEXT_SESSION", status: "PENDING" }, data: { status: "NOTED", resolvedAt: now } });

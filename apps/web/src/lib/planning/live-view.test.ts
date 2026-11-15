@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RouteProjection, StopProjection } from "./live-day";
-import { liveRowView, vehicleLiveView } from "./live-view";
+import { liveRowView, tripLiveText, vehicleLiveView } from "./live-view";
 
 function stop(id: string, state: StopProjection["state"], extra: Partial<StopProjection> = {}): StopProjection {
   return { stopId: id, tripId: `t${id}`, kind: "PICKUP", state, startMinute: 600, departureMinute: 605, delayMinutes: 0, overdueMinutes: null, ...extra };
@@ -61,5 +61,20 @@ describe("vehicleLiveView", () => {
     expect(vehicleLiveView(route({ started: false, closed: 0, lastStatusMinute: null, silentSinceMinute: 445 })).alert).toBe(
       "Aucun statut depuis 07:25\u00a0: appelez l'équipage.",
     );
+  });
+});
+
+describe("tripLiveText", () => {
+  it("says where the trip's pickup and drop-off stand, agreed with them", () => {
+    const trip = route({
+      stops: [
+        stop("s1", "done", { tripId: "ta", departureMinute: 492 }),
+        stop("s2", "pending", { tripId: "ta", kind: "DROPOFF", startMinute: 545, delayMinutes: 12 }),
+        stop("s3", "done", { tripId: "tb", kind: "DROPOFF", startMinute: 545 }),
+      ],
+    });
+    expect(tripLiveText(trip, "ta")).toBe("prise en charge faite à 08:12 · dépose vers 09:05, +12\u00a0min");
+    expect(tripLiveText(trip, "tb")).toBe("dépose faite à 09:05");
+    expect(tripLiveText(trip, "tz")).toBeNull();
   });
 });

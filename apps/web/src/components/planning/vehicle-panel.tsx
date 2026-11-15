@@ -107,10 +107,8 @@ export function VehiclePanel({
             ) : (
               <FileCheck2 aria-hidden className="mt-0.5 size-3.5 shrink-0 text-slate-500" />
             )}
-            <span>
-              <span className="sr-only">Feuille de route&nbsp;: </span>
-              {roadmap.text}
-            </span>
+            {/* The text names the roadmap (« Feuille de route ouverte à 07:05 par… »). */}
+            <span>{roadmap.text}</span>
           </p>
         ) : null}
         {route && lockAction ? <div className="pt-1.5">{lockAction}</div> : null}

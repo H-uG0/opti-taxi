@@ -1,7 +1,7 @@
 /**
  * What the planning page says of a route under way (DAY-01), from its projection (live-day.ts): the chip of its row
  * on the timeline (« 5/12 · +12 min »), the lines of the vehicle panel and the time of each stop there (« fait à
- * 10:31 », « prévu 10:54, +12 min »). Pure, unit-tested.
+ * 10:31 », « vers 10:54, +12 min »), the trip panel's line. Pure, unit-tested.
  */
 import { formatDuration, formatMinute } from "@/lib/time";
 import { SHOWN_DELAY_MIN, type RouteProjection, type StopProjection } from "./live-day";
@@ -59,14 +59,28 @@ export function vehicleLiveView(route: RouteProjection): VehicleLiveView {
         : null;
   const stops: VehicleLiveView["stops"] = {};
   for (const stop of route.stops) {
-    if (stop.state === "done") stops[stop.stopId] = { text: `fait à ${formatMinute(stop.kind === "PICKUP" ? stop.departureMinute : stop.startMinute)}`, tone: "done" };
-    else if (stop.state === "missing") stops[stop.stopId] = { text: "sans statut", tone: "alert" };
-    else if (stop.state === "pending") {
-      const late = stop.delayMinutes >= SHOWN_DELAY_MIN;
-      stops[stop.stopId] = late
-        ? { text: `vers ${formatMinute(stop.startMinute)}, +${minutes(stop.delayMinutes)}`, tone: stop.overdueMinutes !== null || stop.delayMinutes >= ALERT_DELAY_MIN ? "alert" : "late" }
-        : { text: "à l'heure", tone: "ok" };
-    }
+    const text = stopLiveText(stop, "fait");
+    if (text) stops[stop.stopId] = text;
   }
   return { summary: parts.join(" · "), alert, stops };
+}
+
+/** What happened at a stop, or when it should now happen; `done` agrees with what is named (« arrêt fait », « dépose faite »). */
+function stopLiveText(stop: StopProjection, done: "fait" | "faite"): VehicleLiveView["stops"][string] | null {
+  if (stop.state === "done") return { text: `${done} à ${formatMinute(stop.kind === "PICKUP" ? stop.departureMinute : stop.startMinute)}`, tone: "done" };
+  if (stop.state === "missing") return { text: "sans statut", tone: "alert" };
+  if (stop.state !== "pending") return null;
+  return stop.delayMinutes >= SHOWN_DELAY_MIN
+    ? { text: `vers ${formatMinute(stop.startMinute)}, +${minutes(stop.delayMinutes)}`, tone: stop.overdueMinutes !== null || stop.delayMinutes >= ALERT_DELAY_MIN ? "alert" : "late" }
+    : { text: "à l'heure", tone: "ok" };
+}
+
+/** The trip panel's line: « prise en charge faite à 08:12 · dépose vers 09:05, +12 min »; null when nothing to say. */
+export function tripLiveText(route: RouteProjection, tripId: string): string | null {
+  const parts = (["PICKUP", "DROPOFF"] as const).flatMap((kind) => {
+    const stop = route.stops.find((s) => s.tripId === tripId && s.kind === kind);
+    const text = stop ? stopLiveText(stop, "faite") : null;
+    return text ? [`${kind === "PICKUP" ? "prise en charge" : "dépose"} ${text.text}`] : [];
+  });
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
