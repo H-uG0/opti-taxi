@@ -3,7 +3,7 @@ import { cache } from "react";
 import { requireDriverAccount } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getRegulatorPhone } from "@/lib/domain/settings";
-import { fromIsoDate, todayIso } from "@/lib/time";
+import { addDays, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import type { FieldRequestView } from "@/lib/domain/field-requests";
 import { isSameEpisode } from "@/lib/domain/no-show";
 import { fieldRequestView } from "@/lib/planning/live-load";
@@ -317,6 +317,34 @@ export async function loadVehicleDays(
 export async function loadNoShowMinWait(): Promise<number> {
   const settings = await db.appSettings.findUnique({ where: { id: 1 }, select: { noShowMinWaitMin: true } });
   return settings?.noShowMinWaitMin ?? 0;
+}
+
+/** Days ahead « Prochaine tournée » looks for the crew's next route (FLD-04). */
+export const NEXT_ROUTE_LOOKAHEAD_DAYS = 21;
+
+/**
+ * « Prochaine tournée » (FLD-04): the crew's first route after `after` (tomorrow), within NEXT_ROUTE_LOOKAHEAD_DAYS —
+ * its day, start, vehicle and depot, validated or provisional. No stop, no patient: data minimisation.
+ */
+export async function loadNextRouteSummary(driverId: string, after: string): Promise<(Omit<NextDaySummary, "firstStop"> & { date: string }) | null> {
+  const route = await db.route.findFirst({
+    where: {
+      serviceDate: { gt: fromIsoDate(after), lte: fromIsoDate(addDays(after, NEXT_ROUTE_LOOKAHEAD_DAYS)) },
+      OR: [{ driverId }, { crewMateId: driverId }],
+      stops: { some: {} },
+    },
+    orderBy: [{ serviceDate: "asc" }, { startMinute: "asc" }],
+    select: { id: true, serviceDate: true, status: true, startMinute: true, vehicle: { select: { label: true, depot: { select: { name: true } } } } },
+  });
+  if (!route) return null;
+  return {
+    id: route.id,
+    date: toIsoDate(route.serviceDate),
+    status: route.status,
+    startMinute: route.startMinute,
+    vehicleLabel: route.vehicle.label,
+    depotName: route.vehicle.depot.name,
+  };
 }
 
 /**

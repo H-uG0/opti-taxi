@@ -579,4 +579,15 @@ describe("roadmap changes and field requests (DAY-04, DAY-05)", () => {
     expect(later).toEqual({ late: false, notReady: false, sent: [] });
     expect(stopSignalsView({ kind: "PICKUP", tripId: "trip_a", state: "done", isNext: false }, [])).toBeNull();
   });
+  it("offers « Prévenir par SMS » on a pickup at home still to do today, a mobile number only (FLD-04)", () => {
+    const route = makeRoute([makeStop(0, "trip_a", "PICKUP", A), makeStop(1, "trip_a", "DROPOFF", A)]);
+    route.stops[0]!.trip.patient.phone = "06 12 34 56 78";
+    const [pickup, dropoff] = buildRouteView(route, DRIVER, true).stops;
+    expect(pickup?.sms).toEqual({ phone: "06 12 34 56 78", vehicle: "TAXI" });
+    // The care place, tomorrow's preview, a landline: no text.
+    expect(dropoff?.sms).toBeNull();
+    expect(buildRouteView(route, DRIVER, false).stops[0]?.sms).toBeNull();
+    route.stops[0]!.trip.patient.phone = "04 91 00 00 00";
+    expect(buildRouteView(route, DRIVER, true).stops[0]?.sms).toBeNull();
+  });
 });

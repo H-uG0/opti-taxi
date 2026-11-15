@@ -10,7 +10,7 @@ import { roadmapSnapshot, stopKey } from "@/lib/planning/roadmap-version";
 import { dayHoursText, facilityHoursOn } from "@/lib/domain/facility-hours";
 import { addDays, formatMinute, minuteOfDay, toIsoDate } from "@/lib/time";
 import type { DriverRoute, DriverRouteStop } from "./load";
-import { phoneContact, telHref, type PhoneContact } from "./links";
+import { isMobileNumber, phoneContact, telHref, type PhoneContact } from "./links";
 import { plannedTapMinute, recordedLateness, type RecordedLateness } from "./punctuality";
 import {
   buildTimeline,
@@ -103,6 +103,8 @@ export type StopView = {
   entry: "declared" | "corrected" | null;
   /** Lateness and « Patient pas prêt » (today, a stop still to do); null otherwise. */
   signals: StopSignalsView | null;
+  /** « Prévenir par SMS » (FLD-04): a pickup at home still to do today, the patient's mobile number; null otherwise. */
+  sms: { phone: string; vehicle: VehicleType } | null;
   /**
    * Planned departure of a pickup whose patient is on board, when it differs
    * from plannedMinute (the status was due then, after the service time); null otherwise.
@@ -414,6 +416,10 @@ export function buildRouteView(
         noShowMinWaitMin: stop.kind === "PICKUP" ? noShowMinWaitMin : 0,
         noShowReason: state === "no_show" && trip.noShowReason ? NO_SHOW_REASON_LABELS[trip.noShowReason] : null,
         entry: stop.completedSource === "DECLARED" ? "declared" : stop.completedSource === "CORRECTED" ? "corrected" : null,
+        sms:
+          editable && state === "pending" && stop.kind === "PICKUP" && !careStop && trip.patient.phone && isMobileNumber(trip.patient.phone)
+            ? { phone: trip.patient.phone, vehicle: route.vehicle.type }
+            : null,
         signals: editable
           ? stopSignalsView({ kind: stop.kind, tripId: stop.tripId, state, isNext: stop.id === nextId }, field.requests.get(stop.tripId))
           : null,

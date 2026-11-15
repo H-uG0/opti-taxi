@@ -72,3 +72,28 @@ export type RegulatorContact = PhoneContact;
 export function regulatorContact(phone: string | null | undefined): RegulatorContact | null {
   return phoneContact(phone);
 }
+
+/** A French mobile number (06, 07, +33 6, +33 7): the only ones a text message reaches. */
+export function isMobileNumber(phone: string | null | undefined): boolean {
+  const href = telHref(phone);
+  if (!href) return false;
+  const digits = href.slice("tel:".length).replace(/^\+33/, "0").replace(/^0033/, "0");
+  return /^0[67]\d{8}$/.test(digits);
+}
+
+/**
+ * sms: link of a text pre-filled with `body` (FLD-04: « J'arrive vers HH:MM »), null when the number is no mobile.
+ * iPhones read « sms:NUM&body= », Android « sms:NUM?body= ». No patient name in the text: only the time.
+ */
+export function smsHref(phone: string | null | undefined, body: string, apple: boolean): string | null {
+  if (!isMobileNumber(phone)) return null;
+  const number = telHref(phone)!.slice("tel:".length);
+  return `sms:${number}${apple ? "&" : "?"}body=${encodeURIComponent(body)}`;
+}
+
+/** « Bonjour, ici votre taxi : j'arrive vers 08:15. » */
+export function arrivalText(vehicle: "TAXI" | "VSL" | "AMBULANCE", time: string): string {
+  const word = vehicle === "TAXI" ? "taxi" : vehicle === "VSL" ? "VSL" : "ambulance";
+  return `Bonjour, ici votre ${word}\u00a0: j'arrive vers ${time}.`;
+}
+

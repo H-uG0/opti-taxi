@@ -30,6 +30,7 @@ import { ChangedPill, ChangedRing } from "./roadmap-watch";
 import { StopActions, UndoStatus } from "./stop-actions";
 import { StopRequests } from "./stop-requests";
 import { StopSignals } from "./stop-signals";
+import { SmsArrival } from "./sms-arrival";
 
 const KIND_STYLES = {
   PICKUP: { icon: ArrowUpFromLine, className: "bg-brand-50 text-brand-900 ring-brand-300" },
@@ -147,6 +148,14 @@ function StopDetails({ stop }: { stop: StopView }) {
       {stop.phoneHref || stop.facility?.phoneHref ? (
         <div className="grid gap-2 sm:grid-cols-2">
           {stop.phoneHref && stop.phone ? <PhoneLink href={stop.phoneHref} label="Appeler le patient" number={stop.phone} /> : null}
+          {stop.sms ? (
+            <SmsArrival
+              phone={stop.sms.phone}
+              vehicle={stop.sms.vehicle}
+              plannedMinute={stop.plannedMinute}
+              timing={stop.timing ? { plannedArrivalMinute: stop.plannedArrivalMinute, anchorArrivalMinute: stop.timing.anchorArrivalMinute } : null}
+            />
+          ) : null}
           {stop.facility?.phoneHref && stop.facility.phone ? (
             <PhoneLink href={stop.facility.phoneHref} label="Appeler l'accueil" number={stop.facility.phone} />
           ) : null}

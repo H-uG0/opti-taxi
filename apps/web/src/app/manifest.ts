@@ -29,6 +29,13 @@ export default function manifest(): MetadataRoute.Manifest {
     lang: "fr",
     dir: "ltr",
     categories: ["medical", "navigation", "business"],
+    // A long press on the icon (FLD-04): the day, tomorrow, the end of the route. A call cannot be a shortcut (tel:
+    // is outside the app's scope): the regulation's number is in the header and on the offline page.
+    shortcuts: [
+      { name: "Feuille de route du jour", short_name: "Aujourd'hui", url: "/chauffeur", icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }] },
+      { name: "Tournée de demain", short_name: "Demain", url: "/chauffeur?jour=demain", icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }] },
+      { name: "Fin de tournée", short_name: "Fin de tournée", url: "/chauffeur/fin-de-tournee", icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }] },
+    ],
     icons: [
       { src: "/icons/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
       { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },

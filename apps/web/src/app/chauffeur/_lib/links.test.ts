@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isValidPoint, navigationLinks, phoneContact, regulatorContact, telHref } from "./links";
+import { arrivalText, isMobileNumber, isValidPoint, navigationLinks, phoneContact, regulatorContact, smsHref, telHref } from "./links";
 
 describe("navigationLinks", () => {
   it("builds Google Maps, Waze, geo: and Apple Plans links to the coordinates", () => {
@@ -62,3 +62,22 @@ describe("phoneContact", () => {
     expect(phoneContact("—")).toBeNull();
   });
 });
+
+describe("text message « J'arrive vers HH:MM » (FLD-04)", () => {
+  it("reaches mobile numbers only", () => {
+    expect(isMobileNumber("06 12 34 56 78")).toBe(true);
+    expect(isMobileNumber("+33 7 12 34 56 78")).toBe(true);
+    expect(isMobileNumber("04 91 00 00 00")).toBe(false);
+    expect(isMobileNumber(null)).toBe(false);
+  });
+
+  it("writes the iPhone and Android syntaxes, the text encoded", () => {
+    const body = arrivalText("TAXI", "08:15");
+    expect(body).toBe("Bonjour, ici votre taxi\u00a0: j'arrive vers 08:15.");
+    expect(smsHref("06 12 34 56 78", body, true)).toBe(`sms:0612345678&body=${encodeURIComponent(body)}`);
+    expect(smsHref("+33 6 12 34 56 78", body, false)).toBe(`sms:+33612345678?body=${encodeURIComponent(body)}`);
+    expect(smsHref("04 91 00 00 00", body, false)).toBeNull();
+    expect(arrivalText("AMBULANCE", "17:40")).toContain("votre ambulance");
+  });
+});
+

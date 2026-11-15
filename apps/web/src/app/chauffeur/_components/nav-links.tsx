@@ -50,6 +50,19 @@ const noSubscription = () => () => undefined;
 const applePhone = () => isApplePhone(navigator.userAgent, navigator.platform, navigator.maxTouchPoints);
 
 /**
+ * The navigation app offered first on this phone (the one used last, else Google Maps) and its link to a point;
+ * null when the coordinates are unusable. The bottom bar's « Itinéraire » (FLD-04).
+ */
+export function useFirstNavLink(lat: number, lng: number): { app: NavApp; label: string; href: string } | null {
+  const preferred = useSyncExternalStore(subscribePreference, readPreference, () => null);
+  const apple = useSyncExternalStore(noSubscription, applePhone, () => false);
+  const links = navigationLinks({ lat, lng });
+  if (!links) return null;
+  const app = navAppsFor(apple, preferred)[0]!;
+  return { app, label: NAV_APP_LABELS[app], href: navAppHref(app, links) };
+}
+
+/**
  * "Itinéraire" buttons: Google Maps, Waze and the phone's own navigation
  * (Apple Plans on an iPhone, geo: elsewhere), the one used last first.
  * Rendered in the default order on the server, then adapted to the phone.
