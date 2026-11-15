@@ -94,6 +94,8 @@ export type RecordedByView = {
 export type FieldRecordView = RecordedByView & {
   stopId: string;
   kind: StopKind;
+  /** « Arrivé » at the pickup before this status (ISO, FLD-01); absent: none. */
+  arrivedAt?: string;
 };
 
 export type TripView = {
@@ -128,6 +130,8 @@ export type TripView = {
   sharingAnswer: RecordedByView | null;
   /** Pick-up (or absence) and drop-off recorded by the crew, in route order; empty before the trip starts. */
   fieldRecords: FieldRecordView[];
+  /** « Patient absent »: the reason the crew gave, as shown (FLD-01); absent or null otherwise. */
+  noShowReason?: string | null;
   lockedVehicleId: string | null;
   /** Vehicle of the route the trip is in, null when unassigned. */
   vehicleId: string | null;

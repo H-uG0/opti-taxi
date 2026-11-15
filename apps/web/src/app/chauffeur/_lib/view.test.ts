@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Prisma, StopKind, TripDirection, TripStatus } from "@prisma/client";
 import type { DriverRoute, DriverRouteStop } from "./load";
-import { buildRouteView, nextDayCardFirst } from "./view";
+import { NO_CONTROLS } from "./transitions";
+import { buildRouteView, nextDayCardFirst, stopSignalsView } from "./view";
 
 const DRIVER = "drv_1";
 const CREW = "drv_2";
@@ -50,10 +51,12 @@ function makeStop(
     departureMinute: 485 + sequence * 15 + (options.extraServiceMin ?? 0),
     loadAfter: 0,
     completedAt: completedAt ? new Date(completedAt) : null,
+    arrivedAt: null,
     completedBy: completedAt ? { driverId: completedByDriverId } : null,
     trip: {
       direction: trip.direction,
       status: trip.status ?? "ASSIGNED",
+      noShowReason: null,
       appointmentMinute: trip.appointmentMinute ?? null,
       readyMinute: trip.readyMinute ?? null,
       notes: trip.notes ?? null,
@@ -134,7 +137,7 @@ describe("buildRouteView", () => {
 
     // 07:02 UTC is 08:02 in Paris (winter time): 3 min before the planned departure (08:05, patient on board).
     expect(aPickup).toMatchObject({ state: "done", completedMinute: 482, lateness: { minutes: -3, reference: "planned" } });
-    expect(aPickup?.controls).toEqual({ primary: null, blockedReason: null, noShow: false, undo: true });
+    expect(aPickup?.controls).toEqual({ ...NO_CONTROLS, undo: true });
     expect(bPickup).toMatchObject({ isNext: true, state: "pending" });
     expect(bPickup?.controls).toMatchObject({ primary: "PICKUP", noShow: true });
     expect(aDropoff?.controls).toMatchObject({ primary: "DROPOFF", blockedReason: null });
@@ -187,7 +190,7 @@ describe("buildRouteView", () => {
   it("is read-only outside the service day", () => {
     const view = buildRouteView(sharedRoute(), DRIVER, false);
     for (const stop of view.stops) {
-      expect(stop.controls).toEqual({ primary: null, blockedReason: null, noShow: false, undo: false });
+      expect(stop.controls).toEqual(NO_CONTROLS);
     }
   });
 
@@ -535,5 +538,43 @@ describe("roadmap changes and field requests (DAY-04, DAY-05)", () => {
     expect(dropoff?.field).toMatchObject({ askReturn: true, signalReady: false, cancelReturn: false, nextSession: false });
     const asked = buildRouteView(route, DRIVER, true, new Set(), { returns: new Map(), requests: new Map([["trip_a", pending]]) }).stops[0];
     expect(asked?.field).toMatchObject({ askCancel: false, sent: ["Annulation demandée : rentre par ses propres moyens · demande envoyée à 08:00, en attente de la régulation"] });
+  });
+  it("shows the arrival, the minimum wait and the reason of an absence (FLD-01)", () => {
+    const arrived = { ...makeStop(0, "trip_a", "PICKUP", A), arrivedAt: new Date("2026-11-03T06:58:00.000Z") };
+    const route = makeRoute([arrived, makeStop(1, "trip_a", "DROPOFF", A)]);
+    const [pickup] = buildRouteView(route, DRIVER, true, new Set(), undefined, 5).stops;
+    // 06:58 UTC is 07:58 in Paris (winter time).
+    expect(pickup).toMatchObject({ arrivedMinute: 478, arrivedAt: Date.parse("2026-11-03T06:58:00.000Z"), noShowMinWaitMin: 5 });
+    expect(pickup?.controls).toMatchObject({ arrive: false, undoArrive: true, noShow: true });
+
+    const absent = makeRoute([makeStop(0, "trip_a", "PICKUP", { ...A, status: "NO_SHOW" }, "2026-11-03T07:10:00.000Z"), makeStop(1, "trip_a", "DROPOFF", { ...A, status: "NO_SHOW" })]);
+    absent.stops[0]!.trip.noShowReason = "NO_ANSWER";
+    expect(buildRouteView(absent, DRIVER, true).stops[0]).toMatchObject({ state: "no_show", noShowReason: "Pas de réponse" });
+  });
+
+  it("offers the lateness on the next stop and « Patient pas prêt » on a pickup, with what was sent (FLD-01)", () => {
+    const late = (minutes: number, at: string, status: "PENDING" | "NOTED" = "PENDING") => ({
+      id: `l${minutes}`,
+      kind: "LATE" as const,
+      status,
+      tripId: "trip_a",
+      readyMinute: null,
+      previousReadyMinute: null,
+      cancellationReason: null,
+      nextSessionDate: null,
+      lateMinutes: minutes,
+      stopKind: "PICKUP" as const,
+      createdAt: at,
+      createdBy: null,
+    });
+    const next = stopSignalsView({ kind: "PICKUP", tripId: "trip_a", state: "pending", isNext: true }, [late(10, "2026-11-03T07:00:00.000Z"), late(20, "2026-11-03T07:05:00.000Z")]);
+    expect(next).toEqual({
+      late: true,
+      notReady: true,
+      sent: ["Retard annoncé sur la prise en charge\u00a0: +20\u00a0min · signalement envoyé à 08:05, transmis à la régulation"],
+    });
+    const later = stopSignalsView({ kind: "DROPOFF", tripId: "trip_a", state: "pending", isNext: false }, [late(10, "2026-11-03T07:00:00.000Z")]);
+    expect(later).toEqual({ late: false, notReady: false, sent: [] });
+    expect(stopSignalsView({ kind: "PICKUP", tripId: "trip_a", state: "done", isNext: false }, [])).toBeNull();
   });
 });

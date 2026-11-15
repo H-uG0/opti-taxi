@@ -15,6 +15,11 @@
  * - "Annuler" (UNDO) on the stop holding the latest status of the route: the
  *   stop's completedAt is cleared and the trip goes back one step
  *   (PICKED_UP or NO_SHOW -> ASSIGNED, DROPPED_OFF -> PICKED_UP).
+ * - "Arrivé" (ARRIVE, FLD-01) on a pickup still to do: optional, the stop's
+ *   arrivedAt is set now (the wait at the door starts, see
+ *   lib/domain/field-wait.ts); nothing else changes. "Annuler l'arrivée"
+ *   (UNDO_ARRIVE) clears it while the pickup is still to do. The minimum wait
+ *   before an absence is checked by the route (it needs the settings).
  *
  * Every action is idempotent: replaying it once its effect is in place (a
  * retry after a lost response on a flaky mobile network) changes nothing and
@@ -23,14 +28,21 @@
 import type { StopKind, TripStatus } from "@prisma/client";
 import { stopState } from "./roadmap";
 
-export type StopAction = "PICKUP" | "DROPOFF" | "NO_SHOW" | "UNDO";
+export type StopAction = "PICKUP" | "DROPOFF" | "NO_SHOW" | "UNDO" | "ARRIVE" | "UNDO_ARRIVE";
 
 export const STOP_ACTION_LABELS: Record<StopAction, string> = {
   PICKUP: "Pris en charge",
   DROPOFF: "Déposé",
   NO_SHOW: "Patient absent",
   UNDO: "Annuler",
+  ARRIVE: "Arrivé",
+  UNDO_ARRIVE: "Annuler l'arrivée",
 };
+
+/** Actions that only date the arrival at a pickup (RouteStop.arrivedAt): the stop's status is not touched. */
+export function isArrivalAction(action: StopAction): action is "ARRIVE" | "UNDO_ARRIVE" {
+  return action === "ARRIVE" || action === "UNDO_ARRIVE";
+}
 
 /**
  * AuditEvent action of each status action. Events are written on the trip
@@ -42,6 +54,8 @@ export const STOP_AUDIT_ACTIONS = {
   PICKUP: "stop.pickup",
   DROPOFF: "stop.dropoff",
   NO_SHOW: "stop.no_show",
+  ARRIVE: "stop.arrive",
+  UNDO_ARRIVE: "stop.undo_arrive",
 } as const satisfies Record<Exclude<StopAction, "UNDO">, `stop.${string}`>;
 
 export function stopAuditAction(action: StopAction, kind: StopKind): `stop.${string}` {
@@ -55,17 +69,30 @@ export type StopSnapshot = {
   tripStatus: TripStatus;
   /** The stop holds the most recent status of its route (see latestCompletedStopId). */
   isLatestCompleted: boolean;
+  /** « Arrivé » recorded on the pickup (absent: none). */
+  arrivedAt?: Date | null;
 };
 
 export type StopDecision =
-  /** Write these values (guarded by the snapshot they were computed from). */
-  | { type: "apply"; completedAt: Date | null; tripStatus: TripStatus; message: string }
+  /**
+   * Write these values (guarded by the snapshot they were computed from). `arrivedAt` is set for an arrival action
+   * only (ARRIVE, UNDO_ARRIVE), which writes nothing else.
+   */
+  | { type: "apply"; completedAt: Date | null; tripStatus: TripStatus; arrivedAt?: Date | null; message: string }
   /** Already in place: nothing to write, report success. */
   | { type: "noop"; message: string }
   /** Not allowed in the current state. */
   | { type: "refuse"; error: string; reason: RefusalReason };
 
-export type RefusalReason = "WRONG_KIND" | "CANCELLED" | "NO_SHOW" | "NOT_PICKED_UP" | "ALREADY_PICKED_UP" | "NOT_LATEST" | "UNDO_DROPOFF_FIRST";
+export type RefusalReason =
+  | "WRONG_KIND"
+  | "CANCELLED"
+  | "NO_SHOW"
+  | "NOT_PICKED_UP"
+  | "ALREADY_PICKED_UP"
+  | "NOT_LATEST"
+  | "UNDO_DROPOFF_FIRST"
+  | "ALREADY_RECORDED";
 
 const OPEN: readonly TripStatus[] = ["PLANNED", "ASSIGNED"];
 const ON_BOARD_OR_LATER: readonly TripStatus[] = ["PICKED_UP", "DROPPED_OFF"];
@@ -119,6 +146,25 @@ export function decideStopAction(action: StopAction, stop: StopSnapshot, now: Da
       return { type: "apply", completedAt: completedAt ?? now, tripStatus: "NO_SHOW", message: "Absence enregistrée." };
     }
 
+    case "ARRIVE": {
+      if (kind !== "PICKUP") return refuse("WRONG_KIND", "L'arrivée se note sur une prise en charge.");
+      if (stop.arrivedAt) return { type: "noop", message: "Arrivée déjà enregistrée." };
+      if (tripStatus === "CANCELLED") return refuse("CANCELLED", CANCELLED_ERROR);
+      if (tripStatus === "NO_SHOW") return refuse("NO_SHOW", "Patient déclaré absent\u00a0: annulez l'absence d'abord.");
+      // The patient is already on board (taken by the other crew member): the arrival no longer tells anything.
+      if (completedAt || ON_BOARD_OR_LATER.includes(tripStatus)) return { type: "noop", message: "Prise en charge déjà enregistrée." };
+      return { type: "apply", completedAt, tripStatus, arrivedAt: now, message: "Arrivée enregistrée." };
+    }
+
+    case "UNDO_ARRIVE": {
+      if (!stop.arrivedAt) return { type: "noop", message: "Arrivée déjà annulée." };
+      if (tripStatus === "CANCELLED") return refuse("CANCELLED", CANCELLED_ERROR);
+      if (completedAt || !OPEN.includes(tripStatus)) {
+        return refuse("ALREADY_RECORDED", "Statut déjà saisi sur cet arrêt\u00a0: l'arrivée reste enregistrée.");
+      }
+      return { type: "apply", completedAt, tripStatus, arrivedAt: null, message: "Arrivée annulée." };
+    }
+
     case "UNDO": {
       if (!completedAt) return { type: "noop", message: "Statut déjà annulé." };
       if (tripStatus === "CANCELLED") return refuse("CANCELLED", CANCELLED_ERROR);
@@ -165,9 +211,13 @@ export type StopControls = {
   noShow: boolean;
   /** "Annuler" is available (latest recorded status of the route). */
   undo: boolean;
+  /** "Arrivé" is available (a pickup still to do, no arrival yet). */
+  arrive: boolean;
+  /** "Annuler l'arrivée" is available (an arrival on a pickup still to do). */
+  undoArrive: boolean;
 };
 
-export const NO_CONTROLS: StopControls = { primary: null, blockedReason: null, noShow: false, undo: false };
+export const NO_CONTROLS: StopControls = { primary: null, blockedReason: null, noShow: false, undo: false, arrive: false, undoArrive: false };
 
 /**
  * Buttons to show on a stop: exactly the actions decideStopAction would apply.
@@ -183,7 +233,13 @@ export function stopControls(stop: StopSnapshot, editable: boolean): StopControl
   if (state !== "pending") return NO_CONTROLS;
 
   if (stop.kind === "PICKUP") {
-    return { primary: applies("PICKUP") ? "PICKUP" : null, blockedReason: null, noShow: applies("NO_SHOW"), undo: false };
+    return {
+      ...NO_CONTROLS,
+      primary: applies("PICKUP") ? "PICKUP" : null,
+      noShow: applies("NO_SHOW"),
+      arrive: applies("ARRIVE"),
+      undoArrive: applies("UNDO_ARRIVE"),
+    };
   }
   const dropoff = decideStopAction("DROPOFF", stop, now);
   if (dropoff.type === "apply") return { ...NO_CONTROLS, primary: "DROPOFF" };

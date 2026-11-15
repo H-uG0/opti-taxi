@@ -5,6 +5,7 @@
  */
 import type { Mobility, RouteStatus, StopKind, TripStatus, VehicleType } from "@prisma/client";
 import { fieldRequestCrewText, OPEN_TRIP_STATUSES, type FieldRequestView } from "@/lib/domain/field-requests";
+import { NO_SHOW_REASON_LABELS } from "@/lib/domain/field-wait";
 import { roadmapSnapshot, stopKey } from "@/lib/planning/roadmap-version";
 import { dayHoursText, facilityHoursOn } from "@/lib/domain/facility-hours";
 import { addDays, formatMinute, minuteOfDay, toIsoDate } from "@/lib/time";
@@ -62,6 +63,18 @@ export type FieldContext = {
 
 export const NO_FIELD_CONTEXT: FieldContext = { returns: new Map(), requests: new Map() };
 
+/**
+ * Signals of a stop still to do (FLD-01): « Retard +10 / +20 / +30 » on the next stop, « Patient pas prêt » on a pickup
+ * the crew has reached; and what was sent already on this stop, with where it stands.
+ */
+export type StopSignalsView = {
+  /** The lateness can be announced (the next stop of today's route). */
+  late: boolean;
+  /** « Patient pas prêt » can be signalled (a pickup still to do, none pending). */
+  notReady: boolean;
+  sent: string[];
+};
+
 export type StopView = {
   id: string;
   /** « tripId/KIND »: what a change of the roadmap highlights (lib/planning/roadmap-version.ts). */
@@ -78,6 +91,16 @@ export type StopView = {
   plannedArrivalMinute: number;
   /** Real time of the recorded status, minutes since midnight Europe/Paris. */
   completedMinute: number | null;
+  /** « Arrivé » on a pickup (FLD-01): epoch ms, null when not recorded. */
+  arrivedAt: number | null;
+  /** Its minute of the service day (Europe/Paris), null when not recorded. */
+  arrivedMinute: number | null;
+  /** Minimum wait at the door before « Patient absent » (Paramètres), minutes; 0: none. */
+  noShowMinWaitMin: number;
+  /** « Patient absent »: the reason the crew gave, as shown; null otherwise. */
+  noShowReason: string | null;
+  /** Lateness and « Patient pas prêt » (today, a stop still to do); null otherwise. */
+  signals: StopSignalsView | null;
   /**
    * Planned departure of a pickup whose patient is on board, when it differs
    * from plannedMinute (the status was due then, after the service time); null otherwise.
@@ -278,6 +301,30 @@ export function stopFieldView(
 }
 
 /**
+ * Signals of a stop still to do (FLD-01): the lateness on the next stop, « Patient pas prêt » on a pickup; what the
+ * crew sent from it (its latest lateness, its « pas prêt »). Null on a closed stop.
+ */
+export function stopSignalsView(
+  stop: { kind: StopKind; tripId: string; state: StopState; isNext: boolean },
+  requests: readonly FieldRequestView[] | undefined,
+): StopSignalsView | null {
+  if (stop.state !== "pending") return null;
+  const own = (requests ?? []).filter(
+    (request) => (request.kind === "LATE" && request.stopKind === stop.kind) || (request.kind === "NOT_READY" && stop.kind === "PICKUP"),
+  );
+  const lastLate = own.filter((request) => request.kind === "LATE").at(-1);
+  const notReady = own.filter((request) => request.kind === "NOT_READY");
+  const sent = [...(lastLate ? [lastLate] : []), ...notReady]
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .map((request) => fieldRequestCrewText(request, sentAt(request.createdAt)));
+  return {
+    late: stop.isNext,
+    notReady: stop.kind === "PICKUP" && !notReady.some((request) => request.status === "PENDING"),
+    sent,
+  };
+}
+
+/**
  * Whether tomorrow's card (« Demain ») comes first on today's roadmap: in the evening, once every stop of the day is
  * done, and on a day without a route; after the routes otherwise. Shown once either way.
  */
@@ -308,6 +355,8 @@ export function buildRouteView(
   editable: boolean,
   returnTripsAfterOutboundNoShow: ReadonlySet<string> = new Set(),
   field: FieldContext = NO_FIELD_CONTEXT,
+  /** Minimum wait at the door before « Patient absent » (Paramètres), minutes. */
+  noShowMinWaitMin = 0,
 ): RouteView {
   const like: StopLike[] = route.stops.map((stop) => ({
     id: stop.id,
@@ -353,10 +402,18 @@ export function buildRouteView(
           ? minuteOfDay(latestStop.completedAt) + (stop.arrivalMinute - latestPlannedTap)
           : null;
       const plannedTap = plannedTapMinute({ ...stop, noShow: state === "no_show" });
+      const arrivedAt = stop.kind === "PICKUP" ? (stop.arrivedAt ?? null) : null;
       return {
         id: stop.id,
         changeKey: stopKey(stop.tripId, stop.kind),
         field: editable ? stopFieldView(stop, field, toIsoDate(route.serviceDate)) : null,
+        arrivedAt: arrivedAt?.getTime() ?? null,
+        arrivedMinute: arrivedAt ? minuteOfDay(arrivedAt) : null,
+        noShowMinWaitMin: stop.kind === "PICKUP" ? noShowMinWaitMin : 0,
+        noShowReason: state === "no_show" && trip.noShowReason ? NO_SHOW_REASON_LABELS[trip.noShowReason] : null,
+        signals: editable
+          ? stopSignalsView({ kind: stop.kind, tripId: stop.tripId, state, isNext: stop.id === nextId }, field.requests.get(stop.tripId))
+          : null,
         position: index + 1,
         kind: stop.kind,
         state,
@@ -414,7 +471,7 @@ export function buildRouteView(
         interrupted: interruptionOf(trip),
         resumesInterrupted,
         controls: stopControls(
-          { kind: stop.kind, completedAt: stop.completedAt, tripStatus: trip.status, isLatestCompleted: stop.id === latestId },
+          { kind: stop.kind, completedAt: stop.completedAt, tripStatus: trip.status, isLatestCompleted: stop.id === latestId, arrivedAt },
           editable,
         ),
       };

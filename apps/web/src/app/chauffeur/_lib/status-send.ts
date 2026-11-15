@@ -44,7 +44,13 @@ export async function sendQueuedStatus(status: QueuedStatus, ownerId: string): P
   if (navigator.onLine === false) return { kind: "retry", reason: "offline" };
   const startedAt = Date.now();
   try {
-    const body: StatusRequestBody = { action: status.action, observedAt: status.observedAt, sentAt: startedAt, ownerId };
+    const body: StatusRequestBody = {
+      action: status.action,
+      observedAt: status.observedAt,
+      sentAt: startedAt,
+      ownerId,
+      ...(status.reason ? { reason: status.reason } : {}),
+    };
     const { status: httpStatus, json } = await postJson(stopStatusUrl(status.stopId), body, SEND_TIMEOUT_MS);
     return classifyStatusResponse(httpStatus, json);
   } catch {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { quantile, type KpiTrip } from "./kpis-rows";
-import { addWaits, emptyWaits, rideTime, waitAfterSession, waitBeforeAppointment, waitsOfDay } from "./kpis-waits";
+import { addWaits, doorTimes, emptyWaits, rideTime, waitAfterSession, waitBeforeAppointment, waitsOfDay } from "./kpis-waits";
 
 // November 2026: Europe/Paris is UTC+1.
 const DAY = "2026-11-03";
@@ -106,3 +106,38 @@ describe("waits and time on board (KPI-05)", () => {
     expect(addWaits(emptyWaits(), emptyWaits())).toEqual(emptyWaits());
   });
 });
+
+describe("at the patient's door (FLD-01)", () => {
+  // Pickup planned at 07:15 (435), 5 minutes of boarding.
+  const door = (overrides: Partial<KpiTrip> = {}) => outbound({ pickupStartMinute: 435, pickupServiceMinutes: 5, ...overrides });
+
+  it("measures the arrival against the planned start and the wait until « Pris en charge », boarding out", () => {
+    // Arrived 07:18 (3 min late), patient on board at 07:30: 12 min at the door less 5 of boarding.
+    expect(doorTimes(door({ pickupArrivedAt: at("07:18"), pickupCompletedAt: at("07:30") }))).toEqual({ arrivalDelay: 3, wait: 7, noShow: false });
+    // Arrived early (07:05): the wait starts at 07:15.
+    expect(doorTimes(door({ pickupArrivedAt: at("07:05"), pickupCompletedAt: at("07:25") }))).toEqual({ arrivalDelay: -10, wait: 5, noShow: false });
+  });
+
+  it("measures the wait before an absence, and nothing without « Arrivé »", () => {
+    expect(doorTimes(door({ status: "NO_SHOW", pickupArrivedAt: at("07:15"), pickupCompletedAt: at("07:27"), dropoffCompletedAt: null }))).toEqual({
+      arrivalDelay: 0,
+      wait: 12,
+      noShow: true,
+    });
+    expect(doorTimes(door())).toBeNull();
+    // Arrived, the pickup not recorded yet: only the arrival.
+    expect(doorTimes(door({ status: "ASSIGNED", pickupArrivedAt: at("07:20"), pickupCompletedAt: null }))).toEqual({ arrivalDelay: 5, wait: null, noShow: false });
+  });
+
+  it("collects them over a day", () => {
+    const totals = waitsOfDay(
+      [
+        door({ pickupArrivedAt: at("07:18"), pickupCompletedAt: at("07:30") }),
+        door({ id: "o2", patientId: "p2", status: "NO_SHOW", pickupArrivedAt: at("07:15"), pickupCompletedAt: at("07:27"), dropoffCompletedAt: null }),
+      ],
+      OPTIONS,
+    );
+    expect(totals).toMatchObject({ arrivalDelays: [3, 0], doorWaits: [7], noShowWaits: [12] });
+  });
+});
+

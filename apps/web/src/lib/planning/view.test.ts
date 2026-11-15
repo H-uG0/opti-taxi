@@ -525,6 +525,14 @@ describe("recorded by", () => {
     expect(records.get("n")).toEqual([{ stopId: "s9", kind: "PICKUP", at: t3.toISOString(), byName: "Paul" }]);
     expect(records.has("b")).toBe(false);
   });
+
+  it("keeps the arrival at the pickup with its record (FLD-01)", () => {
+    const arrived = new Date("2026-11-03T06:52:00Z");
+    const records = fieldRecordsByTrip([
+      { stops: [{ ...stop("s1", 0, "a", "PICKUP", 420, 1, new Date("2026-11-03T07:00:00Z"), { name: "Jean" }), arrivedAt: arrived }] },
+    ]);
+    expect(records.get("a")?.[0]).toMatchObject({ kind: "PICKUP", arrivedAt: arrived.toISOString() });
+  });
 });
 
 describe("day KPIs", () => {

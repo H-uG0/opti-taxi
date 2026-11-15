@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SendOutcome } from "./status-protocol";
-import { isQueuedStatus, localStatusShown, memoryStorage, StatusQueue, type QueuedStatus } from "./status-queue";
+import { isQueuedStatus, localArrival, localStatusShown, memoryStorage, StatusQueue, undoActionOf, type QueuedStatus } from "./status-queue";
 
 const OK: SendOutcome = { kind: "ok", message: "Enregistré.", serverTime: 1_000, sessionExpiresAt: null };
 const OFFLINE: SendOutcome = { kind: "retry", reason: "offline" };
@@ -277,5 +277,47 @@ describe("isQueuedStatus", () => {
     expect(isQueuedStatus({ stopId: "s", action: "PICKUP", observedAt: "1" })).toBe(false);
     expect(isQueuedStatus({ stopId: "x".repeat(65), action: "PICKUP", observedAt: 1 })).toBe(false);
     expect(isQueuedStatus(null)).toBe(false);
+  });
+});
+
+describe("StatusQueue: arrival and reason (FLD-01)", () => {
+  it("keeps the reason code of an absence with it, and sends it", async () => {
+    const { queue, sent, storage } = setup({ answers: [OFFLINE] });
+    await queue.submit("stop_1", "NO_SHOW", "NO_ANSWER");
+    expect(storage.values()).toEqual([{ stopId: "stop_1", action: "NO_SHOW", observedAt: expect.any(Number), reason: "NO_ANSWER" }]);
+    expect(sent[0]).toMatchObject({ action: "NO_SHOW", reason: "NO_ANSWER" });
+    expect(isQueuedStatus({ stopId: "s", action: "NO_SHOW", observedAt: 1, reason: "NO_ANSWER" })).toBe(true);
+    expect(isQueuedStatus({ stopId: "s", action: "NO_SHOW", observedAt: 1, reason: "Hospitalisé" })).toBe(false);
+    expect(isQueuedStatus({ stopId: "s", action: "ARRIVE", observedAt: 1 })).toBe(true);
+  });
+
+  it("forgets an arrival still on the phone when it is undone, without sending anything", async () => {
+    const { queue, send, storage } = setup({ answers: [OFFLINE] });
+    await queue.submit("stop_1", "ARRIVE");
+    expect(queue.getSnapshot().byStop.stop_1).toMatchObject({ action: "ARRIVE", phase: "queued" });
+    send.mockClear();
+    await queue.submit("stop_1", "UNDO_ARRIVE");
+    expect(send).not.toHaveBeenCalled();
+    expect(storage.values()).toEqual([]);
+    expect(queue.getSnapshot().byStop.stop_1).toBeUndefined();
+  });
+
+  it("undoes an arrival sent without an answer with « Annuler l'arrivée », never « Annuler »", async () => {
+    const { queue, sent } = setup({ answers: [{ kind: "retry", reason: "timeout", maybeReceived: true }, OK] });
+    await queue.submit("stop_1", "ARRIVE");
+    await queue.cancelQueued("stop_1");
+    expect(sent.map((status) => status.action)).toEqual(["ARRIVE", "UNDO_ARRIVE"]);
+    expect(undoActionOf("ARRIVE")).toBe("UNDO_ARRIVE");
+    expect(undoActionOf("PICKUP")).toBe("UNDO");
+    expect(undoActionOf("UNDO_ARRIVE")).toBeNull();
+  });
+
+  it("never hides the buttons of a stop for an arrival, and shows the arrival from the phone", () => {
+    expect(localStatusShown(true, { action: "ARRIVE", observedAt: 5, phase: "queued" })).toBeNull();
+    expect(localStatusShown(false, { action: "UNDO_ARRIVE", observedAt: 5, phase: "sending" })).toBeNull();
+    expect(localArrival(null, { action: "ARRIVE", observedAt: 5, phase: "queued" })).toBe(5);
+    expect(localArrival(3, { action: "ARRIVE", observedAt: 5, phase: "sent" })).toBe(3);
+    expect(localArrival(3, { action: "UNDO_ARRIVE", observedAt: 9, phase: "queued" })).toBeNull();
+    expect(localArrival(3, undefined)).toBe(3);
   });
 });

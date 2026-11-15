@@ -81,11 +81,13 @@
  *   of trips changed), details.tripIds and, in the same order,
  *   details.vehicleIds: the vehicle each trip was locked on or unlocked from);
  * - field, on the Trip (stops are deleted by re-optimizations): stop.pickup,
- *   stop.dropoff, stop.no_show, stop.undo_pickup, stop.undo_dropoff
- *   (details.observedAt: the time of the gesture, when the status was sent
- *   from the phone's offline queue more than 1 min after it); the crews'
- *   signals and requests (DAY-05): field_request.create (details.kind and
- *   details.requestId, never the reason: health data), trip.ready_time (an
+ *   stop.dropoff, stop.no_show (its reason stays on the trip, never here),
+ *   stop.undo_pickup, stop.undo_dropoff, stop.arrive and stop.undo_arrive
+ *   (« Arrivé » on a pickup, FLD-01) (details.observedAt: the time of the
+ *   gesture, when the status was sent from the phone's offline queue more
+ *   than 1 min after it); the crews' signals and requests (DAY-05, FLD-01):
+ *   field_request.create (details.kind and details.requestId, details.minutes
+ *   of a lateness announced; never the reason: health data), trip.ready_time (an
  *   end of session signalled from the field, details.from and to in minutes,
  *   details.source "field"), and the regulator's answer field_request.note,
  *   .accept or .refuse; roadmap.seen (« J'ai vu » of a changed roadmap, on

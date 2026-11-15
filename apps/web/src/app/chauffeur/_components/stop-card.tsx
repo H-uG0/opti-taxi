@@ -29,6 +29,7 @@ import { RegulatorCallBlock } from "./regulator-call";
 import { ChangedPill, ChangedRing } from "./roadmap-watch";
 import { StopActions, UndoStatus } from "./stop-actions";
 import { StopRequests } from "./stop-requests";
+import { StopSignals } from "./stop-signals";
 
 const KIND_STYLES = {
   PICKUP: { icon: ArrowUpFromLine, className: "bg-brand-50 text-brand-900 ring-brand-300" },
@@ -173,7 +174,7 @@ function OutboundNoShowWarning({ regulator }: { regulator: RegulatorContact | nu
 /** A stop still to do: everything the crew needs, then the status buttons. */
 function OpenStopCard({ stop, total, regulator }: { stop: StopView; total: number; regulator: RegulatorContact | null }) {
   const { controls } = stop;
-  const hasActions = controls.primary !== null || controls.noShow;
+  const hasActions = controls.primary !== null || controls.noShow || controls.arrive || controls.undoArrive;
   return (
     <li
       id={`stop-${stop.id}`}
@@ -244,7 +245,23 @@ function OpenStopCard({ stop, total, regulator }: { stop: StopView; total: numbe
             noShow={controls.noShow}
             emphasized={stop.isNext}
             patient={stop.patient}
+            arrival={
+              stop.kind === "PICKUP"
+                ? {
+                    can: controls.arrive,
+                    canUndo: controls.undoArrive,
+                    arrivedAt: stop.arrivedAt,
+                    plannedMinute: stop.plannedMinute,
+                    minWaitMin: stop.noShowMinWaitMin,
+                  }
+                : null
+            }
           />
+          {stop.signals ? (
+            <div className="mt-3">
+              <StopSignals stopId={stop.id} view={stop.signals} arrivedAt={stop.arrivedAt} />
+            </div>
+          ) : null}
         </div>
       ) : null}
     </li>
@@ -301,6 +318,7 @@ function ClosedStopCard({ stop, routeStopIds }: { stop: StopView; routeStopIds: 
           <span className="min-w-0 flex-1">
             <span className={cn("block truncate text-sm font-semibold", stop.state === "no_show" ? "text-red-800" : "text-slate-700")}>
               {label}
+              {stop.noShowReason ? <span className="font-normal"> · {stop.noShowReason}</span> : null}
               {/* Status recorded from the other crew member's phone. */}
               {stop.recordedBy ? <span className="font-normal text-slate-600"> · par {stop.recordedBy}</span> : null}
             </span>
@@ -325,6 +343,12 @@ function ClosedStopCard({ stop, routeStopIds }: { stop: StopView; routeStopIds: 
               <>
                 {" "}
                 (départ <span className="tabular font-semibold">{formatMinute(stop.plannedDepartureMinute)}</span>)
+              </>
+            ) : null}
+            {stop.arrivedMinute !== null ? (
+              <>
+                {" "}
+                · arrivé à <span className="tabular font-semibold">{formatMinute(stop.arrivedMinute)}</span>
               </>
             ) : null}
             {stop.completedMinute !== null ? (

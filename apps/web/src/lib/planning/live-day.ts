@@ -11,6 +11,9 @@
  * not used here: it re-plans an empty vehicle from its last stop at « now » (right for re-planning, pessimistic for an
  * arrival estimate) and costs a full request every poll (measured, journal lot 23).
  *
+ * A lateness announced by the crew on a stop still to do (« Retard +20 », FLD-01) is a floor: that stop starts no
+ * earlier than its planned start plus the minutes announced, and the delay is carried on from there.
+ *
  * Pure: the planning board feeds it the routes and trips as the page and the live poll know them.
  */
 import type { StopKind, TripDirection, TripStatus } from "@prisma/client";
@@ -133,11 +136,19 @@ function tapOf(kind: StopKind, state: StopState, start: number, departure: numbe
   return kind === "PICKUP" && state !== "no_show" ? departure : start;
 }
 
+/** Lateness announced by the crews: « tripId/KIND » of the stop -> minutes (LiveSnapshot.lateness). */
+export type AnnouncedLateness = Readonly<Record<string, number>>;
+
 /**
  * The projection of one route at `nowMinute`. `tripOf` gives each stop's trip as known now (status, ready time
  * updated from the field). A stop without its trip is read as still planned.
  */
-export function projectRoute(route: LiveRouteInput, tripOf: (tripId: string) => LiveTripInput | undefined, nowMinute: number): RouteProjection {
+export function projectRoute(
+  route: LiveRouteInput,
+  tripOf: (tripId: string) => LiveTripInput | undefined,
+  nowMinute: number,
+  lateness: AnnouncedLateness = {},
+): RouteProjection {
   const stops = [...route.stops].sort((a, b) => a.sequence - b.sequence);
   const states = stops.map((stop): StopState => {
     const tripStatus = tripOf(stop.tripId)?.status ?? "ASSIGNED";
@@ -188,7 +199,9 @@ export function projectRoute(route: LiveRouteInput, tripOf: (tripId: string) => 
     const arrival = anchorProjected + (stop.arrivalMinute - anchorPlanned);
     // Never before the planned start (the patient was told), a return pickup never before the patient is ready.
     const ready = stop.kind === "PICKUP" && trip?.direction === "RETURN" && trip.readyMinute !== null ? trip.readyMinute : -Infinity;
-    const expectedStart = Math.max(arrival, stop.startMinute, ready);
+    // A lateness the crew announced on this stop: never before its planned start plus the minutes announced.
+    const announced = lateness[`${stop.tripId}/${stop.kind}`];
+    const expectedStart = Math.max(arrival, stop.startMinute, ready, announced ? stop.startMinute + announced : -Infinity);
     let start = expectedStart;
     let overdue: number | null = null;
     if (nextIndex === -1) {
@@ -288,11 +301,13 @@ export function projectDay(args: {
   trips: readonly LiveTripInput[];
   nowMinute: number;
   maxTotalWaitMin: number;
+  /** Lateness announced by the crews on stops still to do (« tripId/KIND » -> minutes). */
+  lateness?: AnnouncedLateness;
 }): DayProjection {
-  const { routes, trips, nowMinute, maxTotalWaitMin } = args;
+  const { routes, trips, nowMinute, maxTotalWaitMin, lateness = {} } = args;
   const byId = new Map(trips.map((trip) => [trip.id, trip]));
   const tripOf = (id: string) => byId.get(id);
-  const projected = routes.map((route) => projectRoute(route, tripOf, nowMinute));
+  const projected = routes.map((route) => projectRoute(route, tripOf, nowMinute, lateness));
   const silent: SilentRoute[] = [];
   const overdue: OverdueStop[] = [];
   for (const route of projected) {

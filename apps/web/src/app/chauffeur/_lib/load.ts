@@ -77,12 +77,16 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
           departureMinute: true,
           loadAfter: true,
           completedAt: true,
+          // « Arrivé » on a pickup (FLD-01): the wait at the door is counted from it.
+          arrivedAt: true,
           // Server-side only: which crew member recorded the status (never sent to the client).
           completedBy: { select: { driverId: true } },
           trip: {
             select: {
               direction: true,
               status: true,
+              // « Patient absent »: the reason the crew chose (a code from a list).
+              noShowReason: true,
               appointmentMinute: true,
               readyMinute: true,
               // The regulator's note: a recurrence's instructions, copied, or typed on the trip.
@@ -187,6 +191,8 @@ export async function loadFieldContext(routes: readonly DriverRoute[], isoDate: 
       previousReadyMinute: true,
       cancellationReason: true,
       nextSessionDate: true,
+      lateMinutes: true,
+      stopKind: true,
       createdAt: true,
       createdBy: { select: { name: true } },
       resolvedById: true,
@@ -228,6 +234,12 @@ export async function loadNextDaySummary(driverId: string, tomorrow: string): Pr
       firstStop: first ? { minute: first.startMinute, kind: first.kind, town: townOf(first.address) } : null,
     };
   });
+}
+
+/** The minimum wait at the door before « Patient absent » (Paramètres, FLD-01), minutes; 0: none. */
+export async function loadNoShowMinWait(): Promise<number> {
+  const settings = await db.appSettings.findUnique({ where: { id: 1 }, select: { noShowMinWaitMin: true } });
+  return settings?.noShowMinWaitMin ?? 0;
 }
 
 /**

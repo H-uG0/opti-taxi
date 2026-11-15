@@ -4,14 +4,17 @@
  * - from an outbound drop-off: « Patient prêt à HH:MM » (READY_TIME: the return's end of session changes at once,
  *   the regulator is told), « Demander un retour » when none is planned (RETURN), the next session of the series
  *   (NEXT_SESSION), the cancellation of the return (CANCEL with target "return");
- * - from a pickup still to do: the cancellation of its trip (CANCEL).
- * A cancellation or a return waits for the regulator (« À traiter » of the planning). Online only: the phone says
- * so when the request does not go through (no queue: the regulator may be called instead).
+ * - from a pickup still to do: the cancellation of its trip (CANCEL), and « Patient pas prêt » (NOT_READY, FLD-01: the
+ *   crew waits at the door);
+ * - from the stop to come (pickup or drop-off still to do): « Retard +10 / +20 / +30 » (LATE, FLD-01): the day's
+ *   follow-up moves the estimated times of the route from it; a newer one on the same route replaces it.
+ * A cancellation or a return waits for the regulator (« À traiter » of the planning); a signal is only taken note of.
+ * Online only: the phone says so when the request does not go through (no queue: the regulator may be called instead).
  *
  * Rules of the other driver routes: same-site request, current driver (JSON 401, no redirect), the page's account
  * (ownerId), the crew's own route, today only. Each request is written with its audit event (field_request.create on
- * the trip concerned, details.kind and details.requestId; a new end of session also trip.ready_time with
- * details.from and to, minutes). Never the reason in the trail (health data): it stays on the request.
+ * the trip concerned, details.kind and details.requestId, details.minutes for a lateness; a new end of session also
+ * trip.ready_time with details.from and to, minutes). Never the reason in the trail (health data): it stays on the request.
  */
 import type { Prisma, TripStatus } from "@prisma/client";
 import type { NextRequest } from "next/server";
@@ -22,14 +25,15 @@ import { currentDriver } from "@/lib/auth";
 import { isSameOriginRequest } from "@/lib/auth/same-origin";
 import { renewDriverSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { FIELD_CANCEL_REASONS, nextSessionIssue, OPEN_TRIP_STATUSES, readyMinuteIssue } from "@/lib/domain/field-requests";
+import { FIELD_CANCEL_REASONS, LATE_SIGNAL_MINUTES, nextSessionIssue, OPEN_TRIP_STATUSES, readyMinuteIssue } from "@/lib/domain/field-requests";
 import { isSameEpisode } from "@/lib/domain/no-show";
 import { logError } from "@/lib/log";
 import { formatMinute, fromIsoDate, isIsoDate, todayIso, toIsoDate } from "@/lib/time";
 import { jsonReply, ORIGIN_ERROR, PASSWORD_ERROR, SESSION_ERROR } from "@/app/api/chauffeur/_lib/reply";
 
 const bodySchema = z.object({
-  kind: z.enum(["READY_TIME", "CANCEL", "RETURN", "NEXT_SESSION"]),
+  kind: z.enum(["READY_TIME", "CANCEL", "RETURN", "NEXT_SESSION", "LATE", "NOT_READY"]),
+  lateMinutes: z.union(LATE_SIGNAL_MINUTES.map((minutes) => z.literal(minutes)) as [z.ZodLiteral<10>, z.ZodLiteral<20>, z.ZodLiteral<30>]).nullish(),
   readyMinute: z.number().int().min(0).max(1439).nullish(),
   reason: z.enum(FIELD_CANCEL_REASONS).nullish(),
   nextSessionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
@@ -111,7 +115,7 @@ async function returnOf(tx: Prisma.TransactionClient, outbound: RequestTrip): Pr
 async function record(user: { id: string; role: "DRIVER" | "REGULATOR"; driverId: string; name?: string }, stopId: string, input: RequestBody, now: Date): Promise<Outcome> {
   const stop = await db.routeStop.findUnique({
     where: { id: stopId },
-    select: { id: true, kind: true, completedAt: true, route: { select: { serviceDate: true, driverId: true, crewMateId: true } }, trip: { select: TRIP_SELECT } },
+    select: { id: true, kind: true, completedAt: true, route: { select: { id: true, serviceDate: true, driverId: true, crewMateId: true } }, trip: { select: TRIP_SELECT } },
   });
   if (!stop) return failure(403, "not-yours", STOP_ACCESS_ERRORS["not-yours"]);
   const access = stopAccess(stop.route, user.driverId, todayIso(now));
@@ -119,8 +123,45 @@ async function record(user: { id: string; role: "DRIVER" | "REGULATOR"; driverId
   const trip = stop.trip;
   const isoDate = toIsoDate(stop.route.serviceDate);
   const atDropoff = stop.kind === "DROPOFF" && trip.direction === "OUTBOUND";
-  const event = (kind: string, tripId: string, requestId: string) =>
-    ({ action: "field_request.create", entity: "Trip", entityId: tripId, serviceDate: isoDate, details: { kind, requestId } }) as const;
+  const event = (kind: string, tripId: string, requestId: string, extra: { minutes?: number } = {}) =>
+    ({ action: "field_request.create", entity: "Trip", entityId: tripId, serviceDate: isoDate, details: { kind, requestId, ...extra } }) as const;
+
+  if (input.kind === "LATE") {
+    // The stop to come: a pickup still to do, or the drop-off of a patient on board.
+    const pending = stop.completedAt === null && (stop.kind === "PICKUP" ? OPEN_TRIP_STATUSES.includes(trip.status) : trip.status === "PICKED_UP");
+    if (!pending) return failure(409, "refused", "Arrêt déjà fait ou annulé\u00a0: signalez le retard sur l'arrêt à venir.");
+    if (input.lateMinutes == null) return failure(400, "invalid", "Choisissez le retard\u00a0: +10, +20 ou +30\u00a0min.");
+    const minutes = input.lateMinutes;
+    return db.$transaction(async (tx) => {
+      // The latest lateness of the route is the one in force: an earlier one still pending is replaced.
+      await tx.fieldRequest.updateMany({
+        where: { serviceDate: trip.serviceDate, kind: "LATE", status: "PENDING", trip: { routeId: stop.route.id } },
+        data: { status: "NOTED", resolvedAt: now },
+      });
+      const created = await tx.fieldRequest.create({
+        data: { serviceDate: trip.serviceDate, kind: "LATE", tripId: trip.id, stopKind: stop.kind, lateMinutes: minutes, createdById: user.id, createdAt: now },
+        select: { id: true },
+      });
+      await audit(tx, user, event("LATE", trip.id, created.id, { minutes }));
+      return done(`Retard de ${minutes}\u00a0min signalé à la régulation.`);
+    });
+  }
+
+  if (input.kind === "NOT_READY") {
+    if (stop.kind !== "PICKUP" || stop.completedAt !== null || !OPEN_TRIP_STATUSES.includes(trip.status)) {
+      return failure(409, "refused", "Se signale sur une prise en charge pas encore faite.");
+    }
+    return db.$transaction(async (tx) => {
+      const pending = await tx.fieldRequest.findFirst({ where: { tripId: trip.id, kind: "NOT_READY", status: "PENDING" }, select: { id: true } });
+      if (pending) return done("Déjà signalé, transmis à la régulation.");
+      const created = await tx.fieldRequest.create({
+        data: { serviceDate: trip.serviceDate, kind: "NOT_READY", tripId: trip.id, stopKind: "PICKUP", createdById: user.id, createdAt: now },
+        select: { id: true },
+      });
+      await audit(tx, user, event("NOT_READY", trip.id, created.id));
+      return done("Patient pas prêt\u00a0: signalé à la régulation.");
+    });
+  }
 
   if (input.kind === "CANCEL" && input.target !== "return") {
     if (stop.kind !== "PICKUP" || stop.completedAt !== null || !OPEN_TRIP_STATUSES.includes(trip.status)) {
@@ -143,10 +184,12 @@ async function record(user: { id: string; role: "DRIVER" | "REGULATOR"; driverId
     return failure(409, "refused", "L'aller est annulé ou le patient absent\u00a0: appelez la régulation.");
   }
 
+  // Signals were answered above; only the requests of an outbound drop-off are left.
+  const kind = input.kind;
   return db.$transaction(async (tx) => {
     const back = await returnOf(tx, trip);
     const open = back !== null && OPEN_TRIP_STATUSES.includes(back.status);
-    switch (input.kind) {
+    switch (kind) {
       case "READY_TIME": {
         if (!back || !open) return failure(409, "refused", NO_RETURN);
         if (input.readyMinute == null) return failure(400, "invalid", "Indiquez l'heure à laquelle le patient est prêt.");

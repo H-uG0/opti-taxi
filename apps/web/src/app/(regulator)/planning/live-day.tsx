@@ -160,8 +160,15 @@ export function LiveDayProvider({
   const mergedVehicles = useMemo(() => liveVehicles(vehicles, field), [vehicles, field]);
   const mergedTrips = useMemo(() => liveTrips(trips, field), [trips, field]);
   const projection = useMemo(
-    () => projectDay({ routes: projectionRoutes(mergedVehicles), trips: projectionTrips(mergedTrips), nowMinute, maxTotalWaitMin }),
-    [mergedVehicles, mergedTrips, nowMinute, maxTotalWaitMin],
+    () =>
+      projectDay({
+        routes: projectionRoutes(mergedVehicles),
+        trips: projectionTrips(mergedTrips),
+        nowMinute,
+        maxTotalWaitMin,
+        lateness: snapshot.lateness ?? {},
+      }),
+    [mergedVehicles, mergedTrips, nowMinute, maxTotalWaitMin, snapshot.lateness],
   );
   const value = useMemo<LiveDay>(
     () => ({

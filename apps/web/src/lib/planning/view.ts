@@ -4,6 +4,7 @@
  */
 import type {
   Mobility,
+  NoShowReason,
   OptimizationRunStatus,
   Payer,
   RouteStatus,
@@ -27,6 +28,7 @@ import {
 } from "@/lib/optimizer/build-request";
 import type { RunDetails } from "@/lib/optimizer/run-details";
 import { isSameEpisode, returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
+import { NO_SHOW_REASON_LABELS } from "@/lib/domain/field-wait";
 import { minuteOn } from "./day-progress";
 import { halfServedPairs } from "./half-served";
 import { isStopDone } from "./stop-done";
@@ -89,6 +91,8 @@ export type RawTrip = TripInput & {
   notes?: string | null;
   /** Why it was cancelled (a transport interrupted: DAY-03); absent in older tests: unknown. */
   cancellationReason?: string | null;
+  /** « Patient absent »: the reason the crew gave (FLD-01); absent in older tests: unknown. */
+  noShowReason?: NoShowReason | null;
 };
 
 export type RawStop = {
@@ -105,6 +109,8 @@ export type RawStop = {
   loadAfter: number;
   completedAt: Date | null;
   completedBy: Recorder;
+  /** « Arrivé » on a pickup (FLD-01); absent in older tests: none. */
+  arrivedAt?: Date | null;
 };
 
 export type RawRoute = {
@@ -215,7 +221,7 @@ export function sharingAnswerOf(trip: Pick<RawTrip, "sharingRespondedAt" | "shar
 
 /** Stop statuses recorded by the crew, per trip, in route order. */
 export function fieldRecordsByTrip(
-  routes: ReadonlyArray<{ stops: ReadonlyArray<Pick<RawStop, "id" | "sequence" | "tripId" | "kind" | "completedAt" | "completedBy">> }>,
+  routes: ReadonlyArray<{ stops: ReadonlyArray<Pick<RawStop, "id" | "sequence" | "tripId" | "kind" | "completedAt" | "completedBy" | "arrivedAt">> }>,
 ): Map<string, FieldRecordView[]> {
   const byTrip = new Map<string, FieldRecordView[]>();
   for (const route of routes) {
@@ -226,6 +232,7 @@ export function fieldRecordsByTrip(
         kind: stop.kind,
         at: stop.completedAt.toISOString(),
         byName: recorderName(stop.completedBy),
+        ...(stop.arrivedAt ? { arrivedAt: stop.arrivedAt.toISOString() } : {}),
       };
       const list = byTrip.get(stop.tripId);
       if (list) list.push(record);
@@ -601,6 +608,7 @@ export function buildPlanningView(input: PlanningRawInput): PlanningDayView {
         sharingStatus: t.sharingStatus,
         sharingAnswer: sharingAnswerOf(t),
         fieldRecords: fieldRecords.get(t.id) ?? [],
+        noShowReason: t.status === "NO_SHOW" && t.noShowReason ? NO_SHOW_REASON_LABELS[t.noShowReason] : null,
         lockedVehicleId: t.lockedVehicleId,
         vehicleId,
         plannedPickupMinute: vehicleId ? t.plannedPickupMinute : null,

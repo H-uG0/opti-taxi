@@ -53,6 +53,7 @@ const STORED = {
   replanMaxMarginLoss: 0.1,
   replanChangePenalty: 15,
   lateCancellationHours: 2,
+  noShowMinWaitMin: 0,
   tripHorizonDays: 14,
   crewMaxReplacementKm: 60,
   crewMinPairOverlapMin: 240,

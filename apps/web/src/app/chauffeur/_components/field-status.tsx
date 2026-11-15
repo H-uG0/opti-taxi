@@ -158,6 +158,8 @@ const REFUSED_LABELS: Record<StopAction, { label: string; tapped: string }> = {
   DROPOFF: { label: "Déposé", tapped: "saisi" },
   NO_SHOW: { label: "Patient absent", tapped: "saisi" },
   UNDO: { label: "Annulation", tapped: "saisie" },
+  ARRIVE: { label: "Arrivé", tapped: "saisi" },
+  UNDO_ARRIVE: { label: "Annulation de l'arrivée", tapped: "saisie" },
 };
 
 /** « Pris en charge, saisi à 10:02 » : which status and when, to tell the regulation. */

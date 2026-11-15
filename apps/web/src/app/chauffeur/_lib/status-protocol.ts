@@ -6,9 +6,10 @@
  * Types, URLs and the reading of a response by the phone. Pure module, safe
  * in the browser (no zod: the server validates requests itself).
  */
+import type { NoShowReason } from "@prisma/client";
 import type { StopAction } from "./transitions";
 
-export const STOP_ACTIONS = ["PICKUP", "DROPOFF", "NO_SHOW", "UNDO"] as const satisfies readonly StopAction[];
+export const STOP_ACTIONS = ["PICKUP", "DROPOFF", "NO_SHOW", "UNDO", "ARRIVE", "UNDO_ARRIVE"] as const satisfies readonly StopAction[];
 
 export function stopStatusUrl(stopId: string): string {
   return `/api/chauffeur/stops/${encodeURIComponent(stopId)}/status`;
@@ -25,6 +26,8 @@ export type StatusRequestBody = {
   sentAt: number;
   /** Account whose queue holds the status: refused (401, kept) when the session is now another account's. */
   ownerId: string;
+  /** « Patient absent »: the reason chosen in the list (lib/domain/field-wait.ts). */
+  reason?: NoShowReason;
 };
 
 /** Body of a session request: the account the page belongs to (401 when the cookie is now another's). */
@@ -41,6 +44,8 @@ export type StatusErrorCode =
   | "not-yours"
   | "wrong-day"
   | "too-old"
+  /** « Patient absent » before the minimum wait set in Paramètres. */
+  | "wait"
   /** The transition rules refuse it (already picked up, cancelled trip…). */
   | "refused"
   /** The other crew member changed the stop meanwhile. */

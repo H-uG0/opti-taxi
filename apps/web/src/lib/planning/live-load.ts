@@ -4,7 +4,8 @@
  * - what the crews recorded: each stop's status time, each trip's status and end of session;
  * - the returns to check after an absence on the outbound leg;
  * - where each crew stands with its roadmap (version published, « J'ai vu »);
- * - the crews' requests still to handle (« Fin de séance », « Demande d'annulation »…);
+ * - the crews' requests still to handle (« Fin de séance », « Demande d'annulation », « Retard annoncé »…);
+ * - the lateness each crew announced last on a stop of its route (FLD-01), which the projection carries on;
  * - a key of the plan itself (routes, stops, trips, crews), statuses and end-of-session times aside: when it moves,
  *   something else than the field changed the plan, and the page offers « Recharger ».
  * Ids, minutes, statuses, crew names and a request's reason from a fixed list: the read of the day's patients
@@ -61,9 +62,37 @@ export type LiveSnapshot = {
   roadmaps: Record<string, RoadmapStateView>;
   /** Requests of the crews still to handle, oldest first. */
   requests: FieldRequestView[];
+  /** The lateness announced last on each route (« tripId/KIND » of its stop -> minutes), handled or not. */
+  lateness: Record<string, number>;
 };
 
 type Client = Pick<PrismaClient, "route" | "trip" | "routeVersion" | "fieldRequest" | "$queryRaw" | "optimizationRun" | "appSettings">;
+
+/** A lateness announced by a crew (FieldRequest LATE) as announcedLateness reads it. */
+export type LatenessRow = {
+  tripId: string;
+  stopKind: StopKind | null;
+  lateMinutes: number | null;
+  createdAt: Date;
+  status: FieldRequestStatus;
+  resolvedById: string | null;
+  routeId: string | null;
+};
+
+/**
+ * The lateness in force on each route: the latest one announced on it (« tripId/KIND » of its stop -> minutes). One
+ * replaced by a newer one of the crew (closed without a regulator) is left out; one the regulator took note of stays.
+ */
+export function announcedLateness(rows: readonly LatenessRow[]): Record<string, number> {
+  const latest = new Map<string, LatenessRow>();
+  for (const row of rows) {
+    if (row.routeId === null || row.stopKind === null || row.lateMinutes === null) continue;
+    if (row.status === "NOTED" && row.resolvedById === null) continue;
+    const current = latest.get(row.routeId);
+    if (!current || row.createdAt > current.createdAt) latest.set(row.routeId, row);
+  }
+  return Object.fromEntries([...latest.values()].map((row) => [`${row.tripId}/${row.stopKind}`, row.lateMinutes ?? 0]));
+}
 
 const ROUTE_SELECT = {
   id: true,
@@ -284,6 +313,8 @@ const REQUEST_SELECT = {
   previousReadyMinute: true,
   cancellationReason: true,
   nextSessionDate: true,
+  lateMinutes: true,
+  stopKind: true,
   createdAt: true,
   createdBy: { select: { name: true } },
 } satisfies Prisma.FieldRequestSelect;
@@ -297,6 +328,8 @@ type RequestRow = {
   previousReadyMinute: number | null;
   cancellationReason: CancellationReason | null;
   nextSessionDate: Date | null;
+  lateMinutes?: number | null;
+  stopKind?: StopKind | null;
   createdAt: Date;
   createdBy: { name: string } | null;
 };
@@ -311,6 +344,8 @@ export function fieldRequestView(row: RequestRow): FieldRequestView {
     previousReadyMinute: row.previousReadyMinute,
     cancellationReason: row.cancellationReason,
     nextSessionDate: row.nextSessionDate ? toIsoDate(row.nextSessionDate) : null,
+    lateMinutes: row.lateMinutes ?? null,
+    stopKind: row.stopKind ?? null,
     createdAt: row.createdAt.toISOString(),
     createdBy: row.createdBy?.name ?? null,
   };
@@ -349,12 +384,16 @@ export async function loadRoadmapStates(client: Pick<PrismaClient, "route" | "tr
 /** The live state of isoDate at `now` (see the module's comment). */
 export async function loadLiveSnapshot(client: Client, isoDate: string, now: Date = new Date()): Promise<LiveSnapshot> {
   const serviceDate = fromIsoDate(isoDate);
-  const [day, routes, trips, versions, requests] = await Promise.all([
+  const [day, routes, trips, versions, requests, lateRows] = await Promise.all([
     loadDayVersion(client, isoDate, now),
     client.route.findMany({ where: { serviceDate }, select: ROUTE_SELECT }),
     client.trip.findMany({ where: { serviceDate }, select: TRIP_SELECT }),
     loadStandingVersions(client, serviceDate),
     loadPendingRequests(client, isoDate),
+    client.fieldRequest.findMany({
+      where: { serviceDate, kind: "LATE" },
+      select: { tripId: true, stopKind: true, lateMinutes: true, createdAt: true, status: true, resolvedById: true, trip: { select: { routeId: true } } },
+    }),
   ]);
   const done: Record<string, number> = {};
   for (const route of routes) {
@@ -373,5 +412,6 @@ export async function loadLiveSnapshot(client: Client, isoDate: string, now: Dat
     returnsToCheck: [...returnsToCheckAfterNoShow(trips)],
     roadmaps: roadmapStatesOf({ isoDate, routes, trips: new Map(trips.map((trip) => [trip.id, trip])), versions, now }),
     requests,
+    lateness: announcedLateness(lateRows.map(({ trip, ...row }) => ({ ...row, routeId: trip.routeId }))),
   };
 }

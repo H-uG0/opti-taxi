@@ -3,13 +3,16 @@
  * - « Patient prêt à HH:MM » (the session ends earlier or later than planned): the return's end of session
  *   (Trip.readyMinute) changes at once, the regulator is told (« À traiter ») and re-places the return if needed;
  * - a cancellation or a return trip asked for: nothing changes until the regulator accepts it;
- * - the next session of the series, typed at the drop-off: passed on to the regulator.
+ * - the next session of the series, typed at the drop-off: passed on to the regulator;
+ * - a lateness announced on the stop to come (« Retard +10 / +20 / +30 », FLD-01): the day's follow-up moves the
+ *   estimated times of the route from it (lib/planning/live-day.ts), the regulator takes note of it;
+ * - « Patient pas prêt » at a pickup: the crew waits at the door, the regulator is told.
  * Never a free text (health data): a reason from a list, a time, a date.
  *
  * Pure module (labels, bounds, texts, the return trip's data), shared by the driver's route, the regulator's
  * actions and screens, and the tests.
  */
-import type { CancellationReason, FieldRequestKind, FieldRequestStatus, Prisma, Trip, TripDirection, TripStatus } from "@prisma/client";
+import type { CancellationReason, FieldRequestKind, FieldRequestStatus, Prisma, StopKind, Trip, TripDirection, TripStatus } from "@prisma/client";
 import { addDays, formatMinute, formatShortDate } from "@/lib/time";
 
 /** Reasons a crew may give for a cancellation (« Autre » leaves the details to a call). */
@@ -29,7 +32,16 @@ export const FIELD_REQUEST_KIND_LABELS: Record<FieldRequestKind, string> = {
   CANCEL: "Demande d'annulation",
   RETURN: "Demande de retour",
   NEXT_SESSION: "Prochaine séance",
+  LATE: "Retard annoncé",
+  NOT_READY: "Patient pas prêt",
 };
+
+/** Signals the regulator only takes note of (« Pris en compte »): nothing waits for an answer. */
+export const INFORMATIVE_REQUEST_KINDS: readonly FieldRequestKind[] = ["READY_TIME", "NEXT_SESSION", "LATE", "NOT_READY"];
+
+/** The lateness a crew may announce on the stop to come, minutes. */
+export const LATE_SIGNAL_MINUTES = [10, 20, 30] as const;
+export type LateSignalMinutes = (typeof LATE_SIGNAL_MINUTES)[number];
 
 export const FIELD_REQUEST_STATUS_LABELS: Record<FieldRequestStatus, string> = {
   PENDING: "en attente de la régulation",
@@ -76,6 +88,10 @@ export type FieldRequestView = {
   cancellationReason: CancellationReason | null;
   /** YYYY-MM-DD. */
   nextSessionDate: string | null;
+  /** LATE: minutes announced. */
+  lateMinutes?: number | null;
+  /** LATE, NOT_READY: the stop of the trip it is about. */
+  stopKind?: StopKind | null;
   /** ISO instant. */
   createdAt: string;
   /** First name and name of the crew member (employee), null when unknown. */
@@ -87,7 +103,9 @@ function reasonLabel(reason: CancellationReason | null): string | null {
 }
 
 /** What was signalled or asked, without the patient's name (the screen gives it beside): « Prêt à 11:20 (prévu 11:45) ». */
-export function fieldRequestText(request: Pick<FieldRequestView, "kind" | "readyMinute" | "previousReadyMinute" | "cancellationReason" | "nextSessionDate">): string {
+export function fieldRequestText(
+  request: Pick<FieldRequestView, "kind" | "readyMinute" | "previousReadyMinute" | "cancellationReason" | "nextSessionDate" | "lateMinutes" | "stopKind">,
+): string {
   switch (request.kind) {
     case "READY_TIME": {
       const was = request.previousReadyMinute !== null ? ` (prévu ${formatMinute(request.previousReadyMinute)})` : "";
@@ -101,6 +119,12 @@ export function fieldRequestText(request: Pick<FieldRequestView, "kind" | "ready
       return `Retour demandé, patient prêt à ${formatMinute(request.readyMinute)}`;
     case "NEXT_SESSION":
       return `Prochaine séance le ${request.nextSessionDate ? formatShortDate(request.nextSessionDate) : "?"}`;
+    case "LATE": {
+      const stop = request.stopKind === "DROPOFF" ? " sur la dépose" : request.stopKind === "PICKUP" ? " sur la prise en charge" : "";
+      return `Retard annoncé${stop} : +${request.lateMinutes ?? "?"} min`;
+    }
+    case "NOT_READY":
+      return "Patient pas prêt : l'équipage attend sur place";
   }
 }
 
@@ -108,7 +132,15 @@ export function fieldRequestText(request: Pick<FieldRequestView, "kind" | "ready
  * The crew's line about its own request, the request named so that everything agrees with it: « Patient prêt à 11:20 ·
  * demande envoyée à 10:05, en attente de la régulation ».
  */
-export function fieldRequestCrewText(request: Pick<FieldRequestView, "kind" | "status" | "readyMinute" | "previousReadyMinute" | "cancellationReason" | "nextSessionDate">, sentAt: string): string {
+export function fieldRequestCrewText(
+  request: Pick<FieldRequestView, "kind" | "status" | "readyMinute" | "previousReadyMinute" | "cancellationReason" | "nextSessionDate" | "lateMinutes" | "stopKind">,
+  sentAt: string,
+): string {
+  // A signal (lateness, patient not ready) is « un signalement »: its words agree with it.
+  if (request.kind === "LATE" || request.kind === "NOT_READY") {
+    const state = request.status === "PENDING" ? "transmis à la régulation" : "pris en compte par la régulation";
+    return `${fieldRequestText(request)} · signalement envoyé à ${sentAt}, ${state}`;
+  }
   // An end of session is in force at once: the regulator only takes note of it.
   const state = request.kind === "READY_TIME" && request.status === "PENDING" ? "transmise à la régulation" : FIELD_REQUEST_STATUS_LABELS[request.status];
   return `${fieldRequestText(request)} · demande envoyée à ${sentAt}, ${state}`;

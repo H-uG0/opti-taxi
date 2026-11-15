@@ -75,6 +75,8 @@ export async function loadPlanningDay(
         notes: true,
         // A transport interrupted (DAY-03) is not « annulée après l'optimisation »: its continuation takes over.
         cancellationReason: true,
+        // « Patient absent »: the reason the crew gave (FLD-01).
+        noShowReason: true,
         // Shown in the trip panel to call the patient or brief the crew (the page traces plan.view).
         patient: { select: { firstName: true, lastName: true, phone: true, mobility: true, accessNotes: true } },
         facility: { select: { name: true, phone: true } },
@@ -116,6 +118,8 @@ export async function loadPlanningDay(
             loadAfter: true,
             completedAt: true,
             completedBy: recorderSelect,
+            // « Arrivé » on a pickup (FLD-01), shown with the crew's records in the trip panel.
+            arrivedAt: true,
           },
         },
       },

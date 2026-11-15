@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { StopKind, TripStatus } from "@prisma/client";
 import {
   decideStopAction,
+  isArrivalAction,
+  NO_CONTROLS,
   STOP_AUDIT_ACTIONS,
   stopAuditAction,
   stopControls,
@@ -164,7 +166,13 @@ describe("stopWrite", () => {
 
 describe("STOP_AUDIT_ACTIONS / stopAuditAction", () => {
   it("names one audit action per status action (an undo depends on the stop kind)", () => {
-    expect(STOP_AUDIT_ACTIONS).toEqual({ PICKUP: "stop.pickup", DROPOFF: "stop.dropoff", NO_SHOW: "stop.no_show" });
+    expect(STOP_AUDIT_ACTIONS).toEqual({
+      PICKUP: "stop.pickup",
+      DROPOFF: "stop.dropoff",
+      NO_SHOW: "stop.no_show",
+      ARRIVE: "stop.arrive",
+      UNDO_ARRIVE: "stop.undo_arrive",
+    });
   });
 
   it("names the stop kind an undo reverts", () => {
@@ -176,23 +184,74 @@ describe("STOP_AUDIT_ACTIONS / stopAuditAction", () => {
   });
 });
 
+describe("decideStopAction: arrival (FLD-01)", () => {
+  const arrived = (tripStatus: TripStatus = "ASSIGNED", completedAt: Date | null = null): StopSnapshot => ({
+    ...snapshot("PICKUP", tripStatus, completedAt),
+    arrivedAt: EARLIER,
+  });
+
+  it("dates the arrival at a pickup still to do, and nothing else", () => {
+    expect(decideStopAction("ARRIVE", snapshot("PICKUP", "ASSIGNED"), NOW)).toEqual({
+      type: "apply",
+      completedAt: null,
+      tripStatus: "ASSIGNED",
+      arrivedAt: NOW,
+      message: "Arrivée enregistrée.",
+    });
+    expect(isArrivalAction("ARRIVE")).toBe(true);
+    expect(isArrivalAction("PICKUP")).toBe(false);
+  });
+
+  it("is idempotent and changes nothing once the patient is on board", () => {
+    expect(decideStopAction("ARRIVE", arrived(), NOW).type).toBe("noop");
+    expect(decideStopAction("ARRIVE", snapshot("PICKUP", "PICKED_UP", EARLIER), NOW)).toMatchObject({ type: "noop", message: "Prise en charge déjà enregistrée." });
+  });
+
+  it("is refused on a drop-off, a cancelled trip and an absent patient", () => {
+    expect(decideStopAction("ARRIVE", snapshot("DROPOFF", "PICKED_UP"), NOW)).toMatchObject({ type: "refuse", reason: "WRONG_KIND" });
+    expect(decideStopAction("ARRIVE", snapshot("PICKUP", "CANCELLED"), NOW)).toMatchObject({ type: "refuse", reason: "CANCELLED" });
+    expect(decideStopAction("ARRIVE", snapshot("PICKUP", "NO_SHOW", EARLIER), NOW)).toMatchObject({ type: "refuse", reason: "NO_SHOW" });
+  });
+
+  it("undoes an arrival while the pickup is still to do, once (a replay changes nothing)", () => {
+    expect(decideStopAction("UNDO_ARRIVE", arrived(), NOW)).toMatchObject({ type: "apply", arrivedAt: null, completedAt: null, tripStatus: "ASSIGNED" });
+    expect(decideStopAction("UNDO_ARRIVE", snapshot("PICKUP", "ASSIGNED"), NOW).type).toBe("noop");
+    expect(decideStopAction("UNDO_ARRIVE", arrived("PICKED_UP", NOW), NOW)).toMatchObject({ type: "refuse", reason: "ALREADY_RECORDED" });
+    expect(decideStopAction("UNDO_ARRIVE", arrived("NO_SHOW", NOW), NOW)).toMatchObject({ type: "refuse", reason: "ALREADY_RECORDED" });
+  });
+
+  it("leaves the arrival untouched by the other statuses", () => {
+    const pickup = decideStopAction("PICKUP", arrived(), NOW);
+    expect(pickup).toMatchObject({ type: "apply", completedAt: NOW, tripStatus: "PICKED_UP" });
+    expect(pickup).not.toHaveProperty("arrivedAt");
+  });
+});
+
 describe("stopControls", () => {
   it("shows nothing outside the service day", () => {
-    expect(stopControls(snapshot("PICKUP", "ASSIGNED"), false)).toEqual({ primary: null, blockedReason: null, noShow: false, undo: false });
+    expect(stopControls(snapshot("PICKUP", "ASSIGNED"), false)).toEqual(NO_CONTROLS);
   });
 
   it("offers pickup and absence on a pending pickup", () => {
-    expect(stopControls(snapshot("PICKUP", "ASSIGNED"), true)).toEqual({ primary: "PICKUP", blockedReason: null, noShow: true, undo: false });
+    expect(stopControls(snapshot("PICKUP", "ASSIGNED"), true)).toEqual({
+      primary: "PICKUP",
+      blockedReason: null,
+      noShow: true,
+      undo: false,
+      arrive: true,
+      undoArrive: false,
+    });
+    // Arrived: « Annuler l'arrivée » instead of « Arrivé », the rest unchanged.
+    expect(stopControls({ ...snapshot("PICKUP", "ASSIGNED"), arrivedAt: EARLIER }, true)).toMatchObject({ arrive: false, undoArrive: true, primary: "PICKUP", noShow: true });
   });
 
   it("blocks the dropoff until the pickup is recorded", () => {
     expect(stopControls(snapshot("DROPOFF", "ASSIGNED"), true)).toEqual({
+      ...NO_CONTROLS,
       primary: "DROPOFF",
       blockedReason: "Prise en charge non saisie\u00a0: enregistrez-la d'abord.",
-      noShow: false,
-      undo: false,
     });
-    expect(stopControls(snapshot("DROPOFF", "PICKED_UP"), true)).toEqual({ primary: "DROPOFF", blockedReason: null, noShow: false, undo: false });
+    expect(stopControls(snapshot("DROPOFF", "PICKED_UP"), true)).toEqual({ ...NO_CONTROLS, primary: "DROPOFF" });
   });
 
   it("offers undo only on the latest recorded status", () => {
@@ -202,9 +261,8 @@ describe("stopControls", () => {
   });
 
   it("offers nothing on skipped and cancelled stops", () => {
-    const none = { primary: null, blockedReason: null, noShow: false, undo: false };
-    expect(stopControls(snapshot("DROPOFF", "NO_SHOW"), true)).toEqual(none);
-    expect(stopControls(snapshot("PICKUP", "CANCELLED"), true)).toEqual(none);
+    expect(stopControls(snapshot("DROPOFF", "NO_SHOW"), true)).toEqual(NO_CONTROLS);
+    expect(stopControls(snapshot("PICKUP", "CANCELLED"), true)).toEqual(NO_CONTROLS);
   });
 
   it("never shows a usable button that the server would refuse", () => {

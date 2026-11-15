@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { todayIso } from "@/lib/time";
-import { livePlanToken, planKeyOf, roadmapStatesOf, shownPlanHolds } from "./live-load";
+import { announcedLateness, livePlanToken, planKeyOf, roadmapStatesOf, shownPlanHolds, type LatenessRow } from "./live-load";
 import { roadmapSnapshot } from "./roadmap-version";
 
 type Routes = Parameters<typeof planKeyOf>[0];
@@ -44,6 +44,32 @@ const trips = (status: Trips[number]["status"] = "ASSIGNED", readyMinute: number
     notes: null,
   },
 ];
+
+describe("announcedLateness (FLD-01)", () => {
+  const row = (extra: Partial<LatenessRow>): LatenessRow => ({
+    tripId: "t1",
+    stopKind: "PICKUP",
+    lateMinutes: 10,
+    createdAt: new Date("2026-11-16T08:00:00.000Z"),
+    status: "PENDING",
+    resolvedById: null,
+    routeId: "r1",
+    ...extra,
+  });
+
+  it("keeps the latest lateness of each route, handled or not, never one the crew replaced", () => {
+    expect(
+      announcedLateness([
+        row({}),
+        row({ tripId: "t2", stopKind: "DROPOFF", lateMinutes: 30, createdAt: new Date("2026-11-16T08:20:00.000Z"), status: "NOTED", resolvedById: "reg1" }),
+        row({ routeId: "r2", tripId: "t9", lateMinutes: 20 }),
+        // Replaced by a newer one of the crew (closed without a regulator).
+        row({ routeId: "r3", tripId: "t5", status: "NOTED", resolvedById: null }),
+        row({ routeId: null, tripId: "t7" }),
+      ]),
+    ).toEqual({ "t2/DROPOFF": 30, "t9/PICKUP": 20 });
+  });
+});
 
 describe("planKeyOf", () => {
   it("does not move with what the field records (statuses, end of session)", () => {

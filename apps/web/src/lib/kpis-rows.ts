@@ -102,6 +102,10 @@ export type KpiTrip = {
   pickupCompletedAt?: Date | null;
   /** Planned service time at the pickup stop (departure - start), minutes. */
   pickupServiceMinutes?: number | null;
+  /** « Arrivé » at the pickup (RouteStop.arrivedAt, FLD-01): the wait at the door is measured from it. */
+  pickupArrivedAt?: Date | null;
+  /** Planned start of the pickup stop (minute of the day): the wait at the door never starts before it. */
+  pickupStartMinute?: number | null;
   /** Planned time on board: start of the drop-off - departure from the pickup, minutes. */
   plannedRideMinutes?: number | null;
 };
@@ -247,6 +251,8 @@ export type KpiStopRow = {
   startMinute: number;
   departureMinute: number;
   completedAt: Date | null;
+  /** « Arrivé » on a pickup (FLD-01); absent in older callers. */
+  arrivedAt?: Date | null;
   /** Absent in older callers: the route timings are then unknown. */
   sequence?: number;
   arrivalMinute?: number;

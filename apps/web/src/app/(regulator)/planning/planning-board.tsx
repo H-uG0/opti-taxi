@@ -15,7 +15,7 @@ import { Timeline } from "@/components/planning/timeline";
 import type { TripDragApi } from "@/components/planning/use-trip-drag";
 import { VehiclePanel } from "@/components/planning/vehicle-panel";
 import type { DroppedLock } from "@/lib/optimizer/build-request";
-import type { FieldRequestView } from "@/lib/domain/field-requests";
+import { INFORMATIVE_REQUEST_KINDS, type FieldRequestView } from "@/lib/domain/field-requests";
 import type { RoadmapStateView } from "@/lib/planning/live-load";
 import { liveRowView, tripLiveText, vehicleLiveView, type LiveRowView } from "@/lib/planning/live-view";
 import { scopeLockCounts, scopeTripOf } from "@/lib/planning/bulk-lock";
@@ -113,7 +113,7 @@ function RequestActions({
   otherLeg: TripView | undefined;
 }) {
   const fields = (decision: string, extra: Record<string, string> = {}) => ({ requestId: request.id, decision, ...extra });
-  if (request.kind === "READY_TIME" || request.kind === "NEXT_SESSION") {
+  if (INFORMATIVE_REQUEST_KINDS.includes(request.kind)) {
     return (
       <div className="flex flex-wrap items-start gap-1.5">
         <ActionButton action={resolveFieldRequest} fields={fields("note")} align="start">

@@ -14,21 +14,28 @@
  * - a refusal (cancelled trip, status changed by the other crew member…)
  *   puts the buttons back with the reason, and the driver can tap again;
  * - a slow network is announced after a few seconds instead of a silent
- *   spinner, and after 15 s the status simply waits in the queue.
+ *   spinner, and after 15 s the status simply waits in the queue;
+ * - on a pickup (FLD-01), « Arrivé » (optional) dates the arrival and starts
+ *   a wait counter; « Patient absent » asks for a reason from a list, and
+ *   waits for the minimum wait set in Paramètres when there is one.
  */
 import { useEffect, useId, useState } from "react";
-import { Check, CloudOff, LoaderCircle, TriangleAlert, Undo2, UserX } from "lucide-react";
+import type { NoShowReason } from "@prisma/client";
+import { Check, Clock, CloudOff, LoaderCircle, MapPinCheck, TriangleAlert, Undo2, UserX } from "lucide-react";
 import { cn } from "@/components/ui/cn";
+import { NO_SHOW_REASON_LABELS, NO_SHOW_REASONS, noShowAllowedFrom, waitedMinutes, waitStartMinute } from "@/lib/domain/field-wait";
 import { formatMinute, minuteOfDay } from "@/lib/time";
-import { localStatusShown, type LocalStatus } from "../_lib/status-queue";
+import { localArrival, localStatusShown, type LocalStatus } from "../_lib/status-queue";
 import type { StopAction } from "../_lib/transitions";
-import { useDriverApp, useQueueSnapshot } from "./driver-app";
+import { useDriverApp, useMinuteClock, useQueueSnapshot } from "./driver-app";
 
 const STATUS_LABELS: Record<StopAction, string> = {
   PICKUP: "Pris en charge",
   DROPOFF: "Déposé",
   NO_SHOW: "Patient absent",
   UNDO: "Annulation du statut",
+  ARRIVE: "Arrivé",
+  UNDO_ARRIVE: "Annulation de l'arrivée",
 };
 
 const SLOW_AFTER_MS = 6000;
@@ -137,7 +144,117 @@ function useRefusal(stopId: string): string | null {
   return null;
 }
 
-/** Buttons of a stop still to do: "Pris en charge" / "Déposé", and "Patient absent" on a pickup. */
+/** The arrival at a pickup as the buttons need it (FLD-01); null on a drop-off. */
+export type ArrivalControls = {
+  /** « Arrivé » can be recorded (no arrival yet). */
+  can: boolean;
+  /** « Annuler l'arrivée » can be sent (an arrival on the server). */
+  canUndo: boolean;
+  /** Arrival recorded on the server (epoch ms), null when none. */
+  arrivedAt: number | null;
+  /** Planned start of the pickup (minute of the day): the wait never starts before it. */
+  plannedMinute: number;
+  /** Minimum wait before « Patient absent » (Paramètres), minutes; 0: none. */
+  minWaitMin: number;
+};
+
+/** « Arrivé à 07:58 · attente 6 min », with « Annuler l'arrivée ». */
+function ArrivalLine({
+  stopId,
+  arrivedAt,
+  plannedMinute,
+  canUndo,
+  waiting,
+}: {
+  stopId: string;
+  arrivedAt: number;
+  plannedMinute: number;
+  canUndo: boolean;
+  /** The arrival is still on the phone (not received by the server yet). */
+  waiting: boolean;
+}) {
+  const { submit } = useDriverApp();
+  const now = useMinuteClock();
+  const arrivedMinute = minuteOfDay(new Date(arrivedAt));
+  const start = waitStartMinute(arrivedMinute, plannedMinute) ?? plannedMinute;
+  const nowMinute = now === null ? null : minuteOfDay(new Date(now));
+  const waited = nowMinute === null ? null : waitedMinutes(arrivedMinute, plannedMinute, nowMinute);
+  return (
+    <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sky-950">
+      <p className="flex min-w-0 flex-1 items-center gap-2 text-base">
+        <Clock aria-hidden className="size-5 shrink-0" />
+        <span className="tabular">
+          <span className="font-semibold">Arrivé à {formatMinute(arrivedMinute)}</span>
+          {nowMinute !== null && nowMinute < start ? (
+            <> · patient attendu à {formatMinute(start)}</>
+          ) : waited !== null ? (
+            <> · attente {waited}&nbsp;min</>
+          ) : null}
+          {waiting ? <span className="block text-sm">En attente d&apos;envoi, avec l&apos;heure du geste.</span> : null}
+        </span>
+      </p>
+      {canUndo || waiting ? (
+        <button
+          type="button"
+          onClick={() => submit(stopId, "UNDO_ARRIVE")}
+          className="inline-flex min-h-11 touch-manipulation items-center gap-1 rounded-lg px-2 text-sm font-semibold text-sky-900 underline underline-offset-2 hover:bg-sky-100 focus-visible:outline-2 focus-visible:outline-brand-600"
+        >
+          Annuler l&apos;arrivée
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** « Confirmer l'absence de … ? » with its reason, chosen in the list (never a free text). */
+function NoShowConfirm({ patient, onCancel, onConfirm }: { patient: string; onCancel: () => void; onConfirm: (reason: NoShowReason) => void }) {
+  const id = useId();
+  const [reason, setReason] = useState<NoShowReason | null>(null);
+  return (
+    <div role="group" aria-labelledby={`${id}-confirm`} className="space-y-3 rounded-xl border border-red-200 bg-red-50 p-3">
+      <div>
+        <p id={`${id}-confirm`} className="text-base font-semibold text-red-950">
+          Confirmer l&apos;absence de {patient}&#x202F;?
+        </p>
+        <p className="text-sm text-red-900">La course passe en «&#x202F;Absent&#x202F;» et sa dépose est retirée de la tournée.</p>
+      </div>
+      <fieldset className="space-y-1.5">
+        <legend className="mb-1 text-sm font-semibold text-red-950">Motif</legend>
+        {NO_SHOW_REASONS.map((value) => (
+          <label
+            key={value}
+            className={cn(
+              "flex min-h-12 cursor-pointer touch-manipulation items-center gap-3 rounded-xl border bg-white px-3 text-base text-slate-900",
+              reason === value ? "border-red-600 ring-2 ring-red-600" : "border-slate-300",
+            )}
+          >
+            <input type="radio" name={`${id}-reason`} value={value} checked={reason === value} onChange={() => setReason(value)} className="size-5 accent-red-700" />
+            {NO_SHOW_REASON_LABELS[value]}
+          </label>
+        ))}
+      </fieldset>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className={cn(bigButton, "min-h-12 border border-slate-300 bg-white text-base text-slate-900 hover:bg-slate-50")}
+        >
+          Retour
+        </button>
+        <button
+          type="button"
+          disabled={reason === null}
+          onClick={() => reason && onConfirm(reason)}
+          className={cn(bigButton, "min-h-12 bg-red-700 text-base text-white hover:bg-red-800 disabled:bg-red-300")}
+        >
+          Oui, absent
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Buttons of a stop still to do: "Pris en charge" / "Déposé", and "Arrivé", "Patient absent" on a pickup. */
 export function StopActions({
   stopId,
   pickupStopId,
@@ -146,6 +263,7 @@ export function StopActions({
   noShow,
   emphasized,
   patient,
+  arrival = null,
 }: {
   stopId: string;
   /** On a dropoff: the pickup stop of the same trip (a pickup tapped on the phone unlocks the dropoff). */
@@ -156,54 +274,67 @@ export function StopActions({
   /** Next stop to do: filled main button. */
   emphasized: boolean;
   patient: string;
+  /** A pickup: its arrival and the wait before an absence. */
+  arrival?: ArrivalControls | null;
 }) {
   const { submit } = useDriverApp();
   const { byStop } = useQueueSnapshot();
+  const now = useMinuteClock();
   const refusal = useRefusal(stopId);
   const [confirmingNoShow, setConfirmingNoShow] = useState(false);
   const reasonId = useId();
+  const waitId = useId();
 
   const local = localStatusShown(true, byStop[stopId]);
   if (local) return <LocalStatusPanel stopId={stopId} local={local} />;
 
   if (confirmingNoShow) {
     return (
-      <div role="group" aria-labelledby={`${reasonId}-confirm`} className="space-y-3 rounded-xl border border-red-200 bg-red-50 p-3">
-        <div>
-          <p id={`${reasonId}-confirm`} className="text-base font-semibold text-red-950">
-            Confirmer l&apos;absence de {patient}&#x202F;?
-          </p>
-          <p className="text-sm text-red-900">La course passe en «&#x202F;Absent&#x202F;» et sa dépose est retirée de la tournée.</p>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => setConfirmingNoShow(false)}
-            className={cn(bigButton, "min-h-12 border border-slate-300 bg-white text-base text-slate-900 hover:bg-slate-50")}
-          >
-            Retour
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setConfirmingNoShow(false);
-              submit(stopId, "NO_SHOW");
-            }}
-            className={cn(bigButton, "min-h-12 bg-red-700 text-base text-white hover:bg-red-800")}
-          >
-            Oui, absent
-          </button>
-        </div>
-      </div>
+      <NoShowConfirm
+        patient={patient}
+        onCancel={() => setConfirmingNoShow(false)}
+        onConfirm={(reason) => {
+          setConfirmingNoShow(false);
+          submit(stopId, "NO_SHOW", reason);
+        }}
+      />
     );
   }
 
   // The pickup of this trip, tapped on this phone and not yet on the page, unlocks its dropoff.
   const pickupLocal = pickupStopId ? byStop[pickupStopId] : undefined;
   const blocked = blockedReason !== null && pickupLocal?.action !== "PICKUP";
+  // The arrival as the crew sees it: the server's, or the one tapped on this phone.
+  const stopLocal = byStop[stopId];
+  const arrivedAt = arrival ? localArrival(arrival.arrivedAt, stopLocal) : null;
+  const arrivalWaiting = stopLocal?.action === "ARRIVE" && stopLocal.phase !== "sent";
+  // « Patient absent » before the minimum wait: shown, not usable, with the moment it becomes so.
+  const allowedFrom =
+    arrival && noShow
+      ? noShowAllowedFrom({
+          arrivedMinute: arrivedAt !== null ? minuteOfDay(new Date(arrivedAt)) : null,
+          plannedStartMinute: arrival.plannedMinute,
+          minWaitMin: arrival.minWaitMin,
+        })
+      : null;
+  const nowMinute = now === null ? null : minuteOfDay(new Date(now));
+  const noShowLocked = allowedFrom !== null && (allowedFrom === "arrival" || nowMinute === null || nowMinute < allowedFrom);
 
   return (
     <div className="space-y-2">
+      {arrival && arrivedAt !== null ? (
+        <ArrivalLine stopId={stopId} arrivedAt={arrivedAt} plannedMinute={arrival.plannedMinute} canUndo={arrival.canUndo} waiting={arrivalWaiting} />
+      ) : arrival?.can ? (
+        <button
+          type="button"
+          onClick={() => submit(stopId, "ARRIVE")}
+          className={cn(bigButton, "min-h-12 border-2 border-sky-700 bg-white text-base text-sky-900 hover:bg-sky-50 active:bg-sky-100")}
+        >
+          <MapPinCheck aria-hidden className="size-5" />
+          Arrivé
+          <span className="sr-only"> chez {patient}</span>
+        </button>
+      ) : null}
       {primary ? (
         <button
           type="button"
@@ -234,13 +365,30 @@ export function StopActions({
       {noShow ? (
         <button
           type="button"
+          disabled={noShowLocked}
+          aria-describedby={noShowLocked ? waitId : undefined}
           onClick={() => setConfirmingNoShow(true)}
-          className={cn(bigButton, "min-h-12 border border-red-300 bg-white text-base text-red-800 hover:bg-red-50 active:bg-red-100")}
+          className={cn(
+            bigButton,
+            "min-h-12 border text-base",
+            noShowLocked
+              ? "border-dashed border-slate-300 bg-slate-100 text-slate-500"
+              : "border-red-300 bg-white text-red-800 hover:bg-red-50 active:bg-red-100",
+          )}
         >
           <UserX aria-hidden className="size-5" />
           Patient absent
           <span className="sr-only"> : {patient}</span>
         </button>
+      ) : null}
+      {noShow && noShowLocked && arrival ? (
+        <p id={waitId} className="text-center text-sm font-medium text-slate-600">
+          {allowedFrom === "arrival"
+            ? `Attente minimale de ${arrival.minWaitMin}\u00a0min\u00a0: touchez d'abord «\u202fArrivé\u202f».`
+            : typeof allowedFrom === "number"
+              ? `Attente minimale de ${arrival.minWaitMin}\u00a0min\u00a0: possible à partir de ${formatMinute(allowedFrom)}.`
+              : null}
+        </p>
       ) : null}
       {refusal ? <ActionError message={refusal} /> : null}
     </div>
@@ -267,7 +415,11 @@ export function UndoStatus({
   const { byStop } = useQueueSnapshot();
   const refusal = useRefusal(stopId);
   const local = localStatusShown(false, byStop[stopId]);
-  const newerOnPhone = routeStopIds.some((id) => id !== stopId && byStop[id] !== undefined && byStop[id].action !== "UNDO");
+  // An arrival elsewhere is not a newer status: the server's latest status stays the one to undo.
+  const newerOnPhone = routeStopIds.some((id) => {
+    const other = id !== stopId ? byStop[id] : undefined;
+    return other !== undefined && other.action !== "UNDO" && other.action !== "ARRIVE" && other.action !== "UNDO_ARRIVE";
+  });
   if (!local && !refusal && newerOnPhone) return null;
 
   return (

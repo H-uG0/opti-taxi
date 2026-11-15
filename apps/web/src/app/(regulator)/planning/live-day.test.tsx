@@ -25,6 +25,7 @@ function snapshot(extra: Partial<LiveSnapshot> = {}): LiveSnapshot {
     returnsToCheck: [],
     roadmaps: {},
     requests: [],
+    lateness: {},
     ...extra,
   };
 }

@@ -381,6 +381,14 @@ function SettingsFields({ values, errors }: { values: FormValues; errors: FieldE
           >
             <NumberInput name="lateCancellationHours" unit="h" integer values={values} errors={errors} />
           </Field>
+          <Field
+            label="Attente minimale avant une absence (min)"
+            htmlFor="noShowMinWaitMin"
+            error={errors.noShowMinWaitMin}
+            hint="0 par défaut&nbsp;: l'équipage peut déclarer «&#x202F;Patient absent&#x202F;» tout de suite. Au-delà, il touche «&#x202F;Arrivé&#x202F;» et attend ce délai, compté au plus tôt à l'heure prévue de la prise en charge. Valeur à fixer avec la direction."
+          >
+            <NumberInput name="noShowMinWaitMin" unit="min" integer values={values} errors={errors} />
+          </Field>
         </div>
       </Fieldset>
 

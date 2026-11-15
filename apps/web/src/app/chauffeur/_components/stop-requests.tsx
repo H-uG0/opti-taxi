@@ -7,24 +7,13 @@
  * (POST /api/chauffeur/stops/:id/requests), online only: without network the crew calls the regulation. Never a free
  * text: a time, a date, a reason from a list. What was sent shows on the stop with where it stands.
  */
-import { useId, useState, useTransition, type FormEvent, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useId, useState, type FormEvent, type ReactNode } from "react";
 import { MessageSquareShare, Send } from "lucide-react";
 import { cn } from "@/components/ui/cn";
-import type { FieldRequestResponse } from "@/app/api/chauffeur/stops/[id]/requests/route";
 import { FIELD_CANCEL_REASON_LABELS, FIELD_CANCEL_REASONS, type FieldCancelReason } from "@/lib/domain/field-requests";
 import { formatMinute, parseMinute } from "@/lib/time";
-import { serverReachable } from "../_lib/reachability";
 import type { StopFieldView } from "../_lib/view";
-import { useDriverApp } from "./driver-app";
-
-type RequestBody = {
-  kind: "READY_TIME" | "CANCEL" | "RETURN" | "NEXT_SESSION";
-  readyMinute?: number;
-  reason?: FieldCancelReason;
-  nextSessionDate?: string;
-  target?: "return";
-};
+import { useFieldRequest, type FieldRequestBody as RequestBody } from "./use-field-request";
 
 const field = "min-h-12 rounded-xl border border-field bg-white px-3 text-base text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600";
 const secondary =
@@ -184,38 +173,8 @@ export function requestsSummary(view: StopFieldView): string {
 }
 
 export function StopRequests({ stopId, view }: { stopId: string; view: StopFieldView }) {
-  const router = useRouter();
-  const { ownerId } = useDriverApp();
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  const [, startTransition] = useTransition();
+  const { busy, message, send } = useFieldRequest(stopId);
   const hasForms = view.signalReady || view.askReturn || view.cancelReturn || view.askCancel || view.nextSession;
-
-  const send = async (body: RequestBody) => {
-    setBusy(true);
-    setMessage(null);
-    try {
-      if (navigator.onLine === false) throw new Error("offline");
-      const response = await fetch(`/api/chauffeur/stops/${encodeURIComponent(stopId)}/requests`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...body, ownerId }),
-        credentials: "same-origin",
-        cache: "no-store",
-        redirect: "error",
-      });
-      const answer = (await response.json().catch(() => null)) as FieldRequestResponse | null;
-      if (!answer) throw new Error("unreadable");
-      setMessage(answer.ok ? { ok: true, text: answer.message } : { ok: false, text: answer.error });
-      if (answer.ok || answer.code === "conflict") {
-        if (await serverReachable()) startTransition(() => router.refresh());
-      }
-    } catch {
-      setMessage({ ok: false, text: "Pas de réseau\u00a0: rien n'a été envoyé. Réessayez, ou appelez la régulation." });
-    } finally {
-      setBusy(false);
-    }
-  };
 
   if (!hasForms && view.sent.length === 0) return null;
   return (

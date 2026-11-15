@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { FIELD_REQUEST_KIND_LABELS, OPEN_TRIP_STATUSES, returnTripData } from "@/lib/domain/field-requests";
+import { FIELD_REQUEST_KIND_LABELS, INFORMATIVE_REQUEST_KINDS, OPEN_TRIP_STATUSES, returnTripData } from "@/lib/domain/field-requests";
 import { isSameEpisode } from "@/lib/domain/no-show";
 import { sharingAllowedFor } from "@/lib/domain/rules";
 import { INITIAL_ACTION_RESULT, type ActionResult } from "@/lib/forms";
@@ -34,7 +34,7 @@ export async function resolveFieldRequest(_prev: ActionResult, formData: FormDat
   });
   if (!request) return { ok: false, message: "Demande introuvable\u00a0: rechargez la page." };
   if (request.status !== "PENDING") return { ok: false, message: "Demande déjà traitée\u00a0: rechargez la page." };
-  const informative = request.kind === "READY_TIME" || request.kind === "NEXT_SESSION";
+  const informative = INFORMATIVE_REQUEST_KINDS.includes(request.kind);
   if ((decision === "note") !== informative) return { ok: false, message: "Réponse impossible pour cette demande\u00a0: rechargez la page." };
 
   const trip = await db.trip.findUnique({

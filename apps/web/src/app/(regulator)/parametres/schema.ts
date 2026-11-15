@@ -6,6 +6,7 @@
 import { z } from "zod";
 import type { AppSettings } from "@prisma/client";
 import { LATE_CANCELLATION_HOURS } from "@/lib/domain/cancellation";
+import { NO_SHOW_MIN_WAIT } from "@/lib/domain/field-wait";
 import { TRIP_HORIZON_DAYS } from "@/lib/trips/horizon";
 import { formatDecimalInput, numberField, optionalNumberField, type FormValues } from "@/lib/forms";
 import { fractionToPercent, percentToFraction } from "../tarifs/schema";
@@ -106,6 +107,8 @@ export const settingsSchema = z
       max: LATE_CANCELLATION_HOURS.max,
       unit: "h",
     }),
+    // The wait at the door before the crew can declare « Patient absent » (lib/domain/field-wait.ts, FLD-01).
+    noShowMinWaitMin: numberField({ integer: true, min: NO_SHOW_MIN_WAIT.min, max: NO_SHOW_MIN_WAIT.max, unit: "min" }),
     // Automatic crews of the day (lib/staff/day-crews.ts): replacements and ambulance pairs.
     crewMaxReplacementKm: numberField({ min: 0, max: CREW_LIMITS.maxReplacementKm, unit: "km" }),
     crewMinPairOverlapMin: numberField({ integer: true, min: 0, max: CREW_LIMITS.minPairOverlapMin, unit: "min" }),
@@ -155,6 +158,7 @@ export const SETTINGS_FIELDS = [
   "replanMaxServedLoss",
   "replanChangePenalty",
   "lateCancellationHours",
+  "noShowMinWaitMin",
   "tripHorizonDays",
   "crewMaxReplacementKm",
   "crewMinPairOverlapMin",

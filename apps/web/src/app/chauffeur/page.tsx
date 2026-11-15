@@ -8,7 +8,14 @@ import { formatLongDate, formatMinute, minuteOfDay, todayIso, tomorrowIso } from
 import { Badge } from "@/components/ui/badge";
 import { STOP_KIND_LABELS } from "@/lib/labels";
 import type { RegulatorContact } from "./_lib/links";
-import { loadDriverRoutes, loadFieldContext, loadNextDaySummary, loadRegulatorContact, loadReturnTripsAfterOutboundNoShow } from "./_lib/load";
+import {
+  loadDriverRoutes,
+  loadFieldContext,
+  loadNextDaySummary,
+  loadNoShowMinWait,
+  loadRegulatorContact,
+  loadReturnTripsAfterOutboundNoShow,
+} from "./_lib/load";
 import { isReadableRoadmapDate, type NextDaySummary } from "./_lib/roadmap";
 import { buildRouteView, nextDayCardFirst, NO_FIELD_CONTEXT } from "./_lib/view";
 import { DaySwitch } from "./_components/day-switch";
@@ -122,9 +129,10 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
   // Statuses are recorded on the service day only (the status route handler checks it too).
   const editable = date === today;
 
-  const [routes, regulator] = await Promise.all([
+  const [routes, regulator, noShowMinWait] = await Promise.all([
     loadDriverRoutes(user.driverId, date, today),
     loadRegulatorContact(),
+    loadNoShowMinWait(),
     // Trace of the read (patient names, phones and addresses on screen) for the day shown,
     // tomorrow on the ?date= preview; never breaks the page.
     auditRead(user, { action: "roadmap.view", entity: "Driver", entityId: user.driverId, serviceDate: date }),
@@ -136,7 +144,7 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
     // The evening before: tomorrow's start and first stop (DAY-04).
     date === today ? loadNextDaySummary(user.driverId, tomorrow) : [],
   ]);
-  const views = routes.map((route) => buildRouteView(route, user.driverId, editable, afterOutboundNoShow, field));
+  const views = routes.map((route) => buildRouteView(route, user.driverId, editable, afterOutboundNoShow, field, noShowMinWait));
   // Tomorrow's card, once: first in the evening (today's stops done, or no route today), after the routes otherwise.
   const nextDayCard = <NextDayCard tomorrow={tomorrow} routes={nextDay} />;
   const nextDayFirst = nextDayCardFirst(views);

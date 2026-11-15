@@ -14,8 +14,13 @@
  * - Time on board: « Déposé » - « Pris en charge », against the direct drive,
  *   estimated from the plan (planned time on board × direct km ÷ km on board,
  *   the patient's own detour taken out).
+ * - At the patient's door (FLD-01, « Arrivé » tapped): the crew's arrival
+ *   against the planned start of the pickup (positive: late), the crew's wait
+ *   from the arrival (never before the planned start) to « Pris en charge »
+ *   less the planned boarding time, and the wait before a « Patient absent ».
  */
 import { isSameEpisode } from "@/lib/domain/no-show";
+import { waitedMinutes } from "@/lib/domain/field-wait";
 import { isServedTrip, minuteOfServiceDay, type KpiOptions, type KpiTrip } from "./kpis-rows";
 
 /** A shared care session whose measured wait went over the limit (ids and minutes only). */
@@ -49,6 +54,12 @@ export type WaitTotals = {
   rideExcess: number[];
   /** Trips whose time on board exceeded the direct drive by more than AppSettings.maxRideExtraMin. */
   rideOverMax: number;
+  /** « Arrivé » at a pickup against its planned start (minutes, positive: late). */
+  arrivalDelays: number[];
+  /** The crew's wait at the door before « Pris en charge » (minutes). */
+  doorWaits: number[];
+  /** The crew's wait at the door before « Patient absent » (minutes). */
+  noShowWaits: number[];
 };
 
 export function emptyWaits(): WaitTotals {
@@ -64,6 +75,9 @@ export function emptyWaits(): WaitTotals {
     rideMinutes: [],
     rideExcess: [],
     rideOverMax: 0,
+    arrivalDelays: [],
+    doorWaits: [],
+    noShowWaits: [],
   };
 }
 
@@ -80,6 +94,9 @@ export function addWaits(a: WaitTotals, b: WaitTotals): WaitTotals {
     rideMinutes: [...a.rideMinutes, ...b.rideMinutes],
     rideExcess: [...a.rideExcess, ...b.rideExcess],
     rideOverMax: a.rideOverMax + b.rideOverMax,
+    arrivalDelays: [...a.arrivalDelays, ...b.arrivalDelays],
+    doorWaits: [...a.doorWaits, ...b.doorWaits],
+    noShowWaits: [...a.noShowWaits, ...b.noShowWaits],
   };
 }
 
@@ -114,6 +131,24 @@ export function rideTime(trip: KpiTrip): { onBoard: number; excess: number | nul
   return { onBoard, excess: onBoard - directMinutes };
 }
 
+/**
+ * The crew at the patient's door (FLD-01), null without « Arrivé »: its arrival against the planned start of the
+ * pickup, and its wait until « Pris en charge » (less the planned boarding time) or « Patient absent ».
+ */
+export function doorTimes(trip: KpiTrip): { arrivalDelay: number; wait: number | null; noShow: boolean } | null {
+  const arrived = trip.pickupArrivedAt ?? null;
+  const start = trip.pickupStartMinute ?? null;
+  if (!arrived || start === null) return null;
+  const arrivedMinute = minuteOfServiceDay(arrived, trip.serviceDate);
+  const arrivalDelay = arrivedMinute - start;
+  const closed = trip.pickupCompletedAt ?? null;
+  const onBoard = trip.status === "PICKED_UP" || trip.status === "DROPPED_OFF";
+  if (!closed || (!onBoard && trip.status !== "NO_SHOW")) return { arrivalDelay, wait: null, noShow: false };
+  const boarding = onBoard ? Math.max(0, trip.pickupServiceMinutes ?? 0) : 0;
+  const waited = waitedMinutes(arrivedMinute, start, minuteOfServiceDay(closed, trip.serviceDate) - boarding);
+  return { arrivalDelay, wait: waited, noShow: trip.status === "NO_SHOW" };
+}
+
 /** Legs of a care session that are still to be (or were) carried. */
 function carried(trip: KpiTrip): boolean {
   return isServedTrip(trip);
@@ -127,6 +162,11 @@ export function waitsOfDay(trips: readonly KpiTrip[], options: Pick<KpiOptions, 
     if (before !== null) totals.beforeWaits.push(before);
     const after = waitAfterSession(trip);
     if (after !== null) totals.afterWaits.push(after);
+    const door = doorTimes(trip);
+    if (door) {
+      totals.arrivalDelays.push(door.arrivalDelay);
+      if (door.wait !== null) (door.noShow ? totals.noShowWaits : totals.doorWaits).push(door.wait);
+    }
     const ride = rideTime(trip);
     if (ride) {
       totals.rideMinutes.push(ride.onBoard);

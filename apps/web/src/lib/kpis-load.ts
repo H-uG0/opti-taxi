@@ -122,6 +122,7 @@ const stopSelect = {
   departureMinute: true,
   loadAfter: true,
   completedAt: true,
+  arrivedAt: true,
 } as const satisfies Prisma.RouteStopSelect;
 
 export async function loadKpiRows(prisma: KpiClient, dates: KpiDates): Promise<KpiData> {
@@ -215,6 +216,8 @@ export function routeTimings(
 
 type TripTimes = {
   pickupAt: Date | null;
+  arrivedAt: Date | null;
+  pickupStart: number | null;
   dropoffAt: Date | null;
   pickupService: number | null;
   pickupDeparture: number | null;
@@ -237,9 +240,19 @@ export function toKpiData({ routes, stops, trips, runs, plans = [] }: KpiQueryRo
   const times = new Map<string, TripTimes>();
   for (const stop of stops) {
     if (routeOfTrip.get(stop.tripId) !== stop.routeId) continue;
-    const entry = times.get(stop.tripId) ?? { pickupAt: null, dropoffAt: null, pickupService: null, pickupDeparture: null, dropoffStart: null };
+    const entry: TripTimes = times.get(stop.tripId) ?? {
+      pickupAt: null,
+      arrivedAt: null,
+      pickupStart: null,
+      dropoffAt: null,
+      pickupService: null,
+      pickupDeparture: null,
+      dropoffStart: null,
+    };
     if (stop.kind === "PICKUP") {
       entry.pickupAt = latest(entry.pickupAt, stop.completedAt);
+      entry.arrivedAt = latest(entry.arrivedAt, stop.arrivedAt ?? null);
+      entry.pickupStart = stop.startMinute;
       entry.pickupService = stop.departureMinute - stop.startMinute;
       entry.pickupDeparture = stop.departureMinute;
     } else {
@@ -287,6 +300,8 @@ export function toKpiData({ routes, stops, trips, runs, plans = [] }: KpiQueryRo
         pickupCompletedAt: own?.pickupAt ?? null,
         dropoffCompletedAt: own?.dropoffAt ?? null,
         pickupServiceMinutes: own?.pickupService ?? null,
+        pickupArrivedAt: own?.arrivedAt ?? null,
+        pickupStartMinute: own?.pickupStart ?? null,
         plannedRideMinutes:
           own && own.pickupDeparture !== null && own.dropoffStart !== null ? own.dropoffStart - own.pickupDeparture : null,
       };

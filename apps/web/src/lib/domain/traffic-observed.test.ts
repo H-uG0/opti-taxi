@@ -155,6 +155,14 @@ describe("legsFromStops", () => {
     expect(kinds("DROPOFF", "PICKUP")).toBe(15);
   });
 
+  it("ends a leg at « Arrivé » on a pickup: the wait at the door and a planned wait are left out (FLD-01)", () => {
+    const pickupNext = { ...next, kind: "PICKUP", arrivalMinute: 500, startMinute: 505, departureMinute: 510, completedAt: at(530) } as const;
+    // Planned 15 min of driving (485 -> 500); arrived 18 min after leaving, the patient came down 12 min later.
+    expect(legsFromStops([stop({ completedAt: at(485) }), stop({ ...pickupNext, arrivedAt: at(503) })])[0]).toMatchObject({ plannedMinutes: 15, actualMinutes: 18 });
+    // Without « Arrivé », a pickup with a planned wait says nothing of the drive.
+    expect(legsFromStops([stop({ completedAt: at(485) }), stop(pickupNext)])).toEqual([]);
+  });
+
   it("skips a leg driven empty, a planned wait, a missing tap, a gap and another route", () => {
     expect(legsFromStops([stop({ loadAfter: 0 }), stop(next)])).toEqual([]);
     expect(legsFromStops([stop(), stop({ ...next, arrivalMinute: 500 })])).toEqual([]);

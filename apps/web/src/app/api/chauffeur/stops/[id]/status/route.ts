@@ -1,6 +1,7 @@
 /**
  * POST /api/chauffeur/stops/:id/status — records one status of the driver
- * roadmap (« Pris en charge », « Déposé », « Patient absent », « Annuler »),
+ * roadmap (« Pris en charge », « Déposé », « Patient absent » with its reason,
+ * « Annuler », and « Arrivé » / « Annuler l'arrivée » on a pickup: FLD-01),
  * sent with fetch from the phone's queue (chauffeur/_lib/status-queue.ts)
  * instead of a server action: no page render in the answer, no roadmap.view
  * audit event per tap, and a stuck request does not hold the others (Next.js
@@ -22,13 +23,16 @@
  * 4. the time of the gesture, bounded (observed-time.ts: never before the
  *    statuses already recorded on earlier stops), and the service day of that
  *    time (Europe/Paris): see chauffeur/_lib/access;
- * 5. the pure rules of chauffeur/_lib/transitions;
+ * 5. the pure rules of chauffeur/_lib/transitions, and for « Patient absent »
+ *    the minimum wait set in Paramètres (lib/domain/field-wait.ts);
  * 6. guarded updates in one transaction, so a concurrent change by the other
  *    crew member is detected instead of overwritten. The stop keeps who
  *    recorded it and when the server received it, and the same transaction
  *    writes the audit event on the trip (stop.pickup, stop.dropoff,
- *    stop.no_show, stop.undo_pickup, stop.undo_dropoff; details.observedAt
- *    for a status sent later from the queue).
+ *    stop.no_show, stop.undo_pickup, stop.undo_dropoff, stop.arrive,
+ *    stop.undo_arrive; details.observedAt for a status sent later from the
+ *    queue). The reason of an absence stays on the trip (Trip.noShowReason),
+ *    never in the trail (it can be health data).
  * Nothing is revalidated: the phone shows the status at once and refreshes
  * the roadmap a moment later, after a refusal too (the page is then stale).
  * The answer may renew a driver's session close to its end
@@ -40,13 +44,15 @@ import { STOP_ACCESS_ERRORS, stopAccess } from "@/app/chauffeur/_lib/access";
 import { boundObservedAt, previousStatusAt, TOO_OLD_ERROR } from "@/app/chauffeur/_lib/observed-time";
 import { latestCompletedStopId } from "@/app/chauffeur/_lib/roadmap";
 import { STOP_ACTIONS, type StatusErrorCode, type StatusResponseBody } from "@/app/chauffeur/_lib/status-protocol";
-import { decideStopAction, stopAuditAction, stopWrite, type StopSnapshot } from "@/app/chauffeur/_lib/transitions";
+import { decideStopAction, isArrivalAction, stopAuditAction, stopWrite, type StopSnapshot } from "@/app/chauffeur/_lib/transitions";
 import { audit } from "@/lib/audit";
 import { currentDriver, type DriverAccount } from "@/lib/auth";
 import { isSameOriginRequest } from "@/lib/auth/same-origin";
 import { renewDriverSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
+import { NO_SHOW_REASONS, noShowWaitIssue } from "@/lib/domain/field-wait";
 import { logError } from "@/lib/log";
+import { minuteOn } from "@/lib/planning/day-progress";
 import { todayIso, toIsoDate } from "@/lib/time";
 import { jsonReply, ORIGIN_ERROR, PASSWORD_ERROR, SESSION_ERROR } from "@/app/api/chauffeur/_lib/reply";
 
@@ -58,6 +64,8 @@ const bodySchema = z.object({
   sentAt: epochMs.nullish(),
   /** Account whose queue on the phone holds the status (absent from a page loaded before this field existed). */
   ownerId: z.string().max(64).nullish(),
+  /** « Patient absent »: the reason from the list (absent from a page loaded before FLD-01). */
+  reason: z.enum(NO_SHOW_REASONS).nullish(),
 });
 type StatusBody = z.infer<typeof bodySchema>;
 
@@ -123,6 +131,8 @@ async function recordStopStatus(user: DriverAccount, stopId: string, input: Stat
       sequence: true,
       kind: true,
       completedAt: true,
+      arrivedAt: true,
+      startMinute: true,
       tripId: true,
       trip: { select: { status: true } },
       route: { select: { id: true, serviceDate: true, driverId: true, crewMateId: true } },
@@ -143,6 +153,7 @@ async function recordStopStatus(user: DriverAccount, stopId: string, input: Stat
     completedAt: stop.completedAt,
     tripStatus: stop.trip.status,
     isLatestCompleted: latestId === stop.id,
+    arrivedAt: stop.arrivedAt,
   };
   // A replay of a status already in place (its first answer was lost: phone timeout, network cut) succeeds
   // before the time bounds, which would refuse it once old (the last dropoff of the evening, sent again the
@@ -167,18 +178,44 @@ async function recordStopStatus(user: DriverAccount, stopId: string, input: Stat
   if (decision.type === "refuse") return failure(409, "refused", decision.error);
   if (decision.type === "noop") return noop(decision.message);
 
+  const isoDate = toIsoDate(stop.route.serviceDate);
+  if (action === "NO_SHOW" && decision.tripStatus === "NO_SHOW") {
+    // The minimum wait at the door before an absence (Paramètres, 0 by default: no check).
+    const settings = await db.appSettings.findUnique({ where: { id: 1 }, select: { noShowMinWaitMin: true } });
+    const issue = noShowWaitIssue({
+      arrivedMinute: stop.arrivedAt ? minuteOn(stop.arrivedAt, isoDate) : null,
+      plannedStartMinute: stop.startMinute,
+      minWaitMin: settings?.noShowMinWaitMin ?? 0,
+      atMinute: minuteOn(observed.at, isoDate),
+    });
+    if (issue) return failure(409, "wait", issue);
+  }
+
+  const arrival = isArrivalAction(action);
+  // The time this request records (the arrival, or the status), for the audit of a status sent later.
+  const recordedAt = arrival ? decision.arrivedAt : decision.completedAt;
   try {
     await db.$transaction(async (tx) => {
       // Guarded by the values the decision was computed from: zero rows means someone changed them meanwhile.
-      const stopUpdate = await tx.routeStop.updateMany({
-        where: { id: stop.id, completedAt: stop.completedAt },
-        data: stopWrite(decision, user.id, receivedAt),
-      });
+      const stopUpdate = arrival
+        ? await tx.routeStop.updateMany({
+            where: { id: stop.id, completedAt: stop.completedAt, arrivedAt: stop.arrivedAt },
+            data: { arrivedAt: decision.arrivedAt ?? null },
+          })
+        : await tx.routeStop.updateMany({
+            where: { id: stop.id, completedAt: stop.completedAt },
+            data: stopWrite(decision, user.id, receivedAt),
+          });
       if (stopUpdate.count !== 1) throw new ConflictError();
       if (decision.tripStatus !== stop.trip.status) {
         const tripUpdate = await tx.trip.updateMany({
           where: { id: stop.tripId, status: stop.trip.status },
-          data: { status: decision.tripStatus },
+          data: {
+            status: decision.tripStatus,
+            // The reason of an absence goes with it, and leaves with it (« Annuler »).
+            ...(decision.tripStatus === "NO_SHOW" ? { noShowReason: input.reason ?? null } : {}),
+            ...(stop.trip.status === "NO_SHOW" ? { noShowReason: null } : {}),
+          },
         });
         if (tripUpdate.count !== 1) throw new ConflictError();
       }
@@ -186,9 +223,9 @@ async function recordStopStatus(user: DriverAccount, stopId: string, input: Stat
         action: stopAuditAction(action, stop.kind),
         entity: "Trip",
         entityId: stop.tripId,
-        serviceDate: toIsoDate(stop.route.serviceDate),
+        serviceDate: isoDate,
         // A status sent later from the queue: the time of the gesture (the event itself is dated on receipt).
-        ...(observed.deferred && decision.completedAt ? { details: { observedAt: decision.completedAt.toISOString() } } : {}),
+        ...(observed.deferred && recordedAt ? { details: { observedAt: recordedAt.toISOString() } } : {}),
       });
     });
   } catch (error) {

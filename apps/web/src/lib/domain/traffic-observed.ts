@@ -8,6 +8,10 @@
  * A tap does not mark the same moment at every stop: « pris en charge » is
  * tapped with the patient on board (end of the stop), « déposé » on arrival
  * (start of the stop). The time spent at a stop between two taps is taken out.
+ * « Arrivé » on a pickup (FLD-01) marks the arrival itself: the leg ends there,
+ * the wait at the door is left out, and a pickup with a planned wait counts.
+ * A time typed afterwards (« Fin de tournée », a regulator's correction) is
+ * no driving time: those stops are left out.
  *
  * Which legs count:
  * - a patient on board and no planned wait at the next stop: the vehicle drove
@@ -66,6 +70,8 @@ export type ObservedStop = {
   departureMinute: number;
   loadAfter: number;
   completedAt: Date | null;
+  /** « Arrivé » on a pickup (absent: none). */
+  arrivedAt?: Date | null;
   route: { serviceDate: Date };
 };
 
@@ -86,17 +92,20 @@ export function legsFromStops(stops: readonly ObservedStop[]): ObservedLeg[] {
     const stop = stops[i];
     if (!previous || !stop || previous.routeId !== stop.routeId || stop.sequence !== previous.sequence + 1) continue;
     if (!previous.completedAt || !stop.completedAt) continue;
-    if (previous.loadAfter === 0 || stop.arrivalMinute !== stop.startMinute) continue;
+    // « Arrivé » dates the end of the drive at a pickup: neither the wait at the door nor a planned wait is in the leg.
+    const arrived = stop.kind === "PICKUP" ? (stop.arrivedAt ?? null) : null;
+    if (previous.loadAfter === 0 || (!arrived && stop.arrivalMinute !== stop.startMinute)) continue;
     // The stop's duration lies between the taps after a dropoff (tapped at its start) and before a pickup (tapped at its end).
     const atPrevious = previous.kind === "DROPOFF" ? previous.departureMinute - previous.startMinute : 0;
-    const atStop = stop.kind === "PICKUP" ? stop.departureMinute - stop.startMinute : 0;
+    const atStop = stop.kind === "PICKUP" && !arrived ? stop.departureMinute - stop.startMinute : 0;
+    const end = arrived ?? stop.completedAt;
     legs.push({
       from: { lat: previous.lat, lng: previous.lng },
       to: { lat: stop.lat, lng: stop.lng },
       isoDate: toIsoDate(stop.route.serviceDate),
       departureMinute: previous.departureMinute,
       plannedMinutes: stop.arrivalMinute - previous.departureMinute,
-      actualMinutes: (stop.completedAt.getTime() - previous.completedAt.getTime()) / 60_000 - atPrevious - atStop,
+      actualMinutes: (end.getTime() - previous.completedAt.getTime()) / 60_000 - atPrevious - atStop,
     });
   }
   return legs;
@@ -278,6 +287,7 @@ async function observedFactorsOf(
       departureMinute: true,
       loadAfter: true,
       completedAt: true,
+      arrivedAt: true,
       route: { select: { serviceDate: true } },
     },
     orderBy: [{ routeId: "asc" }, { sequence: "asc" }],

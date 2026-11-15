@@ -30,6 +30,23 @@ function route(completed: { a1?: number; a2?: number; b1?: number; b2?: number }
 const tripsOf = (list: LiveTripInput[]) => (id: string) => list.find((t) => t.id === id);
 
 describe("projectRoute", () => {
+  it("starts a stop no earlier than the lateness the crew announced on it, and carries it on (FLD-01)", () => {
+    // 07:30: A picked up on time at 07:25; the crew announces +20 on the drop-off (planned 07:50).
+    const p = projectRoute(route({ a1: 445 }), tripsOf([A, B]), 450, { "a/DROPOFF": 20 });
+    expect(p.stops[1]).toMatchObject({ state: "pending", startMinute: 490, delayMinutes: 20 });
+    expect(p.delayMinutes).toBe(20);
+    // A lateness on a stop already done changes nothing.
+    const done = projectRoute(route({ a1: 445, a2: 471 }), tripsOf([A, B]), 480, { "a/DROPOFF": 30 });
+    expect(done.stops[1]).toMatchObject({ state: "done", startMinute: 471 });
+    // Without an announcement, the drop-off is on time.
+    expect(projectRoute(route({ a1: 445 }), tripsOf([A, B]), 450).stops[1]?.startMinute).toBe(470);
+  });
+
+  it("puts an appointment at risk from an announced lateness", () => {
+    const day = projectDay({ routes: [route({ a1: 445 })], trips: [A, B], nowMinute: 450, maxTotalWaitMin: 45, lateness: { "a/DROPOFF": 20 } });
+    expect(day.threatened).toEqual([{ tripId: "a", vehicleId: "v1", appointmentMinute: 480, projectedMinute: 490, lateMinutes: 10 }]);
+  });
+
   it("reads a route not started yet, before its first stop, as on time", () => {
     const p = projectRoute(route(), tripsOf([A, B]), 430);
     expect(p.started).toBe(false);

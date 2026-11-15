@@ -24,7 +24,7 @@ import {
   SHARING_STATUS_LABELS,
   TRIP_STATUS_LABELS,
 } from "@/lib/labels";
-import { formatDuration, formatMinute } from "@/lib/time";
+import { formatDuration, formatMinute, formatTimeOn } from "@/lib/time";
 import { lockTrip, moveTrip, proposeExceptionalAmbulance, unlockTrip } from "./actions";
 import { PlaceFinder } from "./place-finder";
 import { usePlanningActivity } from "./planning-activity";
@@ -469,7 +469,9 @@ export function TripPanel({
           ) : null}
           {trip.fieldRecords.map((record) => (
             <Row key={record.stopId} label={fieldRecordLabel(record.kind, trip.status)}>
+              {record.kind === "PICKUP" && trip.noShowReason ? <span>{trip.noShowReason} · </span> : null}
               <span className="tabular">{fieldRecordText(record, date)}</span>
+              {record.arrivedAt ? <span className="tabular text-slate-500"> · arrivé à {formatTimeOn(record.arrivedAt, date)}</span> : null}
             </Row>
           ))}
           <Row label="Attente sur place">

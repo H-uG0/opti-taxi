@@ -19,6 +19,13 @@ export type WaitCaseRow = {
 /** Cases listed at most: the count says how many there are. */
 export const WAIT_CASES_SHOWN = 50;
 
+/** « +4 min », « −2 min », « 0 min » (a median of arrivals against the planned time). */
+function formatSignedMinutes(value: number | null): string {
+  if (value === null) return "—";
+  const rounded = Math.round(value);
+  return rounded > 0 ? `+${formatMinutes(rounded)}` : rounded < 0 ? `−${formatMinutes(-rounded)}` : formatMinutes(0);
+}
+
 function medianP90(values: readonly number[]): string {
   return `médiane ${formatMinutes(quantile(values, 0.5))}, p90 ${formatMinutes(quantile(values, 0.9))}`;
 }
@@ -80,6 +87,15 @@ export function WaitsSection({ period, options, cases }: { period: PeriodKpis; o
           label="Temps à bord"
           value={formatMinutes(quantile(w.rideMinutes, 0.5))}
           hint={`Médiane de «\u202fPris en charge\u202f» à «\u202fDéposé\u202f», p90 ${formatMinutes(quantile(w.rideMinutes, 0.9))}, sur ${plural(w.rideMinutes.length, "course", "courses")}`}
+        />
+        <Stat
+          label="Attente à la porte du patient"
+          value={formatMinutes(quantile(w.doorWaits, 0.5))}
+          hint={
+            w.arrivalDelays.length > 0
+              ? `Médiane de «\u202fArrivé\u202f» à «\u202fPris en charge\u202f», p90 ${formatMinutes(quantile(w.doorWaits, 0.9))}, sur ${plural(w.doorWaits.length, "prise en charge", "prises en charge")} · arrivée ${formatSignedMinutes(quantile(w.arrivalDelays, 0.5))} sur l'heure prévue (médiane)${w.noShowWaits.length > 0 ? ` · attente avant une absence\u00a0: ${medianP90(w.noShowWaits)}` : ""}`
+              : "Mesurée quand l'équipage touche «\u202fArrivé\u202f» (facultatif) avant «\u202fPris en charge\u202f» ou «\u202fPatient absent\u202f»"
+          }
         />
         <Stat
           label={`Allers serrés (< ${options.tightMarginMin}\u00a0min)`}

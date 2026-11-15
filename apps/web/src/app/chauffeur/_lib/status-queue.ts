@@ -7,8 +7,9 @@
  * again when the network or the app comes back, and survives a reload or the
  * app being killed (IndexedDB, status-queue-idb.ts).
  *
- * What is kept is only { stopId, action, observedAt }: opaque ids and a time,
- * no name, address or note (no health data on the phone).
+ * What is kept is only { stopId, action, observedAt } (and the reason code of
+ * a « Patient absent », chosen in a fixed list): opaque ids, a time and a
+ * code, no name, address or note (no health data on the phone).
  *
  * Sending is idempotent end to end: the server ignores a status already in
  * place (a replay after a lost answer), a second tap of the same status while
@@ -20,11 +21,28 @@
  * Free of React and browser APIs (storage and sending are injected), so it is
  * unit-tested; the provider (_components/driver-app.tsx) wires it.
  */
+import type { NoShowReason } from "@prisma/client";
+import { isNoShowReason } from "@/lib/domain/field-wait";
 import type { SendOutcome } from "./status-protocol";
-import type { StopAction } from "./transitions";
+import { isArrivalAction, type StopAction } from "./transitions";
+
+/**
+ * The action that takes `action` back: « Annuler l'arrivée » for « Arrivé », « Annuler » for a status; null for an
+ * undo (nothing takes it back).
+ */
+export function undoActionOf(action: StopAction): "UNDO" | "UNDO_ARRIVE" | null {
+  if (action === "UNDO" || action === "UNDO_ARRIVE") return null;
+  return action === "ARRIVE" ? "UNDO_ARRIVE" : "UNDO";
+}
 
 /** A status waiting on the phone: nothing else is stored. */
-export type QueuedStatus = { stopId: string; action: StopAction; observedAt: number };
+export type QueuedStatus = {
+  stopId: string;
+  action: StopAction;
+  observedAt: number;
+  /** « Patient absent »: the reason code chosen in the list. */
+  reason?: NoShowReason;
+};
 
 /** A queued status with its storage key (increasing: the order of the taps). */
 export type StoredStatus = { key: number; value: QueuedStatus };
@@ -111,13 +129,14 @@ export function memoryStorage(initial: QueuedStatus[] = []): QueueStorage & { va
   };
 }
 
-const STOP_ACTION_SET: ReadonlySet<string> = new Set(["PICKUP", "DROPOFF", "NO_SHOW", "UNDO"]);
+const STOP_ACTION_SET: ReadonlySet<string> = new Set(["PICKUP", "DROPOFF", "NO_SHOW", "UNDO", "ARRIVE", "UNDO_ARRIVE"]);
 
 /** A stored value read back from the phone is used only if it has exactly the expected shape. */
 export function isQueuedStatus(value: unknown): value is QueuedStatus {
   if (typeof value !== "object" || value === null) return false;
-  const { stopId, action, observedAt } = value as Record<string, unknown>;
+  const { stopId, action, observedAt, reason } = value as Record<string, unknown>;
   return (
+    (reason === undefined || isNoShowReason(reason)) &&
     typeof stopId === "string" &&
     stopId.length > 0 &&
     stopId.length <= 64 &&
@@ -178,14 +197,15 @@ export class StatusQueue {
   }
 
   /** Records a tap: saved at once with the time of the gesture, then sent. */
-  async submit(stopId: string, action: StopAction): Promise<void> {
+  async submit(stopId: string, action: StopAction, reason?: NoShowReason): Promise<void> {
     const observedAt = this.deps.now();
     await this.start();
     this.refusals = this.refusals.filter((refusal) => refusal.stopId !== stopId);
     const last = this.lastItemFor(stopId);
 
-    if (action === "UNDO" && last && last.value.action !== "UNDO" && last.key !== this.inFlight) {
-      // « Annuler » on a status the server does not have yet: forget it, nothing to send.
+    if (last && last.key !== this.inFlight && undoActionOf(last.value.action) === action) {
+      // « Annuler » on a status the server does not have yet (« Annuler l'arrivée » on an arrival): forget it,
+      // nothing to send.
       await this.cancelQueued(stopId);
       return;
     }
@@ -196,7 +216,7 @@ export class StatusQueue {
       return;
     }
 
-    await this.enqueue({ stopId, action, observedAt });
+    await this.enqueue({ stopId, action, observedAt, ...(reason ? { reason } : {}) });
     this.emit();
     await this.flush();
   }
@@ -215,9 +235,10 @@ export class StatusQueue {
     const last = this.lastItemFor(stopId);
     if (!last || last.key === this.inFlight) return false;
     if (this.uncertain.has(last.key)) {
-      if (last.value.action === "UNDO") return false;
+      const undo = undoActionOf(last.value.action);
+      if (undo === null) return false;
       await this.removeItem(last.key);
-      await this.enqueue({ stopId, action: "UNDO", observedAt: this.deps.now() });
+      await this.enqueue({ stopId, action: undo, observedAt: this.deps.now() });
       this.emit();
       await this.flush();
       return true;
@@ -406,11 +427,23 @@ export class StatusQueue {
  * latest local status: the buttons (null) or the local status in place of
  * them. On a stop still to do, a pickup, dropoff or absence tapped on the
  * phone replaces the buttons until the page shows it; on a closed stop, an
- * undo does (a status just received is already the page's).
+ * undo does (a status just received is already the page's). An arrival never
+ * replaces the buttons: the stop still has its status to record (the arrival
+ * shows as the wait, see localArrival).
  */
 export function localStatusShown(stopOpen: boolean, local: LocalStatus | undefined): LocalStatus | null {
-  if (!local) return null;
+  if (!local || isArrivalAction(local.action)) return null;
   if (stopOpen) return local.action === "UNDO" ? null : local;
   if (local.action === "UNDO") return local;
   return local.phase === "sent" ? null : local;
+}
+
+/**
+ * The arrival a pickup shows given the server's (arrivedAt, epoch ms) and the stop's latest local status: an
+ * « Arrivé » tapped on the phone counts from its gesture, an « Annuler l'arrivée » hides it; null when none.
+ */
+export function localArrival(serverArrivedAt: number | null, local: LocalStatus | undefined): number | null {
+  if (local?.action === "ARRIVE") return serverArrivedAt ?? local.observedAt;
+  if (local?.action === "UNDO_ARRIVE") return null;
+  return serverArrivedAt;
 }

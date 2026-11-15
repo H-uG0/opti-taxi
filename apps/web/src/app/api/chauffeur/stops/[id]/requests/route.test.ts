@@ -31,7 +31,7 @@ const DRIVER = { id: "u1", name: "Julien Marchetti", role: "DRIVER", driverId: "
 // Monday 9 November 2026, 10:05 in Paris.
 const NOW = new Date("2026-11-09T09:05:00.000Z");
 const DAY = new Date("2026-11-09T00:00:00.000Z");
-const ROUTE = { serviceDate: DAY, driverId: "d1", crewMateId: null };
+const ROUTE = { id: "r1", serviceDate: DAY, driverId: "d1", crewMateId: null };
 
 const outbound = { id: "t_out", status: "DROPPED_OFF", direction: "OUTBOUND", serviceDate: DAY, appointmentMinute: 600, readyMinute: null, patientId: "p1", recurrenceId: "rec1", facilityId: "f1" };
 const back = { id: "t_back", status: "ASSIGNED", direction: "RETURN", serviceDate: DAY, appointmentMinute: null, readyMinute: 705, patientId: "p1", recurrenceId: "rec1", facilityId: "f1" };
@@ -157,5 +157,49 @@ describe("POST /api/chauffeur/stops/:id/requests", () => {
     });
     expect((await POST(foreign, { params: Promise.resolve({ id: "s1" }) })).status).toBe(403);
     expect(fake.tx.fieldRequest.create).not.toHaveBeenCalled();
+  });
+  describe("signals of the stop to come (FLD-01)", () => {
+    const toPick = { ...back, id: "t_next", direction: "OUTBOUND", status: "ASSIGNED", readyMinute: null, appointmentMinute: 600 };
+
+    it("announces a lateness on the stop to come, replacing the route's earlier one, with the minutes in the trail", async () => {
+      stop("PICKUP", toPick);
+      const { status, body } = await answer(await post({ kind: "LATE", lateMinutes: 20, ownerId: "u1" }));
+      expect(status).toBe(200);
+      expect(body).toMatchObject({ ok: true, message: "Retard de 20\u00a0min signalé à la régulation." });
+      expect(fake.tx.fieldRequest.updateMany).toHaveBeenCalledWith({
+        where: { serviceDate: DAY, kind: "LATE", status: "PENDING", trip: { routeId: "r1" } },
+        data: { status: "NOTED", resolvedAt: NOW },
+      });
+      expect(fake.tx.fieldRequest.create).toHaveBeenCalledWith({
+        data: { serviceDate: DAY, kind: "LATE", tripId: "t_next", stopKind: "PICKUP", lateMinutes: 20, createdById: "u1", createdAt: NOW },
+        select: { id: true },
+      });
+      expect(auditEvents()).toEqual([expect.objectContaining({ action: "field_request.create", entityId: "t_next", details: { kind: "LATE", requestId: "req1", minutes: 20 } })]);
+    });
+
+    it("takes only +10, +20 or +30, on a stop still to do", async () => {
+      stop("PICKUP", toPick);
+      expect((await answer(await post({ kind: "LATE", lateMinutes: 45 }))).status).toBe(400);
+      expect((await answer(await post({ kind: "LATE" }))).body).toMatchObject({ code: "invalid" });
+      stop("PICKUP", { ...toPick, status: "PICKED_UP" }, new Date("2026-11-09T08:58:00.000Z"));
+      expect((await answer(await post({ kind: "LATE", lateMinutes: 10 }))).body).toMatchObject({ code: "refused" });
+      // The drop-off of a patient on board is still to come.
+      stop("DROPOFF", { ...toPick, status: "PICKED_UP" });
+      expect((await answer(await post({ kind: "LATE", lateMinutes: 10 }))).body).toMatchObject({ ok: true });
+    });
+
+    it("signals « Patient pas prêt » on a pickup still to do, once", async () => {
+      stop("PICKUP", toPick);
+      expect((await answer(await post({ kind: "NOT_READY" }))).body).toMatchObject({ ok: true, message: "Patient pas prêt\u00a0: signalé à la régulation." });
+      expect(fake.tx.fieldRequest.create).toHaveBeenCalledWith({
+        data: { serviceDate: DAY, kind: "NOT_READY", tripId: "t_next", stopKind: "PICKUP", createdById: "u1", createdAt: NOW },
+        select: { id: true },
+      });
+      fake.tx.fieldRequest.findFirst.mockResolvedValue({ id: "req1" });
+      expect((await answer(await post({ kind: "NOT_READY" }))).body).toMatchObject({ ok: true, message: "Déjà signalé, transmis à la régulation." });
+      expect(fake.tx.fieldRequest.create).toHaveBeenCalledTimes(1);
+      stop("DROPOFF", outbound);
+      expect((await answer(await post({ kind: "NOT_READY" }))).body).toMatchObject({ code: "refused" });
+    });
   });
 });

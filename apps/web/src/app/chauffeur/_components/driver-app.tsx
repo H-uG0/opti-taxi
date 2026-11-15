@@ -24,6 +24,7 @@ import { serverReachable } from "../_lib/reachability";
 import { EMPTY_QUEUE_SNAPSHOT, StatusQueue, type QueueSnapshot } from "../_lib/status-queue";
 import { openIndexedDbQueue } from "../_lib/status-queue-idb";
 import { renewSession, sendQueuedStatus, type SessionState } from "../_lib/status-send";
+import type { NoShowReason } from "@prisma/client";
 import type { StopAction } from "../_lib/transitions";
 
 /** While statuses wait, sending is tried again this often (the "online" event is unreliable on phones). */
@@ -37,7 +38,8 @@ type DriverApp = {
   /** The signed-in account: each request says whose page it comes from. */
   ownerId: string;
   queue: StatusQueue;
-  submit: (stopId: string, action: StopAction) => void;
+  /** `reason`: « Patient absent », the reason chosen. */
+  submit: (stopId: string, action: StopAction, reason?: NoShowReason) => void;
   cancelQueued: (stopId: string) => void;
   sendNow: () => void;
   /** End of the session on the phone's clock (epoch ms), null until known. */
@@ -212,9 +214,9 @@ export function DriverAppProvider({
     () => ({
       ownerId,
       queue,
-      submit: (stopId, action) => {
+      submit: (stopId, action, reason) => {
         if (typeof navigator.vibrate === "function") navigator.vibrate(25);
-        void queue.submit(stopId, action);
+        void queue.submit(stopId, action, reason);
       },
       cancelQueued: (stopId) => void queue.cancelQueued(stopId),
       sendNow: () => {

@@ -245,6 +245,23 @@ enum FieldRequestKind {
   RETURN
   /// Prochaine séance de la série, saisie à la dépose et transmise à la régulation.
   NEXT_SESSION
+  /// Retard annoncé par l'équipage sur l'arrêt à venir (+10, +20 ou +30 min) : il décale l'heure estimée du suivi du jour.
+  LATE
+  /// Patient pas prêt à la prise en charge : l'équipage attend sur place.
+  NOT_READY
+}
+
+/// Motif d'une absence du patient déclarée par l'équipage (« Patient absent ») : un code, jamais de texte libre.
+enum NoShowReason {
+  /// Personne ne répond (porte, interphone, téléphone).
+  NO_ANSWER
+  /// Le patient refuse le transport.
+  REFUSED
+  /// Patient hospitalisé.
+  HOSPITALIZED
+  /// Séance annulée par l'établissement.
+  FACILITY_CANCELLED
+  OTHER
 }
 
 /// Suite donnée par la régulation à une demande du terrain.
@@ -477,6 +494,8 @@ model Trip {
   cancelledById      String?
   /// Annulée par une personne moins de AppSettings.lateCancellationHours avant la prise en charge prévue.
   lateCancellation   Boolean             @default(false)
+  /// Absence déclarée par l'équipage (statut NO_SHOW) : motif choisi dans une liste ; vidé quand l'absence est annulée.
+  noShowReason       NoShowReason?
 
   /// Péages facturés sur la facture de ce patient (€), hors majorations et abattements.
   tollAmount              Float?
@@ -776,6 +795,9 @@ model RouteStop {
   completedReceivedAt DateTime?
   /// Compte (chauffeur ou équipier) qui a saisi completedAt.
   completedById   String?
+  /// « Arrivé » (prise en charge seulement, facultatif) : heure du geste sur le téléphone, bornée comme completedAt.
+  /// Mesure l'attente sur place avant « Pris en charge » ou « Patient absent ».
+  arrivedAt       DateTime?
 
   route       Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
   trip        Trip  @relation(fields: [tripId], references: [id], onDelete: Cascade)
@@ -831,6 +853,10 @@ model FieldRequest {
   cancellationReason CancellationReason?
   /// Prochaine séance de la série, saisie à la dépose.
   nextSessionDate DateTime? @db.Date
+  /// Retard annoncé : minutes de retard sur l'heure prévue de l'arrêt (10, 20 ou 30).
+  lateMinutes Int?
+  /// Retard annoncé, patient pas prêt : l'arrêt de la course concerné (prise en charge ou dépose).
+  stopKind    StopKind?
   createdAt   DateTime           @default(now())
   createdById String?
   /// Suite donnée par la régulation.
@@ -980,6 +1006,9 @@ model AppSettings {
   replanChangePenalty        Float    @default(15)
   /// Une annulation saisie moins de N heures avant la prise en charge prévue est tardive.
   lateCancellationHours      Int      @default(2)
+  /// Attente minimale sur place (min) avant que l'équipage puisse déclarer un patient absent, comptée depuis « Arrivé »
+  /// (jamais avant l'heure prévue de la prise en charge) ; 0 : pas de délai, « Arrivé » reste facultatif.
+  noShowMinWaitMin           Int      @default(0)
   /// Les courses des récurrences sont créées de demain à J+N (création, modification ou réactivation
   /// d'une récurrence, d'une prescription ou d'un patient ; ouverture du planning ou des courses).
   tripHorizonDays            Int      @default(14)

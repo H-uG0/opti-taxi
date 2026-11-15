@@ -15,6 +15,7 @@ const fake = vi.hoisted(() => {
     tx,
     db: {
       routeStop: { findUnique: vi.fn(), findMany: vi.fn() },
+      appSettings: { findUnique: vi.fn() },
       $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
     },
     currentDriver: vi.fn(),
@@ -86,6 +87,7 @@ beforeEach(() => {
   fake.tx.routeStop.updateMany.mockResolvedValue({ count: 1 });
   fake.tx.trip.updateMany.mockResolvedValue({ count: 1 });
   fake.tx.auditEvent.createMany.mockResolvedValue({ count: 1 });
+  fake.db.appSettings.findUnique.mockResolvedValue({ noShowMinWaitMin: 0 });
 });
 
 afterEach(() => {
@@ -288,5 +290,74 @@ describe("POST /api/chauffeur/stops/:id/status", () => {
     stops([pickup()], "s_pick");
     const response = await post("s_pick", { action: "PICKUP", observedAt: NOW.getTime() });
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+  describe("arrival and absence (FLD-01)", () => {
+    // Planned start of the pickup: 08:10 (490), the clock is at 08:25.
+    const atDoor = (status = "ASSIGNED", arrivedAt: Date | null = null, completedAt: Date | null = null) => ({
+      ...pickup(status, completedAt),
+      startMinute: 490,
+      arrivedAt,
+    });
+
+    it("dates « Arrivé » at the gesture, guarded, without touching the status", async () => {
+      stops([atDoor()], "s_pick");
+      const gesture = NOW.getTime() - 4 * MIN;
+      const { body } = await answer(await post("s_pick", { action: "ARRIVE", observedAt: gesture, sentAt: NOW.getTime() }));
+      expect(body).toMatchObject({ ok: true, outcome: "applied", message: "Arrivée enregistrée." });
+      expect(fake.tx.routeStop.updateMany).toHaveBeenCalledWith({
+        where: { id: "s_pick", completedAt: null, arrivedAt: null },
+        data: { arrivedAt: new Date(gesture) },
+      });
+      expect(fake.tx.trip.updateMany).not.toHaveBeenCalled();
+      expect(auditEvents()).toEqual([expect.objectContaining({ action: "stop.arrive", entity: "Trip", entityId: "t1", details: { observedAt: new Date(gesture).toISOString() } })]);
+    });
+
+    it("undoes an arrival, and replays an arrival already there without writing", async () => {
+      const arrived = new Date(NOW.getTime() - 10 * MIN);
+      stops([atDoor("ASSIGNED", arrived)], "s_pick");
+      expect((await answer(await post("s_pick", { action: "ARRIVE", observedAt: NOW.getTime() }))).body).toMatchObject({ outcome: "noop" });
+      expect(fake.db.$transaction).not.toHaveBeenCalled();
+      await post("s_pick", { action: "UNDO_ARRIVE", observedAt: NOW.getTime() });
+      expect(fake.tx.routeStop.updateMany).toHaveBeenCalledWith({ where: { id: "s_pick", completedAt: null, arrivedAt: arrived }, data: { arrivedAt: null } });
+      expect(auditEvents()).toEqual([expect.objectContaining({ action: "stop.undo_arrive" })]);
+    });
+
+    it("records the reason of an absence on the trip, never in the audit trail", async () => {
+      stops([atDoor()], "s_pick");
+      const { body } = await answer(await post("s_pick", { action: "NO_SHOW", observedAt: NOW.getTime(), reason: "HOSPITALIZED" }));
+      expect(body).toMatchObject({ ok: true, outcome: "applied" });
+      expect(fake.tx.trip.updateMany).toHaveBeenCalledWith({ where: { id: "t1", status: "ASSIGNED" }, data: { status: "NO_SHOW", noShowReason: "HOSPITALIZED" } });
+      expect(JSON.stringify(auditEvents())).not.toContain("HOSPITALIZED");
+    });
+
+    it("refuses a reason that is not in the list", async () => {
+      stops([atDoor()], "s_pick");
+      const { status } = await answer(await post("s_pick", { action: "NO_SHOW", observedAt: NOW.getTime(), reason: "Chute dans l'escalier" }));
+      expect(status).toBe(400);
+    });
+
+    it("clears the reason when the absence is undone", async () => {
+      stops([atDoor("NO_SHOW", null, new Date(NOW.getTime() - 2 * MIN))], "s_pick");
+      await post("s_pick", { action: "UNDO", observedAt: NOW.getTime() });
+      expect(fake.tx.trip.updateMany).toHaveBeenCalledWith({ where: { id: "t1", status: "NO_SHOW" }, data: { status: "ASSIGNED", noShowReason: null } });
+    });
+
+    it("refuses an absence before the minimum wait set in Paramètres, counted from the arrival", async () => {
+      fake.db.appSettings.findUnique.mockResolvedValue({ noShowMinWaitMin: 10 });
+      // No arrival: « Arrivé » first.
+      stops([atDoor()], "s_pick");
+      let reply = await answer(await post("s_pick", { action: "NO_SHOW", observedAt: NOW.getTime(), reason: "NO_ANSWER" }));
+      expect(reply).toMatchObject({ status: 409, body: { code: "wait" } });
+      expect(String(reply.body.error)).toContain("touchez d'abord");
+      // Arrived at 08:20 (after the planned 08:10): possible from 08:30, the clock says 08:25.
+      stops([atDoor("ASSIGNED", new Date(NOW.getTime() - 5 * MIN))], "s_pick");
+      reply = await answer(await post("s_pick", { action: "NO_SHOW", observedAt: NOW.getTime(), reason: "NO_ANSWER" }));
+      expect(reply).toMatchObject({ status: 409, body: { code: "wait", error: "Attente minimale de 10\u00a0min avant une absence\u00a0: possible à partir de 08:30." } });
+      expect(fake.db.$transaction).not.toHaveBeenCalled();
+      // Arrived at 08:12: 13 min waited.
+      stops([atDoor("ASSIGNED", new Date(NOW.getTime() - 13 * MIN))], "s_pick");
+      reply = await answer(await post("s_pick", { action: "NO_SHOW", observedAt: NOW.getTime(), reason: "NO_ANSWER" }));
+      expect(reply).toMatchObject({ status: 200, body: { ok: true } });
+    });
   });
 });
