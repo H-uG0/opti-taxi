@@ -91,19 +91,19 @@ export function StatusCorrection({ stops, patient }: { stops: readonly Correctab
       }}
     >
       <p className="text-sm font-medium text-slate-900">Corriger un statut</p>
+      <div>
+        <label htmlFor={ids.stop} className="text-xs font-medium text-slate-700">
+          Arrêt
+        </label>
+        <Select id={ids.stop} value={stop.id} onChange={(e) => chooseStop(e.target.value)} disabled={busy} className="mt-1">
+          {stops.map((s) => (
+            <option key={s.id} value={s.id}>
+              {STOP_KIND_LABELS[s.kind]} ({CORRECTION_TARGET_LABELS[s.current].toLowerCase()})
+            </option>
+          ))}
+        </Select>
+      </div>
       <div className="grid grid-cols-2 gap-2">
-        <div>
-          <label htmlFor={ids.stop} className="text-xs font-medium text-slate-700">
-            Arrêt
-          </label>
-          <Select id={ids.stop} value={stop.id} onChange={(e) => chooseStop(e.target.value)} disabled={busy} className="mt-1">
-            {stops.map((s) => (
-              <option key={s.id} value={s.id}>
-                {STOP_KIND_LABELS[s.kind]} ({CORRECTION_TARGET_LABELS[s.current].toLowerCase()})
-              </option>
-            ))}
-          </Select>
-        </div>
         <div>
           <label htmlFor={ids.target} className="text-xs font-medium text-slate-700">
             Statut
@@ -132,22 +132,22 @@ export function StatusCorrection({ stops, patient }: { stops: readonly Correctab
             />
           </div>
         ) : null}
-        {target === "NO_SHOW" ? (
-          <div>
-            <label htmlFor={ids.absence} className="text-xs font-medium text-slate-700">
-              Motif de l&apos;absence
-            </label>
-            <Select id={ids.absence} required value={absence} onChange={(e) => setAbsence(e.target.value as NoShowReason)} disabled={busy} className="mt-1">
-              <option value="">Choisir…</option>
-              {NO_SHOW_REASONS.map((value) => (
-                <option key={value} value={value}>
-                  {NO_SHOW_REASON_LABELS[value]}
-                </option>
-              ))}
-            </Select>
-          </div>
-        ) : null}
       </div>
+      {target === "NO_SHOW" ? (
+        <div>
+          <label htmlFor={ids.absence} className="text-xs font-medium text-slate-700">
+            Motif de l&apos;absence
+          </label>
+          <Select id={ids.absence} required value={absence} onChange={(e) => setAbsence(e.target.value as NoShowReason)} disabled={busy} className="mt-1">
+            <option value="">Choisir…</option>
+            {NO_SHOW_REASONS.map((value) => (
+              <option key={value} value={value}>
+                {NO_SHOW_REASON_LABELS[value]}
+              </option>
+            ))}
+          </Select>
+        </div>
+      ) : null}
       <div>
         <label htmlFor={ids.reason} className="text-xs font-medium text-slate-700">
           Motif de la correction (obligatoire)

@@ -551,7 +551,7 @@ async function seedOdometerReadings(rng: Rng, dates: Dates, vehicleIds: readonly
     await prisma.odometerReading.createMany({ data: readings });
     if (vehicle.energy === "ELECTRIC") {
       await prisma.maintenanceDeadline.create({
-        data: { vehicleId, kind: "SERVICE", label: "Révision annuelle (véhicule électrique)", dueKm: km + 1800 },
+        data: { vehicleId, kind: "SERVICE", label: "annuelle, véhicule électrique", dueKm: km + 1800 },
       });
     }
   }

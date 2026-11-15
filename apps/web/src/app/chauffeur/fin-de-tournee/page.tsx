@@ -7,7 +7,7 @@ import { requireDriver } from "@/lib/auth";
 import { cn } from "@/components/ui/cn";
 import { formatLongDate, formatMinute, minuteOfDay, todayIso } from "@/lib/time";
 import { LATE_ENTRY_UNTIL_MINUTE, lateEntryDates } from "../_lib/access";
-import { endOfRouteView } from "../_lib/end-of-route";
+import { endOfRouteView, FORGOTTEN_AFTER_MIN } from "../_lib/end-of-route";
 import { loadEndOfRouteRoutes, loadVehicleDays } from "../_lib/load";
 import { ServerRenderMark } from "../_components/driver-app";
 import { LateEntry } from "../_components/late-entry";
@@ -40,7 +40,13 @@ export default async function EndOfRoutePage({ searchParams }: { searchParams: S
   // Patient names of the stops left without a status are on screen: traced like the roadmap.
   await auditRead(user, { action: "roadmap.view", entity: "Driver", entityId: user.driverId, serviceDate: date, details: { page: "end_of_route" } });
   const vehicleDays = await loadVehicleDays(routes, date);
-  const views = routes.map((route) => ({ route, view: endOfRouteView(route.stops), day: vehicleDays.get(route.id) ?? null }));
+  // Today, only the stops whose time is past (the others are still to come on the roadmap); the day before, all of them.
+  const nowMinute = date === today ? minuteOfDay(now) : null;
+  const views = routes.map((route) => {
+    const view = endOfRouteView(route.stops);
+    const past = (stop: { plannedMinute: number }) => nowMinute === null || stop.plannedMinute + FORGOTTEN_AFTER_MIN < nowMinute;
+    return { route, view, forgotten: view.pending.filter(past), upcoming: view.pending.filter((stop) => !past(stop)).length, day: vehicleDays.get(route.id) ?? null };
+  });
   const yesterday = open.length > 1 ? open[0] : null;
 
   return (
@@ -83,7 +89,7 @@ export default async function EndOfRoutePage({ searchParams }: { searchParams: S
       {views.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-8 text-center text-base text-slate-700">Aucune tournée ce jour-là.</p>
       ) : (
-        views.map(({ route, view, day }) => (
+        views.map(({ route, view, forgotten, upcoming, day }) => (
           <section key={route.id} aria-labelledby={`end-${route.id}`} className="space-y-3">
             <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3">
               <h2 id={`end-${route.id}`} className="text-lg font-bold text-slate-950">
@@ -97,18 +103,18 @@ export default async function EndOfRoutePage({ searchParams }: { searchParams: S
             {/* The end of the day: the odometer back at the depot (FLD-03); the start's, if it was forgotten. */}
             {day && day.start === null ? <OdometerCard routeId={route.id} date={day.date} moment="START" recorded={null} lastKnown={day.lastKnown} startKm={null} /> : null}
             {day ? <OdometerCard routeId={route.id} date={day.date} moment="END" recorded={day.end} lastKnown={day.lastKnown} startKm={day.start} prominent={day.end === null} /> : null}
-            {view.pending.length === 0 ? (
+            {forgotten.length === 0 ? (
               <p className="flex items-center gap-2 rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-base font-semibold text-emerald-950">
                 <CircleCheck aria-hidden className="size-5" />
-                Tous les arrêts ont un statut.
+                {upcoming > 0 ? "Aucun arrêt oublié." : "Tous les arrêts ont un statut."}
               </p>
             ) : (
               <>
                 <p className="text-sm font-semibold text-slate-800">
-                  {view.pending.length > 1 ? `${view.pending.length} arrêts sans statut` : "1 arrêt sans statut"}
+                  {forgotten.length > 1 ? `${forgotten.length} arrêts sans statut` : "1 arrêt sans statut"}
                 </p>
                 <ol className="space-y-3">
-                  {view.pending.map((stop) => (
+                  {forgotten.map((stop) => (
                     <LateEntry
                       key={stop.id}
                       stopId={stop.id}
@@ -122,6 +128,11 @@ export default async function EndOfRoutePage({ searchParams }: { searchParams: S
                 </ol>
               </>
             )}
+            {upcoming > 0 ? (
+              <p className="text-sm text-slate-600">
+                {upcoming > 1 ? `${upcoming} arrêts encore à venir` : "1 arrêt encore à venir"} sur la feuille de route.
+              </p>
+            ) : null}
             {day ? <VehicleDayPanel routeId={route.id} day={day} readings={false} /> : null}
           </section>
         ))

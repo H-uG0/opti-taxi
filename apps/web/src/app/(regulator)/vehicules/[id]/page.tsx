@@ -374,7 +374,7 @@ export default async function EditVehiclePage({
                   <ul className="divide-y divide-slate-100">
                     {readingRows(readings, readingDays).map((row) => (
                       <li key={row.date} className="tabular flex flex-wrap gap-x-3 py-1.5">
-                        <span className="w-16 text-slate-500">{formatShortDate(row.date)}</span>
+                        <span className="w-24 shrink-0 text-slate-500">{formatShortDate(row.date)}</span>
                         <span>
                           Départ {row.start !== null ? `${nf.format(row.start)}\u00a0km` : "—"} · retour {row.end !== null ? `${nf.format(row.end)}\u00a0km` : "—"}
                         </span>

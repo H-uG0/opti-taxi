@@ -180,28 +180,30 @@ function ArrivalLine({
   const nowMinute = now === null ? null : minuteOfDay(new Date(now));
   const waited = nowMinute === null ? null : waitedMinutes(arrivedMinute, plannedMinute, nowMinute);
   return (
-    <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sky-950">
-      <p className="flex min-w-0 flex-1 items-center gap-2 text-base">
+    <div role="status" className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sky-950">
+      <p className="flex items-center gap-2 text-base">
         <Clock aria-hidden className="size-5 shrink-0" />
-        <span className="tabular">
-          <span className="font-semibold">Arrivé à {formatMinute(arrivedMinute)}</span>
-          {nowMinute !== null && nowMinute < start ? (
-            <> · patient attendu à {formatMinute(start)}</>
-          ) : waited !== null ? (
-            <> · attente {waited}&nbsp;min</>
-          ) : null}
-          {waiting ? <span className="block text-sm">En attente d&apos;envoi, avec l&apos;heure du geste.</span> : null}
-        </span>
+        <span className="tabular font-semibold">Arrivé à {formatMinute(arrivedMinute)}</span>
       </p>
-      {canUndo || waiting ? (
-        <button
-          type="button"
-          onClick={() => submit(stopId, "UNDO_ARRIVE")}
-          className="inline-flex min-h-11 touch-manipulation items-center gap-1 rounded-lg px-2 text-sm font-semibold text-sky-900 underline underline-offset-2 hover:bg-sky-100 focus-visible:outline-2 focus-visible:outline-brand-600"
-        >
-          Annuler l&apos;arrivée
-        </button>
-      ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 pl-7">
+        <p className="tabular text-sm">
+          {nowMinute !== null && nowMinute < start ? (
+            <>Patient attendu à {formatMinute(start)}</>
+          ) : waited !== null ? (
+            <>Attente&nbsp;: {waited}&nbsp;min</>
+          ) : null}
+          {waiting ? <span className="block">En attente d&apos;envoi, avec l&apos;heure du geste.</span> : null}
+        </p>
+        {canUndo || waiting ? (
+          <button
+            type="button"
+            onClick={() => submit(stopId, "UNDO_ARRIVE")}
+            className="inline-flex min-h-11 touch-manipulation items-center rounded-lg px-1 text-sm font-semibold text-sky-900 underline underline-offset-2 hover:bg-sky-100 focus-visible:outline-2 focus-visible:outline-brand-600"
+          >
+            Annuler l&apos;arrivée
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -245,7 +247,7 @@ function NoShowConfirm({ patient, onCancel, onConfirm }: { patient: string; onCa
           type="button"
           disabled={reason === null}
           onClick={() => reason && onConfirm(reason)}
-          className={cn(bigButton, "min-h-12 bg-red-700 text-base text-white hover:bg-red-800 disabled:bg-red-300")}
+          className={cn(bigButton, "min-h-12 bg-red-700 text-base text-white hover:bg-red-800 disabled:bg-slate-200 disabled:text-slate-600")}
         >
           Oui, absent
         </button>

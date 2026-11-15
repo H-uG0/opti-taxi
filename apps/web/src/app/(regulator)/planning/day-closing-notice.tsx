@@ -4,7 +4,7 @@ import { dashboardHref } from "../tableau-de-bord/query";
 import { entryRateText, type DayClosing } from "@/lib/planning/day-closing";
 import { pluralize } from "@/lib/planning/format";
 import { planningTripHref } from "@/lib/planning/links";
-import { formatMinute, formatShortDate } from "@/lib/time";
+import { formatDayDate, formatMinute } from "@/lib/time";
 
 /** People listed under the rate at most (the lowest rates first): the dashboard gives everyone. */
 const PEOPLE_SHOWN = 6;
@@ -19,7 +19,7 @@ const TRIPS_SHOWN = 30;
  */
 export function DayClosingNotice({ closing, yesterday }: { closing: DayClosing; yesterday: boolean }) {
   if (closing.unclosed.length === 0) return null;
-  const day = yesterday ? "hier" : `le ${formatShortDate(closing.date)}`;
+  const day = yesterday ? "hier" : `le ${formatDayDate(closing.date)}`;
   const behind = closing.people.filter((person) => person.recorded < person.placed).slice(0, PEOPLE_SHOWN);
   const shown = closing.unclosed.slice(0, TRIPS_SHOWN);
   return (
@@ -50,7 +50,8 @@ export function DayClosingNotice({ closing, yesterday }: { closing: DayClosing; 
         ) : null}
         <p className="text-xs">
           Aucun «&#x202F;Déposé&#x202F;» ni «&#x202F;Patient absent&#x202F;» saisi. Ouvrez la course, puis «&#x202F;Corriger un statut&#x202F;» avec
-          l&apos;heure réelle et un motif. L&apos;équipage peut encore saisir jusqu&apos;à 03:00 le lendemain («&#x202F;Fin de tournée&#x202F;»).
+          l&apos;heure réelle et un motif.
+          {yesterday ? " L'équipage a pu saisir jusqu'à 03:00 ce matin («\u202fFin de tournée\u202f»)." : null}
         </p>
         <ul className="grid gap-x-4 gap-y-0.5 sm:grid-cols-2 xl:grid-cols-3">
           {shown.map((trip) => (

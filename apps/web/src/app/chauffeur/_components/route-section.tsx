@@ -262,7 +262,10 @@ export function VehicleDayPanel({
       <div className="space-y-3 border-t border-slate-200 px-3 py-3">
         {readings ? (
           <>
-            <OdometerCard routeId={routeId} date={day.date} moment="START" recorded={day.start} lastKnown={day.lastKnown} startKm={null} />
+            {/* Missing, the start's card is at the top of the route (the first thing of the day). */}
+            {day.start !== null ? (
+              <OdometerCard routeId={routeId} date={day.date} moment="START" recorded={day.start} lastKnown={day.lastKnown} startKm={null} />
+            ) : null}
             <OdometerCard routeId={routeId} date={day.date} moment="END" recorded={day.end} lastKnown={day.lastKnown} startKm={day.start} />
           </>
         ) : null}
