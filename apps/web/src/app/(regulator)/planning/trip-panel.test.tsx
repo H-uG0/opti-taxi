@@ -16,6 +16,8 @@ const actions = vi.hoisted(() => ({
   placeTrip: vi.fn(async () => ({ ok: true, message: "Course placée." })),
 }));
 vi.mock("./actions", () => actions);
+const correction = vi.hoisted(() => ({ correctStopStatus: vi.fn(async () => ({ ok: true, message: "Statut corrigé." })) }));
+vi.mock("./status-correction-actions", () => correction);
 
 afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
@@ -50,6 +52,23 @@ const moveSelect = () => screen.getByLabelText("Déplacer vers…") as HTMLSelec
 const optionLabels = () => Array.from(moveSelect().options).map((o) => o.textContent);
 
 describe("TripPanel (panneau course)", () => {
+  it("corrects a stop's status with the real time, a reason, and the absence's reason (FLD-02)", async () => {
+    renderPanel(planningFixture().trips["trip-a"]!);
+    fireEvent.click(screen.getByRole("button", { name: /Corriger un statut/ }));
+    expect((screen.getByLabelText("Arrêt") as HTMLSelectElement).options[0]?.textContent).toBe("Prise en charge (sans statut)");
+    fireEvent.change(screen.getByLabelText("Statut"), { target: { value: "NO_SHOW" } });
+    fireEvent.change(screen.getByLabelText("Heure réelle"), { target: { value: "06:58" } });
+    const save = screen.getByRole("button", { name: "Enregistrer la correction" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Motif de l'absence"), { target: { value: "NO_ANSWER" } });
+    fireEvent.change(screen.getByLabelText("Motif de la correction (obligatoire)"), { target: { value: "PHONE_ISSUE" } });
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(correction.correctStopStatus).toHaveBeenCalledWith({ stopId: "s1", target: "NO_SHOW", time: "06:58", reason: "PHONE_ISSUE", noShowReason: "NO_ANSWER" }),
+    );
+  });
+
   it("offers only the available vehicles of an allowed type, other than the trip's own", () => {
     renderPanel(planningFixture().trips["trip-a"]!);
     expect(optionLabels()).toEqual(["Déplacer vers…", "VSL 1 (Marseille) — libre"]);

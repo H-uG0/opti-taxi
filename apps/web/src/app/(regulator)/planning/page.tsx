@@ -20,7 +20,8 @@ import { PLACE_NO_ROUTES } from "@/lib/planning/place-view";
 import type { PlanningDayView } from "@/lib/planning/types";
 import { loadDayVersion } from "@/lib/planning/version";
 import { livePlanToken, loadLiveSnapshot, loadRoadmapStates, type LiveSnapshot } from "@/lib/planning/live-load";
-import { formatDateTime, formatDayDate, formatLongDate, isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
+import { addDays, formatDateTime, formatDayDate, formatLongDate, isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
+import { loadDayClosing } from "@/lib/planning/day-closing-load";
 import { currentHorizon, inHorizon } from "@/lib/trips/completion";
 import { loadRecurrencesWithoutTrip } from "@/lib/trips/missing-load";
 import { generationStateOf, MissingRecurrencesNote } from "@/components/trips/missing-recurrences";
@@ -39,6 +40,7 @@ import { PlanningBoard } from "./planning-board";
 import { PlanningToolbar } from "./planning-toolbar";
 import { LiveDayBar, LiveDayProvider } from "./live-day";
 import { ReplacePanel } from "./replace-panel";
+import { DayClosingNotice } from "./day-closing-notice";
 import { PlanningVersionWatcher } from "./version-watcher";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -131,7 +133,9 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   // so an action on this page is refused (never the other way round).
   // Today: the live state is read before the plan too (its key is the plan shown; « Recharger » when it moves).
   const [shownVersion, liveRead] = await Promise.all([loadDayVersion(db, date), date === today ? loadLiveSnapshot(db, date) : null]);
-  const [view, horizon, missing, closed, roadmaps] = await Promise.all([
+  // FLD-02: the trips whose outcome the crews never recorded, the day before on today's planning, a past day's own.
+  const closingDate = date === today ? addDays(today, -1) : date < today ? date : null;
+  const [view, horizon, missing, closed, roadmaps, , closing] = await Promise.all([
     loadPlanningDay(date),
     // Read only: the trips of a date of the horizon are completed by <TripCompletion> once the page is shown.
     currentHorizon(db, today),
@@ -142,7 +146,12 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
     date === tomorrow ? loadRoadmapStates(db, date) : Promise.resolve(null),
     // The day's patients, stop addresses, phones, access and trip notes are on screen (timeline, map, trip panel).
     auditRead(user, { action: "plan.view", entity: "Route", entityId: null, serviceDate: date }),
+    closingDate ? loadDayClosing(closingDate) : Promise.resolve(null),
   ]);
+  // The day before's unclosed trips name their patients: traced as a read of that day's plan.
+  if (closing && closingDate !== date && closing.unclosed.length > 0) {
+    await auditRead(user, { action: "plan.view", entity: "Route", entityId: null, serviceDate: closingDate, details: { source: "day_closing" } });
+  }
   const completing = inHorizon(date, horizon);
 
   const past = date < today;
@@ -243,6 +252,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
 
           <PlanningActivityBanner />
           {live ? <LiveDayBar /> : null}
+          {closing ? <DayClosingNotice closing={closing} yesterday={closingDate !== date} /> : null}
           <PlanningVersionWatcher key={`${shownVersion.version}/${shownVersion.run ?? ""}`} date={date} shown={shownVersion} />
           {/* One line of context: the optimizer service, then the plan in place (when, how, what to keep in mind). */}
           <div data-wall-hide className="flex flex-wrap items-center gap-x-4 gap-y-1">

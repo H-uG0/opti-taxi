@@ -356,6 +356,7 @@ function ClosedStopCard({ stop, routeStopIds }: { stop: StopView; routeStopIds: 
                 {" "}
                 · saisie à <span className="tabular font-semibold">{formatMinute(stop.completedMinute)}</span>
                 {stop.recordedBy ? <> par {stop.recordedBy}</> : null}
+                {stop.entry === "corrected" ? <> (corrigé par la régulation)</> : stop.entry === "declared" ? <> (saisi en fin de tournée)</> : null}
                 <Lateness lateness={stop.lateness} />
               </>
             ) : null}

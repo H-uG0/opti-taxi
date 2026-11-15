@@ -104,7 +104,7 @@ describe("POST /api/chauffeur/stops/:id/status", () => {
     expect(body).toMatchObject({ ok: true, outcome: "applied", message: "Prise en charge enregistrée.", sessionExpiresAt: "2026-11-09T19:25:00.000Z" });
     expect(fake.tx.routeStop.updateMany).toHaveBeenCalledWith({
       where: { id: "s_pick", completedAt: null },
-      data: { completedAt: new Date(gesture), completedById: "u1", completedReceivedAt: NOW },
+      data: { completedAt: new Date(gesture), completedById: "u1", completedReceivedAt: NOW, completedSource: null, correctionReason: null },
     });
     expect(fake.tx.trip.updateMany).toHaveBeenCalledWith({ where: { id: "t1", status: "ASSIGNED" }, data: { status: "PICKED_UP" } });
     expect(auditEvents()).toEqual([
@@ -264,7 +264,7 @@ describe("POST /api/chauffeur/stops/:id/status", () => {
     const { body } = await answer(await post("s_pick", { action: "UNDO", observedAt: NOW.getTime() }));
     expect(body).toMatchObject({ ok: true, outcome: "applied", message: "Statut annulé." });
     expect(fake.tx.routeStop.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { completedAt: null, completedById: null, completedReceivedAt: null } }),
+      expect.objectContaining({ data: { completedAt: null, completedById: null, completedReceivedAt: null, completedSource: null, correctionReason: null } }),
     );
     expect(auditEvents()).toEqual([expect.objectContaining({ action: "stop.undo_pickup" })]);
   });
@@ -358,6 +358,46 @@ describe("POST /api/chauffeur/stops/:id/status", () => {
       stops([atDoor("ASSIGNED", new Date(NOW.getTime() - 13 * MIN))], "s_pick");
       reply = await answer(await post("s_pick", { action: "NO_SHOW", observedAt: NOW.getTime(), reason: "NO_ANSWER" }));
       expect(reply).toMatchObject({ status: 200, body: { ok: true } });
+    });
+  });
+  describe("« Fin de tournée »: a forgotten status with its real time (FLD-02)", () => {
+    // Monday 9 November, 01:30 in Paris: the Sunday 8's route is still open until 03:00.
+    const NIGHT = new Date("2026-11-09T00:30:00.000Z");
+    const SUNDAY: Route = { ...ROUTE, serviceDate: new Date("2026-11-08T00:00:00.000Z") };
+
+    it("records it at the time typed on the day before until 03:00, says so on the stop and in the audit", async () => {
+      vi.setSystemTime(NIGHT);
+      stops([pickup("PICKED_UP", new Date("2026-11-08T16:05:00.000Z")), dropoff("PICKED_UP")], "s_drop", SUNDAY);
+      // 17:40 on Sunday, Paris (16:40 UTC).
+      const { status, body } = await answer(await post("s_drop", { action: "DROPOFF", observedAt: NIGHT.getTime(), declaredMinute: 17 * 60 + 40 }));
+      expect(status).toBe(200);
+      expect(body).toMatchObject({ ok: true, outcome: "applied" });
+      const at = new Date("2026-11-08T16:40:00.000Z");
+      expect(fake.tx.routeStop.updateMany).toHaveBeenCalledWith({
+        where: { id: "s_drop", completedAt: null },
+        data: { completedAt: at, completedById: "u1", completedReceivedAt: NIGHT, completedSource: "DECLARED", correctionReason: null },
+      });
+      expect(auditEvents()).toEqual([expect.objectContaining({ action: "stop.dropoff", details: { declaredAt: at.toISOString() } })]);
+    });
+
+    it("refuses the day before once 03:00 has passed, a time to come and a time out of the route's order", async () => {
+      vi.setSystemTime(new Date("2026-11-09T02:10:00.000Z"));
+      stops([pickup("PICKED_UP", new Date("2026-11-08T16:05:00.000Z")), dropoff("PICKED_UP")], "s_drop", SUNDAY);
+      expect((await answer(await post("s_drop", { action: "DROPOFF", observedAt: 0, declaredMinute: 1060 }))).body).toMatchObject({ code: "wrong-day" });
+
+      vi.setSystemTime(NOW);
+      stops([pickup("PICKED_UP", new Date(NOW.getTime() - 30 * MIN)), dropoff("PICKED_UP")], "s_drop");
+      // 09:00 is still to come (08:25 now).
+      expect((await answer(await post("s_drop", { action: "DROPOFF", observedAt: 0, declaredMinute: 540 }))).body).toMatchObject({ code: "declared" });
+      // 07:40, before the pickup recorded at 07:55.
+      const early = await answer(await post("s_drop", { action: "DROPOFF", observedAt: 0, declaredMinute: 460 }));
+      expect(early).toMatchObject({ status: 422, body: { code: "declared", error: "Heure avant le statut déjà saisi de l'arrêt précédent (07:55)\u00a0: vérifiez l'heure." } });
+      expect(fake.db.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("never takes an undo or an arrival with a time typed", async () => {
+      stops([pickup()], "s_pick");
+      expect((await answer(await post("s_pick", { action: "ARRIVE", observedAt: 0, declaredMinute: 480 }))).status).toBe(400);
     });
   });
 });

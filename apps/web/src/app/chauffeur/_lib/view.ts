@@ -99,6 +99,8 @@ export type StopView = {
   noShowMinWaitMin: number;
   /** « Patient absent »: the reason the crew gave, as shown; null otherwise. */
   noShowReason: string | null;
+  /** The status was typed afterwards (« Fin de tournée ») or corrected by the regulation (FLD-02); null: on the spot. */
+  entry: "declared" | "corrected" | null;
   /** Lateness and « Patient pas prêt » (today, a stop still to do); null otherwise. */
   signals: StopSignalsView | null;
   /**
@@ -411,6 +413,7 @@ export function buildRouteView(
         arrivedMinute: arrivedAt ? minuteOfDay(arrivedAt) : null,
         noShowMinWaitMin: stop.kind === "PICKUP" ? noShowMinWaitMin : 0,
         noShowReason: state === "no_show" && trip.noShowReason ? NO_SHOW_REASON_LABELS[trip.noShowReason] : null,
+        entry: stop.completedSource === "DECLARED" ? "declared" : stop.completedSource === "CORRECTED" ? "corrected" : null,
         signals: editable
           ? stopSignalsView({ kind: stop.kind, tripId: stop.tripId, state, isNext: stop.id === nextId }, field.requests.get(stop.tripId))
           : null,

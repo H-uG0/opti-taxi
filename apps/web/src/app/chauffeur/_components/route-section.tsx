@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { ChevronDown, Coffee, Flag, Info, Warehouse } from "lucide-react";
+import Link from "next/link";
+import { ChevronDown, ClipboardCheck, Coffee, Flag, Info, Warehouse } from "lucide-react";
 import { Badge, VehicleTypeBadge } from "@/components/ui/badge";
 import { cn } from "@/components/ui/cn";
 import { formatKm, STOP_KIND_LABELS } from "@/lib/labels";
@@ -205,7 +206,40 @@ function ReturnMarker({ route, finished }: { route: RouteView; finished: boolean
   );
 }
 
-export function RouteSection({ route, regulator }: { route: RouteView; regulator: RegulatorContact | null }) {
+/** « Fin de tournée » (FLD-02): the stops left without a status (their time past), and the way to enter them. */
+function EndOfRouteLink({ forgotten }: { forgotten: number }) {
+  return (
+    <Link
+      href="/chauffeur/fin-de-tournee"
+      prefetch={false}
+      className={cn(
+        "flex min-h-14 touch-manipulation items-center gap-3 rounded-2xl border px-4 py-2.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
+        forgotten > 0 ? "border-amber-400 bg-amber-50 text-amber-950 hover:bg-amber-100" : "border-slate-300 bg-white text-slate-800 hover:bg-slate-50",
+      )}
+    >
+      <ClipboardCheck aria-hidden className="size-5 shrink-0" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-base font-semibold">Fin de tournée</span>
+        <span className="block text-sm">
+          {forgotten > 0
+            ? `${forgotten > 1 ? `${forgotten} arrêts` : "1 arrêt"} sans statut\u00a0: saisissez l'heure réelle`
+            : "Statuts oubliés, avec l'heure réelle"}
+        </span>
+      </span>
+    </Link>
+  );
+}
+
+export function RouteSection({
+  route,
+  regulator,
+  endOfRoute = null,
+}: {
+  route: RouteView;
+  regulator: RegulatorContact | null;
+  /** Today's route: the stops left without a status although their time is past (« Fin de tournée »). */
+  endOfRoute?: { forgotten: number } | null;
+}) {
   const titleId = `route-${route.id}`;
   const finished = route.stops.length > 0 && route.nextStop === null;
   const stopIds = route.stops.map((stop) => stop.id);
@@ -237,6 +271,7 @@ export function RouteSection({ route, regulator }: { route: RouteView; regulator
           }
         })}
       </ol>
+      {endOfRoute ? <EndOfRouteLink forgotten={endOfRoute.forgotten} /> : null}
     </section>
   );
 }

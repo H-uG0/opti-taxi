@@ -42,7 +42,12 @@ export type QueuedStatus = {
   observedAt: number;
   /** « Patient absent »: the reason code chosen in the list. */
   reason?: NoShowReason;
+  /** « Fin de tournée » (FLD-02): the real time typed, minute of the service day (sent instead of the gesture's). */
+  declaredMinute?: number;
 };
+
+/** What a status carries besides its stop, action and time: the reason of an absence, a time typed afterwards. */
+export type StatusExtra = Pick<QueuedStatus, "reason" | "declaredMinute">;
 
 /** A queued status with its storage key (increasing: the order of the taps). */
 export type StoredStatus = { key: number; value: QueuedStatus };
@@ -64,6 +69,8 @@ export type LocalPhase = "queued" | "sending" | "sent";
 export type LocalStatus = {
   action: StopAction;
   observedAt: number;
+  /** « Fin de tournée »: the real time typed (minute of the service day), shown instead of the gesture's. */
+  declaredMinute?: number;
   phase: LocalPhase;
   /** Server clock once saved (phase "sent"): a page rendered later shows it. */
   serverTime?: number;
@@ -134,9 +141,10 @@ const STOP_ACTION_SET: ReadonlySet<string> = new Set(["PICKUP", "DROPOFF", "NO_S
 /** A stored value read back from the phone is used only if it has exactly the expected shape. */
 export function isQueuedStatus(value: unknown): value is QueuedStatus {
   if (typeof value !== "object" || value === null) return false;
-  const { stopId, action, observedAt, reason } = value as Record<string, unknown>;
+  const { stopId, action, observedAt, reason, declaredMinute } = value as Record<string, unknown>;
   return (
     (reason === undefined || isNoShowReason(reason)) &&
+    (declaredMinute === undefined || (typeof declaredMinute === "number" && Number.isInteger(declaredMinute) && declaredMinute >= 0 && declaredMinute < 1440)) &&
     typeof stopId === "string" &&
     stopId.length > 0 &&
     stopId.length <= 64 &&
@@ -145,6 +153,11 @@ export function isQueuedStatus(value: unknown): value is QueuedStatus {
     typeof observedAt === "number" &&
     Number.isFinite(observedAt)
   );
+}
+
+/** The declared time of a status typed in « Fin de tournée », to show with it. */
+function declaredOf(value: QueuedStatus): Pick<LocalStatus, "declaredMinute"> {
+  return value.declaredMinute !== undefined ? { declaredMinute: value.declaredMinute } : {};
 }
 
 export class StatusQueue {
@@ -197,7 +210,7 @@ export class StatusQueue {
   }
 
   /** Records a tap: saved at once with the time of the gesture, then sent. */
-  async submit(stopId: string, action: StopAction, reason?: NoShowReason): Promise<void> {
+  async submit(stopId: string, action: StopAction, extra: StatusExtra = {}): Promise<void> {
     const observedAt = this.deps.now();
     await this.start();
     this.refusals = this.refusals.filter((refusal) => refusal.stopId !== stopId);
@@ -210,13 +223,24 @@ export class StatusQueue {
       return;
     }
     if (last && last.value.action === action) {
-      // Same status tapped again while the first one waits: already kept.
-      this.emit();
-      await this.flush();
-      return;
+      const changed = last.value.reason !== extra.reason || last.value.declaredMinute !== extra.declaredMinute;
+      if (!changed || last.key === this.inFlight || this.uncertain.has(last.key)) {
+        // Same status tapped again while the first one waits: already kept.
+        this.emit();
+        await this.flush();
+        return;
+      }
+      // Typed again with another time or reason before it left: the new one replaces it.
+      await this.removeItem(last.key);
     }
 
-    await this.enqueue({ stopId, action, observedAt, ...(reason ? { reason } : {}) });
+    await this.enqueue({
+      stopId,
+      action,
+      observedAt,
+      ...(extra.reason ? { reason: extra.reason } : {}),
+      ...(extra.declaredMinute !== undefined ? { declaredMinute: extra.declaredMinute } : {}),
+    });
     this.emit();
     await this.flush();
   }
@@ -351,7 +375,7 @@ export class StatusQueue {
   }
 
   private queuedStatus(item: StoredStatus): LocalStatus {
-    const status: LocalStatus = { action: item.value.action, observedAt: item.value.observedAt, phase: "queued" };
+    const status: LocalStatus = { action: item.value.action, observedAt: item.value.observedAt, phase: "queued", ...declaredOf(item.value) };
     return this.uncertain.has(item.key) ? { ...status, uncertain: true } : status;
   }
 
@@ -369,7 +393,7 @@ export class StatusQueue {
         const item = this.items[0]!;
         const { stopId, action, observedAt } = item.value;
         this.inFlight = item.key;
-        this.setPhase(item, { action, observedAt, phase: "sending" });
+        this.setPhase(item, { action, observedAt, phase: "sending", ...declaredOf(item.value) });
         this.emit();
         let outcome: SendOutcome;
         try {
@@ -393,7 +417,7 @@ export class StatusQueue {
         await this.removeItem(item.key);
         if (outcome.kind === "ok") {
           if (latestForStop) {
-            this.byStop = { ...this.byStop, [stopId]: { action, observedAt, phase: "sent", serverTime: outcome.serverTime } };
+            this.byStop = { ...this.byStop, [stopId]: { action, observedAt, phase: "sent", serverTime: outcome.serverTime, ...declaredOf(item.value) } };
           }
           this.deps.onDelivered?.(outcome);
           for (const listener of this.deliveryListeners) listener(outcome);

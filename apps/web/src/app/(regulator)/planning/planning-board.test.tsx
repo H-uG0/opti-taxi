@@ -16,6 +16,7 @@ const actions = vi.hoisted(() => ({
 // « Hors service… » offers « Localiser l'adresse » (a server action).
 vi.mock("@/components/address/actions", () => ({ geocodeAddressAction: vi.fn() }));
 vi.mock("./field-request-actions", () => ({ resolveFieldRequest: vi.fn() }));
+vi.mock("./status-correction-actions", () => ({ correctStopStatus: vi.fn() }));
 vi.mock("./actions", () => ({
   lockTrip: vi.fn(),
   unlockTrip: vi.fn(),

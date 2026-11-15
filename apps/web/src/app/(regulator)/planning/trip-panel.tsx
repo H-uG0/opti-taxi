@@ -24,7 +24,9 @@ import {
   SHARING_STATUS_LABELS,
   TRIP_STATUS_LABELS,
 } from "@/lib/labels";
-import { formatDuration, formatMinute, formatTimeOn } from "@/lib/time";
+import { formatDuration, formatMinute, formatTimeOn, todayIso } from "@/lib/time";
+import { currentTarget } from "@/lib/domain/stop-correction";
+import { StatusCorrection, type CorrectableStop } from "./status-correction";
 import { lockTrip, moveTrip, proposeExceptionalAmbulance, unlockTrip } from "./actions";
 import { PlaceFinder } from "./place-finder";
 import { usePlanningActivity } from "./planning-activity";
@@ -182,6 +184,18 @@ export function TripPanel({
   const sharingAnswerLine = trip.sharingAnswer ? sharingAnswerText(trip.sharingAnswer, trip.sharingStatus) : null;
   // The trip's line in Courses (patient and leg): phone, sharing answer, cancellation, toll.
   const coursesHref = coursesTripHref(date, trip.patientId, trip.direction);
+  // « Corriger un statut » (FLD-02): the trip's stops on its route, on a day started or past, the trip not cancelled.
+  const correctable: CorrectableStop[] =
+    current?.route && trip.status !== "CANCELLED" && date <= todayIso()
+      ? current.route.stops
+          .filter((stop) => stop.tripId === trip.id)
+          .map((stop) => ({
+            id: stop.id,
+            kind: stop.kind,
+            current: currentTarget(stop.kind, stop.completed ? new Date(0) : null, trip.status),
+            minute: stop.completedMinute ?? stop.startMinute,
+          }))
+      : [];
 
   return (
     <Card aria-labelledby="trip-panel-title">
@@ -472,6 +486,7 @@ export function TripPanel({
               {record.kind === "PICKUP" && trip.noShowReason ? <span>{trip.noShowReason} · </span> : null}
               <span className="tabular">{fieldRecordText(record, date)}</span>
               {record.arrivedAt ? <span className="tabular text-slate-500"> · arrivé à {formatTimeOn(record.arrivedAt, date)}</span> : null}
+              {record.entry ? <span className="block text-xs text-amber-800">{record.entry}</span> : null}
             </Row>
           ))}
           <Row label="Attente sur place">
@@ -481,6 +496,7 @@ export function TripPanel({
             <span className="text-slate-500"> {outbound ? "avant le RDV" : "après la séance"}</span>
           </Row>
         </div>
+        {correctable.length > 0 ? <StatusCorrection key={trip.id} stops={correctable} patient={trip.patientName} /> : null}
         <div className="py-1">
           <Row label="Partage">
             {trip.coPassengerTripIds.length > 0 ? (

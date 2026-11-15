@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fromIsoDate } from "@/lib/time";
-import { stopAccess } from "./access";
+import { lateEntryAccess, lateEntryDates, stopAccess } from "./access";
 
 const TODAY = "2026-11-03";
 const route = (overrides: Partial<{ driverId: string | null; crewMateId: string | null; serviceDate: Date }> = {}) => ({
@@ -34,3 +34,21 @@ describe("stopAccess", () => {
     expect(stopAccess(route({ serviceDate: fromIsoDate("2026-11-02") }), "drv_3", TODAY)).toBe("not-yours");
   });
 });
+
+describe("« Fin de tournée »: the days still open (FLD-02)", () => {
+  // Tuesday 3 November 2026, Paris is UTC+1.
+  it("keeps the day before open until 03:00, today always", () => {
+    expect(lateEntryDates(new Date("2026-11-03T01:59:00.000Z"))).toEqual(["2026-11-02", "2026-11-03"]);
+    expect(lateEntryDates(new Date("2026-11-03T02:00:00.000Z"))).toEqual(["2026-11-03"]);
+    expect(lateEntryDates(new Date("2026-11-03T21:00:00.000Z"))).toEqual(["2026-11-03"]);
+  });
+
+  it("lets the crew enter on those days only, its own routes only", () => {
+    const night = new Date("2026-11-03T01:00:00.000Z");
+    expect(lateEntryAccess(route({ serviceDate: fromIsoDate("2026-11-02") }), "drv_2", night)).toBe("ok");
+    expect(lateEntryAccess(route({ serviceDate: fromIsoDate("2026-11-01") }), "drv_2", night)).toBe("wrong-day");
+    expect(lateEntryAccess(route({ serviceDate: fromIsoDate("2026-11-02") }), "drv_3", night)).toBe("not-yours");
+    expect(lateEntryAccess(route({ serviceDate: fromIsoDate("2026-11-02") }), "drv_1", new Date("2026-11-03T08:00:00.000Z"))).toBe("wrong-day");
+  });
+});
+

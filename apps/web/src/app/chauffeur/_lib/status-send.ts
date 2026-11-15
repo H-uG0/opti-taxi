@@ -50,6 +50,7 @@ export async function sendQueuedStatus(status: QueuedStatus, ownerId: string): P
       sentAt: startedAt,
       ownerId,
       ...(status.reason ? { reason: status.reason } : {}),
+      ...(status.declaredMinute !== undefined ? { declaredMinute: status.declaredMinute } : {}),
     };
     const { status: httpStatus, json } = await postJson(stopStatusUrl(status.stopId), body, SEND_TIMEOUT_MS);
     return classifyStatusResponse(httpStatus, json);

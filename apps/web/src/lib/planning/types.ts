@@ -96,6 +96,8 @@ export type FieldRecordView = RecordedByView & {
   kind: StopKind;
   /** « Arrivé » at the pickup before this status (ISO, FLD-01); absent: none. */
   arrivedAt?: string;
+  /** « Saisi après coup par l'équipage », « Corrigé par la régulation (motif) » (FLD-02); absent: recorded live. */
+  entry?: string;
 };
 
 export type TripView = {

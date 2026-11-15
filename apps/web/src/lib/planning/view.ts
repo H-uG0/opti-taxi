@@ -5,6 +5,8 @@
 import type {
   Mobility,
   NoShowReason,
+  StatusCorrectionReason,
+  StopEntrySource,
   OptimizationRunStatus,
   Payer,
   RouteStatus,
@@ -29,6 +31,7 @@ import {
 import type { RunDetails } from "@/lib/optimizer/run-details";
 import { isSameEpisode, returnsToCheckAfterNoShow } from "@/lib/domain/no-show";
 import { NO_SHOW_REASON_LABELS } from "@/lib/domain/field-wait";
+import { CORRECTION_REASON_LABELS } from "@/lib/domain/stop-correction";
 import { minuteOn } from "./day-progress";
 import { halfServedPairs } from "./half-served";
 import { isStopDone } from "./stop-done";
@@ -111,6 +114,9 @@ export type RawStop = {
   completedBy: Recorder;
   /** « Arrivé » on a pickup (FLD-01); absent in older tests: none. */
   arrivedAt?: Date | null;
+  /** Typed afterwards by the crew or corrected by the regulation (FLD-02); absent: live. */
+  completedSource?: StopEntrySource | null;
+  correctionReason?: StatusCorrectionReason | null;
 };
 
 export type RawRoute = {
@@ -221,7 +227,9 @@ export function sharingAnswerOf(trip: Pick<RawTrip, "sharingRespondedAt" | "shar
 
 /** Stop statuses recorded by the crew, per trip, in route order. */
 export function fieldRecordsByTrip(
-  routes: ReadonlyArray<{ stops: ReadonlyArray<Pick<RawStop, "id" | "sequence" | "tripId" | "kind" | "completedAt" | "completedBy" | "arrivedAt">> }>,
+  routes: ReadonlyArray<{
+    stops: ReadonlyArray<Pick<RawStop, "id" | "sequence" | "tripId" | "kind" | "completedAt" | "completedBy" | "arrivedAt" | "completedSource" | "correctionReason">>;
+  }>,
 ): Map<string, FieldRecordView[]> {
   const byTrip = new Map<string, FieldRecordView[]>();
   for (const route of routes) {
@@ -233,6 +241,10 @@ export function fieldRecordsByTrip(
         at: stop.completedAt.toISOString(),
         byName: recorderName(stop.completedBy),
         ...(stop.arrivedAt ? { arrivedAt: stop.arrivedAt.toISOString() } : {}),
+        ...(stop.completedSource === "DECLARED" ? { entry: "Saisi après coup par l'équipage" } : {}),
+        ...(stop.completedSource === "CORRECTED"
+          ? { entry: `Corrigé par la régulation${stop.correctionReason ? ` (${CORRECTION_REASON_LABELS[stop.correctionReason].toLowerCase()})` : ""}` }
+          : {}),
       };
       const list = byTrip.get(stop.tripId);
       if (list) list.push(record);

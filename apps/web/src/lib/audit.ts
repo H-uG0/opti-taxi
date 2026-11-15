@@ -20,8 +20,10 @@
  *   deleted), facility.view (patients treated there), trip_list.view
  *   (/courses), plan.view (/planning: the day's patients, addresses, phones,
  *   access notes and trip notes; « Vérifier la sélection » of a plan waiting
- *   for confirmation, which names the patients it leaves out), roadmap.view (driver, today or
- *   tomorrow), shared_arrivals.view (Facility when a facility's sheet is
+ *   for confirmation, which names the patients it leaves out; the day before's
+ *   trips left without an outcome on today's planning, details.source
+ *   "day_closing"), roadmap.view (driver, today or tomorrow; « Fin de
+ *   tournée », details.page "end_of_route"), shared_arrivals.view (Facility when a facility's sheet is
  *   opened), driver.view (/chauffeurs/[id]: absences), day_crew.view
  *   (/equipages: everyone's absences of the day), staff_list.view
  *   (/chauffeurs: everyone's situation tomorrow, absences included),
@@ -85,7 +87,10 @@
  *   stop.undo_pickup, stop.undo_dropoff, stop.arrive and stop.undo_arrive
  *   (« Arrivé » on a pickup, FLD-01) (details.observedAt: the time of the
  *   gesture, when the status was sent from the phone's offline queue more
- *   than 1 min after it); the crews' signals and requests (DAY-05, FLD-01):
+ *   than 1 min after it; details.declaredAt: the real time typed in « Fin de
+ *   tournée », FLD-02); stop.correct (the regulator's correction, FLD-02:
+ *   details.stopKind, details.status and details.minute { from, to },
+ *   details.reason from a list); the crews' signals and requests (DAY-05, FLD-01):
  *   field_request.create (details.kind and details.requestId, details.minutes
  *   of a lateness announced; never the reason: health data), trip.ready_time (an
  *   end of session signalled from the field, details.from and to in minutes,

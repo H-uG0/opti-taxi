@@ -28,6 +28,8 @@ export type StatusRequestBody = {
   ownerId: string;
   /** « Patient absent »: the reason chosen in the list (lib/domain/field-wait.ts). */
   reason?: NoShowReason;
+  /** « Fin de tournée » (FLD-02): the real time typed, minute of the service day. */
+  declaredMinute?: number;
 };
 
 /** Body of a session request: the account the page belongs to (401 when the cookie is now another's). */
@@ -46,6 +48,8 @@ export type StatusErrorCode =
   | "too-old"
   /** « Patient absent » before the minimum wait set in Paramètres. */
   | "wait"
+  /** « Fin de tournée »: a time in the future, or out of the order of the route's statuses. */
+  | "declared"
   /** The transition rules refuse it (already picked up, cancelled trip…). */
   | "refused"
   /** The other crew member changed the stop meanwhile. */

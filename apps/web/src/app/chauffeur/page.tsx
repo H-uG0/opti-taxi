@@ -10,6 +10,7 @@ import { STOP_KIND_LABELS } from "@/lib/labels";
 import type { RegulatorContact } from "./_lib/links";
 import {
   loadDriverRoutes,
+  loadEndOfRouteRoutes,
   loadFieldContext,
   loadNextDaySummary,
   loadNoShowMinWait,
@@ -18,6 +19,8 @@ import {
 } from "./_lib/load";
 import { isReadableRoadmapDate, type NextDaySummary } from "./_lib/roadmap";
 import { buildRouteView, nextDayCardFirst, NO_FIELD_CONTEXT } from "./_lib/view";
+import { lateEntryDates } from "./_lib/access";
+import { endOfRouteView, forgottenStops } from "./_lib/end-of-route";
 import { DaySwitch } from "./_components/day-switch";
 import { RefreshControl } from "./_components/refresh-control";
 import { ServerRenderMark } from "./_components/driver-app";
@@ -106,6 +109,23 @@ function NextDayCard({ tomorrow, routes }: { tomorrow: string; routes: NextDaySu
   );
 }
 
+/** Before 03:00, the day before still has stops without a status: « Fin de tournée » of yesterday (FLD-02). */
+function YesterdayNotice({ date, forgotten }: { date: string; forgotten: number }) {
+  if (forgotten === 0) return null;
+  return (
+    <Link
+      href={`/chauffeur/fin-de-tournee?date=${date}`}
+      prefetch={false}
+      className="flex min-h-12 items-center gap-2 rounded-xl border border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-950 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-brand-600"
+    >
+      <span>
+        <span className="font-semibold">Hier, {forgotten > 1 ? `${forgotten} arrêts` : "1 arrêt"} sans statut.</span> Saisissez l&apos;heure réelle avant 03:00 dans
+        «&#x202F;Fin de tournée&#x202F;».
+      </span>
+    </Link>
+  );
+}
+
 function DayNotice({ date, today }: { date: string; today: string }) {
   if (date === today) return null;
   return (
@@ -137,13 +157,19 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
     // tomorrow on the ?date= preview; never breaks the page.
     auditRead(user, { action: "roadmap.view", entity: "Driver", entityId: user.driverId, serviceDate: date }),
   ]);
-  const [afterOutboundNoShow, field, nextDay] = await Promise.all([
+  // Before 03:00, the day before is still open to its forgotten statuses (« Fin de tournée »).
+  const openDays = lateEntryDates(now);
+  const yesterday = editable && openDays.length > 1 ? openDays[0]! : null;
+  const [afterOutboundNoShow, field, nextDay, yesterdayRoutes] = await Promise.all([
     loadReturnTripsAfterOutboundNoShow(routes, date),
     // Signals and requests of the crew (DAY-05): the patients' returns and what was already sent, today only.
     editable ? loadFieldContext(routes, date) : NO_FIELD_CONTEXT,
     // The evening before: tomorrow's start and first stop (DAY-04).
     date === today ? loadNextDaySummary(user.driverId, tomorrow) : [],
+    yesterday ? loadEndOfRouteRoutes(user.driverId, yesterday, now) : [],
   ]);
+  const yesterdayForgotten = yesterdayRoutes.reduce((sum, route) => sum + endOfRouteView(route.stops).pending.length, 0);
+  const nowMinute = minuteOfDay(now);
   const views = routes.map((route) => buildRouteView(route, user.driverId, editable, afterOutboundNoShow, field, noShowMinWait));
   // Tomorrow's card, once: first in the evening (today's stops done, or no route today), after the routes otherwise.
   const nextDayCard = <NextDayCard tomorrow={tomorrow} routes={nextDay} />;
@@ -160,6 +186,7 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
         <div className="space-y-2">
           <h1 className="text-xl font-bold text-slate-950 first-letter:uppercase">{formatLongDate(date)}</h1>
           <DayNotice date={date} today={today} />
+          {yesterday ? <YesterdayNotice date={yesterday} forgotten={yesterdayForgotten} /> : null}
           <RefreshControl renderedAt={formatMinute(minuteOfDay(new Date()))} />
         </div>
 
@@ -171,7 +198,21 @@ export default async function DriverRoadmapPage({ searchParams }: { searchParams
         ) : (
           <div className="space-y-8">
             {views.map((view) => (
-              <RouteSection key={view.id} route={view} regulator={regulator} />
+              <RouteSection
+                key={view.id}
+                route={view}
+                regulator={regulator}
+                endOfRoute={
+                  editable
+                    ? {
+                        forgotten: forgottenStops(
+                          view.stops.filter((stop) => stop.state === "pending"),
+                          nowMinute,
+                        ),
+                      }
+                    : null
+                }
+              />
             ))}
             {nextDayFirst ? null : nextDayCard}
           </div>

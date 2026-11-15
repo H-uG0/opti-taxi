@@ -33,6 +33,15 @@
  *    stop.undo_arrive; details.observedAt for a status sent later from the
  *    queue). The reason of an absence stays on the trip (Trip.noShowReason),
  *    never in the trail (it can be health data).
+ * « Fin de tournée » (FLD-02): a forgotten status sent with the real time the
+ * crew typed (declaredMinute) instead of the time of the gesture: today, or
+ * the day before until 03:00 (access.ts lateEntryAccess); the time must be
+ * past and keep the route's statuses in their order (boundDeclaredAt), the
+ * 3 h bound of a gesture does not apply. The stop says it was entered
+ * afterwards (completedSource DECLARED), the audit event gives the time
+ * declared (details.declaredAt); no minimum wait is checked for an absence
+ * declared afterwards (the crew vouches for it).
+ *
  * Nothing is revalidated: the phone shows the status at once and refreshes
  * the roadmap a moment later, after a refusal too (the page is then stale).
  * The answer may renew a driver's session close to its end
@@ -40,8 +49,8 @@
  */
 import type { NextRequest } from "next/server";
 import { z } from "zod";
-import { STOP_ACCESS_ERRORS, stopAccess } from "@/app/chauffeur/_lib/access";
-import { boundObservedAt, previousStatusAt, TOO_OLD_ERROR } from "@/app/chauffeur/_lib/observed-time";
+import { lateEntryAccess, STOP_ACCESS_ERRORS, stopAccess } from "@/app/chauffeur/_lib/access";
+import { boundDeclaredAt, boundObservedAt, nextStatusAt, previousStatusAt, TOO_OLD_ERROR } from "@/app/chauffeur/_lib/observed-time";
 import { latestCompletedStopId } from "@/app/chauffeur/_lib/roadmap";
 import { STOP_ACTIONS, type StatusErrorCode, type StatusResponseBody } from "@/app/chauffeur/_lib/status-protocol";
 import { decideStopAction, isArrivalAction, stopAuditAction, stopWrite, type StopSnapshot } from "@/app/chauffeur/_lib/transitions";
@@ -53,7 +62,7 @@ import { db } from "@/lib/db";
 import { NO_SHOW_REASONS, noShowWaitIssue } from "@/lib/domain/field-wait";
 import { logError } from "@/lib/log";
 import { minuteOn } from "@/lib/planning/day-progress";
-import { todayIso, toIsoDate } from "@/lib/time";
+import { formatMinute, instantOfMinute, todayIso, toIsoDate } from "@/lib/time";
 import { jsonReply, ORIGIN_ERROR, PASSWORD_ERROR, SESSION_ERROR } from "@/app/api/chauffeur/_lib/reply";
 
 const stopIdSchema = z.string().trim().min(1).max(64);
@@ -66,6 +75,8 @@ const bodySchema = z.object({
   ownerId: z.string().max(64).nullish(),
   /** « Patient absent »: the reason from the list (absent from a page loaded before FLD-01). */
   reason: z.enum(NO_SHOW_REASONS).nullish(),
+  /** « Fin de tournée » (FLD-02): the real time typed by the crew, minute of the service day. */
+  declaredMinute: z.number().int().min(0).max(24 * 60 - 1).nullish(),
 });
 type StatusBody = z.infer<typeof bodySchema>;
 
@@ -80,6 +91,14 @@ function failure(status: number, code: StatusErrorCode, error: string): Recorded
 }
 
 class ConflictError extends Error {}
+
+/** Why a time typed in « Fin de tournée » is refused, with the status it would cross. */
+function declaredError(reason: "future" | "before-previous" | "after-next", bound: Date | null, isoDate: string): string {
+  const at = bound ? formatMinute(minuteOn(bound, isoDate)) : "";
+  if (reason === "future") return "Heure à venir\u00a0: saisissez l'heure réelle, déjà passée.";
+  if (reason === "before-previous") return `Heure avant le statut déjà saisi de l'arrêt précédent (${at})\u00a0: vérifiez l'heure.`;
+  return `Heure après le statut déjà saisi de l'arrêt suivant (${at})\u00a0: vérifiez l'heure.`;
+}
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const receivedAt = new Date();
@@ -161,25 +180,45 @@ async function recordStopStatus(user: DriverAccount, stopId: string, input: Stat
   const replay = decideStopAction(action, snapshot, receivedAt);
   if (replay.type === "noop") return noop(replay.message);
 
-  const observed = boundObservedAt({
-    observedAt: input.observedAt ?? null,
-    sentAt: input.sentAt ?? null,
-    receivedAt,
-    // Never before the statuses already recorded on earlier stops of the route, nor a dropoff before its pickup.
-    previousAt: previousStatusAt(stop, routeStops.map((s) => ({ ...s, cancelled: s.trip.status === "CANCELLED" }))),
-  });
-  if (!observed.ok) return failure(422, "too-old", TOO_OLD_ERROR);
-  // The service day is the day of the gesture: a status tapped at 23:55 and sent at 00:05 still counts.
-  if (stopAccess(stop.route, user.driverId, todayIso(observed.at)) === "wrong-day") {
-    return failure(403, "wrong-day", STOP_ACCESS_ERRORS["wrong-day"]);
+  const isoDate = toIsoDate(stop.route.serviceDate);
+  const recorded = routeStops.map((s) => ({ ...s, cancelled: s.trip.status === "CANCELLED" }));
+  const declared = input.declaredMinute ?? null;
+  let observed: { at: Date; deferred: boolean };
+  if (declared !== null) {
+    // « Fin de tournée »: a status, with the real time typed, on a day still open to it.
+    if (action !== "PICKUP" && action !== "DROPOFF" && action !== "NO_SHOW") {
+      return failure(400, "invalid", "Statut illisible\u00a0: actualisez la page.");
+    }
+    if (lateEntryAccess(stop.route, user.driverId, receivedAt) === "wrong-day") return failure(403, "wrong-day", STOP_ACCESS_ERRORS["wrong-day"]);
+    const bounded = boundDeclaredAt({
+      at: instantOfMinute(isoDate, declared),
+      receivedAt,
+      previousAt: previousStatusAt(stop, recorded),
+      nextAt: nextStatusAt(stop, recorded),
+    });
+    if (!bounded.ok) return failure(422, "declared", declaredError(bounded.reason, bounded.bound, isoDate));
+    observed = { at: bounded.at, deferred: true };
+  } else {
+    const gesture = boundObservedAt({
+      observedAt: input.observedAt ?? null,
+      sentAt: input.sentAt ?? null,
+      receivedAt,
+      // Never before the statuses already recorded on earlier stops of the route, nor a dropoff before its pickup.
+      previousAt: previousStatusAt(stop, recorded),
+    });
+    if (!gesture.ok) return failure(422, "too-old", TOO_OLD_ERROR);
+    // The service day is the day of the gesture: a status tapped at 23:55 and sent at 00:05 still counts.
+    if (stopAccess(stop.route, user.driverId, todayIso(gesture.at)) === "wrong-day") {
+      return failure(403, "wrong-day", STOP_ACCESS_ERRORS["wrong-day"]);
+    }
+    observed = gesture;
   }
 
   const decision = decideStopAction(action, snapshot, observed.at);
   if (decision.type === "refuse") return failure(409, "refused", decision.error);
   if (decision.type === "noop") return noop(decision.message);
 
-  const isoDate = toIsoDate(stop.route.serviceDate);
-  if (action === "NO_SHOW" && decision.tripStatus === "NO_SHOW") {
+  if (action === "NO_SHOW" && decision.tripStatus === "NO_SHOW" && declared === null) {
     // The minimum wait at the door before an absence (Paramètres, 0 by default: no check).
     const settings = await db.appSettings.findUnique({ where: { id: 1 }, select: { noShowMinWaitMin: true } });
     const issue = noShowWaitIssue({
@@ -204,7 +243,7 @@ async function recordStopStatus(user: DriverAccount, stopId: string, input: Stat
           })
         : await tx.routeStop.updateMany({
             where: { id: stop.id, completedAt: stop.completedAt },
-            data: stopWrite(decision, user.id, receivedAt),
+            data: stopWrite(decision, user.id, receivedAt, declared !== null ? "DECLARED" : null),
           });
       if (stopUpdate.count !== 1) throw new ConflictError();
       if (decision.tripStatus !== stop.trip.status) {
@@ -224,8 +263,13 @@ async function recordStopStatus(user: DriverAccount, stopId: string, input: Stat
         entity: "Trip",
         entityId: stop.tripId,
         serviceDate: isoDate,
-        // A status sent later from the queue: the time of the gesture (the event itself is dated on receipt).
-        ...(observed.deferred && recordedAt ? { details: { observedAt: recordedAt.toISOString() } } : {}),
+        // A status sent later from the queue: the time of the gesture (the event itself is dated on receipt); one typed
+        // in « Fin de tournée »: the time declared.
+        ...(declared !== null && recordedAt
+          ? { details: { declaredAt: recordedAt.toISOString() } }
+          : observed.deferred && recordedAt
+            ? { details: { observedAt: recordedAt.toISOString() } }
+            : {}),
       });
     });
   } catch (error) {

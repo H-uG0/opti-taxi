@@ -73,11 +73,11 @@ function waitingText(local: LocalStatus, sessionLost: boolean): string {
 }
 
 /** The latest status tapped on this stop, in place of the buttons until the page shows it. */
-function LocalStatusPanel({ stopId, local }: { stopId: string; local: LocalStatus }) {
+export function LocalStatusPanel({ stopId, local }: { stopId: string; local: LocalStatus }) {
   const { cancelQueued } = useDriverApp();
   const { sessionLost } = useQueueSnapshot();
   const slow = useSlow(local.phase === "sending");
-  const at = formatMinute(minuteOfDay(new Date(local.observedAt)));
+  const at = formatMinute(local.declaredMinute ?? minuteOfDay(new Date(local.observedAt)));
   const label = local.action === "UNDO" ? "Annulation du statut" : `${STATUS_LABELS[local.action]} à ${at}`;
 
   if (local.phase === "queued") {
@@ -128,7 +128,7 @@ function LocalStatusPanel({ stopId, local }: { stopId: string; local: LocalStatu
 }
 
 /** The reason on the stop itself. Not a live region: the header's refusal bar announces it once. */
-function ActionError({ message }: { message: string }) {
+export function ActionError({ message }: { message: string }) {
   return (
     <p className="flex items-start gap-2 rounded-xl border border-red-300 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-900">
       <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
@@ -138,7 +138,7 @@ function ActionError({ message }: { message: string }) {
 }
 
 /** The server's last refusal of a status of this stop, until the crew taps again or dismisses it. */
-function useRefusal(stopId: string): string | null {
+export function useRefusal(stopId: string): string | null {
   const { refusals } = useQueueSnapshot();
   for (let i = refusals.length - 1; i >= 0; i--) if (refusals[i]?.stopId === stopId) return refusals[i]!.error;
   return null;
@@ -295,7 +295,7 @@ export function StopActions({
         onCancel={() => setConfirmingNoShow(false)}
         onConfirm={(reason) => {
           setConfirmingNoShow(false);
-          submit(stopId, "NO_SHOW", reason);
+          submit(stopId, "NO_SHOW", { reason });
         }}
       />
     );

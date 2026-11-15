@@ -113,6 +113,21 @@ export function minuteOfDay(instant: Date): number {
   return h * 60 + m;
 }
 
+/**
+ * Real instant of minute `minute` (since local midnight, Europe/Paris) of `isoDate`: a time typed by a person
+ * (« Fin de tournée », a regulator's correction). The offset is read at the target instant, so the days of a
+ * daylight saving change are right (a time that does not exist, in the hour skipped in spring, comes an hour later).
+ */
+export function instantOfMinute(isoDate: string, minute: number): Date {
+  const wallMs = fromIsoDate(isoDate).getTime() + minute * 60_000;
+  const offsetAt = (instant: number) => {
+    const local = fromIsoDate(todayIso(new Date(instant))).getTime() + minuteOfDay(new Date(instant)) * 60_000;
+    return local - Math.floor(instant / 60_000) * 60_000;
+  };
+  const guess = wallMs - offsetAt(wallMs);
+  return new Date(wallMs - offsetAt(guess));
+}
+
 /** Calendar date of a real instant in Europe/Paris as "YYYY-MM-DD". */
 export function isoDateOf(instant: Date): string {
   return todayIso(instant);

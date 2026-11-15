@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   addDays,
+  instantOfMinute,
   formatDateTime,
   formatDayDate,
   formatDuration,
@@ -288,3 +289,15 @@ describe("formatDateTime, formatTimeOn and formatDayDate: the one way to write a
     expect(formatDayDate("2027-01-04", NOW)).toBe("04/01/2027");
   });
 });
+
+describe("instantOfMinute", () => {
+  it("gives the real instant of a time of the day in Paris, summer and winter", () => {
+    expect(instantOfMinute("2026-11-16", 10 * 60 + 40).toISOString()).toBe("2026-11-16T09:40:00.000Z");
+    expect(instantOfMinute("2026-07-01", 8 * 60).toISOString()).toBe("2026-07-01T06:00:00.000Z");
+    expect(instantOfMinute("2026-11-16", 0).toISOString()).toBe("2026-11-15T23:00:00.000Z");
+    // The day of the change to winter time (25 October 2026): 10:00 is in winter time.
+    expect(instantOfMinute("2026-10-25", 600).toISOString()).toBe("2026-10-25T09:00:00.000Z");
+    expect(minuteOfDay(instantOfMinute("2026-03-29", 600))).toBe(600);
+  });
+});
+

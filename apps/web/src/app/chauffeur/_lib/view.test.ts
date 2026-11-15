@@ -52,6 +52,7 @@ function makeStop(
     loadAfter: 0,
     completedAt: completedAt ? new Date(completedAt) : null,
     arrivedAt: null,
+    completedSource: null,
     completedBy: completedAt ? { driverId: completedByDriverId } : null,
     trip: {
       direction: trip.direction,

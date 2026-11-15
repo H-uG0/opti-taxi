@@ -283,7 +283,7 @@ describe("isQueuedStatus", () => {
 describe("StatusQueue: arrival and reason (FLD-01)", () => {
   it("keeps the reason code of an absence with it, and sends it", async () => {
     const { queue, sent, storage } = setup({ answers: [OFFLINE] });
-    await queue.submit("stop_1", "NO_SHOW", "NO_ANSWER");
+    await queue.submit("stop_1", "NO_SHOW", { reason: "NO_ANSWER" });
     expect(storage.values()).toEqual([{ stopId: "stop_1", action: "NO_SHOW", observedAt: expect.any(Number), reason: "NO_ANSWER" }]);
     expect(sent[0]).toMatchObject({ action: "NO_SHOW", reason: "NO_ANSWER" });
     expect(isQueuedStatus({ stopId: "s", action: "NO_SHOW", observedAt: 1, reason: "NO_ANSWER" })).toBe(true);

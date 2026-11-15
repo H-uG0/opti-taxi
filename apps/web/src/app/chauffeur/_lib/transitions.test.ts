@@ -151,16 +151,22 @@ describe("stopWrite", () => {
   };
 
   it("records who set the status with the time of the gesture and the time it reached the server", () => {
-    const recorded = { completedAt: NOW, completedById: USER, completedReceivedAt: RECEIVED };
+    const recorded = { completedAt: NOW, completedById: USER, completedReceivedAt: RECEIVED, completedSource: null, correctionReason: null };
     expect(applied("PICKUP", snapshot("PICKUP", "ASSIGNED"))).toEqual(recorded);
     expect(applied("DROPOFF", snapshot("DROPOFF", "PICKED_UP"))).toEqual(recorded);
     expect(applied("NO_SHOW", snapshot("PICKUP", "ASSIGNED"))).toEqual(recorded);
   });
 
   it("clears the author and both times on undo", () => {
-    const cleared = { completedAt: null, completedById: null, completedReceivedAt: null };
+    const cleared = { completedAt: null, completedById: null, completedReceivedAt: null, completedSource: null, correctionReason: null };
     expect(applied("UNDO", snapshot("PICKUP", "PICKED_UP", EARLIER, true))).toEqual(cleared);
     expect(applied("UNDO", snapshot("DROPOFF", "DROPPED_OFF", EARLIER, true))).toEqual(cleared);
+  });
+
+  it("says a status was typed afterwards in « Fin de tournée » (FLD-02)", () => {
+    const decision = decideStopAction("DROPOFF", snapshot("DROPOFF", "PICKED_UP"), NOW);
+    if (decision.type !== "apply") throw new Error("should apply");
+    expect(stopWrite(decision, USER, RECEIVED, "DECLARED")).toMatchObject({ completedAt: NOW, completedSource: "DECLARED" });
   });
 });
 

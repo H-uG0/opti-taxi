@@ -88,10 +88,46 @@ export function previousStatusAt(
 }
 
 /**
- * Refusal shown to the crew for a status older than MAX_STATUS_AGE_MS. The
- * regulation has no screen to record a status yet: the crew gives it the real
- * time, and is told that tapping again would record the current time.
+ * The earliest status a new status on `stop` may not follow: the earliest one recorded on a later stop of the route
+ * (cancelled trips aside), and for a pickup its own drop-off. Null when there is none. With previousStatusAt, it
+ * bounds a time typed afterwards (« Fin de tournée »), which must keep the route's statuses in their order.
+ */
+export function nextStatusAt(
+  stop: Pick<RecordedStop, "id" | "sequence" | "kind" | "tripId">,
+  routeStops: readonly RecordedStop[],
+): Date | null {
+  let earliest: number | null = null;
+  for (const other of routeStops) {
+    if (!other.completedAt || other.id === stop.id) continue;
+    const later = other.sequence > stop.sequence && !other.cancelled;
+    const ownDropoff = stop.kind === "PICKUP" && other.kind === "DROPOFF" && other.tripId === stop.tripId;
+    if (later || ownDropoff) earliest = Math.min(earliest ?? Number.POSITIVE_INFINITY, other.completedAt.getTime());
+  }
+  return earliest === null ? null : new Date(earliest);
+}
+
+export type DeclaredTime =
+  | { ok: true; at: Date }
+  | { ok: false; reason: "future" | "before-previous" | "after-next"; bound: Date | null };
+
+/**
+ * A time typed afterwards by the crew (« Fin de tournée », FLD-02): the real time of a forgotten status, already the
+ * instant of its minute on the service day. Never in the future, never before the statuses it follows nor after the
+ * ones that follow it (previousStatusAt, nextStatusAt): unlike a gesture, it is refused rather than moved.
+ */
+export function boundDeclaredAt(args: { at: Date; receivedAt: Date; previousAt: Date | null; nextAt: Date | null }): DeclaredTime {
+  const { at, receivedAt, previousAt, nextAt } = args;
+  if (at.getTime() > receivedAt.getTime()) return { ok: false, reason: "future", bound: null };
+  if (previousAt && at.getTime() < previousAt.getTime()) return { ok: false, reason: "before-previous", bound: previousAt };
+  if (nextAt && at.getTime() > nextAt.getTime()) return { ok: false, reason: "after-next", bound: nextAt };
+  return { ok: true, at };
+}
+
+/**
+ * Refusal shown to the crew for a status older than MAX_STATUS_AGE_MS: tapping
+ * again would record the current time, so the crew types the real one in
+ * « Fin de tournée » (until 03:00 the next day), or calls the regulation.
  */
 export const TOO_OLD_ERROR =
-  "Statut saisi il y a plus de 3\u00a0h, non enregistré. Appelez la régulation et donnez-lui l'heure réelle\u202f; " +
-  "un nouvel appui enregistrerait l'heure actuelle.";
+  "Statut saisi il y a plus de 3\u00a0h, non enregistré. Saisissez l'heure réelle dans «\u202fFin de tournée\u202f» " +
+  "(un nouvel appui enregistrerait l'heure actuelle), ou appelez la régulation.";

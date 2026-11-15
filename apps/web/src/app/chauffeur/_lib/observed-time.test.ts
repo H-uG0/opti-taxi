@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundObservedAt, DEFERRED_AFTER_MS, MAX_STATUS_AGE_MS, previousStatusAt, type RecordedStop } from "./observed-time";
+import { boundDeclaredAt, boundObservedAt, DEFERRED_AFTER_MS, MAX_STATUS_AGE_MS, nextStatusAt, previousStatusAt, type RecordedStop } from "./observed-time";
 
 const RECEIVED = new Date("2026-11-03T07:25:00Z");
 const MIN = 60_000;
@@ -124,3 +124,32 @@ describe("previousStatusAt", () => {
     });
   });
 });
+
+describe("a time typed afterwards (« Fin de tournée », FLD-02)", () => {
+  const t = (hhmm: string) => new Date(`2026-11-03T${hhmm}:00.000Z`);
+  const rec = (id: string, sequence: number, kind: "PICKUP" | "DROPOFF", tripId: string, completedAt: Date | null, cancelled = false): RecordedStop => ({
+    id,
+    sequence,
+    kind,
+    tripId,
+    completedAt,
+    cancelled,
+  });
+
+  it("finds the earliest status it must not follow: a later stop of the route, a pickup's own drop-off", () => {
+    const stops = [rec("a1", 1, "PICKUP", "a", t("07:00")), rec("b1", 2, "PICKUP", "b", null), rec("a2", 3, "DROPOFF", "a", t("07:40")), rec("b2", 4, "DROPOFF", "b", t("07:50")), rec("c1", 5, "PICKUP", "c", t("07:30"), true)];
+    expect(nextStatusAt(stops[1]!, stops)).toEqual(t("07:40"));
+    expect(nextStatusAt(rec("x", 9, "DROPOFF", "x", null), stops)).toBeNull();
+    // A pickup is never after its own drop-off, wherever it stands on the route.
+    expect(nextStatusAt(rec("b1", 2, "PICKUP", "b", null), [rec("b2", 1, "DROPOFF", "b", t("06:50"))])).toEqual(t("06:50"));
+  });
+
+  it("refuses a time to come, before the previous status or after the next one; never moves it", () => {
+    const now = t("12:00");
+    expect(boundDeclaredAt({ at: t("09:00"), receivedAt: now, previousAt: t("08:00"), nextAt: t("10:00") })).toEqual({ ok: true, at: t("09:00") });
+    expect(boundDeclaredAt({ at: t("12:30"), receivedAt: now, previousAt: null, nextAt: null })).toEqual({ ok: false, reason: "future", bound: null });
+    expect(boundDeclaredAt({ at: t("07:30"), receivedAt: now, previousAt: t("08:00"), nextAt: null })).toEqual({ ok: false, reason: "before-previous", bound: t("08:00") });
+    expect(boundDeclaredAt({ at: t("10:30"), receivedAt: now, previousAt: null, nextAt: t("10:00") })).toEqual({ ok: false, reason: "after-next", bound: t("10:00") });
+  });
+});
+

@@ -273,6 +273,8 @@ async function observedFactorsOf(
   const stops = await prisma.routeStop.findMany({
     where: {
       completedAt: { not: null },
+      // A time typed afterwards (« Fin de tournée », a correction) is not a driving time.
+      completedSource: null,
       trip: { status: { notIn: ["NO_SHOW", "CANCELLED"] } },
       route,
     },

@@ -186,18 +186,29 @@ export function decideStopAction(action: StopAction, stop: StopSnapshot, now: Da
 /**
  * Stop fields written for an applied decision: the account that records a
  * status and the moment the server received it go with its time (the
- * gesture, see observed-time.ts), and an undo clears all three.
+ * gesture, see observed-time.ts), and an undo clears all of them. `source`:
+ * a time typed afterwards in « Fin de tournée » (DECLARED, FLD-02), null for
+ * a gesture; a regulator's correction (CORRECTED) is written elsewhere.
  */
 export function stopWrite(
   decision: Pick<Extract<StopDecision, { type: "apply" }>, "completedAt">,
   userId: string,
   receivedAt: Date,
-): { completedAt: Date | null; completedById: string | null; completedReceivedAt: Date | null } {
+  source: "DECLARED" | null = null,
+): {
+  completedAt: Date | null;
+  completedById: string | null;
+  completedReceivedAt: Date | null;
+  completedSource: "DECLARED" | null;
+  correctionReason: null;
+} {
   const recorded = decision.completedAt !== null;
   return {
     completedAt: decision.completedAt,
     completedById: recorded ? userId : null,
     completedReceivedAt: recorded ? receivedAt : null,
+    completedSource: recorded ? source : null,
+    correctionReason: null,
   };
 }
 

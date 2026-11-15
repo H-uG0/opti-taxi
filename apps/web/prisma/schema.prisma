@@ -251,6 +251,27 @@ enum FieldRequestKind {
   NOT_READY
 }
 
+/// Statut d'arrêt saisi après coup (FLD-02) : par l'équipage dans « Fin de tournée », ou corrigé par la régulation.
+enum StopEntrySource {
+  /// Heure réelle saisie par l'équipage dans « Fin de tournée » (jusqu'à 03:00 le lendemain).
+  DECLARED
+  /// Statut corrigé par la régulation, avec l'heure réelle et un motif.
+  CORRECTED
+}
+
+/// Motif d'une correction de statut par la régulation (FLD-02) : un code, jamais de texte libre.
+enum StatusCorrectionReason {
+  /// L'équipage a oublié de saisir le statut.
+  CREW_FORGOT
+  /// Téléphone sans batterie, sans réseau ou en panne.
+  PHONE_ISSUE
+  /// Statut ou heure saisis par erreur.
+  WRONG_ENTRY
+  /// Heure donnée par l'équipage au téléphone.
+  CREW_CALL
+  OTHER
+}
+
 /// Motif d'une absence du patient déclarée par l'équipage (« Patient absent ») : un code, jamais de texte libre.
 enum NoShowReason {
   /// Personne ne répond (porte, interphone, téléphone).
@@ -798,6 +819,11 @@ model RouteStop {
   /// « Arrivé » (prise en charge seulement, facultatif) : heure du geste sur le téléphone, bornée comme completedAt.
   /// Mesure l'attente sur place avant « Pris en charge » ou « Patient absent ».
   arrivedAt       DateTime?
+  /// completedAt saisi après coup (FLD-02) : heure déclarée dans « Fin de tournée » ou corrigée par la régulation ;
+  /// null pour un statut saisi sur le moment (geste sur le téléphone).
+  completedSource StopEntrySource?
+  /// Correction par la régulation : son motif.
+  correctionReason StatusCorrectionReason?
 
   route       Route @relation(fields: [routeId], references: [id], onDelete: Cascade)
   trip        Trip  @relation(fields: [tripId], references: [id], onDelete: Cascade)

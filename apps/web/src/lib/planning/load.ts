@@ -120,6 +120,9 @@ export async function loadPlanningDay(
             completedBy: recorderSelect,
             // « Arrivé » on a pickup (FLD-01), shown with the crew's records in the trip panel.
             arrivedAt: true,
+            // A status typed afterwards (« Fin de tournée ») or corrected by the regulation (FLD-02).
+            completedSource: true,
+            correctionReason: true,
           },
         },
       },

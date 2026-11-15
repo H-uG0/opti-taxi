@@ -7,6 +7,7 @@ import { fromIsoDate, todayIso } from "@/lib/time";
 import type { FieldRequestView } from "@/lib/domain/field-requests";
 import { isSameEpisode } from "@/lib/domain/no-show";
 import { fieldRequestView } from "@/lib/planning/live-load";
+import { lateEntryDates } from "./access";
 import { regulatorContact, type RegulatorContact } from "./links";
 import { isReadableRoadmapDate, returnTripsAfterOutboundNoShow, townOf, type NextDaySummary } from "./roadmap";
 import { NO_FIELD_CONTEXT, type FieldContext } from "./view";
@@ -79,6 +80,8 @@ export async function loadDriverRoutes(driverId: string, isoDate: string, today:
           completedAt: true,
           // « Arrivé » on a pickup (FLD-01): the wait at the door is counted from it.
           arrivedAt: true,
+          // Typed afterwards in « Fin de tournée » or corrected by the regulation (FLD-02).
+          completedSource: true,
           // Server-side only: which crew member recorded the status (never sent to the client).
           completedBy: { select: { driverId: true } },
           trip: {
@@ -235,6 +238,41 @@ export async function loadNextDaySummary(driverId: string, tomorrow: string): Pr
     };
   });
 }
+
+/**
+ * « Fin de tournée » (FLD-02): the driver's routes of a day still open to the forgotten statuses (today, yesterday until
+ * 03:00; any other date gives none), with what the screen shows of each stop: its kind, planned time, status, patient's
+ * name and the address (only its town is shown).
+ */
+export async function loadEndOfRouteRoutes(driverId: string, isoDate: string, now: Date = new Date()) {
+  if (!lateEntryDates(now).includes(isoDate)) return [];
+  return db.route.findMany({
+    where: { serviceDate: fromIsoDate(isoDate), OR: [{ driverId }, { crewMateId: driverId }] },
+    orderBy: [{ startMinute: "asc" }, { id: "asc" }],
+    select: {
+      id: true,
+      vehicleId: true,
+      startMinute: true,
+      endMinute: true,
+      vehicle: { select: { label: true, registration: true, energy: true } },
+      stops: {
+        orderBy: { sequence: "asc" },
+        select: {
+          id: true,
+          sequence: true,
+          kind: true,
+          tripId: true,
+          startMinute: true,
+          address: true,
+          completedAt: true,
+          trip: { select: { status: true, direction: true, patient: { select: { firstName: true, lastName: true } } } },
+        },
+      },
+    },
+  });
+}
+
+export type EndOfRouteRoute = Awaited<ReturnType<typeof loadEndOfRouteRoutes>>[number];
 
 /** The minimum wait at the door before « Patient absent » (Paramètres, FLD-01), minutes; 0: none. */
 export async function loadNoShowMinWait(): Promise<number> {
