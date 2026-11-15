@@ -19,11 +19,13 @@ import {
   addFuelLog,
   addUnavailability,
   completeDeadline,
+  correctOdometerReading,
   deleteDeadline,
   deleteFuelLog,
+  deleteOdometerReading,
   deleteUnavailability,
 } from "../fleet-actions";
-import { DeadlineForm, FuelForm, UnavailabilityForm } from "./fleet-cards";
+import { DeadlineForm, FuelForm, ReadingCorrection, UnavailabilityForm } from "./fleet-cards";
 import { setVehicleActive, updateVehicle } from "../actions";
 import { ConfirmAction } from "@/components/ui/confirm-action";
 import { loadDepotOptions } from "@/app/(regulator)/depots/options";
@@ -51,7 +53,7 @@ const STATUS_LABELS: Record<DeadlineStatus, string> = { overdue: "Dépassée", s
 /** Days of crews' readings shown on the record. */
 const READINGS_DAYS = 14;
 
-type ReadingRow = { serviceDate: Date; moment: "START" | "END"; km: number; confirmed: boolean };
+type ReadingRow = { id: string; serviceDate: Date; moment: "START" | "END"; km: number; confirmed: boolean };
 
 /** The days with both readings, with the km planned on the vehicle's route that day (FLD-03). */
 async function readingDaysWithPlan(vehicleId: string, readings: readonly ReadingRow[]): Promise<ReadingDay[]> {
@@ -77,8 +79,8 @@ function readingRows(readings: readonly ReadingRow[], days: readonly ReadingDay[
     const day = days.find((d) => d.date === date);
     return {
       date,
-      start: of("START")?.km ?? null,
-      end: of("END")?.km ?? null,
+      start: of("START") ?? null,
+      end: of("END") ?? null,
       real: day ? day.endKm - day.startKm : null,
       planned: day?.plannedKm ?? null,
       confirmed: Boolean(of("START")?.confirmed || of("END")?.confirmed),
@@ -118,7 +120,8 @@ export default async function EditVehiclePage({
     }),
   ]);
   const todayText = todayIso();
-  const [outages, deadlines, fuel, points, readings] = await Promise.all([
+  const readingSelect = { id: true, serviceDate: true, moment: true, km: true, confirmed: true } as const;
+  const [outages, deadlines, fuel, points, recentReadings, highestReading] = await Promise.all([
     db.vehicleUnavailability.findMany({
       where: { vehicleId: vehicle.id, endDate: { gte: fromIsoDate(addDays(todayText, -30)) } },
       orderBy: { startDate: "asc" },
@@ -137,9 +140,12 @@ export default async function EditVehiclePage({
     loadKmPoints(db, vehicle.id),
     db.odometerReading.findMany({
       where: { vehicleId: vehicle.id, serviceDate: { gte: fromIsoDate(addDays(todayText, -READINGS_DAYS)) } },
-      select: { serviceDate: true, moment: true, km: true, confirmed: true },
+      select: readingSelect,
     }),
+    // The highest reading sets the vehicle's mileage: listed even when older, so a typo there stays correctable.
+    db.odometerReading.findFirst({ where: { vehicleId: vehicle.id }, orderBy: { km: "desc" }, select: readingSelect }),
   ]);
+  const readings = highestReading && !recentReadings.some((r) => r.id === highestReading.id) ? [...recentReadings, highestReading] : recentReadings;
   // The consumption of the last 3 months (FLD-03), the mileage from the fill-ups and the crews' readings.
   const stats = consumptionSince(
     fuel.map((f) => ({ ...f, date: toIsoDate(f.date) })),
@@ -358,7 +364,8 @@ export default async function EditVehiclePage({
             <CardBody className="space-y-3 text-sm text-slate-700">
               <p className="text-xs text-slate-500">
                 Saisis sur la feuille de route au départ et au retour au dépôt&nbsp;: ils tiennent à jour le kilométrage des échéances
-                (véhicules électriques compris) et comparent les km réels aux km planifiés de la tournée.
+                (véhicules électriques compris) et comparent les km réels aux km planifiés de la tournée. Un relevé erroné se corrige
+                ou se supprime ici (l&apos;équipage ne peut plus le changer une fois sa journée close).
               </p>
               {readingDays.length === 0 && readings.length === 0 ? (
                 <p className="text-slate-500">Aucun relevé ces {READINGS_DAYS} derniers jours.</p>
@@ -373,17 +380,36 @@ export default async function EditVehiclePage({
                   ) : null}
                   <ul className="divide-y divide-slate-100">
                     {readingRows(readings, readingDays).map((row) => (
-                      <li key={row.date} className="tabular flex flex-wrap gap-x-3 py-1.5">
-                        <span className="w-24 shrink-0 text-slate-500">{formatShortDate(row.date)}</span>
-                        <span>
-                          Départ {row.start !== null ? `${nf.format(row.start)}\u00a0km` : "—"} · retour {row.end !== null ? `${nf.format(row.end)}\u00a0km` : "—"}
-                        </span>
-                        {row.real !== null ? (
-                          <span className="text-slate-600">
-                            {nf.format(row.real)}&nbsp;km réels{row.planned !== null ? ` · ${nf.format(Math.round(row.planned))}\u00a0km planifiés` : ""}
+                      <li key={row.date} className="space-y-1 py-1.5">
+                        <p className="tabular flex flex-wrap gap-x-3">
+                          <span className="w-24 shrink-0 text-slate-500">{formatShortDate(row.date)}</span>
+                          <span>
+                            Départ {row.start !== null ? `${nf.format(row.start.km)}\u00a0km` : "—"} · retour{" "}
+                            {row.end !== null ? `${nf.format(row.end.km)}\u00a0km` : "—"}
                           </span>
-                        ) : null}
-                        {row.confirmed ? <span className="text-amber-800">saut confirmé par l&apos;équipage</span> : null}
+                          {row.real !== null ? (
+                            <span className="text-slate-600">
+                              {nf.format(row.real)}&nbsp;km réels{row.planned !== null ? ` · ${nf.format(Math.round(row.planned))}\u00a0km planifiés` : ""}
+                            </span>
+                          ) : null}
+                          {row.confirmed ? <span className="text-amber-800">saut confirmé par l&apos;équipage</span> : null}
+                        </p>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 sm:pl-27">
+                          {[
+                            { reading: row.start, label: "le départ" },
+                            { reading: row.end, label: "le retour" },
+                          ].map(({ reading, label }) =>
+                            reading ? (
+                              <ReadingCorrection
+                                key={reading.id}
+                                label={label}
+                                km={reading.km}
+                                action={correctOdometerReading.bind(null, vehicle.id, reading.id)}
+                                remove={deleteOdometerReading.bind(null, vehicle.id, reading.id)}
+                              />
+                            ) : null,
+                          )}
+                        </div>
                       </li>
                     ))}
                   </ul>

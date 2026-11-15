@@ -21,7 +21,7 @@ import type { PlanningDayView } from "@/lib/planning/types";
 import { loadDayVersion } from "@/lib/planning/version";
 import { livePlanToken, loadLiveSnapshot, loadRoadmapStates, type LiveSnapshot } from "@/lib/planning/live-load";
 import { addDays, formatDateTime, formatDayDate, formatLongDate, isIsoDate, todayIso, tomorrowIso } from "@/lib/time";
-import { loadDayClosing } from "@/lib/planning/day-closing-load";
+import { lastServiceDayBefore, loadDayClosing } from "@/lib/planning/day-closing-load";
 import { currentHorizon, inHorizon } from "@/lib/trips/completion";
 import { loadRecurrencesWithoutTrip } from "@/lib/trips/missing-load";
 import { generationStateOf, MissingRecurrencesNote } from "@/components/trips/missing-recurrences";
@@ -133,8 +133,9 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
   // so an action on this page is refused (never the other way round).
   // Today: the live state is read before the plan too (its key is the plan shown; « Recharger » when it moves).
   const [shownVersion, liveRead] = await Promise.all([loadDayVersion(db, date), date === today ? loadLiveSnapshot(db, date) : null]);
-  // FLD-02: the trips whose outcome the crews never recorded, the day before on today's planning, a past day's own.
-  const closingDate = date === today ? addDays(today, -1) : date < today ? date : null;
+  // FLD-02: the trips whose outcome the crews never recorded, the last day with routes on today's planning (a Monday:
+  // Saturday's), a past day's own.
+  const closingDate = date === today ? await lastServiceDayBefore(today) : date < today ? date : null;
   const [view, horizon, missing, closed, roadmaps, , closing] = await Promise.all([
     loadPlanningDay(date),
     // Read only: the trips of a date of the horizon are completed by <TripCompletion> once the page is shown.
@@ -252,7 +253,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Sea
 
           <PlanningActivityBanner />
           {live ? <LiveDayBar /> : null}
-          {closing ? <DayClosingNotice closing={closing} yesterday={closingDate !== date} /> : null}
+          {closing ? <DayClosingNotice closing={closing} fromToday={closingDate !== date} yesterday={closingDate === addDays(today, -1)} /> : null}
           <PlanningVersionWatcher key={`${shownVersion.version}/${shownVersion.run ?? ""}`} date={date} shown={shownVersion} />
           {/* One line of context: the optimizer service, then the plan in place (when, how, what to keep in mind). */}
           <div data-wall-hide className="flex flex-wrap items-center gap-x-4 gap-y-1">

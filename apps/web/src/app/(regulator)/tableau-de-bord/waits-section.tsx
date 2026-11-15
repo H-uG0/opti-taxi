@@ -44,7 +44,8 @@ export function WaitsSection({ period, options, cases }: { period: PeriodKpis; o
         Attentes, temps à bord et ponctualité
       </h2>
       <p className="mb-3 text-sm text-slate-600">
-        Mesurés aux horodatages des équipages («&#x202F;Pris en charge&#x202F;», «&#x202F;Déposé&#x202F;»), sur les courses où ils sont saisis.
+        Mesurés aux horodatages des équipages («&#x202F;Pris en charge&#x202F;», «&#x202F;Déposé&#x202F;»), sur les courses où ils sont saisis
+        sur le moment&nbsp;: une heure saisie après coup («&#x202F;Fin de tournée&#x202F;», correction de la régulation) n&apos;en mesure aucun.
         Attente au lieu de soins&nbsp;: avant le RDV (RDV − dépose) et après la séance (prise en charge − temps de montée prévu − fin de
         séance), au plus {formatDuration(options.maxTotalWaitMin)} au total pour un transport partagé.
       </p>
@@ -93,8 +94,16 @@ export function WaitsSection({ period, options, cases }: { period: PeriodKpis; o
           value={formatMinutes(quantile(w.doorWaits, 0.5))}
           hint={
             w.arrivalDelays.length > 0
-              ? `Médiane de «\u202fArrivé\u202f» à «\u202fPris en charge\u202f», p90 ${formatMinutes(quantile(w.doorWaits, 0.9))}, sur ${plural(w.doorWaits.length, "prise en charge", "prises en charge")} · arrivée ${formatSignedMinutes(quantile(w.arrivalDelays, 0.5))} sur l'heure prévue (médiane)${w.noShowWaits.length > 0 ? ` · attente avant une absence\u00a0: ${medianP90(w.noShowWaits)}` : ""}`
-              : "Mesurée quand l'équipage touche «\u202fArrivé\u202f» (facultatif) avant «\u202fPris en charge\u202f» ou «\u202fPatient absent\u202f»"
+              ? [
+                  w.doorWaits.length > 0
+                    ? `Médiane de «\u202fArrivé\u202f» à «\u202fPris en charge\u202f», p90 ${formatMinutes(quantile(w.doorWaits, 0.9))}, sur ${plural(w.doorWaits.length, "prise en charge", "prises en charge")} à domicile`
+                    : null,
+                  `arrivée ${formatSignedMinutes(quantile(w.arrivalDelays, 0.5))} sur l'heure prévue (médiane, prises en charge à domicile)`,
+                  w.noShowWaits.length > 0 ? `attente avant une absence\u00a0: ${medianP90(w.noShowWaits)}` : null,
+                ]
+                  .filter((part) => part !== null)
+                  .join(" · ")
+              : "Mesurée à domicile quand l'équipage touche «\u202fArrivé\u202f» (facultatif) avant «\u202fPris en charge\u202f» ou «\u202fPatient absent\u202f»"
           }
         />
         <Stat

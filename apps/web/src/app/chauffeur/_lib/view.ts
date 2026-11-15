@@ -252,6 +252,9 @@ function sentAt(iso: string): string {
   return formatMinute(minuteOfDay(new Date(iso)));
 }
 
+/** The crew's requests an outbound drop-off lists (DAY-05): the signals of FLD-01 belong to their stop. */
+const DAY05_KINDS: ReadonlySet<FieldRequestView["kind"]> = new Set(["READY_TIME", "RETURN", "NEXT_SESSION", "CANCEL"]);
+
 const hasPending = (requests: readonly FieldRequestView[] | undefined, kind: FieldRequestView["kind"]) =>
   (requests ?? []).some((request) => request.kind === kind && request.status === "PENDING");
 
@@ -271,7 +274,9 @@ export function stopFieldView(
     // The return cancelled as the crew asked: the answer shows (below), no new return is offered as if none was planned.
     const cancelledAsAsked = back?.status === "CANCELLED" && (backRequests ?? []).some((request) => request.kind === "CANCEL" && request.status === "ACCEPTED");
     const noReturn = back === null || (back.status === "CANCELLED" && !cancelledAsAsked);
+    // The requests of DAY-05 only: a lateness or « Patient pas prêt » shows on its own stop (stopSignalsView).
     const sent = [...(own ?? []), ...(backRequests ?? [])]
+      .filter((request) => DAY05_KINDS.has(request.kind))
       .filter((request) => request.kind !== "CANCEL" || back?.id === request.tripId)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .map((request) => fieldRequestCrewText(request, sentAt(request.createdAt)));
@@ -309,7 +314,7 @@ export function stopFieldView(
  * crew sent from it (its latest lateness, its « pas prêt »). Null on a closed stop.
  */
 export function stopSignalsView(
-  stop: { kind: StopKind; tripId: string; state: StopState; isNext: boolean },
+  stop: { kind: StopKind; tripId: string; state: StopState; isNext: boolean; arrived?: boolean },
   requests: readonly FieldRequestView[] | undefined,
 ): StopSignalsView | null {
   if (stop.state !== "pending") return null;
@@ -322,7 +327,8 @@ export function stopSignalsView(
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     .map((request) => fieldRequestCrewText(request, sentAt(request.createdAt)));
   return {
-    late: stop.isNext,
+    // Once « Arrivé » is recorded the crew is at the door: no lateness to announce on this stop.
+    late: stop.isNext && !stop.arrived,
     notReady: stop.kind === "PICKUP" && !notReady.some((request) => request.status === "PENDING"),
     sent,
   };
@@ -421,7 +427,7 @@ export function buildRouteView(
             ? { phone: trip.patient.phone, vehicle: route.vehicle.type }
             : null,
         signals: editable
-          ? stopSignalsView({ kind: stop.kind, tripId: stop.tripId, state, isNext: stop.id === nextId }, field.requests.get(stop.tripId))
+          ? stopSignalsView({ kind: stop.kind, tripId: stop.tripId, state, isNext: stop.id === nextId, arrived: arrivedAt !== null }, field.requests.get(stop.tripId))
           : null,
         position: index + 1,
         kind: stop.kind,

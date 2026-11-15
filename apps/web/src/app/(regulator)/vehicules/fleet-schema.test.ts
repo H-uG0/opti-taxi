@@ -58,4 +58,16 @@ describe("fuelSchema", () => {
       "Compteur supérieur au relevé suivant du 01/11/2026 (51 000 km).",
     );
   });
+
+  it("places a fill-up between the start and the end read by the crew on its day (FLD-03)", () => {
+    const plain = (text: string | null) => text?.replace(/\s/g, " ") ?? null;
+    const day = [
+      { date: "2026-11-14", odometerKm: 50_000, moment: "START" as const },
+      { date: "2026-11-14", odometerKm: 50_250, moment: "END" as const },
+    ];
+    // Typed the next morning, or in « Fin de tournée » after the end's reading: accepted.
+    expect(odometerConflict({ date: "2026-11-14", odometerKm: 50_120 }, day)).toBeNull();
+    expect(plain(odometerConflict({ date: "2026-11-14", odometerKm: 49_900 }, day))).toBe("Compteur inférieur au relevé de départ du 14/11/2026 (50 000 km).");
+    expect(plain(odometerConflict({ date: "2026-11-14", odometerKm: 50_300 }, day))).toBe("Compteur supérieur au relevé de retour du 14/11/2026 (50 250 km).");
+  });
 });

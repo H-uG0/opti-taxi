@@ -1,7 +1,8 @@
 /**
  * Closing a day (FLD-02): the trips whose outcome the crews never recorded (no « Déposé », no « Patient absent »), and
  * the entry rate of the day and of each person, the same rate as the dashboard's « Saisie des statuts » (lot 21:
- * trips whose crew recorded the outcome ÷ trips placed on a route, served or absent). The planning of today lists the
+ * trips whose crew recorded the outcome ÷ trips placed on a route, served or absent; an outcome the regulation set
+ * with « Corriger un statut » is closed, but not the crew's entry). The planning of today lists the
  * day before's, the planning of a past day its own; the regulator corrects them from the trip's panel.
  *
  * Who closes the day, and when, is still to agree with V (journal, questions for the PO): nothing is closed here.
@@ -22,6 +23,8 @@ export type ClosingTrip = {
   direction: TripDirection;
   patientName: string;
   plannedPickupMinute: number | null;
+  /** The outcome (its drop-off, or its pickup for an absence) was set by the regulation (completedSource CORRECTED). */
+  outcomeCorrected?: boolean;
 };
 
 export type UnclosedTrip = {
@@ -36,7 +39,7 @@ export type UnclosedTrip = {
 
 export type DayClosing = {
   date: string;
-  /** Trips placed on a route (served or absent), and those whose outcome was recorded. */
+  /** Trips placed on a route (served or absent), and those whose outcome the crew recorded. */
   placed: number;
   recorded: number;
   /** Each person who drove or crewed a route, the lowest rate first. */
@@ -56,12 +59,13 @@ export function dayClosing(date: string, routes: readonly ClosingRoute[], trips:
     const route = trip.routeId ? routeById.get(trip.routeId) : undefined;
     if (!route || trip.status === "CANCELLED") continue;
     const done = RECORDED.includes(trip.status);
+    const byCrew = done && !trip.outcomeCorrected;
     placed += 1;
-    if (done) recorded += 1;
+    if (byCrew) recorded += 1;
     for (const person of route.people) {
       const line = people.get(person.id) ?? { ...person, placed: 0, recorded: 0 };
       line.placed += 1;
-      if (done) line.recorded += 1;
+      if (byCrew) line.recorded += 1;
       people.set(person.id, line);
     }
     if (!done) {

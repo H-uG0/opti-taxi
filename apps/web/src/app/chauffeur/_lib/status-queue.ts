@@ -26,6 +26,10 @@ import { isNoShowReason } from "@/lib/domain/field-wait";
 import { parseOdometerKey, type SendOutcome, type StatusErrorCode } from "./status-protocol";
 import { isArrivalAction, type StopAction } from "./transitions";
 
+/** Shown when a status is typed again with another time or reason while the first one is being sent. */
+export const PENDING_CORRECTION_ERROR =
+  "Le statut précédent est en cours d'envoi\u00a0: cette correction n'est pas prise en compte. Une fois l'envoi fini, utilisez «\u202fAnnuler\u202f» puis saisissez-le de nouveau, ou appelez la régulation.";
+
 /** What the queue holds: a stop's status, or a reading of the odometer (FLD-03, keyed by odometerKey). */
 export type QueueAction = StopAction | "ODOMETER";
 
@@ -245,14 +249,27 @@ export class StatusQueue {
         last.value.declaredMinute !== extra.declaredMinute ||
         last.value.km !== extra.km ||
         last.value.confirmed !== extra.confirmed;
-      if (!changed || last.key === this.inFlight || this.uncertain.has(last.key)) {
+      const pending = last.key === this.inFlight || this.uncertain.has(last.key);
+      if (!changed) {
         // Same status tapped again while the first one waits: already kept.
         this.emit();
         await this.flush();
         return;
       }
-      // Typed again with another time or reason before it left: the new one replaces it.
-      await this.removeItem(last.key);
+      if (pending && action !== "ODOMETER") {
+        // Another time or reason while the first one is being sent (or may be on the server already): the server keeps
+        // the first (a status already in place is a replay), so the crew is told instead of the new value vanishing.
+        this.refusals = [
+          ...this.refusals,
+          { id: ++this.refusalIds, stopId, action, observedAt, error: PENDING_CORRECTION_ERROR },
+        ];
+        this.emit();
+        await this.flush();
+        return;
+      }
+      // Typed again before it left: the new one replaces it. A reading being sent (or maybe received) stays: the new
+      // one is sent after it, and replaces it on the server (one reading per day and moment).
+      if (!pending) await this.removeItem(last.key);
     }
 
     await this.enqueue({

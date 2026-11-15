@@ -63,6 +63,24 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/*
+ * The driver app at night (FLD-04): the page behind its frame takes the night background too, so the rubber-band
+ * overscroll of an iPhone (top or bottom) never shows a light band. The frame's own palette is below.
+ */
+html:has([data-driver-frame][data-theme="night"]),
+html:has([data-driver-frame][data-theme="night"]) body {
+  background: oklch(12.9% 0.042 264.695);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  html:has([data-driver-frame][data-theme="auto"]),
+  html:has([data-driver-frame][data-theme="auto"]) body {
+    background: oklch(12.9% 0.042 264.695);
+    color-scheme: dark;
+  }
+}
+
 /* Tabular figures for times, km and amounts. */
 .tabular {
   font-variant-numeric: tabular-nums;

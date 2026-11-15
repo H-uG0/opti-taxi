@@ -7,6 +7,10 @@
  * Rules of the other driver routes: same-site request, current driver (JSON 401, no redirect), the page's account
  * (ownerId), the crew's own route, on a day still open (today, the day before until 03:00). Audited on the fill-up
  * (fuel_log.create, details.vehicleId and details.source "driver").
+ *
+ * A send whose answer was lost (network cut after the write) is sent again by the crew: the same fill-up (vehicle,
+ * day, odometer, quantity and amount) recorded by the same account in the last DUPLICATE_WINDOW_MS is not recorded
+ * twice, the answer says it is already there.
  */
 import type { NextRequest } from "next/server";
 import { z } from "zod";
@@ -44,6 +48,9 @@ export type FuelResponse =
     };
 
 type Outcome = { status: number; body: FuelResponse };
+
+/** A fill-up sent again within this time (lost answer, second tap) is the same one. */
+const DUPLICATE_WINDOW_MS = 15 * 60_000;
 
 function failure(status: number, code: Extract<FuelResponse, { ok: false }>["code"], error: string, fieldErrors?: Extract<FuelResponse, { ok: false }>["fieldErrors"]): Outcome {
   return { status, body: { ok: false, code, error, ...(fieldErrors ? { fieldErrors } : {}), serverTime: Date.now() } };
@@ -97,9 +104,27 @@ async function record(
     return failure(400, "invalid", "Vérifiez les champs signalés.", { ...pick("odometerKm"), ...pick("quantity"), ...pick("cost") });
   }
   const points = await loadKmPoints(db, route.vehicleId);
-  const conflict = odometerConflict(parsed.data, points.map((p) => ({ date: p.date, odometerKm: p.km })));
+  const conflict = odometerConflict(parsed.data, points.map((p) => ({ date: p.date, odometerKm: p.km, moment: p.moment })));
   if (conflict) return failure(400, "invalid", "Vérifiez le compteur.", { odometerKm: conflict });
   const { date, ...rest } = parsed.data;
+  const unit = energyUnit(route.vehicle.energy);
+  const what = unit === "kWh" ? "Recharge" : "Plein";
+  const feminine = unit === "kWh" ? "e" : "";
+  const duplicate = await db.fuelLog.findFirst({
+    where: {
+      vehicleId: route.vehicleId,
+      date: fromIsoDate(date),
+      odometerKm: rest.odometerKm,
+      quantity: rest.quantity,
+      cost: rest.cost,
+      recordedById: user.id,
+      createdAt: { gte: new Date(now.getTime() - DUPLICATE_WINDOW_MS) },
+    },
+    select: { id: true },
+  });
+  if (duplicate) {
+    return { status: 200, body: { ok: true, message: `${what} déjà enregistré${feminine} : rien n'est ajouté.`, serverTime: Date.now(), sessionExpiresAt: null } };
+  }
   await db.$transaction(async (tx) => {
     const created = await tx.fuelLog.create({
       data: { vehicleId: route.vehicleId, date: fromIsoDate(date), ...rest, note: null, recordedById: user.id },
@@ -107,12 +132,11 @@ async function record(
     });
     await audit(tx, user, { action: "fuel_log.create", entity: "FuelLog", entityId: created.id, serviceDate: isoDate, details: { vehicleId: route.vehicleId, source: "driver" } });
   });
-  const unit = energyUnit(route.vehicle.energy);
   return {
     status: 200,
     body: {
       ok: true,
-      message: `${unit === "kWh" ? "Recharge" : "Plein"} enregistré${unit === "kWh" ? "e" : ""} : la régulation le voit sur la fiche du véhicule.`,
+      message: `${what} enregistré${feminine} : la régulation le voit sur la fiche du véhicule.`,
       serverTime: Date.now(),
       sessionExpiresAt: null,
     },

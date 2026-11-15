@@ -3,8 +3,8 @@
  * the end of the day, sent from the phone's queue like a status (offline too: chauffeur/_lib/status-queue.ts).
  *
  * Rules of the other driver routes: same-site request, current driver (JSON 401, no redirect; the reading waits on
- * the phone), the page's account (ownerId), the crew's own route (driver or crew mate), on a day still open (today,
- * the day before until 03:00: chauffeur/_lib/access.ts). The reading is checked against every mileage known of the
+ * the phone), the page's account (ownerId), the crew's own route (driver or crew mate), on a day still open at the
+ * time of the gesture (today, the day before until 03:00: chauffeur/_lib/access.ts). The reading is checked against every mileage known of the
  * vehicle (lib/fleet/odometer.ts checkReading): never below the last one (fill-ups included) nor the day's start,
  * an unusual jump only once the crew confirms it. One reading per vehicle, day and moment: a new one replaces it.
  * Audited on the vehicle (odometer.record: details.moment, details.km { from, to }).
@@ -87,7 +87,11 @@ async function record(
   const route = await db.route.findUnique({ where: { id: routeId }, select: { vehicleId: true, serviceDate: true, driverId: true, crewMateId: true } });
   // Same answer for a missing route and someone else's: no information leak.
   if (!route) return failure(403, "not-yours", STOP_ACCESS_ERRORS["not-yours"]);
-  const access = lateEntryAccess(route, user.driverId, receivedAt);
+  // The time of the gesture, bounded like a status (an old one is dated on receipt: the reading itself matters). It
+  // decides whether the day is still open: typed offline at 02:55 and sent at 03:05, the reading still counts.
+  const observed = boundObservedAt({ observedAt: input.observedAt ?? null, sentAt: input.sentAt ?? null, receivedAt, previousAt: null });
+  const recordedAt = observed.ok ? observed.at : receivedAt;
+  const access = lateEntryAccess(route, user.driverId, recordedAt);
   if (access !== "ok") return failure(403, access, access === "not-yours" ? STOP_ACCESS_ERRORS["not-yours"] : "Ce relevé se saisit le jour de la tournée (jusqu'à 03:00 le lendemain).");
   const isoDate = toIsoDate(route.serviceDate);
   const { moment, km } = input;
@@ -105,9 +109,6 @@ async function record(
   });
   if (!check.ok && (check.kind === "refused" || !input.confirmed)) return failure(422, check.kind === "refused" ? "odometer" : "confirm", check.message);
 
-  // The time of the gesture, bounded like a status (an old one is dated on receipt: the reading itself matters).
-  const observed = boundObservedAt({ observedAt: input.observedAt ?? null, sentAt: input.sentAt ?? null, receivedAt, previousAt: null });
-  const recordedAt = observed.ok ? observed.at : receivedAt;
   await db.$transaction(async (tx) => {
     const key = { vehicleId_serviceDate_moment: { vehicleId: route.vehicleId, serviceDate: route.serviceDate, moment } };
     const existing = await tx.odometerReading.findUnique({ where: key, select: { km: true } });

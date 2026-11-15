@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Prisma, StopKind, TripDirection, TripStatus } from "@prisma/client";
 import type { DriverRoute, DriverRouteStop } from "./load";
+import type { FieldRequestView } from "@/lib/domain/field-requests";
 import { NO_CONTROLS } from "./transitions";
 import { buildRouteView, nextDayCardFirst, stopSignalsView } from "./view";
 
@@ -502,6 +503,14 @@ describe("roadmap changes and field requests (DAY-04, DAY-05)", () => {
     });
     // Not on another day than the service day.
     expect(buildRouteView(route, DRIVER, false, new Set(), field).stops[1]?.field).toBeNull();
+    // A lateness or « Patient pas prêt » of the trip (FLD-01) shows on its own stop, never again on the drop-off.
+    const signal = { id: "l1", kind: "LATE" as const, status: "PENDING" as const, tripId: "trip_a", readyMinute: null, previousReadyMinute: null, cancellationReason: null, nextSessionDate: null, lateMinutes: 10, stopKind: "DROPOFF" as const, createdAt: "2026-11-03T08:00:00.000Z", createdBy: null };
+    const requests = new Map<string, readonly FieldRequestView[]>(field.requests);
+    requests.set("trip_a", [signal, { ...signal, id: "n1", kind: "NOT_READY", stopKind: "PICKUP" }]);
+    const withLate = { ...field, requests };
+    expect(buildRouteView(route, DRIVER, true, new Set(), withLate).stops[1]?.field?.sent).toEqual([
+      "Patient prêt à 11:45 (prévu 11:30) · demande envoyée à 10:05, transmise à la régulation",
+    ]);
   });
 
   it("shows the answer to « Annuler le retour » once accepted, without offering a return as if none was planned", () => {
@@ -577,6 +586,8 @@ describe("roadmap changes and field requests (DAY-04, DAY-05)", () => {
     });
     const later = stopSignalsView({ kind: "DROPOFF", tripId: "trip_a", state: "pending", isNext: false }, [late(10, "2026-11-03T07:00:00.000Z")]);
     expect(later).toEqual({ late: false, notReady: false, sent: [] });
+    // At the door (« Arrivé »): no lateness offered any more.
+    expect(stopSignalsView({ kind: "PICKUP", tripId: "trip_a", state: "pending", isNext: true, arrived: true }, [])).toMatchObject({ late: false, notReady: true });
     expect(stopSignalsView({ kind: "PICKUP", tripId: "trip_a", state: "done", isNext: false }, [])).toBeNull();
   });
   it("offers « Prévenir par SMS » on a pickup at home still to do today, a mobile number only (FLD-04)", () => {

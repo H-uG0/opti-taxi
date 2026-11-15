@@ -91,6 +91,18 @@ describe("filterTrips", () => {
     expect(ids(filterTrips(trips, { ...EMPTY_FILTERS, status: "RETURN_TO_CHECK" }))).toEqual([]);
   });
 
+  it("keeps the trips placed on a route whose outcome nobody recorded (the day's closing, FLD-02)", () => {
+    const placed = [
+      trip({ id: "on-board", status: "PICKED_UP", routeId: "r1" }),
+      trip({ id: "nothing", status: "ASSIGNED", routeId: "r1" }),
+      trip({ id: "done", status: "DROPPED_OFF", routeId: "r1" }),
+      trip({ id: "absent", status: "NO_SHOW", routeId: "r1" }),
+      trip({ id: "aside", status: "PLANNED", routeId: null }),
+    ];
+    expect(parseTripFilters({ statut: "UNCLOSED" }).status).toBe("UNCLOSED");
+    expect(ids(filterTrips(placed, { ...EMPTY_FILTERS, status: "UNCLOSED" }))).toEqual(["on-board", "nothing"]);
+  });
+
   it("filters by direction and sharing", () => {
     expect(ids(filterTrips(trips, { ...EMPTY_FILTERS, direction: "RETURN" }))).toEqual(["b"]);
     expect(ids(filterTrips(trips, { ...EMPTY_FILTERS, sharing: "SHARED" }))).toEqual(["c"]);

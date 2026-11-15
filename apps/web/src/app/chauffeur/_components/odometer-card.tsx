@@ -33,6 +33,7 @@ export function OdometerCard({
   recorded,
   lastKnown,
   startKm,
+  endKm = null,
   prominent = false,
 }: {
   routeId: string;
@@ -45,6 +46,8 @@ export function OdometerCard({
   lastKnown: KmPoint | null;
   /** The day's start (for the end's reading). */
   startKm: number | null;
+  /** The day's end, already read (for a start entered afterwards: never above it). */
+  endKm?: number | null;
   /** The task of the moment (the start, before the first stop): a framed card. */
   prominent?: boolean;
 }) {
@@ -75,7 +78,11 @@ export function OdometerCard({
       setError("Saisissez le kilométrage affiché au compteur, en km entiers.");
       return;
     }
-    const check = checkReading({ km, date, moment, others: lastKnown && lastKnown.date < date ? [lastKnown] : [], startKm });
+    const others = [
+      ...(lastKnown && lastKnown.date < date ? [lastKnown] : []),
+      ...(moment === "START" && endKm !== null ? [{ date, km: endKm, moment: "END" as const }] : []),
+    ];
+    const check = checkReading({ km, date, moment, others, startKm });
     if (!check.ok && check.kind === "refused") {
       setError(check.message);
       return;

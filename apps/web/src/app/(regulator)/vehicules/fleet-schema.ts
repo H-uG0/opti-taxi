@@ -60,21 +60,31 @@ export const fuelSchema = z.object({
 
 export type FuelInput = z.output<typeof fuelSchema>;
 
+/** The regulator's correction of a crew's odometer reading (FLD-03): the km shown on the odometer that day. */
+export const readingCorrectionSchema = z.object({ km: numberField(KM_OPTIONS) });
+
 /**
- * An odometer reading must not go backwards: the readings on or before its
- * date must be lower or equal, those after it higher or equal. Message, or null.
+ * A fill-up's odometer must not go backwards: the mileages known on an earlier day must be lower or equal, those of a
+ * later day higher or equal. On the fill-up's own day the crew's readings are ordered by their moment: the day's
+ * start (START) is a lower bound, its end (END) an upper bound, another fill-up of that day a lower bound (as before
+ * the readings existed). Message, or null.
  */
 export function odometerConflict(
   entry: Pick<FuelInput, "date" | "odometerKm">,
-  others: readonly { date: string; odometerKm: number }[],
+  others: readonly { date: string; odometerKm: number; moment?: "START" | "END" | "FILL" }[],
 ): string | null {
   const nf = new Intl.NumberFormat("fr-FR");
   for (const o of others) {
-    if (o.date <= entry.date && o.odometerKm > entry.odometerKm) {
-      return `Compteur inférieur au relevé du ${formatShortDate(o.date)} (${nf.format(o.odometerKm)}\u00a0km).`;
+    const sameDay = o.date === entry.date;
+    const before = o.date < entry.date || (sameDay && o.moment !== "END");
+    const after = o.date > entry.date || (sameDay && o.moment === "END");
+    if (before && o.odometerKm > entry.odometerKm) {
+      const which = sameDay && o.moment === "START" ? "au relevé de départ" : "au relevé";
+      return `Compteur inférieur ${which} du ${formatShortDate(o.date)} (${nf.format(o.odometerKm)}\u00a0km).`;
     }
-    if (o.date > entry.date && o.odometerKm < entry.odometerKm) {
-      return `Compteur supérieur au relevé suivant du ${formatShortDate(o.date)} (${nf.format(o.odometerKm)}\u00a0km).`;
+    if (after && o.odometerKm < entry.odometerKm) {
+      const which = sameDay ? "au relevé de retour" : "au relevé suivant";
+      return `Compteur supérieur ${which} du ${formatShortDate(o.date)} (${nf.format(o.odometerKm)}\u00a0km).`;
     }
   }
   return null;

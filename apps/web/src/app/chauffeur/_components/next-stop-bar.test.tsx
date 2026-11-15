@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QueueSnapshot } from "../_lib/status-queue";
-import { NextStopBar, type BarStop } from "./next-stop-bar";
+import { BAR_HOLD_MS, NextStopBar, type BarStop } from "./next-stop-bar";
 
 const app = vi.hoisted(() => ({ submit: vi.fn(), snapshot: { byStop: {}, refusals: [] } as Pick<QueueSnapshot, "byStop" | "refusals"> }));
 vi.mock("./driver-app", () => ({
@@ -67,6 +67,31 @@ describe("NextStopBar (FLD-04)", () => {
     render(<NextStopBar stops={[stop("s1", "PICKUP", 480)]} autoScroll />);
     expect(card.scrollIntoView).toHaveBeenCalledWith({ block: "start" });
     card.remove();
+  });
+
+  it("records one status on a double tap: the bar stays on the stop just recorded before moving on", () => {
+    vi.useFakeTimers();
+    try {
+      const stops = [stop("s1", "PICKUP", 480), stop("s2", "PICKUP", 490), stop("s3", "DROPOFF", 510, { blocked: true, pickupStopId: "s1" })];
+      const { rerender } = render(<NextStopBar stops={stops} autoScroll={false} />);
+      fireEvent.click(screen.getByRole("button", { name: /Pris en charge/ }));
+      // The queue has it at once: without the hold, the bar would offer s2's pickup right under the finger.
+      app.snapshot = { byStop: { s1: { action: "PICKUP", observedAt: 1, phase: "queued" } }, refusals: [] };
+      rerender(<NextStopBar stops={stops} autoScroll={false} />);
+      expect(screen.queryByRole("button", { name: /Pris en charge|Déposé/ })).toBeNull();
+      expect(screen.getByRole("status").textContent).toMatch(/^Pris en charge à \d\d:\d\d$/);
+      fireEvent.click(screen.getByRole("status"));
+      expect(app.submit).toHaveBeenCalledTimes(1);
+      expect(app.submit).toHaveBeenCalledWith("s1", "PICKUP");
+      act(() => {
+        vi.advanceTimersByTime(BAR_HOLD_MS);
+      });
+      expect(screen.getByText("· Patient s2")).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: /Pris en charge/ }));
+      expect(app.submit).toHaveBeenLastCalledWith("s2", "PICKUP");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows nothing once every stop has a status on the phone", () => {

@@ -5,7 +5,12 @@
  * and a reason from a list (lib/domain/stop-correction.ts), on a day already started or past (never a day to come).
  * The stop says it was corrected (completedSource CORRECTED, correctionReason), the account that did it is its author
  * (completedById), and the change is audited on the trip (stop.correct: the stop's kind, the status and the minute
- * from and to, the reason; for an absence, its reason stays on the trip).
+ * from and to, the reason; for an absence, its reason stays on the trip, the trail only says it changed).
+ *
+ * The time keeps the route's statuses in their order, as « Fin de tournée » does (observed-time.ts previousStatusAt,
+ * nextStatusAt): never before a status recorded on an earlier stop, nor after one on a later stop. Otherwise the
+ * corrected stop would become the route's latest status (the crew's « Annuler » would jump to it) and pull the
+ * crew's next taps forward to its time.
  */
 import type { NoShowReason } from "@prisma/client";
 import { revalidatePath } from "next/cache";
@@ -16,6 +21,7 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { NO_SHOW_REASONS } from "@/lib/domain/field-wait";
 import { CORRECTION_REASONS, CORRECTION_TARGET_LABELS, currentTarget, decideCorrection } from "@/lib/domain/stop-correction";
+import { nextStatusAt, previousStatusAt } from "@/app/chauffeur/_lib/observed-time";
 import { logError } from "@/lib/log";
 import { minuteOn } from "@/lib/planning/day-progress";
 import { formatMinute, instantOfMinute, parseMinute, todayIso, toIsoDate } from "@/lib/time";
@@ -54,22 +60,24 @@ export async function correctStopStatus(input: {
       where: { id: stopId },
       select: {
         id: true,
+        sequence: true,
         kind: true,
         tripId: true,
         routeId: true,
         completedAt: true,
         route: { select: { serviceDate: true } },
-        trip: { select: { status: true } },
+        trip: { select: { status: true, noShowReason: true } },
       },
     });
     if (!stop) return { ok: false, error: "Arrêt introuvable (planning modifié entre-temps ?) : rechargez la page.", stale: true };
     const isoDate = toIsoDate(stop.route.serviceDate);
     const now = new Date();
     if (isoDate > todayIso(now)) return { ok: false, error: "Un statut se corrige le jour de la tournée ou après." };
-    const other = await db.routeStop.findFirst({
-      where: { routeId: stop.routeId, tripId: stop.tripId, kind: stop.kind === "PICKUP" ? "DROPOFF" : "PICKUP" },
-      select: { completedAt: true },
+    const routeStops = await db.routeStop.findMany({
+      where: { routeId: stop.routeId },
+      select: { id: true, sequence: true, kind: true, tripId: true, completedAt: true, trip: { select: { status: true } } },
     });
+    const other = routeStops.find((s) => s.tripId === stop.tripId && s.kind !== stop.kind);
     const at = minute === null ? null : instantOfMinute(isoDate, minute);
     const decision = decideCorrection({
       kind: stop.kind,
@@ -79,8 +87,22 @@ export async function correctStopStatus(input: {
       target,
       at,
       now,
+      noShowReason: stop.trip.noShowReason,
+      newNoShowReason: noShowReason ?? null,
     });
     if (!decision.ok) return { ok: false, error: decision.error };
+    if (decision.completedAt) {
+      // In the route's order, like a time typed in « Fin de tournée ».
+      const recorded = routeStops.map((s) => ({ ...s, cancelled: s.trip.status === "CANCELLED" }));
+      const previousAt = previousStatusAt(stop, recorded);
+      const nextAt = nextStatusAt(stop, recorded);
+      if (previousAt && decision.completedAt < previousAt) {
+        return { ok: false, error: `Heure avant le statut d'un arrêt précédent de la tournée (${formatMinute(minuteOn(previousAt, isoDate))})\u00a0: vérifiez l'heure, ou corrigez d'abord cet arrêt.` };
+      }
+      if (nextAt && decision.completedAt > nextAt) {
+        return { ok: false, error: `Heure après le statut d'un arrêt suivant de la tournée (${formatMinute(minuteOn(nextAt, isoDate))})\u00a0: vérifiez l'heure, ou corrigez d'abord cet arrêt.` };
+      }
+    }
 
     const from = currentTarget(stop.kind, stop.completedAt, stop.trip.status);
     const recorded = decision.completedAt !== null;
@@ -113,6 +135,8 @@ export async function correctStopStatus(input: {
           status: { from, to: target },
           minute: { from: stop.completedAt ? minuteOn(stop.completedAt, isoDate) : null, to: minute },
           reason,
+          // Never the absence's reason itself (health data): only that it changed.
+          ...(absent !== null && stop.trip.noShowReason !== null && absent !== stop.trip.noShowReason ? { noShowReasonChanged: true } : {}),
         },
       });
     });

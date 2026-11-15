@@ -101,7 +101,7 @@ export default async function EndOfRoutePage({ searchParams }: { searchParams: S
               </p>
             </div>
             {/* The end of the day: the odometer back at the depot (FLD-03); the start's, if it was forgotten. */}
-            {day && day.start === null ? <OdometerCard routeId={route.id} date={day.date} moment="START" recorded={null} lastKnown={day.lastKnown} startKm={null} /> : null}
+            {day && day.start === null ? <OdometerCard routeId={route.id} date={day.date} moment="START" recorded={null} lastKnown={day.lastKnown} startKm={null} endKm={day.end} /> : null}
             {day ? <OdometerCard routeId={route.id} date={day.date} moment="END" recorded={day.end} lastKnown={day.lastKnown} startKm={day.start} prominent={day.end === null} /> : null}
             {forgotten.length === 0 ? (
               <p className="flex items-center gap-2 rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-base font-semibold text-emerald-950">

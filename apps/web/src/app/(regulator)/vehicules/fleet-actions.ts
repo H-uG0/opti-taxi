@@ -6,9 +6,10 @@ import { audit, type AuditEntity, type AuditEntry } from "@/lib/audit";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { errorState, idSchema, invalidState, messageState, readForm, successState, type FormState } from "@/lib/forms";
-import { formatShortDate, fromIsoDate, todayIso } from "@/lib/time";
+import { formatShortDate, fromIsoDate, todayIso, toIsoDate } from "@/lib/time";
+import { checkReading } from "@/lib/fleet/odometer";
 import { loadKmPoints, loadLatestKm } from "@/lib/fleet/odometer-load";
-import { deadlineSchema, fuelSchema, odometerConflict, unavailabilitySchema } from "./fleet-schema";
+import { deadlineSchema, fuelSchema, odometerConflict, readingCorrectionSchema, unavailabilitySchema } from "./fleet-schema";
 import { toUpcomingRoutes, upcomingRouteDates } from "./_lib/upcoming-routes";
 
 const VEHICLE_GONE = "Ce véhicule n'existe plus\u00a0: rechargez la page.";
@@ -194,7 +195,7 @@ export async function addFuelLog(vehicleId: string, _state: FormState, formData:
   const others = await loadKmPoints(db, id);
   const conflict = odometerConflict(
     parsed.data,
-    others.map((o) => ({ date: o.date, odometerKm: o.km })),
+    others.map((o) => ({ date: o.date, odometerKm: o.km, moment: o.moment })),
   );
   if (conflict) return errorState({ odometerKm: conflict }, values);
   const { date, ...rest } = parsed.data;
@@ -224,4 +225,88 @@ export async function deleteFuelLog(vehicleId: string, fuelLogId: string): Promi
   );
   refreshPages(vehicle.data);
   return successState(count > 0 ? "Plein supprimé." : "Ce plein était déjà supprimé.");
+}
+
+// ------------------------------------------------------------------- odometer readings (FLD-03)
+
+const READING_GONE = "Ce relevé n'existe plus\u00a0: rechargez la page.";
+const MOMENT_WORDS = { START: "de départ", END: "de retour" } as const;
+
+async function existingReading(vehicleId: string, readingId: string) {
+  const vehicle = idSchema.safeParse(vehicleId);
+  const id = idSchema.safeParse(readingId);
+  if (!vehicle.success || !id.success) return null;
+  const reading = await db.odometerReading.findFirst({
+    where: { id: id.data, vehicleId: vehicle.data },
+    select: { id: true, vehicleId: true, serviceDate: true, moment: true, km: true },
+  });
+  return reading ? { ...reading, date: toIsoDate(reading.serviceDate) } : null;
+}
+
+/**
+ * The regulator corrects a crew's odometer reading (a typo found once the day is closed, which the crew can no longer
+ * change): checked like the crew's against every other mileage known of the vehicle (never a decrease), an unusual
+ * jump accepted (the regulator vouches for it). Audited on the vehicle (odometer.update: details.moment, details.km
+ * { from, to }).
+ */
+export async function correctOdometerReading(vehicleId: string, readingId: string, _state: FormState, formData: FormData): Promise<FormState> {
+  const user = await requireUser("REGULATOR");
+  const values = readForm(formData);
+  const reading = await existingReading(vehicleId, readingId);
+  if (!reading) return messageState(READING_GONE);
+  const parsed = readingCorrectionSchema.safeParse(values);
+  if (!parsed.success) return invalidState(parsed.error, values);
+  const { km } = parsed.data;
+  if (km === reading.km) return errorState({ km: "C'est déjà le kilométrage enregistré." }, values);
+  const points = await loadKmPoints(db, reading.vehicleId);
+  const check = checkReading({
+    km,
+    date: reading.date,
+    moment: reading.moment,
+    others: points.filter((p) => !(p.date === reading.date && p.moment === reading.moment)),
+    startKm: reading.moment === "END" ? (points.find((p) => p.date === reading.date && p.moment === "START")?.km ?? null) : null,
+  });
+  if (!check.ok && check.kind === "refused") return errorState({ km: check.message }, values);
+  const count = await db.$transaction(async (tx) => {
+    // Guarded by the value read: the crew may have typed another one meanwhile (until 03:00 the next day).
+    const updated = await tx.odometerReading.updateMany({
+      where: { id: reading.id, vehicleId: reading.vehicleId, km: reading.km },
+      data: { km, confirmed: false },
+    });
+    if (updated.count > 0) {
+      await audit(tx, user, {
+        action: "odometer.update",
+        entity: "Vehicle",
+        entityId: reading.vehicleId,
+        serviceDate: reading.date,
+        details: { moment: reading.moment, km: { from: reading.km, to: km } },
+      });
+    }
+    return updated.count;
+  });
+  refreshPages(reading.vehicleId);
+  if (count === 0) return messageState("Le relevé a changé entre-temps\u00a0: rechargez la page.", values);
+  return successState(`Relevé ${MOMENT_WORDS[reading.moment]} du ${formatShortDate(reading.date)} corrigé\u00a0: ${new Intl.NumberFormat("fr-FR").format(km)}\u00a0km.`);
+}
+
+/** The regulator deletes a crew's odometer reading (wrong vehicle, impossible value). Audited (odometer.delete). */
+export async function deleteOdometerReading(vehicleId: string, readingId: string): Promise<FormState> {
+  const user = await requireUser("REGULATOR");
+  const reading = await existingReading(vehicleId, readingId);
+  if (!reading) return successState("Ce relevé était déjà supprimé.");
+  const count = await db.$transaction(async (tx) => {
+    const removed = await tx.odometerReading.deleteMany({ where: { id: reading.id, vehicleId: reading.vehicleId } });
+    if (removed.count > 0) {
+      await audit(tx, user, {
+        action: "odometer.delete",
+        entity: "Vehicle",
+        entityId: reading.vehicleId,
+        serviceDate: reading.date,
+        details: { moment: reading.moment, km: { from: reading.km, to: null } },
+      });
+    }
+    return removed.count;
+  });
+  refreshPages(reading.vehicleId);
+  return successState(count > 0 ? "Relevé supprimé." : "Ce relevé était déjà supprimé.");
 }

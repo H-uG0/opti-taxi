@@ -156,8 +156,11 @@ function DepotNotes({ notes, className }: { notes: string; className?: string })
   );
 }
 
-/** Return to the depot. Once every stop is closed it becomes the next thing to do, with its navigation links. */
-function ReturnMarker({ route, finished }: { route: RouteView; finished: boolean }) {
+/**
+ * Return to the depot. Once every stop is closed it becomes the next thing to do, with its navigation links and the
+ * odometer to read back at the depot (FLD-03: without it, no real km against the planned ones).
+ */
+function ReturnMarker({ route, finished, vehicleDay }: { route: RouteView; finished: boolean; vehicleDay: VehicleDay | null }) {
   const { vehicle } = route;
   if (!finished) {
     return (
@@ -205,12 +208,26 @@ function ReturnMarker({ route, finished }: { route: RouteView; finished: boolean
       </p>
       {vehicle.depot.notes ? <DepotNotes notes={vehicle.depot.notes} /> : null}
       <NavLinks lat={vehicle.depot.lat} lng={vehicle.depot.lng} destination={vehicle.depot.address} />
+      {vehicleDay ? (
+        <OdometerCard
+          routeId={route.id}
+          date={vehicleDay.date}
+          moment="END"
+          recorded={vehicleDay.end}
+          lastKnown={vehicleDay.lastKnown}
+          startKm={vehicleDay.start}
+          prominent={vehicleDay.end === null}
+        />
+      ) : null}
     </li>
   );
 }
 
-/** « Fin de tournée » (FLD-02): the stops left without a status (their time past), and the way to enter them. */
-function EndOfRouteLink({ forgotten }: { forgotten: number }) {
+/**
+ * « Fin de tournée » (FLD-02): the stops left without a status (their time past), and the way to enter them; the
+ * odometer back at the depot while it is not read (FLD-03).
+ */
+function EndOfRouteLink({ forgotten, endReadingMissing }: { forgotten: number; endReadingMissing: boolean }) {
   return (
     <Link
       href="/chauffeur/fin-de-tournee"
@@ -225,8 +242,10 @@ function EndOfRouteLink({ forgotten }: { forgotten: number }) {
         <span className="block text-base font-semibold">Fin de tournée</span>
         <span className="block text-sm">
           {forgotten > 0
-            ? `${forgotten > 1 ? `${forgotten} arrêts` : "1 arrêt"} sans statut\u00a0: saisissez l'heure réelle`
-            : "Statuts oubliés, avec l'heure réelle"}
+            ? `${forgotten > 1 ? `${forgotten} arrêts` : "1 arrêt"} sans statut\u00a0: saisissez l'heure réelle${endReadingMissing ? " · compteur au retour" : ""}`
+            : endReadingMissing
+              ? "Compteur au retour, statuts oubliés avec l'heure réelle"
+              : "Statuts oubliés, avec l'heure réelle"}
         </span>
       </span>
     </Link>
@@ -239,12 +258,15 @@ export function VehicleDayPanel({
   day,
   open = false,
   readings = true,
+  endReading = true,
 }: {
   routeId: string;
   day: VehicleDay;
   open?: boolean;
   /** The odometer readings too (« Fin de tournée » shows the end's on its own). */
   readings?: boolean;
+  /** The end's reading in the panel (false once the route is finished: the return to the depot shows it). */
+  endReading?: boolean;
 }) {
   return (
     <details open={open} className="group rounded-2xl border border-slate-300 bg-white">
@@ -264,9 +286,11 @@ export function VehicleDayPanel({
           <>
             {/* Missing, the start's card is at the top of the route (the first thing of the day). */}
             {day.start !== null ? (
-              <OdometerCard routeId={routeId} date={day.date} moment="START" recorded={day.start} lastKnown={day.lastKnown} startKm={null} />
+              <OdometerCard routeId={routeId} date={day.date} moment="START" recorded={day.start} lastKnown={day.lastKnown} startKm={null} endKm={day.end} />
             ) : null}
-            <OdometerCard routeId={routeId} date={day.date} moment="END" recorded={day.end} lastKnown={day.lastKnown} startKm={day.start} />
+            {endReading ? (
+              <OdometerCard routeId={routeId} date={day.date} moment="END" recorded={day.end} lastKnown={day.lastKnown} startKm={day.start} />
+            ) : null}
           </>
         ) : null}
         <div className="rounded-2xl border border-slate-200 px-3 py-3">
@@ -293,13 +317,24 @@ export function RouteSection({
   const titleId = `route-${route.id}`;
   const finished = route.stops.length > 0 && route.nextStop === null;
   const stopIds = route.stops.map((stop) => stop.id);
+  // Once every stop is done, the odometer back at the depot is on the return's card (the task of the moment).
+  const endOnReturn = vehicleDay !== null && finished && route.waitingPatients.length === 0;
 
   return (
     <section aria-labelledby={titleId} className="space-y-3">
       <RouteHeader route={route} titleId={titleId} />
       {/* The first thing of the day: the odometer as the vehicle leaves the depot. */}
       {vehicleDay && vehicleDay.start === null ? (
-        <OdometerCard routeId={route.id} date={vehicleDay.date} moment="START" recorded={null} lastKnown={vehicleDay.lastKnown} startKm={null} prominent />
+        <OdometerCard
+          routeId={route.id}
+          date={vehicleDay.date}
+          moment="START"
+          recorded={null}
+          lastKnown={vehicleDay.lastKnown}
+          startKm={null}
+          endKm={vehicleDay.end}
+          prominent
+        />
       ) : null}
       {route.nextStop && route.progress.closed > 0 ? <NextStopLink stop={route.nextStop} /> : null}
       <ol aria-label={`Arrêts de la tournée ${route.vehicle.label}`} className="space-y-3">
@@ -321,12 +356,12 @@ export function RouteSection({
             case "stop":
               return <StopCard key={item.stop.id} stop={item.stop} routeStopIds={stopIds} regulator={regulator} />;
             case "return":
-              return <ReturnMarker key="return" route={route} finished={finished} />;
+              return <ReturnMarker key="return" route={route} finished={finished} vehicleDay={endOnReturn ? vehicleDay : null} />;
           }
         })}
       </ol>
-      {endOfRoute ? <EndOfRouteLink forgotten={endOfRoute.forgotten} /> : null}
-      {vehicleDay ? <VehicleDayPanel routeId={route.id} day={vehicleDay} /> : null}
+      {endOfRoute ? <EndOfRouteLink forgotten={endOfRoute.forgotten} endReadingMissing={vehicleDay !== null && vehicleDay.end === null} /> : null}
+      {vehicleDay ? <VehicleDayPanel routeId={route.id} day={vehicleDay} endReading={!endOnReturn} /> : null}
     </section>
   );
 }

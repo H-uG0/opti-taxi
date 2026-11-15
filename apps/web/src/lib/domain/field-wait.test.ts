@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { isNoShowReason, NO_SHOW_REASON_LABELS, NO_SHOW_REASONS, noShowAllowedFrom, noShowWaitIssue, waitedMinutes, waitStartMinute } from "./field-wait";
+import {
+  declaredNoShowFrom,
+  declaredNoShowWaitIssue,
+  isNoShowReason,
+  NO_SHOW_REASON_LABELS,
+  NO_SHOW_REASONS,
+  noShowAllowedFrom,
+  noShowWaitIssue,
+  waitedMinutes,
+  waitStartMinute,
+} from "./field-wait";
 
 describe("field wait (FLD-01)", () => {
   it("counts the wait from the arrival, never before the planned start", () => {
@@ -35,5 +45,14 @@ describe("field wait (FLD-01)", () => {
     expect(isNoShowReason("REFUSED")).toBe(true);
     expect(isNoShowReason("Hospitalisé au CHU")).toBe(false);
     expect(isNoShowReason(undefined)).toBe(false);
+  });
+  it("holds the minimum wait for an absence entered afterwards, from the arrival or else the planned start", () => {
+    expect(declaredNoShowFrom({ arrivedMinute: null, plannedStartMinute: 480, minWaitMin: 0 })).toBeNull();
+    expect(declaredNoShowFrom({ arrivedMinute: null, plannedStartMinute: 480, minWaitMin: 15 })).toBe(495);
+    expect(declaredNoShowFrom({ arrivedMinute: 486, plannedStartMinute: 480, minWaitMin: 15 })).toBe(501);
+    expect(declaredNoShowWaitIssue({ arrivedMinute: null, plannedStartMinute: 480, minWaitMin: 15, atMinute: 480 })?.replace(/\s/g, " ")).toBe(
+      "Attente minimale de 15 min avant une absence : heure réelle à partir de 08:15.",
+    );
+    expect(declaredNoShowWaitIssue({ arrivedMinute: null, plannedStartMinute: 480, minWaitMin: 15, atMinute: 495 })).toBeNull();
   });
 });

@@ -9,6 +9,7 @@ const fake = vi.hoisted(() => {
   const tx = {
     routeStop: { updateMany: vi.fn() },
     trip: { updateMany: vi.fn() },
+    fieldRequest: { updateMany: vi.fn() },
     auditEvent: { createMany: vi.fn() },
   };
   return {
@@ -86,6 +87,7 @@ beforeEach(() => {
   fake.renewDriverSession.mockResolvedValue(new Date("2026-11-09T19:25:00.000Z"));
   fake.tx.routeStop.updateMany.mockResolvedValue({ count: 1 });
   fake.tx.trip.updateMany.mockResolvedValue({ count: 1 });
+  fake.tx.fieldRequest.updateMany.mockResolvedValue({ count: 0 });
   fake.tx.auditEvent.createMany.mockResolvedValue({ count: 1 });
   fake.db.appSettings.findUnique.mockResolvedValue({ noShowMinWaitMin: 0 });
 });
@@ -117,6 +119,11 @@ describe("POST /api/chauffeur/stops/:id/status", () => {
       }),
     ]);
     expect(fake.renewDriverSession).toHaveBeenCalledWith(DRIVER, NOW);
+    // The crew's lateness and « Patient pas prêt » on this pickup leave « À traiter » with it.
+    expect(fake.tx.fieldRequest.updateMany).toHaveBeenCalledWith({
+      where: { tripId: "t1", status: "PENDING", OR: [{ kind: "LATE", stopKind: { in: ["PICKUP"] } }, { kind: "NOT_READY" }] },
+      data: { status: "NOTED", resolvedAt: NOW },
+    });
   });
 
   it("writes no observed time in the audit for a status sent live", async () => {
@@ -393,6 +400,28 @@ describe("POST /api/chauffeur/stops/:id/status", () => {
       const early = await answer(await post("s_drop", { action: "DROPOFF", observedAt: 0, declaredMinute: 460 }));
       expect(early).toMatchObject({ status: 422, body: { code: "declared", error: "Heure avant le statut déjà saisi de l'arrêt précédent (07:55)\u00a0: vérifiez l'heure." } });
       expect(fake.db.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("takes an entry typed offline before 03:00 and sent after: the day is open at the time of the gesture", async () => {
+      // Typed at 02:55, received at 03:05 (Paris).
+      vi.setSystemTime(new Date("2026-11-09T02:05:00.000Z"));
+      stops([pickup("PICKED_UP", new Date("2026-11-08T16:05:00.000Z")), dropoff("PICKED_UP")], "s_drop", SUNDAY);
+      const gesture = Date.parse("2026-11-09T01:55:00.000Z");
+      const { status } = await answer(await post("s_drop", { action: "DROPOFF", observedAt: gesture, sentAt: Date.now(), declaredMinute: 17 * 60 + 40 }));
+      expect(status).toBe(200);
+    });
+
+    it("asks the reason of an absence entered afterwards, and holds the minimum wait from the planned start", async () => {
+      fake.db.appSettings.findUnique.mockResolvedValue({ noShowMinWaitMin: 15 });
+      // Planned at 08:10, no « Arrivé »: an absence dated 08:12 at 08:25 would skip the wait.
+      stops([{ ...pickup(), startMinute: 490, arrivedAt: null } as StopRow], "s_pick");
+      const missing = await answer(await post("s_pick", { action: "NO_SHOW", observedAt: NOW.getTime(), declaredMinute: 492 }));
+      expect(missing).toMatchObject({ status: 400, body: { code: "invalid", error: "Choisissez le motif de l'absence." } });
+      const early = await answer(await post("s_pick", { action: "NO_SHOW", observedAt: NOW.getTime(), declaredMinute: 492, reason: "NO_ANSWER" }));
+      expect(early).toMatchObject({ status: 409, body: { code: "wait", error: "Attente minimale de 15\u00a0min avant une absence\u00a0: heure réelle à partir de 08:25." } });
+      expect(fake.db.$transaction).not.toHaveBeenCalled();
+      const waited = await answer(await post("s_pick", { action: "NO_SHOW", observedAt: NOW.getTime(), declaredMinute: 505, reason: "NO_ANSWER" }));
+      expect(waited).toMatchObject({ status: 200, body: { ok: true } });
     });
 
     it("never takes an undo or an arrival with a time typed", async () => {

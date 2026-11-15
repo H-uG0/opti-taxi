@@ -98,7 +98,7 @@ const COLUMNS: Record<string, Column> = {
   late: {
     key: "retards",
     label: "Retards",
-    title: "Allers en retard / allers déposés avec une heure saisie",
+    title: "Allers en retard / allers déposés avec une heure saisie sur le moment",
     value: (r) => lineRates(r.totals).lateRate,
     render: (r) => (r.totals.measuredOutbound > 0 ? `${r.totals.lateArrivals} / ${r.totals.measuredOutbound}` : "—"),
     numeric: true,
@@ -107,7 +107,7 @@ const COLUMNS: Record<string, Column> = {
   recording: {
     key: "saisie",
     label: "Saisie des statuts",
-    title: "Courses dont l'équipage a saisi l'issue (déposé ou absent) ÷ courses placées, jours terminés",
+    title: "Courses dont l'équipage a saisi l'issue (déposé ou absent\u202f; une correction de la régulation ne compte pas) ÷ courses placées, jours terminés",
     value: (r) => lineRates(r.totals).recordingRate,
     render: (r) => formatPercent(lineRates(r.totals).recordingRate, 0),
     numeric: true,

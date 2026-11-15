@@ -12,6 +12,7 @@ import type {
   CancellationReason,
   Payer,
   SharingStatus,
+  StopEntrySource,
   StopKind,
   TripDirection,
   TripStatus,
@@ -108,7 +109,26 @@ export type KpiTrip = {
   pickupStartMinute?: number | null;
   /** Planned time on board: start of the drop-off - departure from the pickup, minutes. */
   plannedRideMinutes?: number | null;
+  /**
+   * How the pickup's and the drop-off's times were entered (RouteStop.completedSource): null or absent, by the crew
+   * on the moment; DECLARED, typed afterwards in « Fin de tournée »; CORRECTED, by the regulation (FLD-02).
+   */
+  pickupSource?: StopEntrySource | null;
+  dropoffSource?: StopEntrySource | null;
 };
+
+/**
+ * A time entered afterwards (« Fin de tournée », a regulator's correction): it closes the trip but measures nothing,
+ * so punctuality and waits leave it out (a forgotten late drop-off typed at its planned time would count on time).
+ */
+export function enteredAfterwards(source: StopEntrySource | null | undefined): boolean {
+  return source === "DECLARED" || source === "CORRECTED";
+}
+
+/** The outcome of the trip (its drop-off, or its pickup for an absence) was set by the regulation, not the crew. */
+export function outcomeCorrected(trip: Pick<KpiTrip, "status" | "pickupSource" | "dropoffSource">): boolean {
+  return (trip.status === "NO_SHOW" ? trip.pickupSource : trip.dropoffSource) === "CORRECTED";
+}
 
 /**
  * `simulated`: a run of the history simulation (pnpm db:history), whose day is marked « simulé ».
@@ -253,6 +273,8 @@ export type KpiStopRow = {
   completedAt: Date | null;
   /** « Arrivé » on a pickup (FLD-01); absent in older callers. */
   arrivedAt?: Date | null;
+  /** How its time was entered (FLD-02); absent in older callers: on the moment. */
+  completedSource?: StopEntrySource | null;
   /** Absent in older callers: the route timings are then unknown. */
   sequence?: number;
   arrivalMinute?: number;

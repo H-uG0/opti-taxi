@@ -52,6 +52,10 @@ describe("decideCorrection (FLD-02)", () => {
     expect(decideCorrection(input({ kind: "DROPOFF", target: "DROPOFF", tripStatus: "PICKED_UP", otherAt: at("08:30"), at: at("08:20") }))).toMatchObject({ ok: false });
     expect(decideCorrection(input({ target: "PICKUP", otherAt: at("08:00"), tripStatus: "DROPPED_OFF", completedAt: at("07:50") }))).toMatchObject({ ok: false });
     expect(decideCorrection(input({ tripStatus: "PICKED_UP", completedAt: at("08:10") }))).toMatchObject({ ok: false, error: expect.stringContaining("Aucun changement") });
+    // The same absence at the same minute: a change only with another reason.
+    const absent = { tripStatus: "NO_SHOW" as const, completedAt: at("08:10"), target: "NO_SHOW" as const, noShowReason: "NO_ANSWER" as const };
+    expect(decideCorrection(input({ ...absent, newNoShowReason: "NO_ANSWER" }))).toMatchObject({ ok: false, error: expect.stringContaining("Aucun changement") });
+    expect(decideCorrection(input({ ...absent, newNoShowReason: "HOSPITALIZED" }))).toEqual({ ok: true, completedAt: at("08:10"), tripStatus: "NO_SHOW" });
     expect(decideCorrection(input({ target: "NONE", at: null }))).toMatchObject({ ok: false, error: "Aucun statut à retirer." });
     expect(decideCorrection(input({ kind: "DROPOFF", target: "NO_SHOW" }))).toMatchObject({ ok: false });
   });

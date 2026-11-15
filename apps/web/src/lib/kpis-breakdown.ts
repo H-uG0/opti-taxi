@@ -18,6 +18,7 @@ import {
   DEFAULT_KPI_OPTIONS,
   isLyingTrip,
   isRealizedTrip,
+  outcomeCorrected,
   isServedTrip,
   isTapType,
   isUsedRoute,
@@ -128,7 +129,8 @@ export function routeLines(
       line.noShows += 1;
       if (line.finished) {
         line.placedFinished += 1;
-        line.recorded += 1;
+        // Recorded by the crew: an absence the regulation set afterwards (« Corriger un statut ») is not the crew's entry.
+        if (!outcomeCorrected(trip)) line.recorded += 1;
       }
       continue;
     }
@@ -144,7 +146,7 @@ export function routeLines(
     if (realized) line.realized += 1;
     if (line.finished) {
       line.placedFinished += 1;
-      if (realized) line.recorded += 1;
+      if (realized && !outcomeCorrected(trip)) line.recorded += 1;
     }
     const delay = realized ? arrivalDelayMinutes(trip) : null;
     if (delay !== null) {

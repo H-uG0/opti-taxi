@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useId } from "react";
+import { ConfirmAction } from "@/components/ui/confirm-action";
 import { Checkbox, Field, FormMessage, Input, Select, UnitInput } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { IDLE_STATE, refusalKey, SAVING_LABEL, valueOf, type FormState, type FormValues } from "@/lib/forms";
@@ -130,5 +131,54 @@ export function FuelForm({ action, defaultDate, unit }: { action: Action; defaul
         </SubmitButton>
       </div>
     </form>
+  );
+}
+
+/**
+ * « Corriger » a crew's odometer reading (FLD-03): the km typed by mistake (an extra digit, the wrong vehicle) stays
+ * fixable once the day is closed, or the reading is deleted. Both are traced.
+ */
+export function ReadingCorrection({
+  label,
+  km,
+  action,
+  remove,
+}: {
+  /** « le départ », « le retour ». */
+  label: string;
+  km: number;
+  action: Action;
+  remove: Action;
+}) {
+  const [state, formAction] = useActionState(action, IDLE_STATE);
+  const values = echoed(state);
+  const id = useId();
+  const nf = new Intl.NumberFormat("fr-FR");
+  return (
+    <details className="text-xs" open={state.status === "error" ? true : undefined}>
+      <summary className="cursor-pointer font-medium text-brand-700 underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-brand-600">
+        Corriger {label}
+      </summary>
+      <div className="mt-2 space-y-2 rounded-md border border-slate-200 bg-slate-50 p-2">
+        <form key={state.submissionId} action={formAction} className="flex flex-wrap items-end gap-2">
+          <ErrorFocus refusal={refusalKey(state)} />
+          <Field label={`Compteur au ${label.replace(/^le /, "")} (km)`} htmlFor={id} error={state.fieldErrors.km} className="min-w-40">
+            <UnitInput id={id} name="km" inputMode="numeric" required unit="km" defaultValue={valueOf(values, "km") || String(km)} />
+          </Field>
+          <SubmitButton pendingLabel={SAVING_LABEL} variant="secondary" size="sm">
+            Enregistrer
+          </SubmitButton>
+        </form>
+        <Result state={state} />
+        <ConfirmAction
+          action={remove}
+          label="Supprimer le relevé"
+          confirmLabel="Oui, supprimer le relevé"
+          keepLabel="Garder le relevé"
+          triggerVariant="ghost"
+          question={<p>Supprimer le relevé ({nf.format(km)}&nbsp;km)&#x202F;? Le kilométrage du véhicule repart des autres relevés et des pleins.</p>}
+        />
+      </div>
+    </details>
   );
 }

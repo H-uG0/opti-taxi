@@ -101,6 +101,16 @@ describe("routeLines", () => {
     expect(ambulance).toMatchObject({ trips: 1, eligible: 0, measuredOutbound: 1, lateArrivals: 0, kmCost: null });
   });
 
+  it("counts neither an outcome the regulation corrected as the crew's entry, nor a time typed afterwards in punctuality (FLD-02)", () => {
+    const corrected: KpiData = {
+      ...data,
+      trips: [trip({ dropoffSource: "CORRECTED" }), trip({ status: "NO_SHOW", pickupSource: "CORRECTED" }), trip({ dropoffSource: "DECLARED" })],
+    };
+    const [taxi] = routeLines(corrected, TODAY, DEFAULT_KPI_OPTIONS, () => undefined);
+    // Three outcomes placed, one entered by the crew (in « Fin de tournée »); none measured on time or late.
+    expect(taxi).toMatchObject({ placedFinished: 3, recorded: 1, measuredOutbound: 0, lateArrivals: 0 });
+  });
+
   it("matches the dashboard's totals of the same rows", () => {
     const period = summarizePeriod(computeKpisByDay(DAY, DAY, data, TODAY));
     const all = sumLines(lines);

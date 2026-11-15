@@ -69,3 +69,20 @@ export function noShowWaitIssue(args: {
   }
   return null;
 }
+
+/**
+ * An absence entered afterwards with its real time (« Fin de tournée », FLD-02): the minimum wait holds too, counted
+ * from the arrival recorded, else from the planned start (nobody tapped « Arrivé »). First minute the absence may be
+ * dated at; null without a minimum wait.
+ */
+export function declaredNoShowFrom(args: { arrivedMinute: number | null; plannedStartMinute: number; minWaitMin: number }): number | null {
+  if (args.minWaitMin <= 0) return null;
+  return (waitStartMinute(args.arrivedMinute, args.plannedStartMinute) ?? args.plannedStartMinute) + args.minWaitMin;
+}
+
+/** Why an absence entered afterwards cannot be dated at `atMinute` (null: it can). */
+export function declaredNoShowWaitIssue(args: { arrivedMinute: number | null; plannedStartMinute: number; minWaitMin: number; atMinute: number }): string | null {
+  const from = declaredNoShowFrom(args);
+  if (from === null || args.atMinute >= from) return null;
+  return `Attente minimale de ${args.minWaitMin}\u00a0min avant une absence\u00a0: heure réelle à partir de ${formatMinute(from)}.`;
+}

@@ -32,21 +32,28 @@
  *    stop.no_show, stop.undo_pickup, stop.undo_dropoff, stop.arrive,
  *    stop.undo_arrive; details.observedAt for a status sent later from the
  *    queue). The reason of an absence stays on the trip (Trip.noShowReason),
- *    never in the trail (it can be health data).
+ *    never in the trail (it can be health data). The crew's signals of the
+ *    stop still waiting in « À traiter » (a lateness announced on it,
+ *    « Patient pas prêt » on a pickup: FLD-01) are closed as noted with it:
+ *    the stop is done, there is nothing left to act on.
  * « Fin de tournée » (FLD-02): a forgotten status sent with the real time the
  * crew typed (declaredMinute) instead of the time of the gesture: today, or
- * the day before until 03:00 (access.ts lateEntryAccess); the time must be
- * past and keep the route's statuses in their order (boundDeclaredAt), the
- * 3 h bound of a gesture does not apply. The stop says it was entered
- * afterwards (completedSource DECLARED), the audit event gives the time
- * declared (details.declaredAt); no minimum wait is checked for an absence
- * declared afterwards (the crew vouches for it).
+ * the day before until 03:00 (access.ts lateEntryAccess, at the time of the
+ * gesture as for a live status: typed offline at 02:55 and sent at 03:05, it
+ * still counts); the time must be past and keep the route's statuses in their
+ * order (boundDeclaredAt), the 3 h bound of a gesture does not apply. The
+ * stop says it was entered afterwards (completedSource DECLARED), the audit
+ * event gives the time declared (details.declaredAt). An absence declared
+ * afterwards needs its reason, and its time respects the minimum wait, counted
+ * from the arrival or else the planned start (field-wait.ts
+ * declaredNoShowWaitIssue): « Fin de tournée » is no way around the wait.
  *
  * Nothing is revalidated: the phone shows the status at once and refreshes
  * the roadmap a moment later, after a refusal too (the page is then stale).
  * The answer may renew a driver's session close to its end
  * (lib/auth/session-renewal.ts).
  */
+import type { StopKind } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { lateEntryAccess, STOP_ACCESS_ERRORS, stopAccess } from "@/app/chauffeur/_lib/access";
@@ -59,7 +66,7 @@ import { currentDriver, type DriverAccount } from "@/lib/auth";
 import { isSameOriginRequest } from "@/lib/auth/same-origin";
 import { renewDriverSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { NO_SHOW_REASONS, noShowWaitIssue } from "@/lib/domain/field-wait";
+import { declaredNoShowWaitIssue, NO_SHOW_REASONS, noShowWaitIssue } from "@/lib/domain/field-wait";
 import { logError } from "@/lib/log";
 import { minuteOn } from "@/lib/planning/day-progress";
 import { formatMinute, instantOfMinute, todayIso, toIsoDate } from "@/lib/time";
@@ -189,7 +196,14 @@ async function recordStopStatus(user: DriverAccount, stopId: string, input: Stat
     if (action !== "PICKUP" && action !== "DROPOFF" && action !== "NO_SHOW") {
       return failure(400, "invalid", "Statut illisible\u00a0: actualisez la page.");
     }
-    if (lateEntryAccess(stop.route, user.driverId, receivedAt) === "wrong-day") return failure(403, "wrong-day", STOP_ACCESS_ERRORS["wrong-day"]);
+    // No older page sends a declared status: its absence always carries the reason the form asks for.
+    if (action === "NO_SHOW" && !input.reason) return failure(400, "invalid", "Choisissez le motif de l'absence.");
+    // The day is still open at the time of the gesture (bounded like a status: never after the reception, at most 3 h
+    // before), not at the reception: typed offline at 02:55, sent at 03:05, it still counts.
+    const gesture = boundObservedAt({ observedAt: input.observedAt ?? null, sentAt: input.sentAt ?? null, receivedAt, previousAt: null });
+    if (lateEntryAccess(stop.route, user.driverId, gesture.ok ? gesture.at : receivedAt) === "wrong-day") {
+      return failure(403, "wrong-day", STOP_ACCESS_ERRORS["wrong-day"]);
+    }
     const bounded = boundDeclaredAt({
       at: instantOfMinute(isoDate, declared),
       receivedAt,
@@ -218,15 +232,17 @@ async function recordStopStatus(user: DriverAccount, stopId: string, input: Stat
   if (decision.type === "refuse") return failure(409, "refused", decision.error);
   if (decision.type === "noop") return noop(decision.message);
 
-  if (action === "NO_SHOW" && decision.tripStatus === "NO_SHOW" && declared === null) {
-    // The minimum wait at the door before an absence (Paramètres, 0 by default: no check).
+  if (action === "NO_SHOW" && decision.tripStatus === "NO_SHOW") {
+    // The minimum wait at the door before an absence (Paramètres, 0 by default: no check); for one entered afterwards,
+    // its time counted from the arrival, else from the planned start.
     const settings = await db.appSettings.findUnique({ where: { id: 1 }, select: { noShowMinWaitMin: true } });
-    const issue = noShowWaitIssue({
+    const wait = {
       arrivedMinute: stop.arrivedAt ? minuteOn(stop.arrivedAt, isoDate) : null,
       plannedStartMinute: stop.startMinute,
       minWaitMin: settings?.noShowMinWaitMin ?? 0,
       atMinute: minuteOn(observed.at, isoDate),
-    });
+    };
+    const issue = declared === null ? noShowWaitIssue(wait) : declaredNoShowWaitIssue(wait);
     if (issue) return failure(409, "wait", issue);
   }
 
@@ -257,6 +273,19 @@ async function recordStopStatus(user: DriverAccount, stopId: string, input: Stat
           },
         });
         if (tripUpdate.count !== 1) throw new ConflictError();
+      }
+      if (action === "PICKUP" || action === "DROPOFF" || action === "NO_SHOW") {
+        // The signals of what is now done: a lateness announced on this stop (on both stops for an absence, the
+        // drop-off is skipped with it), « Patient pas prêt » on a pickup. Kept for the history, no longer « à traiter ».
+        const kinds: StopKind[] = action === "NO_SHOW" ? ["PICKUP", "DROPOFF"] : [stop.kind];
+        await tx.fieldRequest.updateMany({
+          where: {
+            tripId: stop.tripId,
+            status: "PENDING",
+            OR: [{ kind: "LATE", stopKind: { in: kinds } }, ...(stop.kind === "PICKUP" ? [{ kind: "NOT_READY" as const }] : [])],
+          },
+          data: { status: "NOTED", resolvedAt: receivedAt },
+        });
       }
       await audit(tx, user, {
         action: stopAuditAction(action, stop.kind),

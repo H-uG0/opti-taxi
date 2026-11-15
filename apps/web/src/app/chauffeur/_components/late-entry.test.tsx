@@ -19,10 +19,16 @@ beforeEach(() => {
 const pickup = { stopId: "s3", kind: "PICKUP" as const, plannedMinute: 480, patient: "Jeanne MARTIN", town: "Manosque", pickupStopId: null };
 
 describe("LateEntry (« Fin de tournée », FLD-02)", () => {
-  it("enters a forgotten pickup at the real time typed, the planned one by default", () => {
+  it("enters a forgotten pickup at the real time typed, never the planned one by default", () => {
     render(<LateEntry {...pickup} />);
-    expect((screen.getByLabelText("Heure réelle") as HTMLInputElement).value).toBe("08:00");
-    fireEvent.change(screen.getByLabelText("Heure réelle"), { target: { value: "08:07" } });
+    const time = screen.getByLabelText("Heure réelle") as HTMLInputElement;
+    expect(time.value).toBe("");
+    expect(screen.getByText(/Prévu à/).textContent).toContain("08:00");
+    const empty = screen.getByRole("button", { name: "Enregistrer «\u202fPris en charge\u202f»" }) as HTMLButtonElement;
+    expect(empty.disabled).toBe(true);
+    fireEvent.click(empty);
+    expect(app.submit).not.toHaveBeenCalled();
+    fireEvent.change(time, { target: { value: "08:07" } });
     fireEvent.click(screen.getByRole("button", { name: "Enregistrer «\u202fPris en charge\u202f» à 08:07" }));
     expect(app.submit).toHaveBeenCalledWith("s3", "PICKUP", { declaredMinute: 487 });
   });
@@ -30,6 +36,7 @@ describe("LateEntry (« Fin de tournée », FLD-02)", () => {
   it("asks the reason of an absence before sending it", () => {
     render(<LateEntry {...pickup} />);
     fireEvent.click(screen.getByLabelText("Patient absent"));
+    fireEvent.change(screen.getByLabelText("Heure réelle"), { target: { value: "08:00" } });
     const save = screen.getByRole("button", { name: /Enregistrer «\u202fPatient absent\u202f»/ }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("Motif"), { target: { value: "REFUSED" } });
@@ -45,6 +52,7 @@ describe("LateEntry (« Fin de tournée », FLD-02)", () => {
     cleanup();
     app.snapshot = { byStop: { s3: { action: "PICKUP", observedAt: 1, phase: "queued", declaredMinute: 480 } }, refusals: [] };
     render(<LateEntry {...dropoff} />);
+    fireEvent.change(screen.getByLabelText("Heure réelle"), { target: { value: "08:25" } });
     expect((screen.getByRole("button", { name: /Enregistrer «\u202fDéposé\u202f»/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 

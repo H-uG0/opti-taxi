@@ -9,7 +9,7 @@ const fake = vi.hoisted(() => {
     tx,
     db: {
       route: { findUnique: vi.fn() },
-      fuelLog: { findMany: vi.fn() },
+      fuelLog: { findMany: vi.fn(), findFirst: vi.fn() },
       odometerReading: { findMany: vi.fn() },
       $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
     },
@@ -49,6 +49,7 @@ beforeEach(() => {
   fake.renewDriverSession.mockResolvedValue(null);
   fake.db.route.findUnique.mockResolvedValue({ vehicleId: "v1", serviceDate: DAY, driverId: "d1", crewMateId: "d2", vehicle: { energy: "ELECTRIC" } });
   fake.db.fuelLog.findMany.mockResolvedValue([]);
+  fake.db.fuelLog.findFirst.mockResolvedValue(null);
   fake.db.odometerReading.findMany.mockResolvedValue([{ serviceDate: DAY, km: 30_200, moment: "START" }]);
   fake.tx.fuelLog.create.mockResolvedValue({ id: "f1" });
   fake.tx.auditEvent.createMany.mockResolvedValue({ count: 1 });
@@ -73,6 +74,28 @@ describe("POST /api/chauffeur/routes/:id/fuel (FLD-03)", () => {
     expect(empty).toMatchObject({ status: 400, body: { code: "invalid", fieldErrors: { odometerKm: expect.any(String), quantity: expect.any(String) } } });
     const below = await answer(await post({ odometerKm: "30 100", quantity: "10", cost: "5", fullTank: true }));
     expect(below.body).toMatchObject({ code: "invalid", fieldErrors: { odometerKm: expect.stringContaining("Compteur inférieur") } });
+    expect(fake.db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("takes a fill-up of the day once the day's end is read, between its start and its end", async () => {
+    fake.db.odometerReading.findMany.mockResolvedValue([
+      { serviceDate: DAY, km: 30_200, moment: "START" },
+      { serviceDate: DAY, km: 30_450, moment: "END" },
+    ]);
+    expect((await answer(await post({ odometerKm: "30 320", quantity: "10", cost: "5", fullTank: true }))).status).toBe(200);
+    const above = await answer(await post({ odometerKm: "30 500", quantity: "10", cost: "5", fullTank: true }));
+    expect(above.body).toMatchObject({ code: "invalid", fieldErrors: { odometerKm: expect.stringContaining("supérieur au relevé de retour") } });
+  });
+
+  it("does not record twice a fill-up sent again after a lost answer", async () => {
+    fake.db.fuelLog.findFirst.mockResolvedValue({ id: "f0" });
+    const { status, body } = await answer(await post({ odometerKm: "30 350", quantity: "42,5", cost: "12,80", fullTank: true }));
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ ok: true, message: expect.stringContaining("Recharge déjà enregistrée") });
+    expect(fake.db.fuelLog.findFirst).toHaveBeenCalledWith({
+      where: expect.objectContaining({ vehicleId: "v1", odometerKm: 30_350, quantity: 42.5, cost: 12.8, recordedById: "u1" }),
+      select: { id: true },
+    });
     expect(fake.db.$transaction).not.toHaveBeenCalled();
   });
 

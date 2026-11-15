@@ -123,6 +123,7 @@ const stopSelect = {
   loadAfter: true,
   completedAt: true,
   arrivedAt: true,
+  completedSource: true,
 } as const satisfies Prisma.RouteStopSelect;
 
 export async function loadKpiRows(prisma: KpiClient, dates: KpiDates): Promise<KpiData> {
@@ -216,6 +217,8 @@ export function routeTimings(
 
 type TripTimes = {
   pickupAt: Date | null;
+  pickupSource: KpiTrip["pickupSource"];
+  dropoffSource: KpiTrip["dropoffSource"];
   arrivedAt: Date | null;
   pickupStart: number | null;
   dropoffAt: Date | null;
@@ -242,6 +245,8 @@ export function toKpiData({ routes, stops, trips, runs, plans = [] }: KpiQueryRo
     if (routeOfTrip.get(stop.tripId) !== stop.routeId) continue;
     const entry: TripTimes = times.get(stop.tripId) ?? {
       pickupAt: null,
+      pickupSource: null,
+      dropoffSource: null,
       arrivedAt: null,
       pickupStart: null,
       dropoffAt: null,
@@ -251,12 +256,14 @@ export function toKpiData({ routes, stops, trips, runs, plans = [] }: KpiQueryRo
     };
     if (stop.kind === "PICKUP") {
       entry.pickupAt = latest(entry.pickupAt, stop.completedAt);
+      if (stop.completedAt) entry.pickupSource = stop.completedSource ?? null;
       entry.arrivedAt = latest(entry.arrivedAt, stop.arrivedAt ?? null);
       entry.pickupStart = stop.startMinute;
       entry.pickupService = stop.departureMinute - stop.startMinute;
       entry.pickupDeparture = stop.departureMinute;
     } else {
       entry.dropoffAt = latest(entry.dropoffAt, stop.completedAt);
+      if (stop.completedAt) entry.dropoffSource = stop.completedSource ?? null;
       entry.dropoffStart = stop.startMinute;
     }
     times.set(stop.tripId, entry);
@@ -302,6 +309,8 @@ export function toKpiData({ routes, stops, trips, runs, plans = [] }: KpiQueryRo
         pickupServiceMinutes: own?.pickupService ?? null,
         pickupArrivedAt: own?.arrivedAt ?? null,
         pickupStartMinute: own?.pickupStart ?? null,
+        pickupSource: own?.pickupSource ?? null,
+        dropoffSource: own?.dropoffSource ?? null,
         plannedRideMinutes:
           own && own.pickupDeparture !== null && own.dropoffStart !== null ? own.dropoffStart - own.pickupDeparture : null,
       };

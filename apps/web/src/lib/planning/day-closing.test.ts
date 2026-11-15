@@ -39,6 +39,12 @@ describe("dayClosing (FLD-02)", () => {
     ]);
   });
 
+  it("closes a trip the regulation corrected, without counting it as the crew's entry", () => {
+    const closing = dayClosing("2026-11-15", routes, [trip("a", "DROPPED_OFF", "r1"), { ...trip("b", "DROPPED_OFF", "r1"), outcomeCorrected: true }]);
+    expect(closing).toMatchObject({ placed: 2, recorded: 1, unclosed: [] });
+    expect(closing.people).toEqual([{ id: "d1", name: "MARTIN J.", placed: 2, recorded: 1 }]);
+  });
+
   it("writes a rate without rounding up to 100 %", () => {
     expect(entryRateText({ placed: 200, recorded: 199 })).toBe("99 %");
     expect(entryRateText({ placed: 3, recorded: 3 })).toBe("100 %");

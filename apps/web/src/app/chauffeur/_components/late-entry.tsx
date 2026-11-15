@@ -2,7 +2,8 @@
 
 /**
  * A stop left without a status, on « Fin de tournée » (FLD-02): the crew enters what happened and when (the real
- * time, the planned one by default), and for an absence its reason. It goes through the status queue like any status
+ * time, typed: the planned one is only a hint, so one tap never records the plan as the real time), and for an
+ * absence its reason. It goes through the status queue like any status
  * (offline too), with the time typed (declaredMinute) instead of the gesture's: the server checks the day is still
  * open (until 03:00 the next day) and that the time keeps the route's statuses in their order.
  */
@@ -44,7 +45,8 @@ export function LateEntry({
   const id = useId();
   const outcomes: Outcome[] = kind === "PICKUP" ? ["PICKUP", "NO_SHOW"] : ["DROPOFF"];
   const [outcome, setOutcome] = useState<Outcome>(outcomes[0]!);
-  const [time, setTime] = useState(formatMinute(plannedMinute));
+  // Empty: the real time is typed (the planned time is shown beside it, never recorded by default).
+  const [time, setTime] = useState("");
   const [reason, setReason] = useState<NoShowReason | "">("");
   const local = byStop[stopId];
   const pickupLocal = pickupStopId ? byStop[pickupStopId] : undefined;
@@ -80,7 +82,7 @@ export function LateEntry({
                 <label
                   key={value}
                   className={cn(
-                    "flex min-h-12 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border px-2 text-base font-semibold",
+                    "flex min-h-12 cursor-pointer touch-manipulation items-center justify-center gap-2 rounded-xl border px-2 text-base font-semibold has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-600",
                     outcome === value
                       ? value === "NO_SHOW"
                         ? "border-red-700 bg-red-50 text-red-900 ring-2 ring-red-700"
@@ -94,11 +96,22 @@ export function LateEntry({
               ))}
             </fieldset>
           ) : null}
-          <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+          <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1">
             <label htmlFor={`${id}-time`} className="text-sm font-medium text-slate-800">
               Heure réelle
             </label>
-            <input id={`${id}-time`} type="time" required value={time} onChange={(e) => setTime(e.target.value)} className={cn(field, "tabular")} />
+            <input
+              id={`${id}-time`}
+              type="time"
+              required
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              aria-describedby={`${id}-planned`}
+              className={cn(field, "tabular")}
+            />
+            <p id={`${id}-planned`} className="col-start-2 text-sm text-slate-600">
+              Prévu à <span className="tabular">{formatMinute(plannedMinute)}</span>&nbsp;: saisissez l&apos;heure où c&apos;est arrivé.
+            </p>
           </div>
           {outcome === "NO_SHOW" ? (
             <div className="grid grid-cols-[auto_1fr] items-center gap-2">
@@ -122,7 +135,7 @@ export function LateEntry({
             className="inline-flex min-h-12 w-full touch-manipulation items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 text-base font-semibold text-white hover:bg-brand-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:bg-slate-300 disabled:text-slate-600"
           >
             <Save aria-hidden className="size-5" />
-            Enregistrer «&#x202F;{OUTCOME_LABELS[outcome]}&#x202F;» à {minute !== null ? formatMinute(minute) : "…"}
+            Enregistrer «&#x202F;{OUTCOME_LABELS[outcome]}&#x202F;»{minute !== null ? ` à ${formatMinute(minute)}` : ""}
           </button>
         </form>
       )}

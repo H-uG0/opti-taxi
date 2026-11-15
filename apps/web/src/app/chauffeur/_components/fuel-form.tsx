@@ -4,7 +4,8 @@
  * « Ajouter un plein ou une recharge » for the day's vehicle (FLD-03): the odometer, the quantity (L, or kWh for an
  * electric vehicle), the amount, full tank or not; dated on the route's day. Sent at once (POST
  * /api/chauffeur/routes/:id/fuel) with the regulator's checks; online only: without network nothing leaves, and the
- * form says so (the receipt can be handed to the regulation).
+ * form says so (the receipt can be handed to the regulation). A send without an answer (timeout, cut) may have
+ * arrived: the form says so, and sending it again is safe (the server does not record the same fill-up twice).
  */
 import { useId, useState, type FormEvent } from "react";
 import { Fuel, PlugZap } from "lucide-react";
@@ -19,6 +20,12 @@ const field = "tabular min-h-12 w-full rounded-xl border border-field bg-white p
 
 type Fields = "odometerKm" | "quantity" | "cost";
 
+/** A send still without an answer after this long is given up (it may have arrived). */
+const SEND_TIMEOUT_MS = 15_000;
+
+const OFFLINE = "Pas de réseau\u00a0: rien n'a été envoyé. Réessayez plus tard, ou donnez le ticket à la régulation.";
+const UNCERTAIN = "Envoi incertain (pas de réponse)\u00a0: renvoyez-le quand le réseau revient, un plein déjà reçu n'est pas enregistré deux fois.";
+
 export function FuelForm({ routeId, energy, odometerHint }: { routeId: string; energy: EnergyType | null; odometerHint: number | null }) {
   const { ownerId } = useDriverApp();
   const unit = energyUnit(energy);
@@ -32,11 +39,16 @@ export function FuelForm({ routeId, energy, odometerHint }: { routeId: string; e
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    setBusy(true);
     setMessage(null);
     setErrors({});
+    if (navigator.onLine === false) {
+      setMessage({ ok: false, text: OFFLINE });
+      return;
+    }
+    setBusy(true);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), SEND_TIMEOUT_MS);
     try {
-      if (navigator.onLine === false) throw new Error("offline");
       const response = await fetch(fuelUrl(routeId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -44,6 +56,7 @@ export function FuelForm({ routeId, energy, odometerHint }: { routeId: string; e
         credentials: "same-origin",
         cache: "no-store",
         redirect: "error",
+        signal: controller.signal,
       });
       const answer = (await response.json().catch(() => null)) as FuelResponse | null;
       if (!answer) throw new Error("unreadable");
@@ -55,8 +68,10 @@ export function FuelForm({ routeId, energy, odometerHint }: { routeId: string; e
         setErrors(answer.fieldErrors ?? {});
       }
     } catch {
-      setMessage({ ok: false, text: "Pas de réseau : rien n'a été envoyé. Réessayez plus tard, ou donnez le ticket à la régulation." });
+      // The request may have reached the server (answer lost on the way back, timeout): never « rien n'a été envoyé ».
+      setMessage({ ok: false, text: UNCERTAIN });
     } finally {
+      window.clearTimeout(timer);
       setBusy(false);
     }
   };

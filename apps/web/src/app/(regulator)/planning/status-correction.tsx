@@ -3,8 +3,9 @@
 /**
  * « Corriger un statut » in the trip panel (FLD-02): on a day started or past, the regulator records a status the crew
  * forgot or fixes a wrong one, with the real time and a reason from a list (status-correction-actions.ts). The stop,
- * the status it ends with, its time (the one recorded, else the planned one), the reason; « Patient absent » asks the
- * absence's reason too.
+ * the status it ends with, its time (the one recorded; for a stop without one, typed: the planned time is only shown
+ * beside it, never recorded by default), the reason; « Patient absent » asks the absence's reason too. A forgotten
+ * trip takes two corrections: once its pickup is recorded, the form stays open on its drop-off, the reason kept.
  */
 import { useId, useState } from "react";
 import { PencilLine } from "lucide-react";
@@ -29,9 +30,13 @@ export type CorrectableStop = {
   kind: StopKind;
   /** The status it shows now. */
   current: CorrectionTarget;
-  /** Recorded minute, else the planned start: the time field's default. */
-  minute: number;
+  /** The minute recorded, the time field's default; null when none (the field starts empty). */
+  recordedMinute: number | null;
+  /** The planned start, shown as a hint. */
+  plannedMinute: number;
 };
+
+const timeOf = (stop: CorrectableStop | undefined) => (stop?.recordedMinute != null ? formatMinute(stop.recordedMinute) : "");
 
 export function StatusCorrection({ stops, patient }: { stops: readonly CorrectableStop[]; patient: string }) {
   const { busy, run } = usePlanningActivity();
@@ -39,19 +44,20 @@ export function StatusCorrection({ stops, patient }: { stops: readonly Correctab
   const [stopId, setStopId] = useState(stops[0]?.id ?? "");
   const stop = stops.find((s) => s.id === stopId) ?? stops[0];
   const [target, setTarget] = useState<CorrectionTarget>(() => (stop ? correctionTargets(stop.kind)[0]! : "NONE"));
-  const [time, setTime] = useState(() => formatMinute(stop?.minute ?? 480));
+  const [time, setTime] = useState(() => timeOf(stop));
   const [reason, setReason] = useState<StatusCorrectionReason | "">("");
   const [absence, setAbsence] = useState<NoShowReason | "">("");
   const [refusal, setRefusal] = useState<string | null>(null);
-  const ids = { stop: useId(), target: useId(), time: useId(), reason: useId(), absence: useId() };
+  const [done, setDone] = useState<string | null>(null);
+  const ids = { stop: useId(), target: useId(), time: useId(), planned: useId(), reason: useId(), absence: useId() };
   if (!stop) return null;
 
-  const chooseStop = (id: string) => {
+  const chooseStop = (id: string, nextTarget?: CorrectionTarget) => {
     const next = stops.find((s) => s.id === id);
     if (!next) return;
     setStopId(id);
-    setTarget(correctionTargets(next.kind)[0]!);
-    setTime(formatMinute(next.minute));
+    setTarget(nextTarget ?? correctionTargets(next.kind)[0]!);
+    setTime(timeOf(next));
     setRefusal(null);
   };
 
@@ -59,7 +65,15 @@ export function StatusCorrection({ stops, patient }: { stops: readonly Correctab
     return (
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2">
         <p className="min-w-0 flex-1 text-xs text-slate-600">Statut oublié ou erroné&nbsp;: corrigez-le avec l&apos;heure réelle et un motif.</p>
-        <Button size="sm" variant="secondary" disabled={busy} onClick={() => setOpen(true)}>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy}
+          onClick={() => {
+            setOpen(true);
+            setDone(null);
+          }}
+        >
           <PencilLine aria-hidden className="size-3.5" />
           Corriger un statut…
         </Button>
@@ -69,10 +83,20 @@ export function StatusCorrection({ stops, patient }: { stops: readonly Correctab
 
   const submit = () => {
     setRefusal(null);
-    run(`Correction du statut de ${patient}…`, () => correctStopStatus({ stopId: stop.id, target, time, reason, noShowReason: absence || null }), {
+    setDone(null);
+    const corrected = stop;
+    const correctedTarget = target;
+    run(`Correction du statut de ${patient}…`, () => correctStopStatus({ stopId: stop.id, target, time: target === "NONE" ? "" : time, reason, noShowReason: absence || null }), {
       onResult: (result) => {
         if (!result.ok) {
           setRefusal(result.error);
+          return;
+        }
+        // A pickup just recorded whose drop-off has no status yet: the next correction is that drop-off, same reason.
+        const dropoff = stops.find((s) => s.kind === "DROPOFF" && s.current === "NONE");
+        if (corrected.kind === "PICKUP" && correctedTarget === "PICKUP" && dropoff) {
+          chooseStop(dropoff.id, "DROPOFF");
+          setDone(`${result.message} Saisissez maintenant la dépose.`);
           return;
         }
         setOpen(false);
@@ -128,8 +152,12 @@ export function StatusCorrection({ stops, patient }: { stops: readonly Correctab
               value={time}
               onChange={(e) => setTime(e.target.value)}
               disabled={busy}
+              aria-describedby={ids.planned}
               className="mt-1 tabular-nums"
             />
+            <p id={ids.planned} className="mt-0.5 text-xs text-slate-500">
+              Prévu à <span className="tabular-nums">{formatMinute(stop.plannedMinute)}</span>
+            </p>
           </div>
         ) : null}
       </div>
@@ -161,6 +189,11 @@ export function StatusCorrection({ stops, patient }: { stops: readonly Correctab
           ))}
         </Select>
       </div>
+      {done ? (
+        <p role="status" className="text-sm text-emerald-800">
+          {done}
+        </p>
+      ) : null}
       {refusal ? (
         <p role="alert" className="text-sm text-red-800">
           {refusal}
@@ -179,11 +212,14 @@ export function StatusCorrection({ stops, patient }: { stops: readonly Correctab
         >
           Annuler
         </Button>
-        <Button type="submit" size="sm" variant="primary" disabled={busy || !reason || (target === "NO_SHOW" && !absence)}>
+        <Button type="submit" size="sm" variant="primary" disabled={busy || !reason || (target !== "NONE" && !time) || (target === "NO_SHOW" && !absence)}>
           Enregistrer la correction
         </Button>
       </div>
-      <p className="text-xs text-slate-500">La correction est tracée (auteur, heure, motif) et l&apos;équipage la voit sur sa feuille de route.</p>
+      <p className="text-xs text-slate-500">
+        La correction est tracée (auteur, heure, motif). Elle est visible sur la feuille de route de l&apos;équipage si la tournée est celle
+        du jour.
+      </p>
     </form>
   );
 }

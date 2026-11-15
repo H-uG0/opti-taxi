@@ -78,6 +78,7 @@ export function TripFiltersForm({
         options={[
           { value: "ACTIVE", label: "Hors annulées" },
           { value: "RETURN_TO_CHECK", label: "Retours à vérifier (aller absent)" },
+          { value: "UNCLOSED", label: "Non clôturées (placées, sans issue saisie)" },
           ...STATUS_OPTIONS,
         ]}
         className="w-40"

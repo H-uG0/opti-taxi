@@ -193,7 +193,8 @@ export function TripPanel({
             id: stop.id,
             kind: stop.kind,
             current: currentTarget(stop.kind, stop.completed ? new Date(0) : null, trip.status),
-            minute: stop.completedMinute ?? stop.startMinute,
+            recordedMinute: stop.completedMinute ?? null,
+            plannedMinute: stop.startMinute,
           }))
       : [];
 

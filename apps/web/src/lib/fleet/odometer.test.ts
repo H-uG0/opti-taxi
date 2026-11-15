@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkReading, dailyPace, daysUntilKm, latestKm, MAX_DAILY_KM, paceText, realAgainstPlanned } from "./odometer";
+import { checkReading, dailyPace, daysUntilKm, latestKm, MAX_DAILY_KM, MAX_JUMP_DAYS, paceText, realAgainstPlanned } from "./odometer";
 
 describe("odometer readings (FLD-03)", () => {
   const others = [
@@ -38,6 +38,34 @@ describe("odometer readings (FLD-03)", () => {
       kind: "confirm",
       message: expect.stringContaining("depuis le départ"),
     });
+  });
+
+  it("orders the readings of one day by their moment: start, fill-ups, end", () => {
+    const day = [
+      { date: "2026-11-14", km: 50_000, moment: "START" as const },
+      { date: "2026-11-14", km: 50_120, moment: "FILL" as const },
+      { date: "2026-11-14", km: 50_250, moment: "END" as const },
+    ];
+    const plain = (check: ReturnType<typeof checkReading>) => ("message" in check ? check.message.replace(/\s/g, " ") : null);
+    // A start typed after the day's end (« Fin de tournée »): never above it, nor above a fill-up of that day.
+    expect(plain(checkReading({ km: 50_300, date: "2026-11-14", moment: "START", others: day.filter((p) => p.moment !== "START"), startKm: null }))).toBe(
+      "Supérieur à un plein du jour (50 120 km) : vérifiez le compteur.",
+    );
+    expect(
+      plain(checkReading({ km: 50_260, date: "2026-11-14", moment: "START", others: [day[2]!], startKm: null })),
+    ).toBe("Supérieur au relevé de retour du jour (50 250 km) : vérifiez le compteur.");
+    expect(checkReading({ km: 49_990, date: "2026-11-14", moment: "START", others: day.filter((p) => p.moment !== "START"), startKm: null })).toEqual({ ok: true });
+    // An end never below a fill-up of that day.
+    expect(checkReading({ km: 50_100, date: "2026-11-14", moment: "END", others: day.filter((p) => p.moment !== "END"), startKm: 50_000 })).toMatchObject({
+      kind: "refused",
+      message: expect.stringContaining("Inférieur au dernier relevé connu"),
+    });
+  });
+
+  it("weighs a jump over at most MAX_JUMP_DAYS days: a typo a month after the last fill-up asks for a confirmation", () => {
+    const fill = [{ date: "2026-10-15", km: 125_000, moment: "FILL" as const }];
+    expect(checkReading({ km: 152_000, date: "2026-11-14", moment: "START", others: fill, startKm: null })).toMatchObject({ ok: false, kind: "confirm" });
+    expect(checkReading({ km: 125_000 + MAX_JUMP_DAYS * MAX_DAILY_KM, date: "2026-11-14", moment: "START", others: fill, startKm: null })).toEqual({ ok: true });
   });
 
   it("knows the last mileage, the real km against the planned ones, the pace and the days left", () => {

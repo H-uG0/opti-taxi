@@ -11,9 +11,10 @@
  *   recorded;
  * - a drop-off: « Déposé » (trip DROPPED_OFF), once the patient is on board, or
  *   « Sans statut » (trip back on board).
- * A drop-off is never before its pickup. Never a time to come.
+ * A drop-off is never before its pickup. Never a time to come. An absence corrected to another reason only (the
+ * crew chose « Pas de réponse », the patient was hospitalised) is a change too.
  */
-import type { StatusCorrectionReason, StopKind, TripStatus } from "@prisma/client";
+import type { NoShowReason, StatusCorrectionReason, StopKind, TripStatus } from "@prisma/client";
 
 export const CORRECTION_REASONS = ["CREW_FORGOT", "PHONE_ISSUE", "WRONG_ENTRY", "CREW_CALL", "OTHER"] as const satisfies readonly StatusCorrectionReason[];
 
@@ -51,6 +52,9 @@ export type CorrectionInput = {
   /** The real time, null for « Sans statut ». */
   at: Date | null;
   now: Date;
+  /** The trip's absence reason now, and the one chosen (« Patient absent »): a new reason alone is a change. */
+  noShowReason?: NoShowReason | null;
+  newNoShowReason?: NoShowReason | null;
 };
 
 export type CorrectionDecision =
@@ -82,7 +86,9 @@ export function decideCorrection(input: CorrectionInput): CorrectionDecision {
       }
       case "NO_SHOW":
         if (dropped) return fail("Dépose enregistrée : retirez-la d'abord (« Sans statut » sur la dépose).");
-        if (sameTime && tripStatus === "NO_SHOW") return fail("Aucun changement : ce statut est déjà enregistré à cette heure.");
+        if (sameTime && tripStatus === "NO_SHOW" && (input.newNoShowReason ?? null) === (input.noShowReason ?? null)) {
+          return fail("Aucun changement : ce statut est déjà enregistré à cette heure, avec ce motif.");
+        }
         return { ok: true, completedAt: at, tripStatus: "NO_SHOW" };
       default:
         if (dropped) return fail("Dépose enregistrée : retirez-la d'abord (« Sans statut » sur la dépose).");

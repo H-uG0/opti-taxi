@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SendOutcome } from "./status-protocol";
-import { isQueuedStatus, localArrival, localStatusShown, memoryStorage, StatusQueue, undoActionOf, type QueuedStatus } from "./status-queue";
+import {
+  isQueuedStatus,
+  localArrival,
+  localStatusShown,
+  memoryStorage,
+  PENDING_CORRECTION_ERROR,
+  StatusQueue,
+  undoActionOf,
+  type QueuedStatus,
+} from "./status-queue";
 
 const OK: SendOutcome = { kind: "ok", message: "Enregistré.", serverTime: 1_000, sessionExpiresAt: null };
 const OFFLINE: SendOutcome = { kind: "retry", reason: "offline" };
@@ -331,6 +340,25 @@ describe("StatusQueue: odometer readings (FLD-03)", () => {
     await queue.submit("odometer:r1:START", "ODOMETER", { km: 120_040, confirmed: true });
     expect(storage.values()).toEqual([{ stopId: "odometer:r1:START", action: "ODOMETER", observedAt: expect.any(Number), km: 120_040, confirmed: true }]);
     expect(sent.at(-1)).toMatchObject({ km: 120_040, confirmed: true });
+  });
+
+  it("sends a corrected reading after one being sent or maybe received, and says when a status cannot be corrected yet", async () => {
+    const TIMEOUT: SendOutcome = { kind: "retry", reason: "timeout", maybeReceived: true };
+    const { queue, sent, storage } = setup({ answers: [TIMEOUT, OK, OK] });
+    await queue.submit("odometer:r1:END", "ODOMETER", { km: 120_900 });
+    expect(queue.getSnapshot().byStop["odometer:r1:END"]).toMatchObject({ uncertain: true, km: 120_900 });
+    // The first may be on the server: the correction goes after it (the server keeps the last one).
+    await queue.submit("odometer:r1:END", "ODOMETER", { km: 120_290 });
+    expect(sent.map((status) => status.km)).toEqual([120_900, 120_900, 120_290]);
+    expect(storage.values()).toEqual([]);
+    expect(queue.getSnapshot().byStop["odometer:r1:END"]).toMatchObject({ phase: "sent", km: 120_290 });
+
+    // A status the server would keep as a replay: the crew is told, nothing vanishes silently.
+    const status = setup({ answers: [TIMEOUT] });
+    await status.queue.submit("stop_1", "PICKUP", { declaredMinute: 480 });
+    await status.queue.submit("stop_1", "PICKUP", { declaredMinute: 487 });
+    expect(status.queue.getSnapshot().refusals).toEqual([expect.objectContaining({ stopId: "stop_1", error: PENDING_CORRECTION_ERROR })]);
+    expect(status.sent.map((sent) => sent.declaredMinute)).toEqual([480, 480]);
   });
 
   it("reads back only well-formed readings", () => {

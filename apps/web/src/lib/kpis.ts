@@ -24,6 +24,7 @@ import {
 } from "./kpis-planning-time";
 import {
   DEFAULT_KPI_OPTIONS,
+  enteredAfterwards,
   isRealizedTrip,
   isServedTrip,
   isUsedRoute,
@@ -252,6 +253,8 @@ export function dayCount(from: string, to: string): number {
  */
 export function arrivalDelayMinutes(trip: KpiTrip): number | null {
   if (trip.direction !== "OUTBOUND" || trip.appointmentMinute === null || trip.dropoffCompletedAt === null) return null;
+  // A drop-off time typed afterwards (« Fin de tournée », the regulation's correction) measures nothing.
+  if (enteredAfterwards(trip.dropoffSource)) return null;
   return minuteOfServiceDay(trip.dropoffCompletedAt, trip.serviceDate) - trip.appointmentMinute;
 }
 

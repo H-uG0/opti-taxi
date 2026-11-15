@@ -95,7 +95,7 @@ export function chartSpecs(toleranceMin: number, scoped: boolean): readonly Char
       id: "late",
       indicator: "lateRate",
       title: toleranceMin > 0 ? `Retards au RDV (au-delà de ${toleranceMin} min)` : "Retards au RDV (sans tolérance)",
-      method: `Allers dont l'heure de dépose saisie par le chauffeur (heure de Paris, à la minute près) est ${lateThreshold(toleranceMin)}, parmi les allers déposés avec une heure saisie. Le chauffeur tape « Déposé » après avoir accompagné le patient à l'accueil : d'où la tolérance, réglable en haut de page.`,
+      method: `Allers dont l'heure de dépose saisie par le chauffeur (heure de Paris, à la minute près) est ${lateThreshold(toleranceMin)}, parmi les allers déposés avec une heure saisie sur le moment (une heure saisie après coup, en «\u202fFin de tournée\u202f» ou corrigée par la régulation, ne mesure rien). Le chauffeur tape « Déposé » après avoir accompagné le patient à l'accueil : d'où la tolérance, réglable en haut de page.`,
       value: (s) => (s.measuredOutbound > 0 ? s.lateRate : null),
       period: (p) =>
         `Sur la période : ${formatPercent(p.lateRate, 1)} (${p.lateArrivals} sur ${plural(p.measuredOutbound, "aller mesuré", "allers mesurés")}, ${p.lateOver15} au-delà de 15 min)`,

@@ -53,6 +53,10 @@ describe("waits and time on board (KPI-05)", () => {
     expect(waitBeforeAppointment(outbound({ dropoffCompletedAt: null }))).toBeNull();
     expect(waitAfterSession(back({ pickupCompletedAt: null }))).toBeNull();
     expect(waitAfterSession(back({ status: "NO_SHOW" }))).toBeNull();
+    // A time typed afterwards (« Fin de tournée », the regulation's correction) measures nothing (FLD-02).
+    expect(waitBeforeAppointment(outbound({ dropoffSource: "DECLARED" }))).toBeNull();
+    expect(waitAfterSession(back({ pickupSource: "CORRECTED" }))).toBeNull();
+    expect(rideTime(outbound({ pickupCompletedAt: at("07:10"), dropoffSource: "DECLARED" }))).toBeNull();
   });
 
   it("adds the legs of a care session and lists the shared ones over the limit", () => {
@@ -127,6 +131,12 @@ describe("at the patient's door (FLD-01)", () => {
     expect(doorTimes(door())).toBeNull();
     // Arrived, the pickup not recorded yet: only the arrival.
     expect(doorTimes(door({ status: "ASSIGNED", pickupArrivedAt: at("07:20"), pickupCompletedAt: null }))).toEqual({ arrivalDelay: 5, wait: null, noShow: false });
+    // The pickup entered afterwards: the arrival was live, the end of the wait was not.
+    expect(doorTimes(door({ pickupArrivedAt: at("07:18"), pickupCompletedAt: at("07:30"), pickupSource: "DECLARED" }))).toEqual({ arrivalDelay: 3, wait: null, noShow: false });
+  });
+
+  it("is the patient's door: never a return picked up at the care place", () => {
+    expect(doorTimes(back({ pickupStartMinute: 720, pickupArrivedAt: at("10:40"), pickupCompletedAt: at("12:15") }))).toBeNull();
   });
 
   it("collects them over a day", () => {

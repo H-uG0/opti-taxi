@@ -245,7 +245,7 @@ export function IssuesPanel({
               icon={<MessageSquareWarning aria-hidden className="size-3.5" />}
               title={`Demandes des équipages (${live.requests.length})`}
               tone="red"
-              intro="Une fin de séance signalée est déjà enregistrée sur le retour&nbsp;: replacez-le si besoin («&#x202F;Où placer&#x202F;»). Un retard annoncé décale déjà les heures estimées de la tournée. Une annulation ou un retour attend votre réponse."
+              intro="Une fin de séance signalée est déjà enregistrée sur le retour&nbsp;: replacez-le si besoin («&#x202F;Où placer&#x202F;»). Un retard annoncé décale déjà les heures estimées de la tournée. «&#x202F;Patient pas prêt&#x202F;»&nbsp;: l'équipage attend sur place, appelez-le si l'attente dure. Retards et «&#x202F;pas prêt&#x202F;» quittent la liste dès que l'arrêt a son statut. Une annulation ou un retour attend votre réponse."
             >
               {live.requests.map((request) => (
                 <li key={request.id} className="space-y-1">

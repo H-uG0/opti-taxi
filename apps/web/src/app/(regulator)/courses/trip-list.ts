@@ -25,9 +25,13 @@ export type OriginFilter = (typeof ORIGINS)[number];
 
 /**
  * "ACTIVE" = every status but CANCELLED; "RETURN_TO_CHECK" = return trips
- * whose outbound leg was closed as patient absent (@/lib/domain/no-show).
+ * whose outbound leg was closed as patient absent (@/lib/domain/no-show);
+ * "UNCLOSED" = trips placed on a route whose outcome nobody recorded (no
+ * « Déposé », no « Patient absent »: the day's closing, FLD-02).
  */
-export type StatusFilter = TripStatus | "ACTIVE" | "RETURN_TO_CHECK";
+export type StatusFilter = TripStatus | "ACTIVE" | "RETURN_TO_CHECK" | "UNCLOSED";
+
+const UNCLOSED_STATUSES: readonly TripStatus[] = ["PLANNED", "ASSIGNED", "PICKED_UP"];
 /** "SHARED" = shared in the current planning (Trip.shared), the other values are the traceability status. */
 export type SharingFilter = SharingStatus | "SHARED";
 
@@ -83,7 +87,7 @@ function id(value: SearchParamValue): string | null {
 /** Reads ?statut=&sens=&partage=&q=&patient=&etablissement=&vehicule=&depot=&payeur=&origine= ; unknown values are ignored. */
 export function parseTripFilters(params: Record<string, SearchParamValue>): TripFilters {
   return {
-    status: pick<StatusFilter>(params.statut, [...TRIP_STATUSES, "ACTIVE", "RETURN_TO_CHECK"]),
+    status: pick<StatusFilter>(params.statut, [...TRIP_STATUSES, "ACTIVE", "RETURN_TO_CHECK", "UNCLOSED"]),
     direction: pick<TripDirection>(params.sens, DIRECTIONS),
     sharing: pick<SharingFilter>(params.partage, [...SHARING_STATUSES, "SHARED"]),
     q: (firstValue(params.q) ?? "").trim().slice(0, 80),
@@ -139,6 +143,8 @@ export function matchesFilters(trip: FilterableTrip, filters: TripFilters): bool
     if (trip.status === "CANCELLED") return false;
   } else if (filters.status === "RETURN_TO_CHECK") {
     if (!trip.outboundNoShow) return false;
+  } else if (filters.status === "UNCLOSED") {
+    if ((trip.routeId ?? null) === null || !UNCLOSED_STATUSES.includes(trip.status)) return false;
   } else if (filters.status !== null && trip.status !== filters.status) {
     return false;
   }

@@ -14,14 +14,17 @@
  * - Time on board: « Déposé » - « Pris en charge », against the direct drive,
  *   estimated from the plan (planned time on board × direct km ÷ km on board,
  *   the patient's own detour taken out).
- * - At the patient's door (FLD-01, « Arrivé » tapped): the crew's arrival
+ * - At the patient's door (FLD-01, « Arrivé » tapped on an outbound pickup:
+ *   at home, never a return picked up at the care place): the crew's arrival
  *   against the planned start of the pickup (positive: late), the crew's wait
  *   from the arrival (never before the planned start) to « Pris en charge »
  *   less the planned boarding time, and the wait before a « Patient absent ».
+ * A time entered afterwards (« Fin de tournée », a regulator's correction,
+ * FLD-02) measures none of them (kpis-rows.ts enteredAfterwards).
  */
 import { isSameEpisode } from "@/lib/domain/no-show";
 import { waitedMinutes } from "@/lib/domain/field-wait";
-import { isServedTrip, minuteOfServiceDay, type KpiOptions, type KpiTrip } from "./kpis-rows";
+import { enteredAfterwards, isServedTrip, minuteOfServiceDay, type KpiOptions, type KpiTrip } from "./kpis-rows";
 
 /** A shared care session whose measured wait went over the limit (ids and minutes only). */
 export type WaitCase = {
@@ -105,13 +108,14 @@ export function waitBeforeAppointment(trip: KpiTrip): number | null {
   if (trip.direction !== "OUTBOUND" || trip.status !== "DROPPED_OFF" || trip.appointmentMinute === null || !trip.dropoffCompletedAt) {
     return null;
   }
+  if (enteredAfterwards(trip.dropoffSource)) return null;
   return Math.max(0, trip.appointmentMinute - minuteOfServiceDay(trip.dropoffCompletedAt, trip.serviceDate));
 }
 
 /** Wait after the session of a picked-up return leg, null when not measured. */
 export function waitAfterSession(trip: KpiTrip): number | null {
   const ready = trip.readyMinute ?? null;
-  if (trip.direction !== "RETURN" || ready === null || !trip.pickupCompletedAt) return null;
+  if (trip.direction !== "RETURN" || ready === null || !trip.pickupCompletedAt || enteredAfterwards(trip.pickupSource)) return null;
   if (trip.status !== "PICKED_UP" && trip.status !== "DROPPED_OFF") return null;
   const boarding = Math.max(0, trip.pickupServiceMinutes ?? 0);
   return Math.max(0, minuteOfServiceDay(trip.pickupCompletedAt, trip.serviceDate) - boarding - ready);
@@ -120,6 +124,7 @@ export function waitAfterSession(trip: KpiTrip): number | null {
 /** Minutes on board and beyond the estimated direct drive, null when not measured. */
 export function rideTime(trip: KpiTrip): { onBoard: number; excess: number | null } | null {
   if (trip.status !== "DROPPED_OFF" || !trip.pickupCompletedAt || !trip.dropoffCompletedAt) return null;
+  if (enteredAfterwards(trip.pickupSource) || enteredAfterwards(trip.dropoffSource)) return null;
   const onBoard = (trip.dropoffCompletedAt.getTime() - trip.pickupCompletedAt.getTime()) / 60_000;
   if (onBoard < 0) return null;
   const planned = trip.plannedRideMinutes ?? null;
@@ -136,12 +141,15 @@ export function rideTime(trip: KpiTrip): { onBoard: number; excess: number | nul
  * pickup, and its wait until « Pris en charge » (less the planned boarding time) or « Patient absent ».
  */
 export function doorTimes(trip: KpiTrip): { arrivalDelay: number; wait: number | null; noShow: boolean } | null {
+  // The patient's door: an outbound pickup (a return starts at the care place, where the crew waits for the session).
+  if (trip.direction !== "OUTBOUND") return null;
   const arrived = trip.pickupArrivedAt ?? null;
   const start = trip.pickupStartMinute ?? null;
   if (!arrived || start === null) return null;
   const arrivedMinute = minuteOfServiceDay(arrived, trip.serviceDate);
   const arrivalDelay = arrivedMinute - start;
-  const closed = trip.pickupCompletedAt ?? null;
+  // A pickup or absence entered afterwards: the arrival was tapped live, the end of the wait was not.
+  const closed = enteredAfterwards(trip.pickupSource) ? null : (trip.pickupCompletedAt ?? null);
   const onBoard = trip.status === "PICKED_UP" || trip.status === "DROPPED_OFF";
   if (!closed || (!onBoard && trip.status !== "NO_SHOW")) return { arrivalDelay, wait: null, noShow: false };
   const boarding = onBoard ? Math.max(0, trip.pickupServiceMinutes ?? 0) : 0;

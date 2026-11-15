@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ClipboardCheck } from "lucide-react";
+import { coursesHref, EMPTY_FILTERS } from "../courses/trip-list";
 import { dashboardHref } from "../tableau-de-bord/query";
 import { entryRateText, type DayClosing } from "@/lib/planning/day-closing";
 import { pluralize } from "@/lib/planning/format";
@@ -15,11 +16,23 @@ const TRIPS_SHOWN = 30;
  * The trips of a day whose outcome the crews never recorded (FLD-02), on the planning of today for the day before and
  * on a past day's planning for that day: the day's entry rate and each person's below 100 %, the same rate as the
  * dashboard's « Saisie des statuts » (link to its « Personnel » breakdown), and each trip to open on its day's
- * planning, where « Corriger un statut » records the real time with a reason. Nothing when every outcome is recorded.
+ * planning, where « Corriger un statut » records the real time with a reason; past the first TRIPS_SHOWN, all of them
+ * in Courses (filter « Non clôturées »). Nothing when every outcome is recorded. On today's planning the day is the
+ * last one with routes (a Monday shows Saturday's), « hier » only when it is the day before.
  */
-export function DayClosingNotice({ closing, yesterday }: { closing: DayClosing; yesterday: boolean }) {
+export function DayClosingNotice({
+  closing,
+  fromToday,
+  yesterday,
+}: {
+  closing: DayClosing;
+  /** Shown on today's planning (an earlier day's trips), not on that day's own planning. */
+  fromToday: boolean;
+  /** The day is the day before today (« hier »). */
+  yesterday: boolean;
+}) {
   if (closing.unclosed.length === 0) return null;
-  const day = yesterday ? "hier" : `le ${formatDayDate(closing.date)}`;
+  const day = fromToday && yesterday ? "hier" : `le ${formatDayDate(closing.date)}`;
   const behind = closing.people.filter((person) => person.recorded < person.placed).slice(0, PEOPLE_SHOWN);
   const shown = closing.unclosed.slice(0, TRIPS_SHOWN);
   return (
@@ -51,7 +64,7 @@ export function DayClosingNotice({ closing, yesterday }: { closing: DayClosing; 
         <p className="text-xs">
           Aucun «&#x202F;Déposé&#x202F;» ni «&#x202F;Patient absent&#x202F;» saisi. Ouvrez la course, puis «&#x202F;Corriger un statut&#x202F;» avec
           l&apos;heure réelle et un motif.
-          {yesterday ? " L'équipage a pu saisir jusqu'à 03:00 ce matin («\u202fFin de tournée\u202f»)." : null}
+          {fromToday && yesterday ? " L'équipage a pu saisir jusqu'à 03:00 ce matin («\u202fFin de tournée\u202f»)." : null}
         </p>
         <ul className="grid gap-x-4 gap-y-0.5 sm:grid-cols-2 xl:grid-cols-3">
           {shown.map((trip) => (
@@ -64,7 +77,14 @@ export function DayClosingNotice({ closing, yesterday }: { closing: DayClosing; 
             </li>
           ))}
         </ul>
-        {closing.unclosed.length > shown.length ? <p className="text-xs">… et {closing.unclosed.length - shown.length} de plus.</p> : null}
+        {closing.unclosed.length > shown.length ? (
+          <p className="text-xs">
+            …{" "}
+            <Link href={coursesHref(closing.date, { ...EMPTY_FILTERS, status: "UNCLOSED" })} className="font-medium underline underline-offset-2">
+              et {closing.unclosed.length - shown.length} de plus&nbsp;: toutes les courses non clôturées dans Courses
+            </Link>
+          </p>
+        ) : null}
       </div>
     </details>
   );
