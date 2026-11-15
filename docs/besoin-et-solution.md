@@ -510,6 +510,9 @@ Ajoutées après l'appel du 6 novembre (entre parenthèses, l'hypothèse retenue
 - [ ] Suivi du jour : à partir de quel retard estimé faut-il prévenir l'établissement, et une tournée sans aucun statut 15 min après sa première prise en charge prévue doit-elle déclencher un appel ? (5 min affichés, 15 min en rouge, 15 min de silence)
 - [ ] Fin de séance signalée par le chauffeur : suffit-elle pour décaler le retour, ou faut-il la confirmation de l'accueil ? (appliquée tout de suite, signalée au régulateur)
 - [ ] « Embauche » sur la feuille de route de la veille : départ du dépôt, ou une prise de service plus tôt (préparation du véhicule) ? (départ du dépôt)
+- [ ] Absence d'un patient : combien de minutes l'équipage attend-il à la porte avant de déclarer « Patient absent », et faut-il un appel au patient avant ? (attente minimale réglable, 0 par défaut ; « Arrivé » facultatif)
+- [ ] Qui clôture la journée, et quand : le chauffeur en « Fin de tournée » (possible jusqu'à 03:00 le lendemain), la régulation le matin, ou personne ? Une course restée sans issue doit-elle bloquer quelque chose (export de facturation) ? (aujourd'hui listée, corrigée par la régulation avec un motif)
+- [ ] Relevé du compteur au départ et au retour : obligatoire ou facultatif ? Les chauffeurs saisissent-ils déjà les pleins quelque part (carte carburant, logiciel) ? (facultatif ; un saut de plus de 1 000 km par jour demande confirmation)
 
 **Tarifs et facturation (lot tarifaire, 9 novembre 2026)**
 
